@@ -20,6 +20,12 @@ export function getAssetTypeLabel(type: string): string {
     texture: "Texture",
     model: "Model",
     audio: "Audio",
+    animation: "Animation",
+    material: "Material",
+    prefab: "Prefab",
+    scene: "Scene",
+    script: "Script",
+    data: "Data",
     other: "Other",
   };
   return labels[type] || type;
@@ -30,7 +36,19 @@ export function getAssetTypeColor(type: string): string {
     texture: "text-green-400",
     model: "text-blue-400",
     audio: "text-yellow-400",
+    animation: "text-purple-400",
+    material: "text-pink-400",
+    prefab: "text-cyan-400",
+    scene: "text-orange-400",
+    script: "text-red-400",
+    data: "text-gray-400",
     other: "text-gray-400",
   };
   return colors[type] || "text-gray-400";
+}
+
+export function formatDuration(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
