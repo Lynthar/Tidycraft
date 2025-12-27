@@ -11,6 +11,7 @@
   "sidebar": {
     "assets": "资产",
     "issues": "问题",
+    "stats": "统计",
     "runAnalysis": "运行分析",
     "analyzing": "分析中...",
     "explorer": "资源管理器"

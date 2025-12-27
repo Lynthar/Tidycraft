@@ -1,4 +1,4 @@
-import { Files, AlertTriangle, Play } from "lucide-react";
+import { Files, AlertTriangle, Play, BarChart3 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { DirectoryTree } from "./DirectoryTree";
 import { useProjectStore } from "../stores/projectStore";
@@ -22,7 +22,7 @@ export function Sidebar() {
         <button
           onClick={() => setViewMode("assets")}
           className={cn(
-            "flex-1 flex items-center justify-center gap-2 py-2 text-xs font-medium transition-colors",
+            "flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors",
             viewMode === "assets"
               ? "text-primary border-b-2 border-primary"
               : "text-text-secondary hover:text-text-primary"
@@ -34,7 +34,7 @@ export function Sidebar() {
         <button
           onClick={() => setViewMode("issues")}
           className={cn(
-            "flex-1 flex items-center justify-center gap-2 py-2 text-xs font-medium transition-colors",
+            "flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors",
             viewMode === "issues"
               ? "text-primary border-b-2 border-primary"
               : "text-text-secondary hover:text-text-primary"
@@ -47,6 +47,18 @@ export function Sidebar() {
               {analysisResult.issue_count}
             </span>
           )}
+        </button>
+        <button
+          onClick={() => setViewMode("stats")}
+          className={cn(
+            "flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors",
+            viewMode === "stats"
+              ? "text-primary border-b-2 border-primary"
+              : "text-text-secondary hover:text-text-primary"
+          )}
+        >
+          <BarChart3 size={14} />
+          Stats
         </button>
       </div>
 
