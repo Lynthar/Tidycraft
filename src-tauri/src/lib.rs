@@ -1,6 +1,9 @@
+mod analyzer;
 mod scanner;
 mod thumbnail;
 
+use analyzer::{AnalysisResult, Analyzer};
+use analyzer::rules::RuleConfig;
 use parking_lot::Mutex;
 use scanner::{ScanProgress, ScanResult, ScanState};
 use std::sync::Arc;
@@ -11,10 +14,21 @@ use tauri::{AppHandle, Emitter};
 // Global scan state for cancellation
 static SCAN_STATE: Mutex<Option<Arc<ScanState>>> = Mutex::new(None);
 
+// Global cached scan result for analysis
+static CACHED_SCAN: Mutex<Option<ScanResult>> = Mutex::new(None);
+
 #[tauri::command]
 fn scan_project(path: String) -> Result<ScanResult, String> {
     // Simple synchronous scan without progress tracking
-    scanner::scan_directory_with_state(&path, None).map_err(|e| e.to_string())
+    let result = scanner::scan_directory_with_state(&path, None).map_err(|e| e.to_string())?;
+
+    // Cache the result
+    {
+        let mut cache = CACHED_SCAN.lock();
+        *cache = Some(result.clone());
+    }
+
+    Ok(result)
 }
 
 #[tauri::command]
@@ -68,7 +82,15 @@ async fn scan_project_async(app: AppHandle, path: String) -> Result<ScanResult, 
         *global_state = None;
     }
 
-    result.map_err(|e| e.to_string())
+    let scan_result = result.map_err(|e| e.to_string())?;
+
+    // Cache the result
+    {
+        let mut cache = CACHED_SCAN.lock();
+        *cache = Some(scan_result.clone());
+    }
+
+    Ok(scan_result)
 }
 
 #[tauri::command]
@@ -93,6 +115,44 @@ async fn get_thumbnail(path: String, size: u32) -> Result<String, String> {
     thumbnail::get_thumbnail_base64(&path, size).map_err(|e| e.to_string())
 }
 
+// ============ Analysis Commands ============
+
+#[tauri::command]
+fn analyze_assets(config_toml: Option<String>) -> Result<AnalysisResult, String> {
+    let cache = CACHED_SCAN.lock();
+    let scan_result = cache.as_ref().ok_or("No scan result available. Please scan a project first.")?;
+
+    // Parse config or use default
+    let config = if let Some(toml_str) = config_toml {
+        RuleConfig::from_toml(&toml_str).map_err(|e| format!("Invalid config: {}", e))?
+    } else {
+        RuleConfig::default()
+    };
+
+    let analyzer = Analyzer::with_config(&config);
+    let mut result = analyzer.analyze(scan_result);
+
+    // Also find duplicates
+    let duplicates = analyzer.find_duplicates(scan_result);
+    result.merge(duplicates);
+
+    Ok(result)
+}
+
+#[tauri::command]
+fn get_default_config() -> Result<String, String> {
+    let config = RuleConfig::default();
+    config.to_toml().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn validate_config(config_toml: String) -> Result<bool, String> {
+    match RuleConfig::from_toml(&config_toml) {
+        Ok(_) => Ok(true),
+        Err(e) => Err(format!("Invalid config: {}", e)),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -103,7 +163,10 @@ pub fn run() {
             scan_project_async,
             cancel_scan,
             get_scan_progress,
-            get_thumbnail
+            get_thumbnail,
+            analyze_assets,
+            get_default_config,
+            validate_config
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
