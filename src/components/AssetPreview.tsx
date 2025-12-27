@@ -279,6 +279,33 @@ export function AssetPreview() {
             </div>
           )}
 
+          {/* Unreal Info */}
+          {projectType === "unreal" && selectedAsset.unreal_info && (
+            <div>
+              <h4 className="text-text-secondary text-xs uppercase mb-2">{t("assetPreview.unrealInfo")}</h4>
+              <div className="space-y-1.5">
+                {selectedAsset.unreal_info.asset_class && (
+                  <div className="flex justify-between">
+                    <span className="text-text-secondary">{t("assetPreview.assetClass")}:</span>
+                    <span className="text-text-primary">{selectedAsset.unreal_info.asset_class}</span>
+                  </div>
+                )}
+                {selectedAsset.unreal_info.engine_version && (
+                  <div className="flex justify-between">
+                    <span className="text-text-secondary">{t("assetPreview.engineVersion")}:</span>
+                    <span className="text-text-primary">UE {selectedAsset.unreal_info.engine_version}</span>
+                  </div>
+                )}
+                <div className="flex justify-between">
+                  <span className="text-text-secondary">{t("assetPreview.isCooked")}:</span>
+                  <span className="text-text-primary">
+                    {selectedAsset.unreal_info.is_cooked ? t("assetPreview.yes") : t("assetPreview.no")}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Path */}
           <div>
             <h4 className="text-text-secondary text-xs uppercase mb-2">{t("assetPreview.path")}</h4>

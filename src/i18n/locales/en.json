@@ -27,6 +27,9 @@
     "scene": "Scenes",
     "script": "Scripts",
     "data": "Data",
+    "blueprint": "Blueprints",
+    "uasset": "Unreal Assets",
+    "umap": "Unreal Maps",
     "other": "Other"
   },
   "assetList": {
@@ -102,7 +105,12 @@
     "guid": "GUID",
     "copyGuid": "Copy GUID",
     "path": "Path",
-    "copyPath": "Copy path"
+    "copyPath": "Copy path",
+    "unreal": "Unreal",
+    "unrealInfo": "Unreal Info",
+    "assetClass": "Asset Class",
+    "engineVersion": "Engine Version",
+    "isCooked": "Cooked"
   },
   "statusBar": {
     "ready": "Ready",

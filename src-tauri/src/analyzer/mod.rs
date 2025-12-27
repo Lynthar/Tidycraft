@@ -174,6 +174,7 @@ mod tests {
             size: 1024,
             metadata: None,
             unity_guid: None,
+            unreal_info: None,
         }
     }
 
@@ -191,6 +192,7 @@ mod tests {
                 ..Default::default()
             }),
             unity_guid: None,
+            unreal_info: None,
         }
     }
 

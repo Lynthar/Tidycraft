@@ -4,6 +4,7 @@ mod git;
 mod scanner;
 mod thumbnail;
 mod unity;
+mod unreal;
 
 use analyzer::{AnalysisResult, Analyzer};
 use analyzer::rules::RuleConfig;
@@ -413,6 +414,74 @@ fn find_unused_assets() -> Result<Vec<String>, String> {
         .collect();
 
     Ok(unused)
+}
+
+// ============ Unreal Commands ============
+
+#[tauri::command]
+fn parse_unreal_asset(path: String) -> Result<unreal::UnrealAssetInfo, String> {
+    unreal::parse_uasset(Path::new(&path))
+        .ok_or_else(|| "Failed to parse Unreal asset".to_string())
+}
+
+#[tauri::command]
+fn get_unreal_project_info(path: String) -> Result<unreal::UnrealProjectInfo, String> {
+    unreal::detect_unreal_project(Path::new(&path))
+        .ok_or_else(|| "Not an Unreal project or failed to parse".to_string())
+}
+
+#[derive(Serialize)]
+pub struct UnrealAssetSummary {
+    pub total_uassets: usize,
+    pub total_umaps: usize,
+    pub bulk_data_count: usize,
+    pub by_class: HashMap<String, usize>,
+    pub engine_versions: HashMap<String, usize>,
+}
+
+#[tauri::command]
+fn get_unreal_asset_summary() -> Result<UnrealAssetSummary, String> {
+    let cache = CACHED_SCAN.lock();
+    let scan_result = cache.as_ref().ok_or("No scan result available")?;
+
+    if !matches!(scan_result.project_type, Some(scanner::ProjectType::Unreal)) {
+        return Err("Not an Unreal project".to_string());
+    }
+
+    let mut total_uassets = 0usize;
+    let mut total_umaps = 0usize;
+    let mut bulk_data_count = 0usize;
+    let mut by_class: HashMap<String, usize> = HashMap::new();
+    let mut engine_versions: HashMap<String, usize> = HashMap::new();
+
+    for asset in &scan_result.assets {
+        let ext = asset.extension.to_lowercase();
+        match ext.as_str() {
+            "uasset" => {
+                total_uassets += 1;
+                // Try to parse and get class info
+                if let Some(info) = unreal::parse_uasset(Path::new(&asset.path)) {
+                    if let Some(ref class) = info.asset_class {
+                        *by_class.entry(class.clone()).or_insert(0) += 1;
+                    }
+                    if let Some(ref version) = info.engine_version {
+                        *engine_versions.entry(version.clone()).or_insert(0) += 1;
+                    }
+                }
+            }
+            "umap" => total_umaps += 1,
+            "uexp" | "ubulk" => bulk_data_count += 1,
+            _ => {}
+        }
+    }
+
+    Ok(UnrealAssetSummary {
+        total_uassets,
+        total_umaps,
+        bulk_data_count,
+        by_class,
+        engine_versions,
+    })
 }
 
 // ============ Statistics Commands ============
@@ -919,6 +988,9 @@ pub fn run() {
             parse_unity_file,
             get_unity_dependencies,
             find_unused_assets,
+            parse_unreal_asset,
+            get_unreal_project_info,
+            get_unreal_asset_summary,
             get_project_stats,
             export_to_json,
             export_to_csv,

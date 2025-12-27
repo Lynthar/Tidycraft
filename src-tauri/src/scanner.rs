@@ -10,6 +10,7 @@ use thiserror::Error;
 use walkdir::WalkDir;
 
 use crate::cache::{get_modified_time, ScanCache};
+use crate::unreal;
 
 #[derive(Error, Debug)]
 pub enum ScanError {
@@ -32,6 +33,19 @@ pub struct AssetInfo {
     pub size: u64,
     pub metadata: Option<AssetMetadata>,
     pub unity_guid: Option<String>,
+    /// Unreal-specific asset info (for .uasset files)
+    pub unreal_info: Option<UnrealAssetMetadata>,
+}
+
+/// Unreal asset metadata extracted from .uasset files
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnrealAssetMetadata {
+    /// Asset class (e.g., "Texture2D", "StaticMesh", "Blueprint")
+    pub asset_class: Option<String>,
+    /// Engine version estimate
+    pub engine_version: Option<String>,
+    /// Whether the asset is cooked
+    pub is_cooked: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -46,6 +60,10 @@ pub enum AssetType {
     Scene,
     Script,
     Data,
+    // Unreal-specific types
+    Blueprint,
+    UAsset,
+    UMap,
     Other,
 }
 
@@ -175,7 +193,7 @@ impl Default for ScanState {
 }
 
 /// Get asset type from file extension
-fn get_asset_type(extension: &str) -> AssetType {
+fn get_asset_type(extension: &str, project_type: &Option<ProjectType>) -> AssetType {
     match extension.to_lowercase().as_str() {
         // Textures
         "png" | "jpg" | "jpeg" | "tga" | "psd" | "tiff" | "tif" | "exr" | "hdr" | "webp"
@@ -184,13 +202,20 @@ fn get_asset_type(extension: &str) -> AssetType {
         "fbx" | "obj" | "gltf" | "glb" | "blend" | "dae" | "3ds" | "max" => AssetType::Model,
         // Audio
         "wav" | "mp3" | "ogg" | "flac" | "aiff" | "aac" | "wma" => AssetType::Audio,
+        // Unreal specific
+        "uasset" => AssetType::UAsset,
+        "umap" => AssetType::UMap,
         // Unity specific
         "prefab" => AssetType::Prefab,
         "unity" => AssetType::Scene,
         "mat" => AssetType::Material,
         "controller" | "anim" => AssetType::Animation,
-        "cs" | "js" => AssetType::Script,
-        "asset" | "json" | "xml" | "yaml" | "csv" => AssetType::Data,
+        "cs" => AssetType::Script,
+        // Unreal C++
+        "cpp" | "h" if matches!(project_type, Some(ProjectType::Unreal)) => AssetType::Script,
+        // Other scripts
+        "js" => AssetType::Script,
+        "asset" | "json" | "xml" | "yaml" | "csv" | "ini" => AssetType::Data,
         // Other
         _ => AssetType::Other,
     }
@@ -354,6 +379,17 @@ fn parse_unity_meta(path: &Path) -> Option<String> {
     }
 
     None
+}
+
+/// Parse Unreal .uasset file and extract metadata
+fn parse_unreal_asset_metadata(path: &Path) -> Option<UnrealAssetMetadata> {
+    let info = unreal::parse_uasset(path)?;
+
+    Some(UnrealAssetMetadata {
+        asset_class: info.asset_class,
+        engine_version: info.engine_version,
+        is_cooked: info.is_cooked,
+    })
 }
 
 /// Detect project type based on marker files
@@ -561,7 +597,7 @@ pub fn scan_directory_with_state(
             let size = metadata.map(|m| m.len()).unwrap_or(0);
 
             // Determine asset type
-            let asset_type = get_asset_type(&extension);
+            let asset_type = get_asset_type(&extension, &project_type_clone);
 
             // Parse metadata based on asset type
             let asset_metadata = match asset_type {
@@ -599,6 +635,15 @@ pub fn scan_directory_with_state(
                 None
             };
 
+            // Try to parse Unreal asset info if it's an Unreal project
+            let unreal_info = if matches!(project_type_clone, Some(ProjectType::Unreal))
+                && matches!(asset_type, AssetType::UAsset)
+            {
+                parse_unreal_asset_metadata(entry_path)
+            } else {
+                None
+            };
+
             Some(AssetInfo {
                 path: entry_path.to_string_lossy().to_string(),
                 name: file_name,
@@ -607,6 +652,7 @@ pub fn scan_directory_with_state(
                 size,
                 metadata: asset_metadata,
                 unity_guid,
+                unreal_info,
             })
         })
         .collect();
@@ -631,6 +677,9 @@ pub fn scan_directory_with_state(
             AssetType::Scene => "scene",
             AssetType::Script => "script",
             AssetType::Data => "data",
+            AssetType::Blueprint => "blueprint",
+            AssetType::UAsset => "uasset",
+            AssetType::UMap => "umap",
             AssetType::Other => "other",
         };
         *type_counts.entry(type_key.to_string()).or_insert(0) += 1;
@@ -695,7 +744,7 @@ pub fn parse_asset_file(
     let size = metadata.len();
 
     // Determine asset type
-    let asset_type = get_asset_type(&extension);
+    let asset_type = get_asset_type(&extension, project_type);
 
     // Parse metadata based on asset type
     let asset_metadata = match asset_type {
@@ -731,6 +780,15 @@ pub fn parse_asset_file(
         None
     };
 
+    // Try to parse Unreal asset info if it's an Unreal project
+    let unreal_info = if matches!(project_type, Some(ProjectType::Unreal))
+        && matches!(asset_type, AssetType::UAsset)
+    {
+        parse_unreal_asset_metadata(path)
+    } else {
+        None
+    };
+
     Some(AssetInfo {
         path: path.to_string_lossy().to_string(),
         name: file_name,
@@ -739,6 +797,7 @@ pub fn parse_asset_file(
         size,
         metadata: asset_metadata,
         unity_guid,
+        unreal_info,
     })
 }
 
@@ -909,6 +968,9 @@ pub fn scan_directory_incremental(
             AssetType::Scene => "scene",
             AssetType::Script => "script",
             AssetType::Data => "data",
+            AssetType::Blueprint => "blueprint",
+            AssetType::UAsset => "uasset",
+            AssetType::UMap => "umap",
             AssetType::Other => "other",
         };
         *type_counts.entry(type_key.to_string()).or_insert(0) += 1;
@@ -966,62 +1028,83 @@ mod tests {
 
     #[test]
     fn test_get_asset_type_textures() {
-        assert!(matches!(get_asset_type("png"), AssetType::Texture));
-        assert!(matches!(get_asset_type("jpg"), AssetType::Texture));
-        assert!(matches!(get_asset_type("jpeg"), AssetType::Texture));
-        assert!(matches!(get_asset_type("tga"), AssetType::Texture));
-        assert!(matches!(get_asset_type("psd"), AssetType::Texture));
-        assert!(matches!(get_asset_type("PNG"), AssetType::Texture));
-        assert!(matches!(get_asset_type("JPG"), AssetType::Texture));
+        let none_type: Option<ProjectType> = None;
+        assert!(matches!(get_asset_type("png", &none_type), AssetType::Texture));
+        assert!(matches!(get_asset_type("jpg", &none_type), AssetType::Texture));
+        assert!(matches!(get_asset_type("jpeg", &none_type), AssetType::Texture));
+        assert!(matches!(get_asset_type("tga", &none_type), AssetType::Texture));
+        assert!(matches!(get_asset_type("psd", &none_type), AssetType::Texture));
+        assert!(matches!(get_asset_type("PNG", &none_type), AssetType::Texture));
+        assert!(matches!(get_asset_type("JPG", &none_type), AssetType::Texture));
     }
 
     #[test]
     fn test_get_asset_type_models() {
-        assert!(matches!(get_asset_type("fbx"), AssetType::Model));
-        assert!(matches!(get_asset_type("obj"), AssetType::Model));
-        assert!(matches!(get_asset_type("gltf"), AssetType::Model));
-        assert!(matches!(get_asset_type("glb"), AssetType::Model));
-        assert!(matches!(get_asset_type("blend"), AssetType::Model));
-        assert!(matches!(get_asset_type("FBX"), AssetType::Model));
+        let none_type: Option<ProjectType> = None;
+        assert!(matches!(get_asset_type("fbx", &none_type), AssetType::Model));
+        assert!(matches!(get_asset_type("obj", &none_type), AssetType::Model));
+        assert!(matches!(get_asset_type("gltf", &none_type), AssetType::Model));
+        assert!(matches!(get_asset_type("glb", &none_type), AssetType::Model));
+        assert!(matches!(get_asset_type("blend", &none_type), AssetType::Model));
+        assert!(matches!(get_asset_type("FBX", &none_type), AssetType::Model));
     }
 
     #[test]
     fn test_get_asset_type_audio() {
-        assert!(matches!(get_asset_type("wav"), AssetType::Audio));
-        assert!(matches!(get_asset_type("mp3"), AssetType::Audio));
-        assert!(matches!(get_asset_type("ogg"), AssetType::Audio));
-        assert!(matches!(get_asset_type("flac"), AssetType::Audio));
-        assert!(matches!(get_asset_type("WAV"), AssetType::Audio));
+        let none_type: Option<ProjectType> = None;
+        assert!(matches!(get_asset_type("wav", &none_type), AssetType::Audio));
+        assert!(matches!(get_asset_type("mp3", &none_type), AssetType::Audio));
+        assert!(matches!(get_asset_type("ogg", &none_type), AssetType::Audio));
+        assert!(matches!(get_asset_type("flac", &none_type), AssetType::Audio));
+        assert!(matches!(get_asset_type("WAV", &none_type), AssetType::Audio));
     }
 
     #[test]
     fn test_get_asset_type_unity() {
-        assert!(matches!(get_asset_type("prefab"), AssetType::Prefab));
-        assert!(matches!(get_asset_type("unity"), AssetType::Scene));
-        assert!(matches!(get_asset_type("mat"), AssetType::Material));
-        assert!(matches!(get_asset_type("controller"), AssetType::Animation));
-        assert!(matches!(get_asset_type("anim"), AssetType::Animation));
+        let none_type: Option<ProjectType> = None;
+        assert!(matches!(get_asset_type("prefab", &none_type), AssetType::Prefab));
+        assert!(matches!(get_asset_type("unity", &none_type), AssetType::Scene));
+        assert!(matches!(get_asset_type("mat", &none_type), AssetType::Material));
+        assert!(matches!(get_asset_type("controller", &none_type), AssetType::Animation));
+        assert!(matches!(get_asset_type("anim", &none_type), AssetType::Animation));
+    }
+
+    #[test]
+    fn test_get_asset_type_unreal() {
+        let none_type: Option<ProjectType> = None;
+        let unreal_type = Some(ProjectType::Unreal);
+        assert!(matches!(get_asset_type("uasset", &none_type), AssetType::UAsset));
+        assert!(matches!(get_asset_type("UASSET", &none_type), AssetType::UAsset));
+        assert!(matches!(get_asset_type("umap", &none_type), AssetType::UMap));
+        // C++ files only become Script in Unreal projects
+        assert!(matches!(get_asset_type("cpp", &unreal_type), AssetType::Script));
+        assert!(matches!(get_asset_type("h", &unreal_type), AssetType::Script));
+        assert!(matches!(get_asset_type("cpp", &none_type), AssetType::Other));
     }
 
     #[test]
     fn test_get_asset_type_scripts() {
-        assert!(matches!(get_asset_type("cs"), AssetType::Script));
-        assert!(matches!(get_asset_type("js"), AssetType::Script));
+        let none_type: Option<ProjectType> = None;
+        assert!(matches!(get_asset_type("cs", &none_type), AssetType::Script));
+        assert!(matches!(get_asset_type("js", &none_type), AssetType::Script));
     }
 
     #[test]
     fn test_get_asset_type_data() {
-        assert!(matches!(get_asset_type("json"), AssetType::Data));
-        assert!(matches!(get_asset_type("xml"), AssetType::Data));
-        assert!(matches!(get_asset_type("yaml"), AssetType::Data));
-        assert!(matches!(get_asset_type("csv"), AssetType::Data));
+        let none_type: Option<ProjectType> = None;
+        assert!(matches!(get_asset_type("json", &none_type), AssetType::Data));
+        assert!(matches!(get_asset_type("xml", &none_type), AssetType::Data));
+        assert!(matches!(get_asset_type("yaml", &none_type), AssetType::Data));
+        assert!(matches!(get_asset_type("csv", &none_type), AssetType::Data));
+        assert!(matches!(get_asset_type("ini", &none_type), AssetType::Data));
     }
 
     #[test]
     fn test_get_asset_type_unknown() {
-        assert!(matches!(get_asset_type("xyz"), AssetType::Other));
-        assert!(matches!(get_asset_type("unknown"), AssetType::Other));
-        assert!(matches!(get_asset_type(""), AssetType::Other));
+        let none_type: Option<ProjectType> = None;
+        assert!(matches!(get_asset_type("xyz", &none_type), AssetType::Other));
+        assert!(matches!(get_asset_type("unknown", &none_type), AssetType::Other));
+        assert!(matches!(get_asset_type("", &none_type), AssetType::Other));
     }
 
     #[test]
@@ -1171,10 +1254,32 @@ mod tests {
     }
 
     #[test]
+    fn test_project_type_detection_unreal() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("MyGame.uproject"), r#"{"FileVersion": 3}"#).unwrap();
+
+        let project_type = detect_project_type(dir.path());
+        assert!(matches!(project_type, Some(ProjectType::Unreal)));
+    }
+
+    #[test]
     fn test_project_type_detection_generic() {
         let dir = tempdir().unwrap();
 
         let project_type = detect_project_type(dir.path());
         assert!(matches!(project_type, Some(ProjectType::Generic)));
+    }
+
+    #[test]
+    fn test_unreal_asset_metadata_struct() {
+        let metadata = UnrealAssetMetadata {
+            asset_class: Some("Texture2D".to_string()),
+            engine_version: Some("5.3".to_string()),
+            is_cooked: true,
+        };
+
+        assert_eq!(metadata.asset_class, Some("Texture2D".to_string()));
+        assert_eq!(metadata.engine_version, Some("5.3".to_string()));
+        assert!(metadata.is_cooked);
     }
 }

@@ -8,9 +8,18 @@ export type AssetType =
   | "scene"
   | "script"
   | "data"
+  | "blueprint"
+  | "uasset"
+  | "umap"
   | "other";
 
 export type ProjectType = "unity" | "unreal" | "godot" | "generic";
+
+export interface UnrealAssetMetadata {
+  asset_class?: string;
+  engine_version?: string;
+  is_cooked: boolean;
+}
 
 export interface AssetMetadata {
   // Image metadata
@@ -36,6 +45,7 @@ export interface AssetInfo {
   size: number;
   metadata?: AssetMetadata;
   unity_guid?: string;
+  unreal_info?: UnrealAssetMetadata;
 }
 
 export interface DirectoryNode {

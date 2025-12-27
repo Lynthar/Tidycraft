@@ -26,7 +26,7 @@ pub struct ScanCache {
 }
 
 impl ScanCache {
-    const CACHE_VERSION: u32 = 1;
+    const CACHE_VERSION: u32 = 2; // v2: Added unreal_info to AssetInfo
 
     /// Create a new empty cache
     pub fn new(project_path: &str) -> Self {

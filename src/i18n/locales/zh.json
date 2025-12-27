@@ -27,6 +27,9 @@
     "scene": "场景",
     "script": "脚本",
     "data": "数据",
+    "blueprint": "蓝图",
+    "uasset": "虚幻资产",
+    "umap": "虚幻地图",
     "other": "其他"
   },
   "assetList": {
@@ -102,7 +105,12 @@
     "guid": "GUID",
     "copyGuid": "复制 GUID",
     "path": "路径",
-    "copyPath": "复制路径"
+    "copyPath": "复制路径",
+    "unreal": "虚幻引擎",
+    "unrealInfo": "虚幻信息",
+    "assetClass": "资产类型",
+    "engineVersion": "引擎版本",
+    "isCooked": "已烘焙"
   },
   "statusBar": {
     "ready": "就绪",
