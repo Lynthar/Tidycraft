@@ -35,6 +35,7 @@ toml = "0.8"
 git2 = "0.20"
 ignore = "0.4"
 chrono = "0.4"
+rayon = "1.10"
 
 [profile.dev]
 incremental = true
