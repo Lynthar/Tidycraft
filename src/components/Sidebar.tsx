@@ -1,9 +1,11 @@
-import { Files, AlertTriangle, Play } from "lucide-react";
+import { Files, AlertTriangle, Play, BarChart3 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { DirectoryTree } from "./DirectoryTree";
 import { useProjectStore } from "../stores/projectStore";
 import { cn } from "../lib/utils";
 
 export function Sidebar() {
+  const { t } = useTranslation();
   const {
     scanResult,
     viewMode,
@@ -20,31 +22,43 @@ export function Sidebar() {
         <button
           onClick={() => setViewMode("assets")}
           className={cn(
-            "flex-1 flex items-center justify-center gap-2 py-2 text-xs font-medium transition-colors",
+            "flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors",
             viewMode === "assets"
               ? "text-primary border-b-2 border-primary"
               : "text-text-secondary hover:text-text-primary"
           )}
         >
           <Files size={14} />
-          Assets
+          {t("sidebar.assets")}
         </button>
         <button
           onClick={() => setViewMode("issues")}
           className={cn(
-            "flex-1 flex items-center justify-center gap-2 py-2 text-xs font-medium transition-colors",
+            "flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors",
             viewMode === "issues"
               ? "text-primary border-b-2 border-primary"
               : "text-text-secondary hover:text-text-primary"
           )}
         >
           <AlertTriangle size={14} />
-          Issues
+          {t("sidebar.issues")}
           {analysisResult && analysisResult.issue_count > 0 && (
             <span className="px-1.5 py-0.5 bg-warning/20 text-warning text-[10px] rounded-full">
               {analysisResult.issue_count}
             </span>
           )}
+        </button>
+        <button
+          onClick={() => setViewMode("stats")}
+          className={cn(
+            "flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium transition-colors",
+            viewMode === "stats"
+              ? "text-primary border-b-2 border-primary"
+              : "text-text-secondary hover:text-text-primary"
+          )}
+        >
+          <BarChart3 size={14} />
+          Stats
         </button>
       </div>
 
@@ -62,14 +76,14 @@ export function Sidebar() {
             )}
           >
             <Play size={14} />
-            {isAnalyzing ? "Analyzing..." : "Run Analysis"}
+            {isAnalyzing ? t("sidebar.analyzing") : t("sidebar.runAnalysis")}
           </button>
         </div>
       )}
 
       {/* Directory Tree */}
       <div className="h-8 px-3 flex items-center border-b border-border text-xs text-text-secondary font-medium uppercase tracking-wide">
-        Explorer
+        {t("sidebar.explorer")}
       </div>
       <div className="flex-1 overflow-hidden">
         <DirectoryTree />

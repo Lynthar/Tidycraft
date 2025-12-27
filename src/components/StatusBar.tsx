@@ -1,25 +1,10 @@
 import { X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
 import { formatFileSize } from "../lib/utils";
 
-function getPhaseLabel(phase: string): string {
-  switch (phase) {
-    case "discovering":
-      return "Discovering files";
-    case "parsing":
-      return "Parsing assets";
-    case "building":
-      return "Building tree";
-    case "completed":
-      return "Completed";
-    case "cancelled":
-      return "Cancelled";
-    default:
-      return "Scanning";
-  }
-}
-
 export function StatusBar() {
+  const { t } = useTranslation();
   const { scanResult, isScanning, error, scanProgress, cancelScan, getFilteredAssets } =
     useProjectStore();
 
@@ -29,7 +14,7 @@ export function StatusBar() {
   if (error) {
     return (
       <footer className="h-6 bg-error/20 border-t border-error px-4 flex items-center text-xs text-error">
-        Error: {error}
+        {t("statusBar.error")}: {error}
       </footer>
     );
   }
@@ -47,7 +32,7 @@ export function StatusBar() {
     return (
       <footer className="h-6 bg-card-bg border-t border-border px-4 flex items-center text-xs text-text-secondary">
         <div className="flex items-center gap-3 flex-1">
-          <span className="text-primary">{getPhaseLabel(scanProgress.phase)}</span>
+          <span className="text-primary">{t(`scanPhase.${scanProgress.phase}`)}</span>
           {scanProgress.total && scanProgress.total > 0 && (
             <>
               <span>|</span>
@@ -74,7 +59,7 @@ export function StatusBar() {
           className="flex items-center gap-1 px-2 py-0.5 hover:bg-error/20 hover:text-error rounded transition-colors"
         >
           <X size={12} />
-          Cancel
+          {t("statusBar.cancel")}
         </button>
       </footer>
     );
@@ -83,13 +68,13 @@ export function StatusBar() {
   if (isScanning) {
     return (
       <footer className="h-6 bg-card-bg border-t border-border px-4 flex items-center text-xs text-text-secondary">
-        <span>Starting scan...</span>
+        <span>{t("statusBar.startingScan")}</span>
         <button
           onClick={cancelScan}
           className="ml-auto flex items-center gap-1 px-2 py-0.5 hover:bg-error/20 hover:text-error rounded transition-colors"
         >
           <X size={12} />
-          Cancel
+          {t("statusBar.cancel")}
         </button>
       </footer>
     );
@@ -98,7 +83,7 @@ export function StatusBar() {
   if (!scanResult) {
     return (
       <footer className="h-6 bg-card-bg border-t border-border px-4 flex items-center text-xs text-text-secondary">
-        Ready
+        {t("statusBar.ready")}
       </footer>
     );
   }
@@ -118,34 +103,34 @@ export function StatusBar() {
           </>
         )}
         <span>
-          Total: <span className="text-text-primary">{scanResult.total_count}</span> assets
+          {t("statusBar.total")}: <span className="text-text-primary">{scanResult.total_count}</span> {t("statusBar.assets")}
         </span>
         <span>|</span>
         <span>
-          Size: <span className="text-text-primary">{formatFileSize(scanResult.total_size)}</span>
+          {t("assetList.size")}: <span className="text-text-primary">{formatFileSize(scanResult.total_size)}</span>
         </span>
         <span>|</span>
         <span className="flex gap-3">
           {typeCounts.texture && (
             <span>
-              <span className="text-green-400">Textures:</span> {typeCounts.texture}
+              <span className="text-green-400">{t("statusBar.textures")}:</span> {typeCounts.texture}
             </span>
           )}
           {typeCounts.model && (
             <span>
-              <span className="text-blue-400">Models:</span> {typeCounts.model}
+              <span className="text-blue-400">{t("statusBar.models")}:</span> {typeCounts.model}
             </span>
           )}
           {typeCounts.audio && (
             <span>
-              <span className="text-yellow-400">Audio:</span> {typeCounts.audio}
+              <span className="text-yellow-400">{t("statusBar.audio")}:</span> {typeCounts.audio}
             </span>
           )}
         </span>
       </div>
 
       <div className="text-text-secondary">
-        Showing: <span className="text-text-primary">{filteredAssets.length}</span> assets (
+        {t("statusBar.showing")}: <span className="text-text-primary">{filteredAssets.length}</span> {t("statusBar.assets")} (
         {formatFileSize(filteredSize)})
       </div>
     </footer>

@@ -15,22 +15,6 @@ export function formatFileSize(bytes: number): string {
   return `${(bytes / Math.pow(k, i)).toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
 }
 
-export function getAssetTypeLabel(type: string): string {
-  const labels: Record<string, string> = {
-    texture: "Texture",
-    model: "Model",
-    audio: "Audio",
-    animation: "Animation",
-    material: "Material",
-    prefab: "Prefab",
-    scene: "Scene",
-    script: "Script",
-    data: "Data",
-    other: "Other",
-  };
-  return labels[type] || type;
-}
-
 export function getAssetTypeColor(type: string): string {
   const colors: Record<string, string> = {
     texture: "text-green-400",
