@@ -69,3 +69,25 @@ export interface ScanProgress {
   total?: number;
   current_file: string;
 }
+
+// Analysis types
+export type Severity = "error" | "warning" | "info";
+
+export interface Issue {
+  rule_id: string;
+  rule_name: string;
+  severity: Severity;
+  message: string;
+  asset_path: string;
+  suggestion?: string;
+  auto_fixable: boolean;
+}
+
+export interface AnalysisResult {
+  issues: Issue[];
+  issue_count: number;
+  error_count: number;
+  warning_count: number;
+  info_count: number;
+  by_rule: Record<string, number>;
+}
