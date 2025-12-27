@@ -1,11 +1,14 @@
 import { useState } from "react";
 import { AlertCircle, AlertTriangle, Info, ChevronDown, ChevronRight, FileWarning } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { cn } from "../lib/utils";
 import type { Issue, Severity, AnalysisResult } from "../types/asset";
 
 interface IssueRowProps {
   issue: Issue;
   onLocate?: (path: string) => void;
+  suggestionLabel: string;
+  locateLabel: string;
 }
 
 function SeverityIcon({ severity }: { severity: Severity }) {
@@ -19,7 +22,7 @@ function SeverityIcon({ severity }: { severity: Severity }) {
   }
 }
 
-function IssueRow({ issue, onLocate }: IssueRowProps) {
+function IssueRow({ issue, onLocate, suggestionLabel, locateLabel }: IssueRowProps) {
   const [expanded, setExpanded] = useState(false);
 
   const fileName = issue.asset_path.split("/").pop() || issue.asset_path;
@@ -53,7 +56,7 @@ function IssueRow({ issue, onLocate }: IssueRowProps) {
           <p className="text-sm">{issue.message}</p>
           {issue.suggestion && (
             <p className="text-sm text-text-secondary">
-              <span className="text-primary">Suggestion:</span> {issue.suggestion}
+              <span className="text-primary">{suggestionLabel}:</span> {issue.suggestion}
             </p>
           )}
           <div className="flex items-center gap-2 text-xs">
@@ -66,7 +69,7 @@ function IssueRow({ issue, onLocate }: IssueRowProps) {
                 }}
                 className="px-2 py-1 bg-primary/20 text-primary rounded hover:bg-primary/30 transition-colors shrink-0"
               >
-                Locate
+                {locateLabel}
               </button>
             )}
           </div>
@@ -84,19 +87,20 @@ interface IssueListProps {
 }
 
 export function IssueList({ result, isAnalyzing, onAnalyze, onLocate }: IssueListProps) {
+  const { t } = useTranslation();
   const [filter, setFilter] = useState<Severity | "all">("all");
 
   if (!result && !isAnalyzing) {
     return (
       <div className="h-full flex flex-col items-center justify-center text-text-secondary gap-4">
         <FileWarning size={48} className="opacity-30" />
-        <p>No analysis results</p>
+        <p>{t("issues.noResults")}</p>
         {onAnalyze && (
           <button
             onClick={onAnalyze}
             className="px-4 py-2 bg-primary text-white rounded hover:bg-primary/90 transition-colors"
           >
-            Run Analysis
+            {t("sidebar.runAnalysis")}
           </button>
         )}
       </div>
@@ -106,7 +110,7 @@ export function IssueList({ result, isAnalyzing, onAnalyze, onLocate }: IssueLis
   if (isAnalyzing) {
     return (
       <div className="h-full flex items-center justify-center text-text-secondary">
-        Analyzing assets...
+        {t("issues.analyzing")}
       </div>
     );
   }
@@ -121,13 +125,13 @@ export function IssueList({ result, isAnalyzing, onAnalyze, onLocate }: IssueLis
       {/* Header */}
       <div className="shrink-0 p-3 border-b border-border bg-card-bg">
         <div className="flex items-center justify-between mb-2">
-          <h3 className="font-medium">Issues ({result.issue_count})</h3>
+          <h3 className="font-medium">{t("issues.title")} ({result.issue_count})</h3>
           {onAnalyze && (
             <button
               onClick={onAnalyze}
               className="text-xs px-2 py-1 bg-primary/20 text-primary rounded hover:bg-primary/30 transition-colors"
             >
-              Re-analyze
+              {t("issues.reanalyze")}
             </button>
           )}
         </div>
@@ -143,7 +147,7 @@ export function IssueList({ result, isAnalyzing, onAnalyze, onLocate }: IssueLis
                 : "text-text-secondary hover:bg-background"
             )}
           >
-            All ({result.issue_count})
+            {t("issues.all")} ({result.issue_count})
           </button>
           <button
             onClick={() => setFilter("error")}
@@ -154,7 +158,7 @@ export function IssueList({ result, isAnalyzing, onAnalyze, onLocate }: IssueLis
                 : "text-text-secondary hover:bg-background"
             )}
           >
-            <AlertCircle size={12} /> Errors ({result.error_count})
+            <AlertCircle size={12} /> {t("issues.errors")} ({result.error_count})
           </button>
           <button
             onClick={() => setFilter("warning")}
@@ -165,7 +169,7 @@ export function IssueList({ result, isAnalyzing, onAnalyze, onLocate }: IssueLis
                 : "text-text-secondary hover:bg-background"
             )}
           >
-            <AlertTriangle size={12} /> Warnings ({result.warning_count})
+            <AlertTriangle size={12} /> {t("issues.warnings")} ({result.warning_count})
           </button>
           <button
             onClick={() => setFilter("info")}
@@ -176,7 +180,7 @@ export function IssueList({ result, isAnalyzing, onAnalyze, onLocate }: IssueLis
                 : "text-text-secondary hover:bg-background"
             )}
           >
-            <Info size={12} /> Info ({result.info_count})
+            <Info size={12} /> {t("issues.info")} ({result.info_count})
           </button>
         </div>
       </div>
@@ -185,11 +189,17 @@ export function IssueList({ result, isAnalyzing, onAnalyze, onLocate }: IssueLis
       <div className="flex-1 overflow-auto">
         {filteredIssues.length === 0 ? (
           <div className="flex items-center justify-center h-full text-text-secondary">
-            {filter === "all" ? "No issues found!" : `No ${filter} issues`}
+            {filter === "all" ? t("issues.noIssues") : t("issues.noFilteredIssues", { filter: t(`issues.${filter}s`) })}
           </div>
         ) : (
           filteredIssues.map((issue, index) => (
-            <IssueRow key={`${issue.asset_path}-${index}`} issue={issue} onLocate={onLocate} />
+            <IssueRow
+              key={`${issue.asset_path}-${index}`}
+              issue={issue}
+              onLocate={onLocate}
+              suggestionLabel={t("issues.suggestion")}
+              locateLabel={t("issues.locate")}
+            />
           ))
         )}
       </div>
