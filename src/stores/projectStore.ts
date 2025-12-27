@@ -72,8 +72,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         set({ scanProgress: event.payload });
       });
 
-      // Use async scan command
-      const result = await invoke<ScanResult>("scan_project_async", { path });
+      // Use incremental scan command for faster rescans
+      const { result } = await invoke<{ result: ScanResult; stats: { cached_files: number; rescanned_files: number } }>(
+        "scan_project_incremental",
+        { path }
+      );
       set({
         projectPath: path,
         scanResult: result,

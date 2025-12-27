@@ -8,6 +8,8 @@ use std::sync::Arc;
 use thiserror::Error;
 use walkdir::WalkDir;
 
+use crate::cache::{get_modified_time, ScanCache};
+
 #[derive(Error, Debug)]
 pub enum ScanError {
     #[error("IO error: {0}")]
@@ -634,4 +636,259 @@ pub fn scan_directory_with_state(
         type_counts,
         project_type,
     })
+}
+
+/// Parse a single asset file and return AssetInfo
+pub fn parse_asset_file(
+    path: &Path,
+    project_type: &Option<ProjectType>,
+) -> Option<AssetInfo> {
+    let file_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    let extension = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    if extension.is_empty() {
+        return None;
+    }
+
+    // Get file metadata
+    let metadata = path.metadata().ok()?;
+    let size = metadata.len();
+
+    // Determine asset type
+    let asset_type = get_asset_type(&extension);
+
+    // Parse metadata based on asset type
+    let asset_metadata = match asset_type {
+        AssetType::Texture => {
+            let ext_lower = extension.to_lowercase();
+            match ext_lower.as_str() {
+                "png" | "jpg" | "jpeg" | "bmp" | "gif" | "tga" => parse_image_metadata(path),
+                _ => None,
+            }
+        }
+        AssetType::Model => {
+            let ext_lower = extension.to_lowercase();
+            match ext_lower.as_str() {
+                "gltf" | "glb" => parse_gltf_metadata(path),
+                "obj" => parse_obj_metadata(path),
+                _ => None,
+            }
+        }
+        AssetType::Audio => {
+            let ext_lower = extension.to_lowercase();
+            match ext_lower.as_str() {
+                "mp3" | "ogg" | "wav" => parse_audio_metadata(path),
+                _ => None,
+            }
+        }
+        _ => None,
+    };
+
+    // Try to get Unity GUID if it's a Unity project
+    let unity_guid = if matches!(project_type, Some(ProjectType::Unity)) {
+        parse_unity_meta(path)
+    } else {
+        None
+    };
+
+    Some(AssetInfo {
+        path: path.to_string_lossy().to_string(),
+        name: file_name,
+        extension,
+        asset_type,
+        size,
+        metadata: asset_metadata,
+        unity_guid,
+    })
+}
+
+/// Incremental scan - only re-parse changed files
+pub fn scan_directory_incremental(
+    path: &str,
+    state: Option<Arc<ScanState>>,
+) -> Result<(ScanResult, IncrementalStats), ScanError> {
+    let root_path = Path::new(path);
+
+    if !root_path.exists() {
+        return Err(ScanError::PathNotFound(path.to_string()));
+    }
+
+    if !root_path.is_dir() {
+        return Err(ScanError::InvalidPath(format!(
+            "{} is not a directory",
+            path
+        )));
+    }
+
+    // Load existing cache
+    let mut cache = ScanCache::load(path).unwrap_or_else(|| ScanCache::new(path));
+
+    // Detect project type
+    let project_type = detect_project_type(root_path);
+
+    // Phase 1: Discover all files
+    if let Some(ref s) = state {
+        *s.phase.write() = ScanPhase::Discovering;
+    }
+
+    let mut file_entries: Vec<(walkdir::DirEntry, u64)> = Vec::new();
+
+    for entry in WalkDir::new(root_path)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        if let Some(ref s) = state {
+            if s.is_cancelled() {
+                return Err(ScanError::Cancelled);
+            }
+        }
+
+        let entry_path = entry.path();
+
+        if entry_path.is_dir() {
+            continue;
+        }
+
+        let file_name = entry_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        if file_name.starts_with('.') || file_name.ends_with(".meta") {
+            continue;
+        }
+
+        let extension = entry_path
+            .extension()
+            .map(|e| e.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        if extension.is_empty() {
+            continue;
+        }
+
+        let modified = get_modified_time(entry_path).unwrap_or(0);
+        file_entries.push((entry, modified));
+    }
+
+    // Collect all current file paths for pruning
+    let current_paths: Vec<String> = file_entries
+        .iter()
+        .map(|(e, _)| e.path().to_string_lossy().to_string())
+        .collect();
+
+    // Prune deleted files from cache
+    cache.prune(&current_paths);
+
+    // Determine which files need scanning
+    let files_to_scan: Vec<&(walkdir::DirEntry, u64)> = file_entries
+        .iter()
+        .filter(|(entry, modified)| {
+            let path_str = entry.path().to_string_lossy().to_string();
+            let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+            cache.needs_rescan(&path_str, *modified, size)
+        })
+        .collect();
+
+    let total_files = file_entries.len();
+    let files_to_parse = files_to_scan.len();
+    let cached_count = total_files - files_to_parse;
+
+    if let Some(ref s) = state {
+        s.total.store(files_to_parse, Ordering::SeqCst);
+    }
+
+    // Phase 2: Parse only changed files
+    if let Some(ref s) = state {
+        *s.phase.write() = ScanPhase::Parsing;
+    }
+
+    for (idx, (entry, modified)) in files_to_scan.iter().enumerate() {
+        if let Some(ref s) = state {
+            if s.is_cancelled() {
+                return Err(ScanError::Cancelled);
+            }
+            s.current.store(idx + 1, Ordering::SeqCst);
+            *s.current_file.write() = entry.path().to_string_lossy().to_string();
+        }
+
+        if let Some(asset) = parse_asset_file(entry.path(), &project_type) {
+            cache.update_entry(asset, *modified);
+        }
+    }
+
+    // Get all assets from cache
+    let mut assets = cache.get_assets();
+
+    // Sort assets by path
+    assets.sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
+
+    // Calculate type counts
+    let mut type_counts: HashMap<String, usize> = HashMap::new();
+    for asset in &assets {
+        let type_key = match asset.asset_type {
+            AssetType::Texture => "texture",
+            AssetType::Model => "model",
+            AssetType::Audio => "audio",
+            AssetType::Animation => "animation",
+            AssetType::Material => "material",
+            AssetType::Prefab => "prefab",
+            AssetType::Scene => "scene",
+            AssetType::Script => "script",
+            AssetType::Data => "data",
+            AssetType::Other => "other",
+        };
+        *type_counts.entry(type_key.to_string()).or_insert(0) += 1;
+    }
+
+    // Phase 3: Build directory tree
+    if let Some(ref s) = state {
+        *s.phase.write() = ScanPhase::Building;
+    }
+
+    let directory_tree = build_directory_tree(root_path, &assets);
+
+    let total_count = assets.len();
+    let total_size = assets.iter().map(|a| a.size).sum();
+
+    // Save updated cache
+    let _ = cache.save();
+
+    if let Some(ref s) = state {
+        *s.phase.write() = ScanPhase::Completed;
+    }
+
+    let result = ScanResult {
+        root_path: path.to_string(),
+        directory_tree,
+        assets,
+        total_count,
+        total_size,
+        type_counts,
+        project_type,
+    };
+
+    let stats = IncrementalStats {
+        total_files,
+        cached_files: cached_count,
+        rescanned_files: files_to_parse,
+    };
+
+    Ok((result, stats))
+}
+
+/// Statistics about incremental scan
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IncrementalStats {
+    pub total_files: usize,
+    pub cached_files: usize,
+    pub rescanned_files: usize,
 }
