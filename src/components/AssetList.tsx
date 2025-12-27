@@ -1,8 +1,9 @@
 import { useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Image, Box, Volume2, File } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
-import { cn, formatFileSize, getAssetTypeLabel } from "../lib/utils";
+import { cn, formatFileSize } from "../lib/utils";
 import type { AssetInfo, AssetType } from "../types/asset";
 
 const ROW_HEIGHT = 36; // Height of each row in pixels
@@ -27,9 +28,10 @@ interface AssetRowProps {
   isSelected: boolean;
   onClick: () => void;
   style: React.CSSProperties;
+  typeLabel: string;
 }
 
-function AssetRow({ asset, isSelected, onClick, style }: AssetRowProps) {
+function AssetRow({ asset, isSelected, onClick, style, typeLabel }: AssetRowProps) {
   const dimensions =
     asset.metadata?.width && asset.metadata?.height
       ? `${asset.metadata.width} x ${asset.metadata.height}`
@@ -52,7 +54,7 @@ function AssetRow({ asset, isSelected, onClick, style }: AssetRowProps) {
         </div>
       </div>
       <div className="w-24 py-2 px-3 text-text-secondary shrink-0">
-        {getAssetTypeLabel(asset.asset_type)}
+        {typeLabel}
       </div>
       <div className="w-24 py-2 px-3 text-text-secondary text-right shrink-0">
         {formatFileSize(asset.size)}
@@ -65,6 +67,7 @@ function AssetRow({ asset, isSelected, onClick, style }: AssetRowProps) {
 }
 
 export function AssetList() {
+  const { t } = useTranslation();
   const { scanResult, selectedAsset, setSelectedAsset, getFilteredAssets, isScanning } =
     useProjectStore();
   const parentRef = useRef<HTMLDivElement>(null);
@@ -78,10 +81,15 @@ export function AssetList() {
     overscan: 10, // Render 10 extra items above/below visible area
   });
 
+  const getTypeLabel = (type: AssetType): string => {
+    const key = `assetTypes.${type}` as const;
+    return t(key);
+  };
+
   if (isScanning) {
     return (
       <div className="flex items-center justify-center h-full text-text-secondary">
-        Scanning project...
+        {t("assetList.scanning")}
       </div>
     );
   }
@@ -90,7 +98,7 @@ export function AssetList() {
     return (
       <div className="flex flex-col items-center justify-center h-full text-text-secondary gap-2">
         <Image size={48} className="opacity-50" />
-        <p>Open a folder to view assets</p>
+        <p>{t("assetList.openFolder")}</p>
       </div>
     );
   }
@@ -98,7 +106,7 @@ export function AssetList() {
   if (assets.length === 0) {
     return (
       <div className="flex items-center justify-center h-full text-text-secondary">
-        No assets in this directory
+        {t("assetList.noAssets")}
       </div>
     );
   }
@@ -109,10 +117,10 @@ export function AssetList() {
     <div className="h-full flex flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center bg-card-bg border-b border-border text-text-secondary text-sm font-medium shrink-0">
-        <div className="flex-1 py-2 px-3">Name</div>
-        <div className="w-24 py-2 px-3 shrink-0">Type</div>
-        <div className="w-24 py-2 px-3 text-right shrink-0">Size</div>
-        <div className="w-32 py-2 px-3 text-right shrink-0">Dimensions</div>
+        <div className="flex-1 py-2 px-3">{t("assetList.name")}</div>
+        <div className="w-24 py-2 px-3 shrink-0">{t("assetList.type")}</div>
+        <div className="w-24 py-2 px-3 text-right shrink-0">{t("assetList.size")}</div>
+        <div className="w-32 py-2 px-3 text-right shrink-0">{t("assetList.dimensions")}</div>
       </div>
 
       {/* Virtual List */}
@@ -132,6 +140,7 @@ export function AssetList() {
                 asset={asset}
                 isSelected={selectedAsset?.path === asset.path}
                 onClick={() => setSelectedAsset(asset)}
+                typeLabel={getTypeLabel(asset.asset_type)}
                 style={{
                   position: "absolute",
                   top: 0,

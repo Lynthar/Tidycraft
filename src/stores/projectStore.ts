@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import type { ScanResult, AssetInfo, ScanProgress, AssetType, AnalysisResult } from "../types/asset";
 
-type ViewMode = "assets" | "issues";
+type ViewMode = "assets" | "issues" | "stats";
 
 interface ProjectState {
   // Project data

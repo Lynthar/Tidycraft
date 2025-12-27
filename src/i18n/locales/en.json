@@ -1,0 +1,109 @@
+{
+  "app": {
+    "name": "Tidycraft"
+  },
+  "header": {
+    "openFolder": "Open Folder",
+    "searchPlaceholder": "Search assets...",
+    "rescan": "Rescan",
+    "selectProjectFolder": "Select Project Folder"
+  },
+  "sidebar": {
+    "assets": "Assets",
+    "issues": "Issues",
+    "stats": "Stats",
+    "runAnalysis": "Run Analysis",
+    "analyzing": "Analyzing...",
+    "explorer": "Explorer"
+  },
+  "assetTypes": {
+    "all": "All Types",
+    "texture": "Textures",
+    "model": "Models",
+    "audio": "Audio",
+    "animation": "Animations",
+    "material": "Materials",
+    "prefab": "Prefabs",
+    "scene": "Scenes",
+    "script": "Scripts",
+    "data": "Data",
+    "other": "Other"
+  },
+  "assetList": {
+    "name": "Name",
+    "type": "Type",
+    "size": "Size",
+    "dimensions": "Dimensions",
+    "scanning": "Scanning project...",
+    "openFolder": "Open a folder to view assets",
+    "noAssets": "No assets in this directory"
+  },
+  "assetPreview": {
+    "selectAsset": "Select an asset to view details",
+    "loading": "Loading...",
+    "basicInfo": "Basic Info",
+    "type": "Type",
+    "extension": "Extension",
+    "size": "Size",
+    "imageInfo": "Image Info",
+    "dimensions": "Dimensions",
+    "hasAlpha": "Has Alpha",
+    "yes": "Yes",
+    "no": "No",
+    "modelInfo": "Model Info",
+    "vertices": "Vertices",
+    "faces": "Faces",
+    "materials": "Materials",
+    "audioInfo": "Audio Info",
+    "duration": "Duration",
+    "sampleRate": "Sample Rate",
+    "channels": "Channels",
+    "bitDepth": "Bit Depth",
+    "mono": "Mono",
+    "stereo": "Stereo",
+    "unity": "Unity",
+    "guid": "GUID",
+    "copyGuid": "Copy GUID",
+    "path": "Path",
+    "copyPath": "Copy path"
+  },
+  "statusBar": {
+    "ready": "Ready",
+    "startingScan": "Starting scan...",
+    "cancel": "Cancel",
+    "error": "Error",
+    "total": "Total",
+    "assets": "assets",
+    "showing": "Showing",
+    "textures": "Textures",
+    "models": "Models",
+    "audio": "Audio"
+  },
+  "scanPhase": {
+    "discovering": "Discovering files",
+    "parsing": "Parsing assets",
+    "building": "Building tree",
+    "completed": "Completed",
+    "cancelled": "Cancelled",
+    "scanning": "Scanning"
+  },
+  "issues": {
+    "title": "Issues",
+    "noResults": "No analysis results",
+    "analyzing": "Analyzing assets...",
+    "reanalyze": "Re-analyze",
+    "locate": "Locate",
+    "suggestion": "Suggestion",
+    "all": "All",
+    "errors": "Errors",
+    "warnings": "Warnings",
+    "info": "Info",
+    "noIssues": "No issues found!",
+    "noFilteredIssues": "No {{filter}} issues"
+  },
+  "settings": {
+    "language": "Language",
+    "english": "English",
+    "chinese": "Chinese"
+  }
+}

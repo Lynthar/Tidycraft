@@ -1,0 +1,109 @@
+{
+  "app": {
+    "name": "Tidycraft"
+  },
+  "header": {
+    "openFolder": "打开文件夹",
+    "searchPlaceholder": "搜索资产...",
+    "rescan": "重新扫描",
+    "selectProjectFolder": "选择项目文件夹"
+  },
+  "sidebar": {
+    "assets": "资产",
+    "issues": "问题",
+    "stats": "统计",
+    "runAnalysis": "运行分析",
+    "analyzing": "分析中...",
+    "explorer": "资源管理器"
+  },
+  "assetTypes": {
+    "all": "所有类型",
+    "texture": "纹理",
+    "model": "模型",
+    "audio": "音频",
+    "animation": "动画",
+    "material": "材质",
+    "prefab": "预制体",
+    "scene": "场景",
+    "script": "脚本",
+    "data": "数据",
+    "other": "其他"
+  },
+  "assetList": {
+    "name": "名称",
+    "type": "类型",
+    "size": "大小",
+    "dimensions": "尺寸",
+    "scanning": "正在扫描项目...",
+    "openFolder": "打开文件夹以查看资产",
+    "noAssets": "此目录中没有资产"
+  },
+  "assetPreview": {
+    "selectAsset": "选择一个资产以查看详情",
+    "loading": "加载中...",
+    "basicInfo": "基本信息",
+    "type": "类型",
+    "extension": "扩展名",
+    "size": "大小",
+    "imageInfo": "图像信息",
+    "dimensions": "尺寸",
+    "hasAlpha": "包含透明通道",
+    "yes": "是",
+    "no": "否",
+    "modelInfo": "模型信息",
+    "vertices": "顶点数",
+    "faces": "面数",
+    "materials": "材质数",
+    "audioInfo": "音频信息",
+    "duration": "时长",
+    "sampleRate": "采样率",
+    "channels": "声道",
+    "bitDepth": "位深度",
+    "mono": "单声道",
+    "stereo": "立体声",
+    "unity": "Unity",
+    "guid": "GUID",
+    "copyGuid": "复制 GUID",
+    "path": "路径",
+    "copyPath": "复制路径"
+  },
+  "statusBar": {
+    "ready": "就绪",
+    "startingScan": "正在启动扫描...",
+    "cancel": "取消",
+    "error": "错误",
+    "total": "总计",
+    "assets": "个资产",
+    "showing": "显示",
+    "textures": "纹理",
+    "models": "模型",
+    "audio": "音频"
+  },
+  "scanPhase": {
+    "discovering": "发现文件中",
+    "parsing": "解析资产中",
+    "building": "构建目录树中",
+    "completed": "已完成",
+    "cancelled": "已取消",
+    "scanning": "扫描中"
+  },
+  "issues": {
+    "title": "问题",
+    "noResults": "没有分析结果",
+    "analyzing": "正在分析资产...",
+    "reanalyze": "重新分析",
+    "locate": "定位",
+    "suggestion": "建议",
+    "all": "全部",
+    "errors": "错误",
+    "warnings": "警告",
+    "info": "提示",
+    "noIssues": "未发现问题！",
+    "noFilteredIssues": "没有{{filter}}类型的问题"
+  },
+  "settings": {
+    "language": "语言",
+    "english": "英语",
+    "chinese": "中文"
+  }
+}
