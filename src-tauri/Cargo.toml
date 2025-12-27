@@ -32,6 +32,8 @@ base64 = "0.22"
 parking_lot = "0.12"
 dirs = "5"
 toml = "0.8"
+git2 = "0.20"
+ignore = "0.4"
 
 [profile.dev]
 incremental = true

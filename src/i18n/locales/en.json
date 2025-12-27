@@ -11,6 +11,7 @@
   "sidebar": {
     "assets": "Assets",
     "issues": "Issues",
+    "stats": "Stats",
     "runAnalysis": "Run Analysis",
     "analyzing": "Analyzing...",
     "explorer": "Explorer"
