@@ -1,10 +1,17 @@
-import { FolderOpen, RefreshCw, Search, X, Globe } from "lucide-react";
+import { RefObject } from "react";
+import { FolderOpen, RefreshCw, Search, X, Globe, Sun, Moon } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
+import { useThemeStore } from "../stores/themeStore";
+import { formatShortcut, SHORTCUTS } from "../hooks/useKeyboardShortcuts";
 import type { AssetType } from "../types/asset";
 
-export function Header() {
+interface HeaderProps {
+  searchInputRef?: RefObject<HTMLInputElement>;
+}
+
+export function Header({ searchInputRef }: HeaderProps) {
   const { t, i18n } = useTranslation();
   const {
     projectPath,
@@ -16,6 +23,7 @@ export function Header() {
     setSearchQuery,
     setTypeFilter,
   } = useProjectStore();
+  const { theme, toggleTheme } = useThemeStore();
 
   const ASSET_TYPES: { value: AssetType | null; label: string }[] = [
     { value: null, label: t("assetTypes.all") },
@@ -81,8 +89,9 @@ export function Header() {
               className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-secondary"
             />
             <input
+              ref={searchInputRef}
               type="text"
-              placeholder={t("header.searchPlaceholder")}
+              placeholder={`${t("header.searchPlaceholder")} (${formatShortcut(SHORTCUTS.search)})`}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full h-8 pl-8 pr-8 text-sm bg-background border border-border rounded
@@ -117,6 +126,15 @@ export function Header() {
       )}
 
       <div className="flex items-center gap-2 shrink-0">
+        {/* Theme Toggle */}
+        <button
+          onClick={toggleTheme}
+          className="p-2 rounded hover:bg-background text-text-secondary hover:text-text-primary transition-colors"
+          title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+        >
+          {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+        </button>
+
         {/* Language Toggle */}
         <button
           onClick={toggleLanguage}
@@ -131,7 +149,7 @@ export function Header() {
             onClick={handleRescan}
             disabled={isScanning}
             className="p-2 rounded hover:bg-background text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50"
-            title={t("header.rescan")}
+            title={`${t("header.rescan")} (${formatShortcut(SHORTCUTS.rescan)})`}
           >
             <RefreshCw size={18} className={isScanning ? "animate-spin" : ""} />
           </button>
@@ -140,6 +158,7 @@ export function Header() {
           onClick={handleOpenFolder}
           disabled={isScanning}
           className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded hover:bg-primary/90 transition-colors disabled:opacity-50"
+          title={formatShortcut(SHORTCUTS.openFolder)}
         >
           <FolderOpen size={16} />
           <span>{t("header.openFolder")}</span>
