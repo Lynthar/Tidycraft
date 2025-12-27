@@ -1,13 +1,16 @@
 mod analyzer;
+mod cache;
 mod git;
 mod scanner;
 mod thumbnail;
+mod unity;
 
 use analyzer::{AnalysisResult, Analyzer};
 use analyzer::rules::RuleConfig;
+use cache::ScanCache;
 use git::{GitInfo, GitManager};
 use parking_lot::Mutex;
-use scanner::{ScanProgress, ScanResult, ScanState};
+use scanner::{IncrementalStats, ScanProgress, ScanResult, ScanState};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::Path;
@@ -118,6 +121,84 @@ fn get_scan_progress() -> Option<ScanProgress> {
     global_state.as_ref().map(|s| s.get_progress())
 }
 
+// ============ Incremental Scan Commands ============
+
+#[derive(Serialize)]
+pub struct IncrementalScanResult {
+    pub result: ScanResult,
+    pub stats: IncrementalStats,
+}
+
+#[tauri::command]
+async fn scan_project_incremental(app: AppHandle, path: String) -> Result<IncrementalScanResult, String> {
+    // Create new scan state
+    let state = Arc::new(ScanState::new());
+
+    // Store state for cancellation
+    {
+        let mut global_state = SCAN_STATE.lock();
+        *global_state = Some(state.clone());
+    }
+
+    let state_for_progress = state.clone();
+    let app_for_progress = app.clone();
+
+    // Spawn progress reporter thread
+    let progress_handle = thread::spawn(move || {
+        loop {
+            let progress = state_for_progress.get_progress();
+            let is_done = matches!(
+                progress.phase,
+                scanner::ScanPhase::Completed | scanner::ScanPhase::Cancelled
+            );
+
+            // Emit progress event
+            let _ = app_for_progress.emit("scan-progress", &progress);
+
+            if is_done {
+                break;
+            }
+
+            thread::sleep(Duration::from_millis(100));
+        }
+    });
+
+    // Run incremental scan in blocking thread
+    let state_for_scan = state.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        scanner::scan_directory_incremental(&path, Some(state_for_scan))
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+
+    // Wait for progress reporter to finish
+    let _ = progress_handle.join();
+
+    // Clear global state
+    {
+        let mut global_state = SCAN_STATE.lock();
+        *global_state = None;
+    }
+
+    let (scan_result, stats) = result.map_err(|e| e.to_string())?;
+
+    // Cache the result
+    {
+        let mut cache = CACHED_SCAN.lock();
+        *cache = Some(scan_result.clone());
+    }
+
+    Ok(IncrementalScanResult {
+        result: scan_result,
+        stats,
+    })
+}
+
+#[tauri::command]
+fn clear_scan_cache(path: String) -> Result<(), String> {
+    ScanCache::clear(&path).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn get_thumbnail(path: String, size: u32) -> Result<String, String> {
     thumbnail::get_thumbnail_base64(&path, size).map_err(|e| e.to_string())
@@ -214,6 +295,124 @@ fn get_file_git_status(path: String) -> String {
     } else {
         "unknown".to_string()
     }
+}
+
+// ============ Unity Commands ============
+
+#[tauri::command]
+fn parse_unity_file(path: String) -> Result<unity::UnityFileInfo, String> {
+    unity::parse_unity_file(Path::new(&path)).ok_or_else(|| "Failed to parse Unity file".to_string())
+}
+
+#[derive(Serialize)]
+pub struct DependencyGraph {
+    pub nodes: Vec<DependencyNode>,
+    pub edges: Vec<DependencyEdge>,
+}
+
+#[derive(Serialize)]
+pub struct DependencyNode {
+    pub path: String,
+    pub name: String,
+    pub guid: Option<String>,
+    pub file_type: String,
+}
+
+#[derive(Serialize)]
+pub struct DependencyEdge {
+    pub from_guid: String,
+    pub to_guid: String,
+}
+
+#[tauri::command]
+fn get_unity_dependencies() -> Result<DependencyGraph, String> {
+    let cache = CACHED_SCAN.lock();
+    let scan_result = cache.as_ref().ok_or("No scan result available")?;
+
+    // Only work with Unity projects
+    if !matches!(scan_result.project_type, Some(scanner::ProjectType::Unity)) {
+        return Err("Not a Unity project".to_string());
+    }
+
+    let mut nodes: Vec<DependencyNode> = Vec::new();
+    let mut edges: Vec<DependencyEdge> = Vec::new();
+    let mut guid_to_path: HashMap<String, String> = HashMap::new();
+
+    // Build GUID to path mapping
+    for asset in &scan_result.assets {
+        if let Some(ref guid) = asset.unity_guid {
+            guid_to_path.insert(guid.clone(), asset.path.clone());
+            nodes.push(DependencyNode {
+                path: asset.path.clone(),
+                name: asset.name.clone(),
+                guid: Some(guid.clone()),
+                file_type: format!("{:?}", asset.asset_type).to_lowercase(),
+            });
+        }
+    }
+
+    // Parse Unity files and extract references
+    for asset in &scan_result.assets {
+        let ext = asset.extension.to_lowercase();
+        if ext == "prefab" || ext == "unity" || ext == "mat" {
+            if let Some(unity_info) = unity::parse_unity_file(Path::new(&asset.path)) {
+                if let Some(ref from_guid) = asset.unity_guid {
+                    for reference in &unity_info.references {
+                        // Only add edge if target exists in our project
+                        if guid_to_path.contains_key(&reference.guid) {
+                            edges.push(DependencyEdge {
+                                from_guid: from_guid.clone(),
+                                to_guid: reference.guid.clone(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(DependencyGraph { nodes, edges })
+}
+
+#[tauri::command]
+fn find_unused_assets() -> Result<Vec<String>, String> {
+    let cache = CACHED_SCAN.lock();
+    let scan_result = cache.as_ref().ok_or("No scan result available")?;
+
+    if !matches!(scan_result.project_type, Some(scanner::ProjectType::Unity)) {
+        return Err("Not a Unity project".to_string());
+    }
+
+    let mut referenced_guids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut all_guids: HashMap<String, String> = HashMap::new();
+
+    // Collect all GUIDs
+    for asset in &scan_result.assets {
+        if let Some(ref guid) = asset.unity_guid {
+            all_guids.insert(guid.clone(), asset.path.clone());
+        }
+    }
+
+    // Collect all referenced GUIDs from Unity files
+    for asset in &scan_result.assets {
+        let ext = asset.extension.to_lowercase();
+        if ext == "prefab" || ext == "unity" || ext == "mat" || ext == "controller" {
+            if let Some(unity_info) = unity::parse_unity_file(Path::new(&asset.path)) {
+                for reference in &unity_info.references {
+                    referenced_guids.insert(reference.guid.clone());
+                }
+            }
+        }
+    }
+
+    // Find assets that are never referenced
+    let unused: Vec<String> = all_guids
+        .iter()
+        .filter(|(guid, _path)| !referenced_guids.contains(*guid))
+        .map(|(_guid, path)| path.clone())
+        .collect();
+
+    Ok(unused)
 }
 
 // ============ Statistics Commands ============
@@ -360,8 +559,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             scan_project,
             scan_project_async,
+            scan_project_incremental,
             cancel_scan,
             get_scan_progress,
+            clear_scan_cache,
             get_thumbnail,
             analyze_assets,
             get_default_config,
@@ -369,6 +570,9 @@ pub fn run() {
             get_git_info,
             get_git_statuses,
             get_file_git_status,
+            parse_unity_file,
+            get_unity_dependencies,
+            find_unused_assets,
             get_project_stats,
             export_to_json,
             export_to_csv,
