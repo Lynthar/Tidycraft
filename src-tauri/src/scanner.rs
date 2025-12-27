@@ -1,4 +1,5 @@
 use parking_lot::RwLock;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -513,79 +514,114 @@ pub fn scan_directory_with_state(
         s.total.store(total_files, Ordering::SeqCst);
     }
 
-    // Phase 2: Parse all files
+    // Phase 2: Parse all files in parallel
     if let Some(ref s) = state {
         *s.phase.write() = ScanPhase::Parsing;
     }
 
-    let mut assets: Vec<AssetInfo> = Vec::new();
-    let mut type_counts: HashMap<String, usize> = HashMap::new();
+    // Parse files in parallel using rayon
+    let state_clone = state.clone();
+    let project_type_clone = project_type.clone();
+    let counter = Arc::new(AtomicUsize::new(0));
+    let counter_clone = counter.clone();
 
-    for (idx, entry) in file_paths.iter().enumerate() {
-        if let Some(ref s) = state {
-            if s.is_cancelled() {
-                return Err(ScanError::Cancelled);
+    let assets: Vec<AssetInfo> = file_paths
+        .par_iter()
+        .filter_map(|entry| {
+            // Check for cancellation periodically
+            if let Some(ref s) = state_clone {
+                if s.is_cancelled() {
+                    return None;
+                }
             }
-            s.current.store(idx + 1, Ordering::SeqCst);
-            *s.current_file.write() = entry.path().to_string_lossy().to_string();
-        }
 
-        let entry_path = entry.path();
-        let file_name = entry_path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default();
+            // Update progress counter
+            let current = counter_clone.fetch_add(1, Ordering::SeqCst) + 1;
+            if let Some(ref s) = state_clone {
+                s.current.store(current, Ordering::Relaxed);
+                // Only update current_file every 100 files to reduce lock contention
+                if current % 100 == 0 {
+                    *s.current_file.write() = entry.path().to_string_lossy().to_string();
+                }
+            }
 
-        let extension = entry_path
-            .extension()
-            .map(|e| e.to_string_lossy().to_string())
-            .unwrap_or_default();
+            let entry_path = entry.path();
+            let file_name = entry_path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
 
-        // Get file metadata
-        let metadata = entry_path.metadata().ok();
-        let size = metadata.map(|m| m.len()).unwrap_or(0);
+            let extension = entry_path
+                .extension()
+                .map(|e| e.to_string_lossy().to_string())
+                .unwrap_or_default();
 
-        // Determine asset type
-        let asset_type = get_asset_type(&extension);
+            // Get file metadata
+            let metadata = entry_path.metadata().ok();
+            let size = metadata.map(|m| m.len()).unwrap_or(0);
 
-        // Parse metadata based on asset type
-        let asset_metadata = match asset_type {
-            AssetType::Texture => {
-                let ext_lower = extension.to_lowercase();
-                match ext_lower.as_str() {
-                    "png" | "jpg" | "jpeg" | "bmp" | "gif" | "tga" => {
-                        parse_image_metadata(entry_path)
+            // Determine asset type
+            let asset_type = get_asset_type(&extension);
+
+            // Parse metadata based on asset type
+            let asset_metadata = match asset_type {
+                AssetType::Texture => {
+                    let ext_lower = extension.to_lowercase();
+                    match ext_lower.as_str() {
+                        "png" | "jpg" | "jpeg" | "bmp" | "gif" | "tga" => {
+                            parse_image_metadata(entry_path)
+                        }
+                        _ => None,
                     }
-                    _ => None,
                 }
-            }
-            AssetType::Model => {
-                let ext_lower = extension.to_lowercase();
-                match ext_lower.as_str() {
-                    "gltf" | "glb" => parse_gltf_metadata(entry_path),
-                    "obj" => parse_obj_metadata(entry_path),
-                    _ => None,
+                AssetType::Model => {
+                    let ext_lower = extension.to_lowercase();
+                    match ext_lower.as_str() {
+                        "gltf" | "glb" => parse_gltf_metadata(entry_path),
+                        "obj" => parse_obj_metadata(entry_path),
+                        _ => None,
+                    }
                 }
-            }
-            AssetType::Audio => {
-                let ext_lower = extension.to_lowercase();
-                match ext_lower.as_str() {
-                    "mp3" | "ogg" | "wav" => parse_audio_metadata(entry_path),
-                    _ => None,
+                AssetType::Audio => {
+                    let ext_lower = extension.to_lowercase();
+                    match ext_lower.as_str() {
+                        "mp3" | "ogg" | "wav" => parse_audio_metadata(entry_path),
+                        _ => None,
+                    }
                 }
-            }
-            _ => None,
-        };
+                _ => None,
+            };
 
-        // Try to get Unity GUID if it's a Unity project
-        let unity_guid = if matches!(project_type, Some(ProjectType::Unity)) {
-            parse_unity_meta(entry_path)
-        } else {
-            None
-        };
+            // Try to get Unity GUID if it's a Unity project
+            let unity_guid = if matches!(project_type_clone, Some(ProjectType::Unity)) {
+                parse_unity_meta(entry_path)
+            } else {
+                None
+            };
 
-        // Update type counts
-        let type_key = match asset_type {
+            Some(AssetInfo {
+                path: entry_path.to_string_lossy().to_string(),
+                name: file_name,
+                extension,
+                asset_type,
+                size,
+                metadata: asset_metadata,
+                unity_guid,
+            })
+        })
+        .collect();
+
+    // Check if cancelled during parallel processing
+    if let Some(ref s) = state {
+        if s.is_cancelled() {
+            return Err(ScanError::Cancelled);
+        }
+    }
+
+    // Calculate type counts from the results
+    let mut type_counts: HashMap<String, usize> = HashMap::new();
+    for asset in &assets {
+        let type_key = match asset.asset_type {
             AssetType::Texture => "texture",
             AssetType::Model => "model",
             AssetType::Audio => "audio",
@@ -598,20 +634,17 @@ pub fn scan_directory_with_state(
             AssetType::Other => "other",
         };
         *type_counts.entry(type_key.to_string()).or_insert(0) += 1;
-
-        assets.push(AssetInfo {
-            path: entry_path.to_string_lossy().to_string(),
-            name: file_name,
-            extension,
-            asset_type,
-            size,
-            metadata: asset_metadata,
-            unity_guid,
-        });
     }
 
-    // Sort assets by path
-    assets.sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
+    // Convert to mutable for sorting
+    let mut assets = assets;
+
+    // Sort assets by path using parallel sort for large collections
+    if assets.len() > 1000 {
+        assets.par_sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
+    } else {
+        assets.sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
+    }
 
     // Phase 3: Build directory tree
     if let Some(ref s) = state {
@@ -806,30 +839,62 @@ pub fn scan_directory_incremental(
         s.total.store(files_to_parse, Ordering::SeqCst);
     }
 
-    // Phase 2: Parse only changed files
+    // Phase 2: Parse only changed files in parallel
     if let Some(ref s) = state {
         *s.phase.write() = ScanPhase::Parsing;
     }
 
-    for (idx, (entry, modified)) in files_to_scan.iter().enumerate() {
-        if let Some(ref s) = state {
-            if s.is_cancelled() {
-                return Err(ScanError::Cancelled);
-            }
-            s.current.store(idx + 1, Ordering::SeqCst);
-            *s.current_file.write() = entry.path().to_string_lossy().to_string();
-        }
+    let state_clone = state.clone();
+    let project_type_clone = project_type.clone();
+    let counter = Arc::new(AtomicUsize::new(0));
+    let counter_clone = counter.clone();
 
-        if let Some(asset) = parse_asset_file(entry.path(), &project_type) {
-            cache.update_entry(asset, *modified);
+    // Parse files in parallel and collect results
+    let parsed_assets: Vec<(AssetInfo, u64)> = files_to_scan
+        .par_iter()
+        .filter_map(|(entry, modified)| {
+            // Check for cancellation periodically
+            if let Some(ref s) = state_clone {
+                if s.is_cancelled() {
+                    return None;
+                }
+            }
+
+            // Update progress counter
+            let current = counter_clone.fetch_add(1, Ordering::SeqCst) + 1;
+            if let Some(ref s) = state_clone {
+                s.current.store(current, Ordering::Relaxed);
+                if current % 100 == 0 {
+                    *s.current_file.write() = entry.path().to_string_lossy().to_string();
+                }
+            }
+
+            parse_asset_file(entry.path(), &project_type_clone)
+                .map(|asset| (asset, *modified))
+        })
+        .collect();
+
+    // Check if cancelled during parallel processing
+    if let Some(ref s) = state {
+        if s.is_cancelled() {
+            return Err(ScanError::Cancelled);
         }
+    }
+
+    // Update cache with parsed assets
+    for (asset, modified) in parsed_assets {
+        cache.update_entry(asset, modified);
     }
 
     // Get all assets from cache
     let mut assets = cache.get_assets();
 
-    // Sort assets by path
-    assets.sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
+    // Sort assets by path using parallel sort for large collections
+    if assets.len() > 1000 {
+        assets.par_sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
+    } else {
+        assets.sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
+    }
 
     // Calculate type counts
     let mut type_counts: HashMap<String, usize> = HashMap::new();
