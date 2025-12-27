@@ -1,7 +1,11 @@
+import { useRef } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { Image, Box, Volume2, File } from "lucide-react";
 import { useProjectStore } from "../stores/projectStore";
 import { cn, formatFileSize, getAssetTypeLabel } from "../lib/utils";
 import type { AssetInfo, AssetType } from "../types/asset";
+
+const ROW_HEIGHT = 36; // Height of each row in pixels
 
 function AssetIcon({ type }: { type: AssetType }) {
   const iconProps = { size: 16, className: "shrink-0" };
@@ -22,47 +26,57 @@ interface AssetRowProps {
   asset: AssetInfo;
   isSelected: boolean;
   onClick: () => void;
+  style: React.CSSProperties;
 }
 
-function AssetRow({ asset, isSelected, onClick }: AssetRowProps) {
+function AssetRow({ asset, isSelected, onClick, style }: AssetRowProps) {
   const dimensions =
     asset.metadata?.width && asset.metadata?.height
       ? `${asset.metadata.width} x ${asset.metadata.height}`
       : "-";
 
   return (
-    <tr
+    <div
       className={cn(
-        "border-b border-border cursor-pointer transition-colors",
+        "flex items-center border-b border-border cursor-pointer transition-colors text-sm",
         "hover:bg-background",
         isSelected && "bg-primary/20"
       )}
+      style={style}
       onClick={onClick}
     >
-      <td className="py-2 px-3">
+      <div className="flex-1 py-2 px-3 min-w-0">
         <div className="flex items-center gap-2">
           <AssetIcon type={asset.asset_type} />
           <span className="truncate">{asset.name}</span>
         </div>
-      </td>
-      <td className="py-2 px-3 text-text-secondary">
+      </div>
+      <div className="w-24 py-2 px-3 text-text-secondary shrink-0">
         {getAssetTypeLabel(asset.asset_type)}
-      </td>
-      <td className="py-2 px-3 text-text-secondary text-right">
+      </div>
+      <div className="w-24 py-2 px-3 text-text-secondary text-right shrink-0">
         {formatFileSize(asset.size)}
-      </td>
-      <td className="py-2 px-3 text-text-secondary text-right font-mono text-xs">
+      </div>
+      <div className="w-32 py-2 px-3 text-text-secondary text-right font-mono text-xs shrink-0">
         {dimensions}
-      </td>
-    </tr>
+      </div>
+    </div>
   );
 }
 
 export function AssetList() {
   const { scanResult, selectedAsset, setSelectedAsset, getFilteredAssets, isScanning } =
     useProjectStore();
+  const parentRef = useRef<HTMLDivElement>(null);
 
   const assets = getFilteredAssets();
+
+  const virtualizer = useVirtualizer({
+    count: assets.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 10, // Render 10 extra items above/below visible area
+  });
 
   if (isScanning) {
     return (
@@ -89,28 +103,48 @@ export function AssetList() {
     );
   }
 
+  const virtualItems = virtualizer.getVirtualItems();
+
   return (
-    <div className="h-full overflow-auto">
-      <table className="w-full text-sm">
-        <thead className="sticky top-0 bg-card-bg border-b border-border">
-          <tr className="text-text-secondary text-left">
-            <th className="py-2 px-3 font-medium">Name</th>
-            <th className="py-2 px-3 font-medium w-24">Type</th>
-            <th className="py-2 px-3 font-medium w-24 text-right">Size</th>
-            <th className="py-2 px-3 font-medium w-32 text-right">Dimensions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {assets.map((asset) => (
-            <AssetRow
-              key={asset.path}
-              asset={asset}
-              isSelected={selectedAsset?.path === asset.path}
-              onClick={() => setSelectedAsset(asset)}
-            />
-          ))}
-        </tbody>
-      </table>
+    <div className="h-full flex flex-col overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center bg-card-bg border-b border-border text-text-secondary text-sm font-medium shrink-0">
+        <div className="flex-1 py-2 px-3">Name</div>
+        <div className="w-24 py-2 px-3 shrink-0">Type</div>
+        <div className="w-24 py-2 px-3 text-right shrink-0">Size</div>
+        <div className="w-32 py-2 px-3 text-right shrink-0">Dimensions</div>
+      </div>
+
+      {/* Virtual List */}
+      <div ref={parentRef} className="flex-1 overflow-auto">
+        <div
+          style={{
+            height: `${virtualizer.getTotalSize()}px`,
+            width: "100%",
+            position: "relative",
+          }}
+        >
+          {virtualItems.map((virtualItem) => {
+            const asset = assets[virtualItem.index];
+            return (
+              <AssetRow
+                key={asset.path}
+                asset={asset}
+                isSelected={selectedAsset?.path === asset.path}
+                onClick={() => setSelectedAsset(asset)}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  height: `${virtualItem.size}px`,
+                  transform: `translateY(${virtualItem.start}px)`,
+                }}
+              />
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
