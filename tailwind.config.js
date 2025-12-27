@@ -4,17 +4,17 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Dark theme colors from design spec
-        background: "#1a1a2e",
-        "card-bg": "#252542",
-        border: "#3a3a5c",
-        "text-primary": "#e4e4e7",
-        "text-secondary": "#a1a1aa",
-        primary: "#6366f1",
-        success: "#22c55e",
-        warning: "#f59e0b",
-        error: "#ef4444",
-        info: "#3b82f6",
+        // Theme-aware colors using CSS variables
+        background: "var(--color-background)",
+        "card-bg": "var(--color-card-bg)",
+        border: "var(--color-border)",
+        "text-primary": "var(--color-text-primary)",
+        "text-secondary": "var(--color-text-secondary)",
+        primary: "var(--color-primary)",
+        success: "var(--color-success)",
+        warning: "var(--color-warning)",
+        error: "var(--color-error)",
+        info: "var(--color-info)",
       },
     },
   },

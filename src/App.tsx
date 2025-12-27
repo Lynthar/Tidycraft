@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Header } from "./components/Header";
 import { Sidebar } from "./components/Sidebar";
@@ -7,6 +8,7 @@ import { IssueList } from "./components/IssueList";
 import { StatsDashboard } from "./components/StatsDashboard";
 import { StatusBar } from "./components/StatusBar";
 import { useProjectStore } from "./stores/projectStore";
+import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 
 function App() {
   const {
@@ -18,6 +20,15 @@ function App() {
     runAnalysis,
     locateAsset,
   } = useProjectStore();
+
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Initialize keyboard shortcuts
+  useKeyboardShortcuts({
+    onFocusSearch: () => {
+      searchInputRef.current?.focus();
+    },
+  });
 
   const showPreview = scanResult && selectedAsset && viewMode === "assets";
 
@@ -51,6 +62,21 @@ function App() {
     }
   };
 
+  const handleExportHtml = async () => {
+    try {
+      const html = await invoke<string>("export_to_html");
+      const blob = new Blob([html], { type: "text/html" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "tidycraft-report.html";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Failed to export HTML:", err);
+    }
+  };
+
   const renderMainContent = () => {
     switch (viewMode) {
       case "assets":
@@ -71,6 +97,7 @@ function App() {
             passCount={scanResult ? scanResult.total_count - (analysisResult?.issue_count || 0) : 0}
             onExportJson={handleExportJson}
             onExportCsv={handleExportCsv}
+            onExportHtml={handleExportHtml}
           />
         );
       default:
@@ -80,7 +107,7 @@ function App() {
 
   return (
     <div className="h-screen flex flex-col bg-background">
-      <Header />
+      <Header searchInputRef={searchInputRef} />
 
       <div className="flex-1 flex overflow-hidden">
         <Sidebar />

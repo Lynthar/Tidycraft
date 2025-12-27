@@ -2,6 +2,44 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Theme CSS Variables */
+:root {
+  /* Dark theme (default) */
+  --color-background: #1a1a2e;
+  --color-card-bg: #252542;
+  --color-border: #3a3a5c;
+  --color-text-primary: #e4e4e7;
+  --color-text-secondary: #9ca3af;
+  --color-primary: #6366f1;
+  --color-primary-hover: #5558e3;
+  --color-error: #ef4444;
+  --color-warning: #f59e0b;
+  --color-success: #10b981;
+  --color-info: #3b82f6;
+
+  --scrollbar-track: #252542;
+  --scrollbar-thumb: #3a3a5c;
+  --scrollbar-thumb-hover: #4a4a6c;
+}
+
+[data-theme="light"] {
+  --color-background: #f8fafc;
+  --color-card-bg: #ffffff;
+  --color-border: #e2e8f0;
+  --color-text-primary: #1e293b;
+  --color-text-secondary: #64748b;
+  --color-primary: #6366f1;
+  --color-primary-hover: #4f46e5;
+  --color-error: #dc2626;
+  --color-warning: #d97706;
+  --color-success: #059669;
+  --color-info: #2563eb;
+
+  --scrollbar-track: #f1f5f9;
+  --scrollbar-thumb: #cbd5e1;
+  --scrollbar-thumb-hover: #94a3b8;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -26,9 +64,10 @@ body,
 }
 
 body {
-  background-color: #1a1a2e;
-  color: #e4e4e7;
+  background-color: var(--color-background);
+  color: var(--color-text-primary);
   overflow: hidden;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 /* Custom scrollbar */
@@ -38,16 +77,16 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #252542;
+  background: var(--scrollbar-track);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #3a3a5c;
+  background: var(--scrollbar-thumb);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #4a4a6c;
+  background: var(--scrollbar-thumb-hover);
 }
 
 /* Utility classes */

@@ -551,6 +551,352 @@ fn export_issues_to_json() -> Result<String, String> {
     serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn export_to_html() -> Result<String, String> {
+    let cache = CACHED_SCAN.lock();
+    let scan_result = cache.as_ref().ok_or("No scan result available")?;
+
+    // Run analysis
+    let config = RuleConfig::default();
+    let analyzer = Analyzer::with_config(&config);
+    let mut analysis_result = analyzer.analyze(scan_result);
+    let duplicates = analyzer.find_duplicates(scan_result);
+    analysis_result.merge(duplicates);
+
+    // Calculate statistics
+    let mut type_counts: HashMap<String, usize> = HashMap::new();
+    let mut size_by_type: HashMap<String, u64> = HashMap::new();
+
+    for asset in &scan_result.assets {
+        let type_str = format!("{:?}", asset.asset_type);
+        *type_counts.entry(type_str.clone()).or_insert(0) += 1;
+        *size_by_type.entry(type_str).or_insert(0) += asset.size;
+    }
+
+    // Format file size helper
+    fn format_size(bytes: u64) -> String {
+        if bytes < 1024 {
+            format!("{} B", bytes)
+        } else if bytes < 1024 * 1024 {
+            format!("{:.1} KB", bytes as f64 / 1024.0)
+        } else if bytes < 1024 * 1024 * 1024 {
+            format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+        } else {
+            format!("{:.2} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+        }
+    }
+
+    // Generate HTML
+    let html = format!(r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tidycraft Report - {project_name}</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #e4e4e7; padding: 2rem; }}
+        .container {{ max-width: 1200px; margin: 0 auto; }}
+        h1 {{ color: #6366f1; margin-bottom: 0.5rem; }}
+        h2 {{ color: #e4e4e7; margin: 2rem 0 1rem; border-bottom: 1px solid #3a3a5c; padding-bottom: 0.5rem; }}
+        .meta {{ color: #9ca3af; margin-bottom: 2rem; }}
+        .cards {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem; }}
+        .card {{ background: #252542; border-radius: 8px; padding: 1.5rem; border: 1px solid #3a3a5c; }}
+        .card-value {{ font-size: 2rem; font-weight: bold; color: #6366f1; }}
+        .card-label {{ color: #9ca3af; font-size: 0.875rem; margin-top: 0.25rem; }}
+        table {{ width: 100%; border-collapse: collapse; background: #252542; border-radius: 8px; overflow: hidden; }}
+        th, td {{ padding: 0.75rem 1rem; text-align: left; border-bottom: 1px solid #3a3a5c; }}
+        th {{ background: #1a1a2e; font-weight: 600; }}
+        tr:hover {{ background: #2a2a4a; }}
+        .type-badge {{ display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 500; }}
+        .texture {{ background: #22c55e20; color: #22c55e; }}
+        .model {{ background: #3b82f620; color: #3b82f6; }}
+        .audio {{ background: #f59e0b20; color: #f59e0b; }}
+        .other {{ background: #6b728020; color: #9ca3af; }}
+        .severity-error {{ color: #ef4444; }}
+        .severity-warning {{ color: #f59e0b; }}
+        .severity-info {{ color: #3b82f6; }}
+        .chart {{ display: flex; gap: 2rem; margin-bottom: 2rem; }}
+        .chart-bar {{ flex: 1; background: #252542; border-radius: 8px; padding: 1rem; }}
+        .bar {{ height: 24px; background: #6366f1; border-radius: 4px; margin-bottom: 0.5rem; transition: width 0.3s; }}
+        .bar-label {{ display: flex; justify-content: space-between; font-size: 0.875rem; color: #9ca3af; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Tidycraft Report</h1>
+        <p class="meta">Project: {project_name} | Generated: {date}</p>
+
+        <div class="cards">
+            <div class="card">
+                <div class="card-value">{total_assets}</div>
+                <div class="card-label">Total Assets</div>
+            </div>
+            <div class="card">
+                <div class="card-value">{total_size}</div>
+                <div class="card-label">Total Size</div>
+            </div>
+            <div class="card">
+                <div class="card-value">{issue_count}</div>
+                <div class="card-label">Issues Found</div>
+            </div>
+            <div class="card">
+                <div class="card-value">{pass_count}</div>
+                <div class="card-label">Passed Checks</div>
+            </div>
+        </div>
+
+        <h2>Asset Distribution</h2>
+        <div class="chart">
+            <div class="chart-bar">
+                <h3 style="margin-bottom: 1rem; color: #9ca3af;">By Type</h3>
+                {type_bars}
+            </div>
+        </div>
+
+        <h2>Issues ({issue_count})</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Severity</th>
+                    <th>Rule</th>
+                    <th>Asset</th>
+                    <th>Message</th>
+                </tr>
+            </thead>
+            <tbody>
+                {issue_rows}
+            </tbody>
+        </table>
+
+        <h2>Assets ({total_assets})</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Size</th>
+                    <th>Dimensions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {asset_rows}
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>"#,
+        project_name = scan_result.root_path.split('/').last().unwrap_or("Project"),
+        date = chrono::Local::now().format("%Y-%m-%d %H:%M"),
+        total_assets = scan_result.total_count,
+        total_size = format_size(scan_result.total_size),
+        issue_count = analysis_result.issue_count,
+        pass_count = scan_result.total_count.saturating_sub(analysis_result.issue_count),
+        type_bars = {
+            let max_count = type_counts.values().max().copied().unwrap_or(1) as f64;
+            type_counts.iter().map(|(t, c)| {
+                let pct = (*c as f64 / max_count * 100.0) as u32;
+                format!(r#"<div><div class="bar" style="width: {}%"></div><div class="bar-label"><span>{}</span><span>{}</span></div></div>"#, pct, t, c)
+            }).collect::<Vec<_>>().join("\n")
+        },
+        issue_rows = analysis_result.issues.iter().take(100).map(|issue| {
+            let severity_class = match issue.severity {
+                analyzer::Severity::Error => "severity-error",
+                analyzer::Severity::Warning => "severity-warning",
+                analyzer::Severity::Info => "severity-info",
+            };
+            let file_name = issue.asset_path.split('/').last().unwrap_or(&issue.asset_path);
+            format!(
+                r#"<tr><td class="{}">{:?}</td><td>{}</td><td>{}</td><td>{}</td></tr>"#,
+                severity_class,
+                issue.severity,
+                issue.rule_name,
+                file_name,
+                issue.message
+            )
+        }).collect::<Vec<_>>().join("\n"),
+        asset_rows = scan_result.assets.iter().take(500).map(|asset| {
+            let type_class = match asset.asset_type {
+                scanner::AssetType::Texture => "texture",
+                scanner::AssetType::Model => "model",
+                scanner::AssetType::Audio => "audio",
+                _ => "other",
+            };
+            let dimensions = asset.metadata.as_ref()
+                .and_then(|m| m.width.zip(m.height))
+                .map(|(w, h)| format!("{}x{}", w, h))
+                .unwrap_or_else(|| "-".to_string());
+            format!(
+                r#"<tr><td>{}</td><td><span class="type-badge {}">{:?}</span></td><td>{}</td><td>{}</td></tr>"#,
+                asset.name,
+                type_class,
+                asset.asset_type,
+                format_size(asset.size),
+                dimensions
+            )
+        }).collect::<Vec<_>>().join("\n")
+    );
+
+    Ok(html)
+}
+
+// ============ Batch Operations ============
+
+#[derive(serde::Deserialize)]
+pub enum RenameOperation {
+    FindReplace { find: String, replace: String },
+    AddPrefix { prefix: String },
+    AddSuffix { suffix: String },
+    RemovePrefix { prefix: String },
+    RemoveSuffix { suffix: String },
+    ToLowercase,
+    ToUppercase,
+    ToTitleCase,
+}
+
+#[derive(Serialize)]
+pub struct RenamePreview {
+    pub original_path: String,
+    pub original_name: String,
+    pub new_name: String,
+    pub will_change: bool,
+}
+
+#[derive(Serialize)]
+pub struct BatchRenameResult {
+    pub success_count: usize,
+    pub error_count: usize,
+    pub errors: Vec<String>,
+}
+
+fn apply_rename_operation(name: &str, operation: &RenameOperation) -> String {
+    match operation {
+        RenameOperation::FindReplace { find, replace } => {
+            name.replace(find, replace)
+        }
+        RenameOperation::AddPrefix { prefix } => {
+            format!("{}{}", prefix, name)
+        }
+        RenameOperation::AddSuffix { suffix } => {
+            // Insert suffix before extension
+            if let Some(dot_pos) = name.rfind('.') {
+                format!("{}{}{}", &name[..dot_pos], suffix, &name[dot_pos..])
+            } else {
+                format!("{}{}", name, suffix)
+            }
+        }
+        RenameOperation::RemovePrefix { prefix } => {
+            name.strip_prefix(prefix).unwrap_or(name).to_string()
+        }
+        RenameOperation::RemoveSuffix { suffix } => {
+            // Remove suffix before extension
+            if let Some(dot_pos) = name.rfind('.') {
+                let base = &name[..dot_pos];
+                let ext = &name[dot_pos..];
+                let new_base = base.strip_suffix(suffix).unwrap_or(base);
+                format!("{}{}", new_base, ext)
+            } else {
+                name.strip_suffix(suffix).unwrap_or(name).to_string()
+            }
+        }
+        RenameOperation::ToLowercase => {
+            name.to_lowercase()
+        }
+        RenameOperation::ToUppercase => {
+            name.to_uppercase()
+        }
+        RenameOperation::ToTitleCase => {
+            name.split(|c: char| c == '_' || c == '-' || c == ' ')
+                .map(|word| {
+                    let mut chars = word.chars();
+                    match chars.next() {
+                        None => String::new(),
+                        Some(first) => {
+                            first.to_uppercase().collect::<String>() + chars.as_str()
+                        }
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("_")
+        }
+    }
+}
+
+#[tauri::command]
+fn preview_batch_rename(paths: Vec<String>, operation: RenameOperation) -> Vec<RenamePreview> {
+    paths
+        .into_iter()
+        .map(|path| {
+            let name = Path::new(&path)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+
+            let new_name = apply_rename_operation(&name, &operation);
+            let will_change = name != new_name;
+
+            RenamePreview {
+                original_path: path,
+                original_name: name,
+                new_name,
+                will_change,
+            }
+        })
+        .collect()
+}
+
+#[tauri::command]
+fn execute_batch_rename(paths: Vec<String>, operation: RenameOperation) -> BatchRenameResult {
+    let mut success_count = 0;
+    let mut error_count = 0;
+    let mut errors = Vec::new();
+
+    for path in paths {
+        let path_obj = Path::new(&path);
+        let name = match path_obj.file_name() {
+            Some(n) => n.to_string_lossy().to_string(),
+            None => {
+                errors.push(format!("Invalid path: {}", path));
+                error_count += 1;
+                continue;
+            }
+        };
+
+        let new_name = apply_rename_operation(&name, &operation);
+
+        if name == new_name {
+            // No change needed
+            continue;
+        }
+
+        let new_path = path_obj.with_file_name(&new_name);
+
+        // Check if target already exists
+        if new_path.exists() {
+            errors.push(format!("Target already exists: {}", new_path.display()));
+            error_count += 1;
+            continue;
+        }
+
+        // Perform the rename
+        match std::fs::rename(&path, &new_path) {
+            Ok(_) => {
+                success_count += 1;
+            }
+            Err(e) => {
+                errors.push(format!("Failed to rename {}: {}", name, e));
+                error_count += 1;
+            }
+        }
+    }
+
+    BatchRenameResult {
+        success_count,
+        error_count,
+        errors,
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -576,7 +922,10 @@ pub fn run() {
             get_project_stats,
             export_to_json,
             export_to_csv,
-            export_issues_to_json
+            export_issues_to_json,
+            export_to_html,
+            preview_batch_rename,
+            execute_batch_rename
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
