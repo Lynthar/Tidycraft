@@ -51,9 +51,10 @@ interface StatsDashboardProps {
   passCount?: number;
   onExportJson?: () => void;
   onExportCsv?: () => void;
+  onExportHtml?: () => void;
 }
 
-export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, onExportCsv }: StatsDashboardProps) {
+export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, onExportCsv, onExportHtml }: StatsDashboardProps) {
   const { t } = useTranslation();
   const [stats, setStats] = useState<ProjectStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -277,6 +278,13 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
         >
           <FileDown size={16} />
           Export CSV
+        </button>
+        <button
+          onClick={onExportHtml}
+          className="flex items-center gap-2 px-4 py-2 bg-green-500/20 text-green-400 rounded hover:bg-green-500/30 transition-colors"
+        >
+          <FileDown size={16} />
+          Export HTML Report
         </button>
       </div>
     </div>
