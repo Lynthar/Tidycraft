@@ -37,6 +37,9 @@ ignore = "0.4"
 chrono = "0.4"
 rayon = "1.10"
 
+[dev-dependencies]
+tempfile = "3"
+
 [profile.dev]
 incremental = true
 

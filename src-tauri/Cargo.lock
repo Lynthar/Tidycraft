@@ -4256,6 +4256,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-fs",
+ "tempfile",
  "thiserror 2.0.17",
  "tobj",
  "tokio",

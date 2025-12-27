@@ -957,3 +957,224 @@ pub struct IncrementalStats {
     pub cached_files: usize,
     pub rescanned_files: usize,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_get_asset_type_textures() {
+        assert!(matches!(get_asset_type("png"), AssetType::Texture));
+        assert!(matches!(get_asset_type("jpg"), AssetType::Texture));
+        assert!(matches!(get_asset_type("jpeg"), AssetType::Texture));
+        assert!(matches!(get_asset_type("tga"), AssetType::Texture));
+        assert!(matches!(get_asset_type("psd"), AssetType::Texture));
+        assert!(matches!(get_asset_type("PNG"), AssetType::Texture));
+        assert!(matches!(get_asset_type("JPG"), AssetType::Texture));
+    }
+
+    #[test]
+    fn test_get_asset_type_models() {
+        assert!(matches!(get_asset_type("fbx"), AssetType::Model));
+        assert!(matches!(get_asset_type("obj"), AssetType::Model));
+        assert!(matches!(get_asset_type("gltf"), AssetType::Model));
+        assert!(matches!(get_asset_type("glb"), AssetType::Model));
+        assert!(matches!(get_asset_type("blend"), AssetType::Model));
+        assert!(matches!(get_asset_type("FBX"), AssetType::Model));
+    }
+
+    #[test]
+    fn test_get_asset_type_audio() {
+        assert!(matches!(get_asset_type("wav"), AssetType::Audio));
+        assert!(matches!(get_asset_type("mp3"), AssetType::Audio));
+        assert!(matches!(get_asset_type("ogg"), AssetType::Audio));
+        assert!(matches!(get_asset_type("flac"), AssetType::Audio));
+        assert!(matches!(get_asset_type("WAV"), AssetType::Audio));
+    }
+
+    #[test]
+    fn test_get_asset_type_unity() {
+        assert!(matches!(get_asset_type("prefab"), AssetType::Prefab));
+        assert!(matches!(get_asset_type("unity"), AssetType::Scene));
+        assert!(matches!(get_asset_type("mat"), AssetType::Material));
+        assert!(matches!(get_asset_type("controller"), AssetType::Animation));
+        assert!(matches!(get_asset_type("anim"), AssetType::Animation));
+    }
+
+    #[test]
+    fn test_get_asset_type_scripts() {
+        assert!(matches!(get_asset_type("cs"), AssetType::Script));
+        assert!(matches!(get_asset_type("js"), AssetType::Script));
+    }
+
+    #[test]
+    fn test_get_asset_type_data() {
+        assert!(matches!(get_asset_type("json"), AssetType::Data));
+        assert!(matches!(get_asset_type("xml"), AssetType::Data));
+        assert!(matches!(get_asset_type("yaml"), AssetType::Data));
+        assert!(matches!(get_asset_type("csv"), AssetType::Data));
+    }
+
+    #[test]
+    fn test_get_asset_type_unknown() {
+        assert!(matches!(get_asset_type("xyz"), AssetType::Other));
+        assert!(matches!(get_asset_type("unknown"), AssetType::Other));
+        assert!(matches!(get_asset_type(""), AssetType::Other));
+    }
+
+    #[test]
+    fn test_scan_state_cancellation() {
+        let state = ScanState::new();
+
+        assert!(!state.is_cancelled());
+        state.cancel();
+        assert!(state.is_cancelled());
+    }
+
+    #[test]
+    fn test_scan_state_progress() {
+        let state = ScanState::new();
+
+        state.current.store(50, Ordering::SeqCst);
+        state.total.store(100, Ordering::SeqCst);
+        *state.current_file.write() = "test.png".to_string();
+        *state.phase.write() = ScanPhase::Parsing;
+
+        let progress = state.get_progress();
+
+        assert_eq!(progress.current, 50);
+        assert_eq!(progress.total, Some(100));
+        assert_eq!(progress.current_file, "test.png");
+        assert!(matches!(progress.phase, ScanPhase::Parsing));
+    }
+
+    #[test]
+    fn test_scan_nonexistent_path() {
+        let result = scan_directory_with_state("/nonexistent/path/123456", None);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), ScanError::PathNotFound(_)));
+    }
+
+    #[test]
+    fn test_scan_empty_directory() {
+        let dir = tempdir().unwrap();
+        let result = scan_directory_with_state(dir.path().to_str().unwrap(), None);
+
+        assert!(result.is_ok());
+        let scan_result = result.unwrap();
+        assert_eq!(scan_result.total_count, 0);
+        assert_eq!(scan_result.total_size, 0);
+    }
+
+    #[test]
+    fn test_scan_with_files() {
+        let dir = tempdir().unwrap();
+
+        // Create some test files
+        fs::write(dir.path().join("test.png"), "fake png data").unwrap();
+        fs::write(dir.path().join("test.mp3"), "fake mp3 data").unwrap();
+        fs::write(dir.path().join("test.txt"), "some text").unwrap();
+
+        let result = scan_directory_with_state(dir.path().to_str().unwrap(), None);
+
+        assert!(result.is_ok());
+        let scan_result = result.unwrap();
+        assert_eq!(scan_result.total_count, 3);
+        assert!(scan_result.total_size > 0);
+
+        // Check type counts
+        assert_eq!(*scan_result.type_counts.get("texture").unwrap_or(&0), 1);
+        assert_eq!(*scan_result.type_counts.get("audio").unwrap_or(&0), 1);
+        assert_eq!(*scan_result.type_counts.get("other").unwrap_or(&0), 1);
+    }
+
+    #[test]
+    fn test_scan_skips_hidden_files() {
+        let dir = tempdir().unwrap();
+
+        // Create hidden file
+        fs::write(dir.path().join(".hidden"), "hidden content").unwrap();
+        fs::write(dir.path().join("visible.png"), "visible content").unwrap();
+
+        let result = scan_directory_with_state(dir.path().to_str().unwrap(), None);
+
+        assert!(result.is_ok());
+        let scan_result = result.unwrap();
+        assert_eq!(scan_result.total_count, 1);
+    }
+
+    #[test]
+    fn test_scan_skips_meta_files() {
+        let dir = tempdir().unwrap();
+
+        // Create Unity-style meta files
+        fs::write(dir.path().join("texture.png"), "texture data").unwrap();
+        fs::write(dir.path().join("texture.png.meta"), "meta data").unwrap();
+
+        let result = scan_directory_with_state(dir.path().to_str().unwrap(), None);
+
+        assert!(result.is_ok());
+        let scan_result = result.unwrap();
+        assert_eq!(scan_result.total_count, 1);
+    }
+
+    #[test]
+    fn test_directory_tree_structure() {
+        let dir = tempdir().unwrap();
+
+        // Create nested structure
+        fs::create_dir_all(dir.path().join("textures")).unwrap();
+        fs::create_dir_all(dir.path().join("models")).unwrap();
+        fs::write(dir.path().join("textures/bg.png"), "texture").unwrap();
+        fs::write(dir.path().join("models/char.fbx"), "model").unwrap();
+
+        let result = scan_directory_with_state(dir.path().to_str().unwrap(), None);
+
+        assert!(result.is_ok());
+        let scan_result = result.unwrap();
+
+        // Check tree has children
+        assert_eq!(scan_result.directory_tree.children.len(), 2);
+        assert_eq!(scan_result.total_count, 2);
+    }
+
+    #[test]
+    fn test_asset_metadata() {
+        let asset = AssetMetadata::default();
+
+        assert!(asset.width.is_none());
+        assert!(asset.height.is_none());
+        assert!(asset.has_alpha.is_none());
+        assert!(asset.vertex_count.is_none());
+        assert!(asset.face_count.is_none());
+        assert!(asset.duration_secs.is_none());
+    }
+
+    #[test]
+    fn test_project_type_detection_unity() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("ProjectSettings")).unwrap();
+
+        let project_type = detect_project_type(dir.path());
+        assert!(matches!(project_type, Some(ProjectType::Unity)));
+    }
+
+    #[test]
+    fn test_project_type_detection_godot() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("project.godot"), "config").unwrap();
+
+        let project_type = detect_project_type(dir.path());
+        assert!(matches!(project_type, Some(ProjectType::Godot)));
+    }
+
+    #[test]
+    fn test_project_type_detection_generic() {
+        let dir = tempdir().unwrap();
+
+        let project_type = detect_project_type(dir.path());
+        assert!(matches!(project_type, Some(ProjectType::Generic)));
+    }
+}

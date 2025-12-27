@@ -159,3 +159,184 @@ impl Default for Analyzer {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scanner::{AssetMetadata, AssetType};
+
+    fn create_test_asset(name: &str, asset_type: AssetType) -> AssetInfo {
+        AssetInfo {
+            path: format!("/test/{}", name),
+            name: name.to_string(),
+            extension: name.split('.').last().unwrap_or("").to_string(),
+            asset_type,
+            size: 1024,
+            metadata: None,
+            unity_guid: None,
+        }
+    }
+
+    fn create_texture_with_dimensions(name: &str, width: u32, height: u32) -> AssetInfo {
+        AssetInfo {
+            path: format!("/test/{}", name),
+            name: name.to_string(),
+            extension: "png".to_string(),
+            asset_type: AssetType::Texture,
+            size: 1024,
+            metadata: Some(AssetMetadata {
+                width: Some(width),
+                height: Some(height),
+                has_alpha: Some(false),
+                ..Default::default()
+            }),
+            unity_guid: None,
+        }
+    }
+
+    #[test]
+    fn test_analysis_result_new() {
+        let result = AnalysisResult::new();
+
+        assert_eq!(result.issue_count, 0);
+        assert_eq!(result.error_count, 0);
+        assert_eq!(result.warning_count, 0);
+        assert_eq!(result.info_count, 0);
+        assert!(result.issues.is_empty());
+    }
+
+    #[test]
+    fn test_analysis_result_add_error() {
+        let mut result = AnalysisResult::new();
+
+        let issue = Issue {
+            rule_id: "test_rule".to_string(),
+            rule_name: "Test Rule".to_string(),
+            severity: Severity::Error,
+            message: "Test error".to_string(),
+            asset_path: "/test/file.png".to_string(),
+            suggestion: None,
+            auto_fixable: false,
+        };
+
+        result.add_issue(issue);
+
+        assert_eq!(result.issue_count, 1);
+        assert_eq!(result.error_count, 1);
+        assert_eq!(result.warning_count, 0);
+    }
+
+    #[test]
+    fn test_analysis_result_add_warning() {
+        let mut result = AnalysisResult::new();
+
+        let issue = Issue {
+            rule_id: "test_rule".to_string(),
+            rule_name: "Test Rule".to_string(),
+            severity: Severity::Warning,
+            message: "Test warning".to_string(),
+            asset_path: "/test/file.png".to_string(),
+            suggestion: Some("Fix this".to_string()),
+            auto_fixable: true,
+        };
+
+        result.add_issue(issue);
+
+        assert_eq!(result.issue_count, 1);
+        assert_eq!(result.warning_count, 1);
+        assert_eq!(result.error_count, 0);
+    }
+
+    #[test]
+    fn test_analysis_result_merge() {
+        let mut result1 = AnalysisResult::new();
+        let mut result2 = AnalysisResult::new();
+
+        result1.add_issue(Issue {
+            rule_id: "rule1".to_string(),
+            rule_name: "Rule 1".to_string(),
+            severity: Severity::Error,
+            message: "Error 1".to_string(),
+            asset_path: "/test/file1.png".to_string(),
+            suggestion: None,
+            auto_fixable: false,
+        });
+
+        result2.add_issue(Issue {
+            rule_id: "rule2".to_string(),
+            rule_name: "Rule 2".to_string(),
+            severity: Severity::Warning,
+            message: "Warning 1".to_string(),
+            asset_path: "/test/file2.png".to_string(),
+            suggestion: None,
+            auto_fixable: false,
+        });
+
+        result1.merge(result2);
+
+        assert_eq!(result1.issue_count, 2);
+        assert_eq!(result1.error_count, 1);
+        assert_eq!(result1.warning_count, 1);
+    }
+
+    #[test]
+    fn test_analyzer_new() {
+        let analyzer = Analyzer::new();
+        assert!(analyzer.rules.is_empty());
+    }
+
+    #[test]
+    fn test_analyzer_with_default_config() {
+        let config = RuleConfig::default();
+        let analyzer = Analyzer::with_config(&config);
+
+        // Should have rules added
+        assert!(!analyzer.rules.is_empty());
+    }
+
+    #[test]
+    fn test_severity_equality() {
+        assert_eq!(Severity::Error, Severity::Error);
+        assert_eq!(Severity::Warning, Severity::Warning);
+        assert_eq!(Severity::Info, Severity::Info);
+        assert_ne!(Severity::Error, Severity::Warning);
+    }
+
+    #[test]
+    fn test_by_rule_tracking() {
+        let mut result = AnalysisResult::new();
+
+        result.add_issue(Issue {
+            rule_id: "rule_a".to_string(),
+            rule_name: "Rule A".to_string(),
+            severity: Severity::Warning,
+            message: "Warning 1".to_string(),
+            asset_path: "/test/file1.png".to_string(),
+            suggestion: None,
+            auto_fixable: false,
+        });
+
+        result.add_issue(Issue {
+            rule_id: "rule_a".to_string(),
+            rule_name: "Rule A".to_string(),
+            severity: Severity::Warning,
+            message: "Warning 2".to_string(),
+            asset_path: "/test/file2.png".to_string(),
+            suggestion: None,
+            auto_fixable: false,
+        });
+
+        result.add_issue(Issue {
+            rule_id: "rule_b".to_string(),
+            rule_name: "Rule B".to_string(),
+            severity: Severity::Error,
+            message: "Error 1".to_string(),
+            asset_path: "/test/file3.png".to_string(),
+            suggestion: None,
+            auto_fixable: false,
+        });
+
+        assert_eq!(*result.by_rule.get("rule_a").unwrap(), 2);
+        assert_eq!(*result.by_rule.get("rule_b").unwrap(), 1);
+    }
+}
