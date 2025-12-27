@@ -1,7 +1,9 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import type { ScanResult, AssetInfo, ScanProgress, AssetType } from "../types/asset";
+import type { ScanResult, AssetInfo, ScanProgress, AssetType, AnalysisResult } from "../types/asset";
+
+type ViewMode = "assets" | "issues";
 
 interface ProjectState {
   // Project data
@@ -11,7 +13,12 @@ interface ProjectState {
   error: string | null;
   scanProgress: ScanProgress | null;
 
+  // Analysis
+  analysisResult: AnalysisResult | null;
+  isAnalyzing: boolean;
+
   // UI state
+  viewMode: ViewMode;
   selectedDirectory: string | null;
   selectedAsset: AssetInfo | null;
   searchQuery: string;
@@ -21,10 +28,13 @@ interface ProjectState {
   openProject: (path: string) => Promise<void>;
   closeProject: () => void;
   cancelScan: () => Promise<void>;
+  runAnalysis: () => Promise<void>;
+  setViewMode: (mode: ViewMode) => void;
   setSelectedDirectory: (path: string | null) => void;
   setSelectedAsset: (asset: AssetInfo | null) => void;
   setSearchQuery: (query: string) => void;
   setTypeFilter: (type: AssetType | null) => void;
+  locateAsset: (path: string) => void;
 
   // Computed
   getFilteredAssets: () => AssetInfo[];
@@ -37,6 +47,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   isScanning: false,
   error: null,
   scanProgress: null,
+  analysisResult: null,
+  isAnalyzing: false,
+  viewMode: "assets",
   selectedDirectory: null,
   selectedAsset: null,
   searchQuery: "",
@@ -44,7 +57,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   // Actions
   openProject: async (path: string) => {
-    set({ isScanning: true, error: null, scanProgress: null });
+    set({
+      isScanning: true,
+      error: null,
+      scanProgress: null,
+      analysisResult: null,
+    });
 
     let unlisten: UnlistenFn | null = null;
 
@@ -96,6 +114,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       searchQuery: "",
       typeFilter: null,
       scanProgress: null,
+      analysisResult: null,
+      viewMode: "assets",
     });
   },
 
@@ -105,6 +125,31 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     } catch (err) {
       console.error("Failed to cancel scan:", err);
     }
+  },
+
+  runAnalysis: async () => {
+    set({ isAnalyzing: true });
+
+    try {
+      const result = await invoke<AnalysisResult>("analyze_assets", {
+        configToml: null, // Use default config
+      });
+      set({
+        analysisResult: result,
+        isAnalyzing: false,
+        viewMode: "issues",
+      });
+    } catch (err) {
+      console.error("Failed to analyze:", err);
+      set({
+        error: String(err),
+        isAnalyzing: false,
+      });
+    }
+  },
+
+  setViewMode: (mode: ViewMode) => {
+    set({ viewMode: mode });
   },
 
   setSelectedDirectory: (path: string | null) => {
@@ -121,6 +166,22 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   setTypeFilter: (type: AssetType | null) => {
     set({ typeFilter: type });
+  },
+
+  locateAsset: (path: string) => {
+    const { scanResult } = get();
+    if (!scanResult) return;
+
+    const asset = scanResult.assets.find((a) => a.path === path);
+    if (asset) {
+      // Extract directory from path
+      const dir = path.substring(0, path.lastIndexOf("/"));
+      set({
+        viewMode: "assets",
+        selectedDirectory: dir,
+        selectedAsset: asset,
+      });
+    }
   },
 
   // Computed

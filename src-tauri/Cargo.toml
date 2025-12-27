@@ -30,6 +30,8 @@ serde_yaml = "0.9"
 sha2 = "0.10"
 base64 = "0.22"
 parking_lot = "0.12"
+dirs = "5"
+toml = "0.8"
 
 [profile.dev]
 incremental = true
