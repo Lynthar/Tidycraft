@@ -1,9 +1,11 @@
 import { Files, AlertTriangle, Play } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { DirectoryTree } from "./DirectoryTree";
 import { useProjectStore } from "../stores/projectStore";
 import { cn } from "../lib/utils";
 
 export function Sidebar() {
+  const { t } = useTranslation();
   const {
     scanResult,
     viewMode,
@@ -27,7 +29,7 @@ export function Sidebar() {
           )}
         >
           <Files size={14} />
-          Assets
+          {t("sidebar.assets")}
         </button>
         <button
           onClick={() => setViewMode("issues")}
@@ -39,7 +41,7 @@ export function Sidebar() {
           )}
         >
           <AlertTriangle size={14} />
-          Issues
+          {t("sidebar.issues")}
           {analysisResult && analysisResult.issue_count > 0 && (
             <span className="px-1.5 py-0.5 bg-warning/20 text-warning text-[10px] rounded-full">
               {analysisResult.issue_count}
@@ -62,14 +64,14 @@ export function Sidebar() {
             )}
           >
             <Play size={14} />
-            {isAnalyzing ? "Analyzing..." : "Run Analysis"}
+            {isAnalyzing ? t("sidebar.analyzing") : t("sidebar.runAnalysis")}
           </button>
         </div>
       )}
 
       {/* Directory Tree */}
       <div className="h-8 px-3 flex items-center border-b border-border text-xs text-text-secondary font-medium uppercase tracking-wide">
-        Explorer
+        {t("sidebar.explorer")}
       </div>
       <div className="flex-1 overflow-hidden">
         <DirectoryTree />

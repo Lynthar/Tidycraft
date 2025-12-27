@@ -1,23 +1,11 @@
-import { FolderOpen, RefreshCw, Search, X } from "lucide-react";
+import { FolderOpen, RefreshCw, Search, X, Globe } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
 import type { AssetType } from "../types/asset";
 
-const ASSET_TYPES: { value: AssetType | null; label: string }[] = [
-  { value: null, label: "All Types" },
-  { value: "texture", label: "Textures" },
-  { value: "model", label: "Models" },
-  { value: "audio", label: "Audio" },
-  { value: "animation", label: "Animations" },
-  { value: "material", label: "Materials" },
-  { value: "prefab", label: "Prefabs" },
-  { value: "scene", label: "Scenes" },
-  { value: "script", label: "Scripts" },
-  { value: "data", label: "Data" },
-  { value: "other", label: "Other" },
-];
-
 export function Header() {
+  const { t, i18n } = useTranslation();
   const {
     projectPath,
     isScanning,
@@ -29,11 +17,25 @@ export function Header() {
     setTypeFilter,
   } = useProjectStore();
 
+  const ASSET_TYPES: { value: AssetType | null; label: string }[] = [
+    { value: null, label: t("assetTypes.all") },
+    { value: "texture", label: t("assetTypes.texture") },
+    { value: "model", label: t("assetTypes.model") },
+    { value: "audio", label: t("assetTypes.audio") },
+    { value: "animation", label: t("assetTypes.animation") },
+    { value: "material", label: t("assetTypes.material") },
+    { value: "prefab", label: t("assetTypes.prefab") },
+    { value: "scene", label: t("assetTypes.scene") },
+    { value: "script", label: t("assetTypes.script") },
+    { value: "data", label: t("assetTypes.data") },
+    { value: "other", label: t("assetTypes.other") },
+  ];
+
   const handleOpenFolder = async () => {
     const selected = await open({
       directory: true,
       multiple: false,
-      title: "Select Project Folder",
+      title: t("header.selectProjectFolder"),
     });
 
     if (selected && typeof selected === "string") {
@@ -47,6 +49,12 @@ export function Header() {
     }
   };
 
+  const toggleLanguage = () => {
+    const newLang = i18n.language === "en" ? "zh" : "en";
+    i18n.changeLanguage(newLang);
+    localStorage.setItem("language", newLang);
+  };
+
   const projectName = projectPath
     ? projectPath.split("/").pop() || projectPath.split("\\").pop() || "Project"
     : null;
@@ -54,7 +62,7 @@ export function Header() {
   return (
     <header className="h-12 bg-card-bg border-b border-border flex items-center justify-between px-4 gap-4">
       <div className="flex items-center gap-3 shrink-0">
-        <span className="text-lg font-semibold text-primary">Tidycraft</span>
+        <span className="text-lg font-semibold text-primary">{t("app.name")}</span>
         {projectName && (
           <>
             <span className="text-text-secondary">|</span>
@@ -74,7 +82,7 @@ export function Header() {
             />
             <input
               type="text"
-              placeholder="Search assets..."
+              placeholder={t("header.searchPlaceholder")}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full h-8 pl-8 pr-8 text-sm bg-background border border-border rounded
@@ -109,12 +117,21 @@ export function Header() {
       )}
 
       <div className="flex items-center gap-2 shrink-0">
+        {/* Language Toggle */}
+        <button
+          onClick={toggleLanguage}
+          className="p-2 rounded hover:bg-background text-text-secondary hover:text-text-primary transition-colors"
+          title={i18n.language === "en" ? "切换到中文" : "Switch to English"}
+        >
+          <Globe size={18} />
+        </button>
+
         {projectPath && (
           <button
             onClick={handleRescan}
             disabled={isScanning}
             className="p-2 rounded hover:bg-background text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50"
-            title="Rescan"
+            title={t("header.rescan")}
           >
             <RefreshCw size={18} className={isScanning ? "animate-spin" : ""} />
           </button>
@@ -125,7 +142,7 @@ export function Header() {
           className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded hover:bg-primary/90 transition-colors disabled:opacity-50"
         >
           <FolderOpen size={16} />
-          <span>Open Folder</span>
+          <span>{t("header.openFolder")}</span>
         </button>
       </div>
     </header>
