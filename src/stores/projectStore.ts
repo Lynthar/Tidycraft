@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import type { ScanResult, AssetInfo, ScanProgress, AssetType, AnalysisResult } from "../types/asset";
+import type { ScanResult, AssetInfo, ScanProgress, AssetType, AnalysisResult, UndoResult, HistoryEntry } from "../types/asset";
 
 type ViewMode = "assets" | "issues" | "stats";
 
@@ -24,6 +24,10 @@ interface ProjectState {
   searchQuery: string;
   typeFilter: AssetType | null;
 
+  // Undo state
+  canUndo: boolean;
+  undoHistory: HistoryEntry[];
+
   // Actions
   openProject: (path: string) => Promise<void>;
   closeProject: () => void;
@@ -35,6 +39,11 @@ interface ProjectState {
   setSearchQuery: (query: string) => void;
   setTypeFilter: (type: AssetType | null) => void;
   locateAsset: (path: string) => void;
+
+  // Undo actions
+  undoLastOperation: () => Promise<UndoResult | null>;
+  refreshUndoState: () => Promise<void>;
+  clearUndoHistory: () => Promise<void>;
 
   // Computed
   getFilteredAssets: () => AssetInfo[];
@@ -54,6 +63,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   selectedAsset: null,
   searchQuery: "",
   typeFilter: null,
+  canUndo: false,
+  undoHistory: [],
 
   // Actions
   openProject: async (path: string) => {
@@ -184,6 +195,40 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         selectedDirectory: dir,
         selectedAsset: asset,
       });
+    }
+  },
+
+  // Undo actions
+  undoLastOperation: async () => {
+    try {
+      const result = await invoke<UndoResult>("undo_last_operation");
+      // Refresh undo state after operation
+      const canUndo = await invoke<boolean>("can_undo");
+      const history = await invoke<HistoryEntry[]>("get_undo_history");
+      set({ canUndo, undoHistory: history });
+      return result;
+    } catch (err) {
+      console.error("Failed to undo:", err);
+      return null;
+    }
+  },
+
+  refreshUndoState: async () => {
+    try {
+      const canUndo = await invoke<boolean>("can_undo");
+      const history = await invoke<HistoryEntry[]>("get_undo_history");
+      set({ canUndo, undoHistory: history });
+    } catch (err) {
+      console.error("Failed to refresh undo state:", err);
+    }
+  },
+
+  clearUndoHistory: async () => {
+    try {
+      await invoke("clear_undo_history");
+      set({ canUndo: false, undoHistory: [] });
+    } catch (err) {
+      console.error("Failed to clear undo history:", err);
     }
   },
 

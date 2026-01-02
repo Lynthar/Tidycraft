@@ -1,9 +1,12 @@
 mod analyzer;
 mod cache;
 mod git;
+mod godot;
 mod scanner;
 mod thumbnail;
+mod undo;
 mod unity;
+mod unreal;
 
 use analyzer::{AnalysisResult, Analyzer};
 use analyzer::rules::RuleConfig;
@@ -27,6 +30,9 @@ static CACHED_SCAN: Mutex<Option<ScanResult>> = Mutex::new(None);
 
 // Global Git manager
 static GIT_MANAGER: Mutex<Option<GitManager>> = Mutex::new(None);
+
+// Global undo manager
+static UNDO_MANAGER: Mutex<undo::UndoManager> = Mutex::new(undo::UndoManager::new(50));
 
 #[tauri::command]
 fn scan_project(path: String) -> Result<ScanResult, String> {
@@ -850,6 +856,7 @@ fn execute_batch_rename(paths: Vec<String>, operation: RenameOperation) -> Batch
     let mut success_count = 0;
     let mut error_count = 0;
     let mut errors = Vec::new();
+    let mut paths_to_record: Vec<(String, String)> = Vec::new();
 
     for path in paths {
         let path_obj = Path::new(&path);
@@ -882,6 +889,8 @@ fn execute_batch_rename(paths: Vec<String>, operation: RenameOperation) -> Batch
         match std::fs::rename(&path, &new_path) {
             Ok(_) => {
                 success_count += 1;
+                // Record for undo
+                paths_to_record.push((path.clone(), new_path.to_string_lossy().to_string()));
             }
             Err(e) => {
                 errors.push(format!("Failed to rename {}: {}", name, e));
@@ -890,11 +899,118 @@ fn execute_batch_rename(paths: Vec<String>, operation: RenameOperation) -> Batch
         }
     }
 
+    // Record the operation for undo if there were successful renames
+    if success_count > 0 {
+        let mut undo_manager = UNDO_MANAGER.lock();
+        let file_ops: Vec<undo::FileOperation> = paths_to_record
+            .into_iter()
+            .map(|(original, new_path)| undo::FileOperation {
+                operation_type: undo::OperationType::Rename,
+                original_path: original,
+                new_path: Some(new_path),
+                timestamp: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+            })
+            .collect();
+
+        if !file_ops.is_empty() {
+            undo_manager.record_batch(
+                format!("Batch rename: {} files", file_ops.len()),
+                file_ops,
+            );
+        }
+    }
+
     BatchRenameResult {
         success_count,
         error_count,
         errors,
     }
+}
+
+// ============ Unreal Engine Commands ============
+
+#[tauri::command]
+fn get_unreal_project_info(path: String) -> Result<unreal::UnrealProjectInfo, String> {
+    let root_path = Path::new(&path);
+
+    // Try to find .uproject file in the directory
+    let uproject_path = unreal::find_uproject_file(root_path)
+        .or_else(|| {
+            // If path itself is a .uproject file
+            if path.ends_with(".uproject") {
+                Some(root_path.to_path_buf())
+            } else {
+                None
+            }
+        })
+        .ok_or("No .uproject file found")?;
+
+    unreal::parse_uproject(&uproject_path)
+        .ok_or_else(|| "Failed to parse .uproject file".to_string())
+}
+
+// ============ Godot Commands ============
+
+#[tauri::command]
+fn get_godot_project_info(path: String) -> Result<godot::GodotProjectInfo, String> {
+    let root_path = Path::new(&path);
+
+    // Try to find project.godot file
+    let project_path = if path.ends_with("project.godot") {
+        root_path.to_path_buf()
+    } else {
+        root_path.join("project.godot")
+    };
+
+    if !project_path.exists() {
+        return Err("No project.godot file found".to_string());
+    }
+
+    godot::parse_project_godot(&project_path)
+        .ok_or_else(|| "Failed to parse project.godot file".to_string())
+}
+
+// ============ Undo Commands ============
+
+#[tauri::command]
+fn get_undo_history() -> Vec<undo::HistoryEntry> {
+    let manager = UNDO_MANAGER.lock();
+    manager.get_history()
+}
+
+#[tauri::command]
+fn undo_last_operation() -> Result<undo::UndoResult, String> {
+    let mut manager = UNDO_MANAGER.lock();
+    manager.undo_last()
+        .ok_or_else(|| "No operation to undo".to_string())
+}
+
+#[tauri::command]
+fn undo_operation_by_id(id: String) -> Result<undo::UndoResult, String> {
+    let mut manager = UNDO_MANAGER.lock();
+    manager.undo_by_id(&id)
+        .ok_or_else(|| format!("Operation '{}' not found or already undone", id))
+}
+
+#[tauri::command]
+fn can_undo() -> bool {
+    let manager = UNDO_MANAGER.lock();
+    manager.can_undo()
+}
+
+#[tauri::command]
+fn clear_undo_history() {
+    let mut manager = UNDO_MANAGER.lock();
+    manager.clear_history();
+}
+
+#[tauri::command]
+fn get_undo_count() -> usize {
+    let manager = UNDO_MANAGER.lock();
+    manager.undoable_count()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -925,7 +1041,15 @@ pub fn run() {
             export_issues_to_json,
             export_to_html,
             preview_batch_rename,
-            execute_batch_rename
+            execute_batch_rename,
+            get_unreal_project_info,
+            get_godot_project_info,
+            get_undo_history,
+            undo_last_operation,
+            undo_operation_by_id,
+            can_undo,
+            clear_undo_history,
+            get_undo_count
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
