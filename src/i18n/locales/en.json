@@ -142,5 +142,57 @@
     "language": "Language",
     "english": "English",
     "chinese": "Chinese"
+  },
+  "stats": {
+    "noData": "No data available",
+    "passed": "Passed",
+    "typeDistribution": "Type Distribution",
+    "sizeDistribution": "Size Distribution",
+    "topExtensions": "Top Extensions",
+    "largestFiles": "Largest Files",
+    "exportJson": "Export JSON",
+    "exportCsv": "Export CSV",
+    "exportHtml": "Export HTML Report",
+    "count": "Count"
+  },
+  "theme": {
+    "switchToLight": "Switch to light mode",
+    "switchToDark": "Switch to dark mode"
+  },
+  "sort": {
+    "ascending": "Ascending",
+    "descending": "Descending"
+  },
+  "git": {
+    "branch": "Branch",
+    "noChanges": "No changes",
+    "hasChanges": "Has changes",
+    "ahead": "ahead",
+    "behind": "behind",
+    "notARepo": "Not a Git repository",
+    "status": {
+      "new": "New",
+      "modified": "Modified",
+      "deleted": "Deleted",
+      "renamed": "Renamed",
+      "untracked": "Untracked",
+      "conflicted": "Conflicted"
+    }
+  },
+  "tags": {
+    "title": "Tags",
+    "addTag": "Add Tag",
+    "createTag": "Create Tag",
+    "editTag": "Edit Tag",
+    "deleteTag": "Delete Tag",
+    "tagName": "Tag Name",
+    "tagColor": "Color",
+    "noTags": "No tags yet",
+    "addToSelected": "Add to Selected",
+    "removeFromSelected": "Remove from Selected",
+    "filterByTag": "Filter by Tag",
+    "clearFilter": "Clear Filter",
+    "manageTitle": "Manage Tags",
+    "confirmDelete": "Are you sure you want to delete this tag?"
   }
 }

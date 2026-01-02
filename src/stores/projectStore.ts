@@ -1,9 +1,12 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import type { ScanResult, AssetInfo, ScanProgress, AssetType, AnalysisResult, UndoResult, HistoryEntry } from "../types/asset";
+import type { ScanResult, AssetInfo, ScanProgress, AssetType, AnalysisResult, UndoResult, HistoryEntry, GitInfo, GitStatusMap } from "../types/asset";
 
 type ViewMode = "assets" | "issues" | "stats";
+
+export type SortField = "name" | "type" | "size" | "dimensions";
+export type SortDirection = "asc" | "desc";
 
 interface ProjectState {
   // Project data
@@ -23,10 +26,16 @@ interface ProjectState {
   selectedAsset: AssetInfo | null;
   searchQuery: string;
   typeFilter: AssetType | null;
+  sortField: SortField;
+  sortDirection: SortDirection;
 
   // Undo state
   canUndo: boolean;
   undoHistory: HistoryEntry[];
+
+  // Git state
+  gitInfo: GitInfo | null;
+  gitStatuses: GitStatusMap;
 
   // Actions
   openProject: (path: string) => Promise<void>;
@@ -38,12 +47,17 @@ interface ProjectState {
   setSelectedAsset: (asset: AssetInfo | null) => void;
   setSearchQuery: (query: string) => void;
   setTypeFilter: (type: AssetType | null) => void;
+  setSortField: (field: SortField) => void;
+  toggleSortDirection: () => void;
   locateAsset: (path: string) => void;
 
   // Undo actions
   undoLastOperation: () => Promise<UndoResult | null>;
   refreshUndoState: () => Promise<void>;
   clearUndoHistory: () => Promise<void>;
+
+  // Git actions
+  refreshGitInfo: () => Promise<void>;
 
   // Computed
   getFilteredAssets: () => AssetInfo[];
@@ -63,8 +77,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   selectedAsset: null,
   searchQuery: "",
   typeFilter: null,
+  sortField: "name",
+  sortDirection: "asc",
   canUndo: false,
   undoHistory: [],
+  gitInfo: null,
+  gitStatuses: {},
 
   // Actions
   openProject: async (path: string) => {
@@ -96,6 +114,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         selectedAsset: null,
         scanProgress: null,
       });
+      // Fetch git info after scan completes
+      get().refreshGitInfo();
     } catch (err) {
       const errorMessage = String(err);
       // Don't show error for cancelled scans
@@ -182,6 +202,22 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({ typeFilter: type });
   },
 
+  setSortField: (field: SortField) => {
+    const { sortField, sortDirection } = get();
+    if (sortField === field) {
+      // Toggle direction if same field
+      set({ sortDirection: sortDirection === "asc" ? "desc" : "asc" });
+    } else {
+      // New field, default to ascending
+      set({ sortField: field, sortDirection: "asc" });
+    }
+  },
+
+  toggleSortDirection: () => {
+    const { sortDirection } = get();
+    set({ sortDirection: sortDirection === "asc" ? "desc" : "asc" });
+  },
+
   locateAsset: (path: string) => {
     const { scanResult } = get();
     if (!scanResult) return;
@@ -232,12 +268,36 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
+  // Git actions
+  refreshGitInfo: async () => {
+    const { projectPath } = get();
+    if (!projectPath) {
+      set({ gitInfo: null, gitStatuses: {} });
+      return;
+    }
+
+    try {
+      const gitInfo = await invoke<GitInfo>("get_git_info", { path: projectPath });
+      set({ gitInfo });
+
+      if (gitInfo.is_repo) {
+        const gitStatuses = await invoke<GitStatusMap>("get_git_statuses");
+        set({ gitStatuses });
+      } else {
+        set({ gitStatuses: {} });
+      }
+    } catch (err) {
+      console.error("Failed to get git info:", err);
+      set({ gitInfo: null, gitStatuses: {} });
+    }
+  },
+
   // Computed
   getFilteredAssets: () => {
-    const { scanResult, selectedDirectory, searchQuery, typeFilter } = get();
+    const { scanResult, selectedDirectory, searchQuery, typeFilter, sortField, sortDirection } = get();
     if (!scanResult) return [];
 
-    let assets = scanResult.assets;
+    let assets = [...scanResult.assets];
 
     // Filter by selected directory
     if (selectedDirectory) {
@@ -261,6 +321,30 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (typeFilter) {
       assets = assets.filter((asset) => asset.asset_type === typeFilter);
     }
+
+    // Sort assets
+    assets.sort((a, b) => {
+      let comparison = 0;
+
+      switch (sortField) {
+        case "name":
+          comparison = a.name.localeCompare(b.name);
+          break;
+        case "type":
+          comparison = a.asset_type.localeCompare(b.asset_type);
+          break;
+        case "size":
+          comparison = a.size - b.size;
+          break;
+        case "dimensions":
+          const aDim = (a.metadata?.width || 0) * (a.metadata?.height || 0);
+          const bDim = (b.metadata?.width || 0) * (b.metadata?.height || 0);
+          comparison = aDim - bDim;
+          break;
+      }
+
+      return sortDirection === "asc" ? comparison : -comparison;
+    });
 
     return assets;
   },

@@ -88,7 +88,7 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
   if (error || !stats) {
     return (
       <div className="flex items-center justify-center h-full text-text-secondary">
-        {error || "No data available"}
+        {error || t("stats.noData")}
       </div>
     );
   }
@@ -163,7 +163,7 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
             </div>
             <div>
               <p className="text-2xl font-bold text-text-primary">{passCount}</p>
-              <p className="text-xs text-text-secondary">Passed</p>
+              <p className="text-xs text-text-secondary">{t("stats.passed")}</p>
             </div>
           </div>
         </div>
@@ -173,7 +173,7 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
       <div className="grid grid-cols-2 gap-4">
         {/* Type Distribution Pie Chart */}
         <div className="bg-card-bg border border-border rounded-lg p-4">
-          <h3 className="text-sm font-medium mb-4">Type Distribution</h3>
+          <h3 className="text-sm font-medium mb-4">{t("stats.typeDistribution")}</h3>
           <ResponsiveContainer width="100%" height={200}>
             <PieChart>
               <Pie
@@ -195,7 +195,7 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
                   border: "1px solid #313244",
                   borderRadius: "8px",
                 }}
-                formatter={(value) => [value, "Count"]}
+                formatter={(value) => [value, t("stats.count")]}
               />
               <Legend />
             </PieChart>
@@ -204,7 +204,7 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
 
         {/* Size Distribution Bar Chart */}
         <div className="bg-card-bg border border-border rounded-lg p-4">
-          <h3 className="text-sm font-medium mb-4">Size Distribution</h3>
+          <h3 className="text-sm font-medium mb-4">{t("stats.sizeDistribution")}</h3>
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={sizeData}>
               <XAxis dataKey="name" tick={{ fontSize: 10 }} />
@@ -224,7 +224,7 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
 
       {/* Extension Distribution */}
       <div className="bg-card-bg border border-border rounded-lg p-4">
-        <h3 className="text-sm font-medium mb-4">Top Extensions</h3>
+        <h3 className="text-sm font-medium mb-4">{t("stats.topExtensions")}</h3>
         <ResponsiveContainer width="100%" height={150}>
           <BarChart data={extensionData} layout="vertical">
             <XAxis type="number" tick={{ fontSize: 10 }} />
@@ -243,7 +243,7 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
 
       {/* Largest Files */}
       <div className="bg-card-bg border border-border rounded-lg p-4">
-        <h3 className="text-sm font-medium mb-4">Largest Files</h3>
+        <h3 className="text-sm font-medium mb-4">{t("stats.largestFiles")}</h3>
         <div className="space-y-2">
           {stats.largest_files.slice(0, 5).map((file, index) => (
             <div key={index} className="flex items-center justify-between text-sm">
@@ -270,21 +270,21 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
           className="flex items-center gap-2 px-4 py-2 bg-primary/20 text-primary rounded hover:bg-primary/30 transition-colors"
         >
           <FileDown size={16} />
-          Export JSON
+          {t("stats.exportJson")}
         </button>
         <button
           onClick={onExportCsv}
           className="flex items-center gap-2 px-4 py-2 bg-primary/20 text-primary rounded hover:bg-primary/30 transition-colors"
         >
           <FileDown size={16} />
-          Export CSV
+          {t("stats.exportCsv")}
         </button>
         <button
           onClick={onExportHtml}
           className="flex items-center gap-2 px-4 py-2 bg-green-500/20 text-green-400 rounded hover:bg-green-500/30 transition-colors"
         >
           <FileDown size={16} />
-          Export HTML Report
+          {t("stats.exportHtml")}
         </button>
       </div>
     </div>
