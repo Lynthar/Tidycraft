@@ -91,3 +91,68 @@ export interface AnalysisResult {
   info_count: number;
   by_rule: Record<string, number>;
 }
+
+// ============ Unreal Engine Types ============
+
+export interface UnrealProjectInfo {
+  path: string;
+  project_name: string;
+  engine_association?: string;
+  category?: string;
+  description?: string;
+  plugins: UnrealPlugin[];
+  target_platforms: string[];
+  modules: UnrealModule[];
+  is_enterprise_project: boolean;
+}
+
+export interface UnrealPlugin {
+  name: string;
+  enabled: boolean;
+}
+
+export interface UnrealModule {
+  name: string;
+  module_type: string;
+  loading_phase?: string;
+}
+
+// ============ Godot Types ============
+
+export interface GodotProjectInfo {
+  path: string;
+  project_name: string;
+  godot_version?: string;
+  main_scene?: string;
+  icon?: string;
+  features: string[];
+  autoloads: GodotAutoload[];
+  input_actions: string[];
+  renderer?: string;
+}
+
+export interface GodotAutoload {
+  name: string;
+  path: string;
+  singleton: boolean;
+}
+
+// ============ Undo Types ============
+
+export type OperationType = "rename" | "move" | "delete";
+
+export interface UndoResult {
+  success: boolean;
+  reverted_count: number;
+  failed_count: number;
+  errors: string[];
+  operation_description: string;
+}
+
+export interface HistoryEntry {
+  id: string;
+  description: string;
+  file_count: number;
+  timestamp: number;
+  can_undo: boolean;
+}
