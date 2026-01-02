@@ -156,3 +156,36 @@ export interface HistoryEntry {
   timestamp: number;
   can_undo: boolean;
 }
+
+// ============ Git Types ============
+
+export type GitFileStatus =
+  | "new"
+  | "modified"
+  | "deleted"
+  | "renamed"
+  | "typechange"
+  | "untracked"
+  | "ignored"
+  | "conflicted"
+  | "unchanged";
+
+export interface GitInfo {
+  is_repo: boolean;
+  branch?: string;
+  has_changes: boolean;
+  ahead: number;
+  behind: number;
+}
+
+export type GitStatusMap = Record<string, GitFileStatus>;
+
+// ============ Tag Types ============
+
+export interface Tag {
+  id: string;
+  name: string;
+  color: string;
+}
+
+export type AssetTagsMap = Record<string, Tag[]>;

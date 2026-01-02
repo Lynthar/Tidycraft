@@ -1,5 +1,5 @@
 import { RefObject } from "react";
-import { FolderOpen, RefreshCw, Search, X, Globe, Sun, Moon } from "lucide-react";
+import { FolderOpen, RefreshCw, Search, X, Globe, Sun, Moon, GitBranch } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
@@ -19,6 +19,7 @@ export function Header({ searchInputRef }: HeaderProps) {
     scanResult,
     searchQuery,
     typeFilter,
+    gitInfo,
     openProject,
     setSearchQuery,
     setTypeFilter,
@@ -77,6 +78,22 @@ export function Header({ searchInputRef }: HeaderProps) {
             <span className="text-text-primary">{projectName}</span>
           </>
         )}
+        {/* Git Branch Info */}
+        {gitInfo?.is_repo && gitInfo.branch && (
+          <div className="flex items-center gap-1.5 text-sm text-text-secondary">
+            <GitBranch size={14} />
+            <span>{gitInfo.branch}</span>
+            {(gitInfo.ahead > 0 || gitInfo.behind > 0) && (
+              <span className="text-xs">
+                {gitInfo.ahead > 0 && <span className="text-green-400">↑{gitInfo.ahead}</span>}
+                {gitInfo.behind > 0 && <span className="text-orange-400 ml-1">↓{gitInfo.behind}</span>}
+              </span>
+            )}
+            {gitInfo.has_changes && (
+              <span className="w-2 h-2 rounded-full bg-yellow-400" title={t("git.hasChanges")} />
+            )}
+          </div>
+        )}
       </div>
 
       {/* Search and Filter */}
@@ -130,7 +147,7 @@ export function Header({ searchInputRef }: HeaderProps) {
         <button
           onClick={toggleTheme}
           className="p-2 rounded hover:bg-background text-text-secondary hover:text-text-primary transition-colors"
-          title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+          title={theme === "dark" ? t("theme.switchToLight") : t("theme.switchToDark")}
         >
           {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
         </button>
@@ -139,7 +156,7 @@ export function Header({ searchInputRef }: HeaderProps) {
         <button
           onClick={toggleLanguage}
           className="p-2 rounded hover:bg-background text-text-secondary hover:text-text-primary transition-colors"
-          title={i18n.language === "en" ? "切换到中文" : "Switch to English"}
+          title={i18n.language === "en" ? t("settings.chinese") : t("settings.english")}
         >
           <Globe size={18} />
         </button>

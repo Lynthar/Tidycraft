@@ -3,6 +3,7 @@ mod cache;
 mod git;
 mod godot;
 mod scanner;
+mod tags;
 mod thumbnail;
 mod undo;
 mod unity;
@@ -33,6 +34,9 @@ static GIT_MANAGER: Mutex<Option<GitManager>> = Mutex::new(None);
 
 // Global undo manager
 static UNDO_MANAGER: Mutex<undo::UndoManager> = Mutex::new(undo::UndoManager::new(50));
+
+// Global tags data
+static TAGS_DATA: Mutex<Option<(String, tags::TagsData)>> = Mutex::new(None);
 
 #[tauri::command]
 fn scan_project(path: String) -> Result<ScanResult, String> {
@@ -1013,6 +1017,138 @@ fn get_undo_count() -> usize {
     manager.undoable_count()
 }
 
+// ============ Tags Commands ============
+
+fn get_or_load_tags(project_path: &str) -> tags::TagsData {
+    let mut global_tags = TAGS_DATA.lock();
+    if let Some((path, data)) = global_tags.as_ref() {
+        if path == project_path {
+            return data.clone();
+        }
+    }
+    let data = tags::TagsData::load(Path::new(project_path));
+    *global_tags = Some((project_path.to_string(), data.clone()));
+    data
+}
+
+fn save_tags(project_path: &str, data: &tags::TagsData) -> Result<(), String> {
+    let mut global_tags = TAGS_DATA.lock();
+    *global_tags = Some((project_path.to_string(), data.clone()));
+    data.save(Path::new(project_path))
+}
+
+#[tauri::command]
+fn get_all_tags() -> Result<Vec<tags::Tag>, String> {
+    let cache = CACHED_SCAN.lock();
+    let scan_result = cache.as_ref().ok_or("No project loaded")?;
+    let data = get_or_load_tags(&scan_result.root_path);
+    Ok(data.tags)
+}
+
+#[tauri::command]
+fn create_tag(name: String, color: String) -> Result<tags::Tag, String> {
+    let cache = CACHED_SCAN.lock();
+    let scan_result = cache.as_ref().ok_or("No project loaded")?;
+    let project_path = scan_result.root_path.clone();
+    drop(cache);
+
+    let mut data = get_or_load_tags(&project_path);
+    let tag = data.create_tag(name, color);
+    save_tags(&project_path, &data)?;
+    Ok(tag)
+}
+
+#[tauri::command]
+fn update_tag(tag_id: String, name: Option<String>, color: Option<String>) -> Result<tags::Tag, String> {
+    let cache = CACHED_SCAN.lock();
+    let scan_result = cache.as_ref().ok_or("No project loaded")?;
+    let project_path = scan_result.root_path.clone();
+    drop(cache);
+
+    let mut data = get_or_load_tags(&project_path);
+    let tag = data.update_tag(&tag_id, name, color).ok_or("Tag not found")?;
+    save_tags(&project_path, &data)?;
+    Ok(tag)
+}
+
+#[tauri::command]
+fn delete_tag(tag_id: String) -> Result<(), String> {
+    let cache = CACHED_SCAN.lock();
+    let scan_result = cache.as_ref().ok_or("No project loaded")?;
+    let project_path = scan_result.root_path.clone();
+    drop(cache);
+
+    let mut data = get_or_load_tags(&project_path);
+    data.delete_tag(&tag_id);
+    save_tags(&project_path, &data)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_asset_tags(asset_path: String) -> Result<Vec<tags::Tag>, String> {
+    let cache = CACHED_SCAN.lock();
+    let scan_result = cache.as_ref().ok_or("No project loaded")?;
+    let data = get_or_load_tags(&scan_result.root_path);
+    Ok(data.get_asset_tags(&asset_path))
+}
+
+#[tauri::command]
+fn add_tag_to_asset(asset_path: String, tag_id: String) -> Result<(), String> {
+    let cache = CACHED_SCAN.lock();
+    let scan_result = cache.as_ref().ok_or("No project loaded")?;
+    let project_path = scan_result.root_path.clone();
+    drop(cache);
+
+    let mut data = get_or_load_tags(&project_path);
+    data.add_tag_to_asset(&asset_path, &tag_id);
+    save_tags(&project_path, &data)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn remove_tag_from_asset(asset_path: String, tag_id: String) -> Result<(), String> {
+    let cache = CACHED_SCAN.lock();
+    let scan_result = cache.as_ref().ok_or("No project loaded")?;
+    let project_path = scan_result.root_path.clone();
+    drop(cache);
+
+    let mut data = get_or_load_tags(&project_path);
+    data.remove_tag_from_asset(&asset_path, &tag_id);
+    save_tags(&project_path, &data)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn add_tag_to_assets(asset_paths: Vec<String>, tag_id: String) -> Result<(), String> {
+    let cache = CACHED_SCAN.lock();
+    let scan_result = cache.as_ref().ok_or("No project loaded")?;
+    let project_path = scan_result.root_path.clone();
+    drop(cache);
+
+    let mut data = get_or_load_tags(&project_path);
+    for path in asset_paths {
+        data.add_tag_to_asset(&path, &tag_id);
+    }
+    save_tags(&project_path, &data)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_all_asset_tags() -> Result<HashMap<String, Vec<tags::Tag>>, String> {
+    let cache = CACHED_SCAN.lock();
+    let scan_result = cache.as_ref().ok_or("No project loaded")?;
+    let data = get_or_load_tags(&scan_result.root_path);
+
+    let mut result: HashMap<String, Vec<tags::Tag>> = HashMap::new();
+    for (path, _) in &data.asset_tags {
+        let tags = data.get_asset_tags(path);
+        if !tags.is_empty() {
+            result.insert(path.clone(), tags);
+        }
+    }
+    Ok(result)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1049,7 +1185,17 @@ pub fn run() {
             undo_operation_by_id,
             can_undo,
             clear_undo_history,
-            get_undo_count
+            get_undo_count,
+            // Tags
+            get_all_tags,
+            create_tag,
+            update_tag,
+            delete_tag,
+            get_asset_tags,
+            add_tag_to_asset,
+            remove_tag_from_asset,
+            add_tag_to_assets,
+            get_all_asset_tags
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

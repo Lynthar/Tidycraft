@@ -142,5 +142,57 @@
     "language": "语言",
     "english": "英语",
     "chinese": "中文"
+  },
+  "stats": {
+    "noData": "暂无数据",
+    "passed": "已通过",
+    "typeDistribution": "类型分布",
+    "sizeDistribution": "大小分布",
+    "topExtensions": "常用扩展名",
+    "largestFiles": "最大文件",
+    "exportJson": "导出 JSON",
+    "exportCsv": "导出 CSV",
+    "exportHtml": "导出 HTML 报告",
+    "count": "数量"
+  },
+  "theme": {
+    "switchToLight": "切换到浅色模式",
+    "switchToDark": "切换到深色模式"
+  },
+  "sort": {
+    "ascending": "升序",
+    "descending": "降序"
+  },
+  "git": {
+    "branch": "分支",
+    "noChanges": "无更改",
+    "hasChanges": "有更改",
+    "ahead": "领先",
+    "behind": "落后",
+    "notARepo": "非 Git 仓库",
+    "status": {
+      "new": "新增",
+      "modified": "已修改",
+      "deleted": "已删除",
+      "renamed": "已重命名",
+      "untracked": "未跟踪",
+      "conflicted": "冲突"
+    }
+  },
+  "tags": {
+    "title": "标签",
+    "addTag": "添加标签",
+    "createTag": "创建标签",
+    "editTag": "编辑标签",
+    "deleteTag": "删除标签",
+    "tagName": "标签名称",
+    "tagColor": "颜色",
+    "noTags": "暂无标签",
+    "addToSelected": "添加到已选",
+    "removeFromSelected": "从已选中移除",
+    "filterByTag": "按标签筛选",
+    "clearFilter": "清除筛选",
+    "manageTitle": "管理标签",
+    "confirmDelete": "确定要删除此标签吗？"
   }
 }
