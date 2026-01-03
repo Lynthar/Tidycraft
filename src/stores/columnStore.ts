@@ -40,6 +40,9 @@ const DEFAULT_COLUMNS: ColumnConfig[] = [
   { id: "extension", visible: false, width: 80 },
 ];
 
+// Version for migration - increment when DEFAULT_COLUMNS changes
+const COLUMNS_VERSION = 2;
+
 export const useColumnStore = create<ColumnState>()(
   persist(
     (set) => ({
@@ -71,6 +74,14 @@ export const useColumnStore = create<ColumnState>()(
     }),
     {
       name: "tidycraft-columns",
+      version: COLUMNS_VERSION,
+      migrate: (persistedState: unknown, version: number) => {
+        // If version is outdated, reset to defaults to include new columns like tags
+        if (version < COLUMNS_VERSION) {
+          return { columns: DEFAULT_COLUMNS };
+        }
+        return persistedState as ColumnState;
+      },
     }
   )
 );

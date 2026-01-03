@@ -7,7 +7,8 @@ interface TagsState {
   tags: Tag[];
   assetTags: AssetTagsMap;
   isLoading: boolean;
-  tagFilter: string | null; // Filter by tag ID
+  tagFilter: string | null; // Single tag filter (deprecated, kept for compatibility)
+  tagFilters: string[]; // Multiple tag filters
 
   // Actions
   loadTags: () => Promise<void>;
@@ -18,6 +19,8 @@ interface TagsState {
   removeTagFromAsset: (assetPath: string, tagId: string) => Promise<void>;
   addTagToAssets: (assetPaths: string[], tagId: string) => Promise<void>;
   setTagFilter: (tagId: string | null) => void;
+  toggleTagFilter: (tagId: string, multiSelect?: boolean) => void;
+  clearTagFilters: () => void;
   getAssetTags: (assetPath: string) => Tag[];
 }
 
@@ -26,6 +29,7 @@ export const useTagsStore = create<TagsState>((set, get) => ({
   assetTags: {},
   isLoading: false,
   tagFilter: null,
+  tagFilters: [],
 
   loadTags: async () => {
     set({ isLoading: true });
@@ -116,7 +120,31 @@ export const useTagsStore = create<TagsState>((set, get) => ({
   },
 
   setTagFilter: (tagId: string | null) => {
-    set({ tagFilter: tagId });
+    set({ tagFilter: tagId, tagFilters: tagId ? [tagId] : [] });
+  },
+
+  toggleTagFilter: (tagId: string, multiSelect = false) => {
+    const { tagFilters } = get();
+    if (multiSelect) {
+      // Multi-select: toggle this tag in the list
+      if (tagFilters.includes(tagId)) {
+        const newFilters = tagFilters.filter((id) => id !== tagId);
+        set({ tagFilters: newFilters, tagFilter: newFilters[0] || null });
+      } else {
+        set({ tagFilters: [...tagFilters, tagId], tagFilter: tagId });
+      }
+    } else {
+      // Single select: if already selected, deselect; otherwise select only this
+      if (tagFilters.length === 1 && tagFilters[0] === tagId) {
+        set({ tagFilters: [], tagFilter: null });
+      } else {
+        set({ tagFilters: [tagId], tagFilter: tagId });
+      }
+    }
+  },
+
+  clearTagFilters: () => {
+    set({ tagFilters: [], tagFilter: null });
   },
 
   getAssetTags: (assetPath: string) => {

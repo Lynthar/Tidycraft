@@ -193,6 +193,8 @@
     "removeFromSelected": "从已选中移除",
     "filterByTag": "按标签筛选",
     "clearFilter": "清除筛选",
+    "clearFilters": "清除筛选",
+    "multiSelectHint": "按住 Cmd/Ctrl 多选",
     "manageTitle": "管理标签",
     "confirmDelete": "确定要删除此标签吗？"
   },
@@ -244,8 +246,10 @@
   "modelViewer": {
     "loading": "加载模型中...",
     "loadError": "加载模型失败",
+    "fileNotFound": "文件未找到",
+    "parseError": "解析模型文件失败",
     "webglError": "不支持 WebGL",
-    "unsupportedFormat": "不支持此格式，请使用 GLTF、GLB 或 OBJ",
+    "unsupportedFormat": "不支持此格式，请使用 GLTF、GLB、FBX 或 OBJ",
     "controls": "拖拽旋转 • 滚轮缩放",
     "reset": "重置视角"
   },

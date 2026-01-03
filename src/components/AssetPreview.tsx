@@ -28,8 +28,8 @@ export function AssetPreview() {
   const VIDEO_EXTENSIONS = ["mp4", "webm", "mov", "avi", "mkv", "m4v"];
   const isVideo = selectedAsset && VIDEO_EXTENSIONS.includes(selectedAsset.extension.toLowerCase());
 
-  // 3D model extensions supported by Three.js (FBX removed due to stability issues)
-  const MODEL_3D_EXTENSIONS = ["gltf", "glb", "obj"];
+  // 3D model extensions supported by Three.js
+  const MODEL_3D_EXTENSIONS = ["gltf", "glb", "fbx", "obj", "dae"];
   const is3DModel = selectedAsset && MODEL_3D_EXTENSIONS.includes(selectedAsset.extension.toLowerCase());
 
   useEffect(() => {

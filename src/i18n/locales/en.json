@@ -193,6 +193,8 @@
     "removeFromSelected": "Remove from Selected",
     "filterByTag": "Filter by Tag",
     "clearFilter": "Clear Filter",
+    "clearFilters": "Clear filters",
+    "multiSelectHint": "Hold Cmd/Ctrl to multi-select",
     "manageTitle": "Manage Tags",
     "confirmDelete": "Are you sure you want to delete this tag?"
   },
@@ -244,8 +246,10 @@
   "modelViewer": {
     "loading": "Loading model...",
     "loadError": "Failed to load model",
+    "fileNotFound": "File not found",
+    "parseError": "Failed to parse model file",
     "webglError": "WebGL not supported",
-    "unsupportedFormat": "Format not supported. Use GLTF, GLB, or OBJ.",
+    "unsupportedFormat": "Format not supported. Use GLTF, GLB, FBX, or OBJ.",
     "controls": "Drag to rotate • Scroll to zoom",
     "reset": "Reset view"
   },

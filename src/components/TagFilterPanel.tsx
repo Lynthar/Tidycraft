@@ -12,7 +12,7 @@ const TAG_COLORS = [
 
 export function TagFilterPanel() {
   const { t } = useTranslation();
-  const { tags, tagFilter, setTagFilter, createTag, updateTag, deleteTag } = useTagsStore();
+  const { tags, tagFilters, toggleTagFilter, clearTagFilters, createTag, updateTag, deleteTag } = useTagsStore();
   const [isExpanded, setIsExpanded] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [editingTagId, setEditingTagId] = useState<string | null>(null);
@@ -36,9 +36,13 @@ export function TagFilterPanel() {
 
   const handleDeleteTag = async (tagId: string) => {
     await deleteTag(tagId);
-    if (tagFilter === tagId) {
-      setTagFilter(null);
-    }
+    // tagFilters will be automatically cleaned up since the tag no longer exists
+  };
+
+  const handleTagClick = (tagId: string, e: React.MouseEvent) => {
+    // Check for multi-select modifier keys (Cmd on Mac, Ctrl on Windows/Linux)
+    const isMultiSelect = e.metaKey || e.ctrlKey;
+    toggleTagFilter(tagId, isMultiSelect);
   };
 
   return (
@@ -54,6 +58,11 @@ export function TagFilterPanel() {
           {t("tags.title")}
           {tags.length > 0 && (
             <span className="text-text-secondary/60">({tags.length})</span>
+          )}
+          {tagFilters.length > 0 && (
+            <span className="px-1.5 py-0.5 text-[10px] bg-primary text-white rounded-full">
+              {tagFilters.length}
+            </span>
           )}
         </div>
         {isExpanded && (
@@ -145,8 +154,18 @@ export function TagFilterPanel() {
             </div>
           ) : (
             <div className="space-y-1 max-h-32 overflow-y-auto">
+              {/* Clear all filters button */}
+              {tagFilters.length > 0 && (
+                <button
+                  onClick={() => clearTagFilters()}
+                  className="w-full flex items-center gap-1.5 px-2 py-1 text-xs text-text-secondary hover:text-text-primary hover:bg-background rounded transition-colors"
+                >
+                  <X size={10} />
+                  {t("tags.clearFilters", "Clear filters")}
+                </button>
+              )}
               {tags.map((tag) => {
-                const isActive = tagFilter === tag.id;
+                const isActive = tagFilters.includes(tag.id);
                 const isEditing = editingTagId === tag.id;
 
                 if (isEditing) {
@@ -204,16 +223,17 @@ export function TagFilterPanel() {
                     }}
                   >
                     <button
-                      onClick={() => setTagFilter(isActive ? null : tag.id)}
+                      onClick={(e) => handleTagClick(tag.id, e)}
                       className="flex-1 flex items-center gap-1.5 px-2 py-1 text-xs min-w-0"
                       style={{ color: tag.color }}
+                      title={t("tags.multiSelectHint", "Hold Cmd/Ctrl to multi-select")}
                     >
                       <span
                         className="w-2 h-2 rounded-full shrink-0"
                         style={{ backgroundColor: tag.color }}
                       />
                       <span className="truncate">{tag.name}</span>
-                      {isActive && <X size={10} className="shrink-0" />}
+                      {isActive && <Check size={10} className="shrink-0" />}
                     </button>
                     <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity pr-1">
                       <button
