@@ -1,9 +1,13 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Image, Box, Volume2, FileText, X, Copy, Check } from "lucide-react";
+import { Image, Box, FileText, X, Copy, Check, Maximize2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
 import { formatFileSize, formatDuration } from "../lib/utils";
+import { VideoPlayer } from "./VideoPlayer";
+import { AudioPlayer } from "./AudioPlayer";
+import { ImageLightbox } from "./ImageLightbox";
+import { ModelViewer3D } from "./ModelViewer3D";
 
 export function AssetPreview() {
   const { t } = useTranslation();
@@ -12,6 +16,15 @@ export function AssetPreview() {
   const [loadingThumbnail, setLoadingThumbnail] = useState(false);
   const [copiedPath, setCopiedPath] = useState(false);
   const [copiedGuid, setCopiedGuid] = useState(false);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+
+  // Video file extensions
+  const VIDEO_EXTENSIONS = ["mp4", "webm", "mov", "avi", "mkv", "m4v"];
+  const isVideo = selectedAsset && VIDEO_EXTENSIONS.includes(selectedAsset.extension.toLowerCase());
+
+  // 3D model extensions supported by Three.js (FBX removed due to stability issues)
+  const MODEL_3D_EXTENSIONS = ["gltf", "glb", "obj"];
+  const is3DModel = selectedAsset && MODEL_3D_EXTENSIONS.includes(selectedAsset.extension.toLowerCase());
 
   useEffect(() => {
     if (!selectedAsset || selectedAsset.asset_type !== "texture") {
@@ -68,6 +81,12 @@ export function AssetPreview() {
   }
 
   const renderPreview = () => {
+    // Video preview
+    if (isVideo) {
+      return <VideoPlayer filePath={selectedAsset.path} />;
+    }
+
+    // Image preview with lightbox
     if (selectedAsset.asset_type === "texture") {
       if (loadingThumbnail) {
         return (
@@ -78,11 +97,20 @@ export function AssetPreview() {
       }
       if (thumbnail) {
         return (
-          <img
-            src={`data:image/png;base64,${thumbnail}`}
-            alt={selectedAsset.name}
-            className="w-full aspect-square object-contain bg-background rounded"
-          />
+          <div className="relative group">
+            <img
+              src={`data:image/png;base64,${thumbnail}`}
+              alt={selectedAsset.name}
+              className="w-full aspect-square object-contain bg-background rounded cursor-pointer"
+              onClick={() => setLightboxOpen(true)}
+            />
+            <div
+              className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer rounded"
+              onClick={() => setLightboxOpen(true)}
+            >
+              <Maximize2 size={24} className="text-white" />
+            </div>
+          </div>
         );
       }
       return (
@@ -92,18 +120,20 @@ export function AssetPreview() {
       );
     }
 
+    // Audio preview with waveform
+    if (selectedAsset.asset_type === "audio") {
+      return <AudioPlayer filePath={selectedAsset.path} />;
+    }
+
+    // 3D Model preview with Three.js
     if (selectedAsset.asset_type === "model") {
+      if (is3DModel) {
+        return <ModelViewer3D filePath={selectedAsset.path} extension={selectedAsset.extension} />;
+      }
+      // Fallback for unsupported 3D formats
       return (
         <div className="w-full aspect-square bg-background rounded flex items-center justify-center">
           <Box size={48} className="text-blue-400/50" />
-        </div>
-      );
-    }
-
-    if (selectedAsset.asset_type === "audio") {
-      return (
-        <div className="w-full aspect-square bg-background rounded flex items-center justify-center">
-          <Volume2 size={48} className="text-yellow-400/50" />
         </div>
       );
     }
@@ -297,6 +327,16 @@ export function AssetPreview() {
           </div>
         </div>
       </div>
+
+      {/* Image Lightbox */}
+      {thumbnail && (
+        <ImageLightbox
+          isOpen={lightboxOpen}
+          imageSrc={`data:image/png;base64,${thumbnail}`}
+          imageName={selectedAsset.name}
+          onClose={() => setLightboxOpen(false)}
+        />
+      )}
     </div>
   );
 }

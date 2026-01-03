@@ -1,6 +1,7 @@
 import { Files, AlertTriangle, Play, BarChart3 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { DirectoryTree } from "./DirectoryTree";
+import { TagFilterPanel } from "./TagFilterPanel";
 import { useProjectStore } from "../stores/projectStore";
 import { cn } from "../lib/utils";
 
@@ -80,6 +81,9 @@ export function Sidebar() {
           </button>
         </div>
       )}
+
+      {/* Tag Filter Panel */}
+      {scanResult && <TagFilterPanel />}
 
       {/* Directory Tree */}
       <div className="h-8 px-3 flex items-center border-b border-border text-xs text-text-secondary font-medium uppercase tracking-wide">

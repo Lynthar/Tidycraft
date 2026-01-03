@@ -5,8 +5,18 @@ import type { ScanResult, AssetInfo, ScanProgress, AssetType, AnalysisResult, Un
 
 type ViewMode = "assets" | "issues" | "stats";
 
-export type SortField = "name" | "type" | "size" | "dimensions";
+export type SortField = "name" | "type" | "size" | "dimensions" | "vertices" | "faces" | "duration" | "sampleRate" | "extension";
 export type SortDirection = "asc" | "desc";
+
+export interface AdvancedFilters {
+  minSize: number | null;
+  maxSize: number | null;
+  minWidth: number | null;
+  maxWidth: number | null;
+  minHeight: number | null;
+  maxHeight: number | null;
+  extensions: string[];
+}
 
 interface ProjectState {
   // Project data
@@ -28,6 +38,7 @@ interface ProjectState {
   typeFilter: AssetType | null;
   sortField: SortField;
   sortDirection: SortDirection;
+  advancedFilters: AdvancedFilters;
 
   // Undo state
   canUndo: boolean;
@@ -50,6 +61,8 @@ interface ProjectState {
   setSortField: (field: SortField) => void;
   toggleSortDirection: () => void;
   locateAsset: (path: string) => void;
+  setAdvancedFilters: (filters: Partial<AdvancedFilters>) => void;
+  resetAdvancedFilters: () => void;
 
   // Undo actions
   undoLastOperation: () => Promise<UndoResult | null>;
@@ -79,6 +92,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   typeFilter: null,
   sortField: "name",
   sortDirection: "asc",
+  advancedFilters: {
+    minSize: null,
+    maxSize: null,
+    minWidth: null,
+    maxWidth: null,
+    minHeight: null,
+    maxHeight: null,
+    extensions: [],
+  },
   canUndo: false,
   undoHistory: [],
   gitInfo: null,
@@ -234,6 +256,25 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
+  setAdvancedFilters: (filters: Partial<AdvancedFilters>) => {
+    const { advancedFilters } = get();
+    set({ advancedFilters: { ...advancedFilters, ...filters } });
+  },
+
+  resetAdvancedFilters: () => {
+    set({
+      advancedFilters: {
+        minSize: null,
+        maxSize: null,
+        minWidth: null,
+        maxWidth: null,
+        minHeight: null,
+        maxHeight: null,
+        extensions: [],
+      },
+    });
+  },
+
   // Undo actions
   undoLastOperation: async () => {
     try {
@@ -281,8 +322,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       set({ gitInfo });
 
       if (gitInfo.is_repo) {
-        const gitStatuses = await invoke<GitStatusMap>("get_git_statuses");
-        set({ gitStatuses });
+        const response = await invoke<{ statuses: GitStatusMap }>("get_git_statuses");
+        set({ gitStatuses: response.statuses });
       } else {
         set({ gitStatuses: {} });
       }
@@ -294,7 +335,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   // Computed
   getFilteredAssets: () => {
-    const { scanResult, selectedDirectory, searchQuery, typeFilter, sortField, sortDirection } = get();
+    const { scanResult, selectedDirectory, searchQuery, typeFilter, sortField, sortDirection, advancedFilters } = get();
     if (!scanResult) return [];
 
     let assets = [...scanResult.assets];
@@ -322,6 +363,31 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       assets = assets.filter((asset) => asset.asset_type === typeFilter);
     }
 
+    // Advanced filters
+    if (advancedFilters.minSize !== null) {
+      assets = assets.filter((asset) => asset.size >= advancedFilters.minSize!);
+    }
+    if (advancedFilters.maxSize !== null) {
+      assets = assets.filter((asset) => asset.size <= advancedFilters.maxSize!);
+    }
+    if (advancedFilters.minWidth !== null) {
+      assets = assets.filter((asset) => (asset.metadata?.width || 0) >= advancedFilters.minWidth!);
+    }
+    if (advancedFilters.maxWidth !== null) {
+      assets = assets.filter((asset) => (asset.metadata?.width || 0) <= advancedFilters.maxWidth!);
+    }
+    if (advancedFilters.minHeight !== null) {
+      assets = assets.filter((asset) => (asset.metadata?.height || 0) >= advancedFilters.minHeight!);
+    }
+    if (advancedFilters.maxHeight !== null) {
+      assets = assets.filter((asset) => (asset.metadata?.height || 0) <= advancedFilters.maxHeight!);
+    }
+    if (advancedFilters.extensions.length > 0) {
+      assets = assets.filter((asset) =>
+        advancedFilters.extensions.includes(asset.extension.toLowerCase())
+      );
+    }
+
     // Sort assets
     assets.sort((a, b) => {
       let comparison = 0;
@@ -340,6 +406,21 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           const aDim = (a.metadata?.width || 0) * (a.metadata?.height || 0);
           const bDim = (b.metadata?.width || 0) * (b.metadata?.height || 0);
           comparison = aDim - bDim;
+          break;
+        case "vertices":
+          comparison = (a.metadata?.vertex_count || 0) - (b.metadata?.vertex_count || 0);
+          break;
+        case "faces":
+          comparison = (a.metadata?.face_count || 0) - (b.metadata?.face_count || 0);
+          break;
+        case "duration":
+          comparison = (a.metadata?.duration_secs || 0) - (b.metadata?.duration_secs || 0);
+          break;
+        case "sampleRate":
+          comparison = (a.metadata?.sample_rate || 0) - (b.metadata?.sample_rate || 0);
+          break;
+        case "extension":
+          comparison = a.extension.localeCompare(b.extension);
           break;
       }
 
