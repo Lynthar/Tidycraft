@@ -129,6 +129,7 @@ function AssetRow({
       case "type": return "w-24";
       case "size": return "w-24";
       case "dimensions": return "w-32";
+      case "tags": return "w-[120px]";
       case "vertices": return "w-24";
       case "faces": return "w-24";
       case "duration": return "w-20";
@@ -168,27 +169,44 @@ function AssetRow({
           <AssetIcon type={asset.asset_type} />
           <span className="truncate">{asset.name}</span>
           {gitStatus && gitStatus !== "unchanged" && <GitStatusBadge status={gitStatus} t={t} />}
-          {assetTags.slice(0, 2).map((tag) => (
-            <TagBadge key={tag.id} tag={tag} />
-          ))}
-          {assetTags.length > 2 && (
-            <span className="text-[10px] text-text-secondary">+{assetTags.length - 2}</span>
-          )}
         </div>
       </div>
-      {visibleColumns.filter(c => c !== "name").map((columnId) => (
-        <div
-          key={columnId}
-          className={cn(
-            "py-2 px-3 text-text-secondary shrink-0",
-            getColumnWidth(columnId),
-            columnId !== "type" && "text-right",
-            (columnId === "dimensions" || columnId === "vertices" || columnId === "faces") && "font-mono text-xs"
-          )}
-        >
-          {getColumnValue(columnId)}
-        </div>
-      ))}
+      {visibleColumns.filter(c => c !== "name").map((columnId) => {
+        // Special handling for tags column
+        if (columnId === "tags") {
+          return (
+            <div
+              key={columnId}
+              className="py-2 px-3 shrink-0 w-[120px]"
+            >
+              <div className="flex items-center gap-1 overflow-hidden">
+                {assetTags.slice(0, 2).map((tag) => (
+                  <TagBadge key={tag.id} tag={tag} />
+                ))}
+                {assetTags.length > 2 && (
+                  <span className="text-[10px] text-text-secondary">+{assetTags.length - 2}</span>
+                )}
+                {assetTags.length === 0 && (
+                  <span className="text-text-secondary text-xs">-</span>
+                )}
+              </div>
+            </div>
+          );
+        }
+        return (
+          <div
+            key={columnId}
+            className={cn(
+              "py-2 px-3 text-text-secondary shrink-0",
+              getColumnWidth(columnId),
+              columnId !== "type" && "text-right",
+              (columnId === "dimensions" || columnId === "vertices" || columnId === "faces") && "font-mono text-xs"
+            )}
+          >
+            {getColumnValue(columnId)}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -531,6 +549,7 @@ export function AssetList() {
                 case "type": return "w-24";
                 case "size": return "w-24";
                 case "dimensions": return "w-32";
+                case "tags": return "w-[120px]";
                 case "vertices": return "w-24";
                 case "faces": return "w-24";
                 case "duration": return "w-20";
@@ -539,18 +558,21 @@ export function AssetList() {
                 default: return "w-24";
               }
             };
+            // Tags column is not sortable
+            const isSortable = columnId !== "tags";
             return (
               <div
                 key={columnId}
                 className={cn(
-                  "py-2 px-3 shrink-0 flex items-center gap-1 transition-colors select-none cursor-pointer hover:text-text-primary",
+                  "py-2 px-3 shrink-0 flex items-center gap-1 transition-colors select-none",
                   getWidth(columnId),
-                  columnId !== "type" && "justify-end text-right"
+                  columnId !== "type" && columnId !== "tags" && "justify-end text-right",
+                  isSortable && "cursor-pointer hover:text-text-primary"
                 )}
-                onClick={() => setSortField(columnId as SortField)}
+                onClick={() => isSortable && setSortField(columnId as SortField)}
               >
                 {t(`columns.${columnId}`)}
-                <SortIndicator field={columnId as SortField} currentField={sortField} direction={sortDirection} />
+                {isSortable && <SortIndicator field={columnId as SortField} currentField={sortField} direction={sortDirection} />}
               </div>
             );
           })}
