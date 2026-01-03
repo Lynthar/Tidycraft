@@ -83,21 +83,27 @@ export function TagFilterPanel() {
                     style={{ backgroundColor: newTagColor }}
                   />
                   {showColorPicker && (
-                    <div className="absolute left-0 top-full mt-1 p-2 bg-card-bg border border-border rounded-lg shadow-lg z-50 grid grid-cols-7 gap-1">
-                      {TAG_COLORS.map((color) => (
-                        <button
-                          key={color}
-                          onClick={() => {
-                            setNewTagColor(color);
-                            setShowColorPicker(false);
-                          }}
-                          className={cn(
-                            "w-5 h-5 rounded",
-                            newTagColor === color && "ring-2 ring-offset-1 ring-primary"
-                          )}
-                          style={{ backgroundColor: color }}
-                        />
-                      ))}
+                    <div
+                      className="absolute left-0 top-full mt-1 p-2 bg-card-bg border border-border rounded-lg shadow-lg z-50"
+                      style={{ width: '160px' }}
+                    >
+                      <div className="grid grid-cols-7 gap-1">
+                        {TAG_COLORS.map((color) => (
+                          <button
+                            key={color}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setNewTagColor(color);
+                              setShowColorPicker(false);
+                            }}
+                            className={cn(
+                              "w-4 h-4 rounded shrink-0",
+                              newTagColor === color && "ring-2 ring-offset-1 ring-primary"
+                            )}
+                            style={{ backgroundColor: color }}
+                          />
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>

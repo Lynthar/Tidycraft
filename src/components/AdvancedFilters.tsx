@@ -2,10 +2,16 @@ import { useState, useRef, useEffect } from "react";
 import { Filter, X, ChevronDown, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
+import type { AssetType } from "../types/asset";
+
+const ASSET_TYPES: AssetType[] = [
+  "texture", "model", "audio", "animation", "material",
+  "prefab", "scene", "script", "data", "other"
+];
 
 export function AdvancedFiltersPanel() {
   const { t } = useTranslation();
-  const { advancedFilters, setAdvancedFilters, resetAdvancedFilters, scanResult } = useProjectStore();
+  const { advancedFilters, setAdvancedFilters, resetAdvancedFilters, scanResult, typeFilter, setTypeFilter } = useProjectStore();
   const [isOpen, setIsOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -14,8 +20,14 @@ export function AdvancedFiltersPanel() {
     ? [...new Set(scanResult.assets.map((a) => a.extension.toLowerCase()))].sort()
     : [];
 
+  // Get available asset types from scan result
+  const availableAssetTypes = scanResult
+    ? [...new Set(scanResult.assets.map((a) => a.asset_type))].sort()
+    : [];
+
   // Check if any filters are active
   const hasActiveFilters =
+    typeFilter !== null ||
     advancedFilters.minSize !== null ||
     advancedFilters.maxSize !== null ||
     advancedFilters.minWidth !== null ||
@@ -58,6 +70,7 @@ export function AdvancedFiltersPanel() {
 
   const handleReset = () => {
     resetAdvancedFilters();
+    setTypeFilter(null);
   };
 
   return (
@@ -75,6 +88,7 @@ export function AdvancedFiltersPanel() {
         {hasActiveFilters && (
           <span className="ml-1 px-1.5 py-0.5 text-xs bg-primary text-white rounded-full">
             {[
+              typeFilter !== null ? 1 : 0,
               advancedFilters.minSize !== null || advancedFilters.maxSize !== null ? 1 : 0,
               advancedFilters.minWidth !== null ||
               advancedFilters.maxWidth !== null ||
@@ -114,6 +128,38 @@ export function AdvancedFiltersPanel() {
           </div>
 
           <div className="p-4 space-y-4 max-h-[400px] overflow-y-auto">
+            {/* Asset Type */}
+            <div>
+              <label className="block text-xs text-text-secondary uppercase mb-2">
+                {t("filters.assetType", "Asset Type")}
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  onClick={() => setTypeFilter(null)}
+                  className={`px-2 py-1 text-xs rounded transition-colors ${
+                    typeFilter === null
+                      ? "bg-primary text-white"
+                      : "bg-background text-text-secondary hover:text-text-primary"
+                  }`}
+                >
+                  {t("assetTypes.all")}
+                </button>
+                {ASSET_TYPES.filter(type => availableAssetTypes.includes(type)).map((type) => (
+                  <button
+                    key={type}
+                    onClick={() => setTypeFilter(typeFilter === type ? null : type)}
+                    className={`px-2 py-1 text-xs rounded transition-colors ${
+                      typeFilter === type
+                        ? "bg-primary text-white"
+                        : "bg-background text-text-secondary hover:text-text-primary"
+                    }`}
+                  >
+                    {t(`assetTypes.${type}`)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {/* File Size */}
             <div>
               <label className="block text-xs text-text-secondary uppercase mb-2">
