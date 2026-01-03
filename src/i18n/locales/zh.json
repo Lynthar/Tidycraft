@@ -194,5 +194,60 @@
     "clearFilter": "清除筛选",
     "manageTitle": "管理标签",
     "confirmDelete": "确定要删除此标签吗？"
+  },
+  "contextMenu": {
+    "copyPath": "复制路径",
+    "revealInFinder": "在 Finder 中显示",
+    "rename": "重命名",
+    "delete": "删除",
+    "tags": "标签"
+  },
+  "columns": {
+    "configure": "配置列",
+    "name": "名称",
+    "type": "类型",
+    "size": "大小",
+    "dimensions": "尺寸",
+    "vertices": "顶点数",
+    "faces": "面数",
+    "duration": "时长",
+    "sampleRate": "采样率",
+    "extension": "扩展名"
+  },
+  "rename": {
+    "currentName": "当前名称",
+    "newName": "新名称",
+    "enterName": "输入新名称...",
+    "emptyName": "名称不能为空",
+    "invalidChars": "名称包含无效字符"
+  },
+  "filters": {
+    "advanced": "筛选",
+    "advancedFilters": "高级筛选",
+    "reset": "重置",
+    "fileSize": "文件大小 (MB)",
+    "dimensions": "图片尺寸 (像素)",
+    "width": "宽",
+    "height": "高",
+    "min": "最小",
+    "max": "最大",
+    "extensions": "文件扩展名",
+    "noExtensions": "暂无扫描文件"
+  },
+  "search": {
+    "recentSearches": "最近搜索",
+    "clearAll": "清除"
+  },
+  "modelViewer": {
+    "loading": "加载模型中...",
+    "loadError": "加载模型失败",
+    "webglError": "不支持 WebGL",
+    "unsupportedFormat": "不支持此格式，请使用 GLTF、GLB 或 OBJ",
+    "controls": "拖拽旋转 • 滚轮缩放",
+    "reset": "重置视角"
+  },
+  "common": {
+    "cancel": "取消",
+    "undo": "撤销"
   }
 }

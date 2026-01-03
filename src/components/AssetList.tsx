@@ -1,13 +1,18 @@
-import { useRef, useState, useCallback, useEffect } from "react";
+import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Image, Box, Volume2, File, Edit3, X, ArrowUp, ArrowDown, Plus, Pencil, Trash2, AlertCircle } from "lucide-react";
+import { Image, Box, Volume2, File, Edit3, X, ArrowUp, ArrowDown, Plus, Pencil, Trash2, AlertCircle, Settings } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { invoke } from "@tauri-apps/api/core";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useProjectStore } from "../stores/projectStore";
 import { useTagsStore } from "../stores/tagsStore";
+import { useColumnStore, type ColumnId } from "../stores/columnStore";
 import { cn, formatFileSize } from "../lib/utils";
 import { BatchRenameDialog } from "./BatchRenameDialog";
+import { RenameDialog } from "./RenameDialog";
 import { BatchTagSelector, TagBadge } from "./TagSelector";
 import { TagManager } from "./TagManager";
+import { ContextMenu } from "./ContextMenu";
 import type { AssetInfo, AssetType, GitFileStatus, Tag } from "../types/asset";
 import type { SortField } from "../stores/projectStore";
 
@@ -59,12 +64,14 @@ interface AssetRowProps {
   isSelected: boolean;
   isChecked: boolean;
   onClick: (e: React.MouseEvent) => void;
+  onContextMenu: (e: React.MouseEvent) => void;
   onCheckChange: (checked: boolean) => void;
   style: React.CSSProperties;
   typeLabel: string;
   showCheckbox: boolean;
   gitStatus?: GitFileStatus;
   assetTags: Tag[];
+  visibleColumns: ColumnId[];
   t: (key: string) => string;
 }
 
@@ -73,18 +80,63 @@ function AssetRow({
   isSelected,
   isChecked,
   onClick,
+  onContextMenu,
   onCheckChange,
   style,
   typeLabel,
   showCheckbox,
   gitStatus,
   assetTags,
+  visibleColumns,
   t,
 }: AssetRowProps) {
   const dimensions =
     asset.metadata?.width && asset.metadata?.height
       ? `${asset.metadata.width} x ${asset.metadata.height}`
       : "-";
+
+  const getColumnValue = (columnId: ColumnId): string => {
+    switch (columnId) {
+      case "type":
+        return typeLabel;
+      case "size":
+        return formatFileSize(asset.size);
+      case "dimensions":
+        return dimensions;
+      case "vertices":
+        return asset.metadata?.vertex_count?.toLocaleString() ?? "-";
+      case "faces":
+        return asset.metadata?.face_count?.toLocaleString() ?? "-";
+      case "duration":
+        if (asset.metadata?.duration_secs) {
+          const sec = asset.metadata.duration_secs;
+          const min = Math.floor(sec / 60);
+          const s = Math.floor(sec % 60);
+          return `${min}:${s.toString().padStart(2, "0")}`;
+        }
+        return "-";
+      case "sampleRate":
+        return asset.metadata?.sample_rate ? `${(asset.metadata.sample_rate / 1000).toFixed(1)} kHz` : "-";
+      case "extension":
+        return asset.extension || "-";
+      default:
+        return "-";
+    }
+  };
+
+  const getColumnWidth = (columnId: ColumnId): string => {
+    switch (columnId) {
+      case "type": return "w-24";
+      case "size": return "w-24";
+      case "dimensions": return "w-32";
+      case "vertices": return "w-24";
+      case "faces": return "w-24";
+      case "duration": return "w-20";
+      case "sampleRate": return "w-24";
+      case "extension": return "w-20";
+      default: return "w-24";
+    }
+  };
 
   return (
     <div
@@ -96,6 +148,7 @@ function AssetRow({
       )}
       style={style}
       onClick={onClick}
+      onContextMenu={onContextMenu}
     >
       {showCheckbox && (
         <div className="w-8 py-2 px-2 shrink-0">
@@ -123,15 +176,19 @@ function AssetRow({
           )}
         </div>
       </div>
-      <div className="w-24 py-2 px-3 text-text-secondary shrink-0">
-        {typeLabel}
-      </div>
-      <div className="w-24 py-2 px-3 text-text-secondary text-right shrink-0">
-        {formatFileSize(asset.size)}
-      </div>
-      <div className="w-32 py-2 px-3 text-text-secondary text-right font-mono text-xs shrink-0">
-        {dimensions}
-      </div>
+      {visibleColumns.filter(c => c !== "name").map((columnId) => (
+        <div
+          key={columnId}
+          className={cn(
+            "py-2 px-3 text-text-secondary shrink-0",
+            getColumnWidth(columnId),
+            columnId !== "type" && "text-right",
+            (columnId === "dimensions" || columnId === "vertices" || columnId === "faces") && "font-mono text-xs"
+          )}
+        >
+          {getColumnValue(columnId)}
+        </div>
+      ))}
     </div>
   );
 }
@@ -141,16 +198,95 @@ function SortIndicator({ field, currentField, direction }: { field: SortField; c
   return direction === "asc" ? <ArrowUp size={12} /> : <ArrowDown size={12} />;
 }
 
+// Column configuration dropdown
+function ColumnConfigDropdown({ t }: { t: (key: string) => string }) {
+  const { columns, setColumnVisible } = useColumnStore();
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="p-1.5 text-text-secondary hover:text-text-primary hover:bg-background rounded transition-colors"
+        title={t("columns.configure")}
+      >
+        <Settings size={14} />
+      </button>
+      {isOpen && (
+        <div className="absolute right-0 top-full mt-1 bg-card-bg border border-border rounded-lg shadow-lg z-50 py-1 min-w-[160px]">
+          {columns.map((col) => (
+            <label
+              key={col.id}
+              className="flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-background transition-colors"
+            >
+              <input
+                type="checkbox"
+                checked={col.visible}
+                onChange={(e) => setColumnVisible(col.id, e.target.checked)}
+                disabled={col.id === "name"}
+                className="w-4 h-4 accent-primary"
+              />
+              <span className={col.id === "name" ? "text-text-secondary" : ""}>
+                {t(`columns.${col.id}`)}
+              </span>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function AssetList() {
   const { t } = useTranslation();
-  const { scanResult, selectedAsset, setSelectedAsset, getFilteredAssets, isScanning, projectPath, openProject, sortField, sortDirection, setSortField, gitStatuses } =
-    useProjectStore();
-  const { loadTags, assetTags: allAssetTags } = useTagsStore();
+  const {
+    scanResult,
+    selectedAsset,
+    setSelectedAsset,
+    getFilteredAssets,
+    isScanning,
+    projectPath,
+    openProject,
+    sortField,
+    sortDirection,
+    setSortField,
+    gitStatuses,
+    typeFilter,
+    searchQuery,
+    selectedDirectory,
+    refreshUndoState,
+  } = useProjectStore();
+  const { loadTags, assetTags: allAssetTags, tagFilter } = useTagsStore();
+  const { columns } = useColumnStore();
   const parentRef = useRef<HTMLDivElement>(null);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [showBatchRename, setShowBatchRename] = useState(false);
   const [showTagManager, setShowTagManager] = useState(false);
   const [lastClickedIndex, setLastClickedIndex] = useState<number | null>(null);
+
+  // Single rename state
+  const [renameAsset, setRenameAsset] = useState<AssetInfo | null>(null);
+
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<{
+    isOpen: boolean;
+    position: { x: number; y: number };
+    asset: AssetInfo | null;
+  }>({ isOpen: false, position: { x: 0, y: 0 }, asset: null });
+
+  // Get visible columns
+  const visibleColumns = columns.filter((c) => c.visible).map((c) => c.id);
 
   // Load tags when project is loaded
   useEffect(() => {
@@ -159,7 +295,22 @@ export function AssetList() {
     }
   }, [scanResult, loadTags]);
 
-  const assets = getFilteredAssets();
+  // Get filtered assets with tag filtering applied
+  // Note: Include typeFilter, searchQuery, selectedDirectory, sortField, sortDirection in deps
+  // to ensure re-render when these change (getFilteredAssets reads them internally)
+  const assets = useMemo(() => {
+    let filteredAssets = getFilteredAssets();
+
+    // Apply tag filter if active
+    if (tagFilter) {
+      filteredAssets = filteredAssets.filter((asset) => {
+        const assetTagList = allAssetTags[asset.path] || [];
+        return assetTagList.some((tag) => tag.id === tagFilter);
+      });
+    }
+
+    return filteredAssets;
+  }, [getFilteredAssets, tagFilter, allAssetTags, typeFilter, searchQuery, selectedDirectory, sortField, sortDirection]);
 
   const virtualizer = useVirtualizer({
     count: assets.length,
@@ -231,14 +382,67 @@ export function AssetList() {
     setSelectedPaths(new Set());
   }, []);
 
-  const handleRenameComplete = useCallback(() => {
+  const handleRenameComplete = useCallback(async () => {
     setSelectedPaths(new Set());
     setShowBatchRename(false);
+    // Refresh undo state after rename
+    await refreshUndoState();
     // Rescan to refresh the file list
     if (projectPath) {
       openProject(projectPath);
     }
-  }, [projectPath, openProject]);
+  }, [projectPath, openProject, refreshUndoState]);
+
+  // Context menu handlers
+  const handleContextMenu = useCallback((e: React.MouseEvent, asset: AssetInfo) => {
+    e.preventDefault();
+    setContextMenu({
+      isOpen: true,
+      position: { x: e.clientX, y: e.clientY },
+      asset,
+    });
+  }, []);
+
+  const closeContextMenu = useCallback(() => {
+    setContextMenu((prev) => ({ ...prev, isOpen: false }));
+  }, []);
+
+  const handleCopyPath = useCallback(async () => {
+    if (contextMenu.asset) {
+      try {
+        await writeText(contextMenu.asset.path);
+      } catch (err) {
+        console.error("Failed to copy path:", err);
+      }
+    }
+  }, [contextMenu.asset]);
+
+  const handleRevealInFinder = useCallback(async () => {
+    if (contextMenu.asset) {
+      try {
+        await invoke("reveal_in_finder", { path: contextMenu.asset.path });
+      } catch (err) {
+        console.error("Failed to reveal in finder:", err);
+      }
+    }
+  }, [contextMenu.asset]);
+
+  const handleRename = useCallback(() => {
+    if (contextMenu.asset) {
+      // Use single rename dialog for individual asset
+      setRenameAsset(contextMenu.asset);
+    }
+  }, [contextMenu.asset]);
+
+  const handleSingleRenameComplete = useCallback(async () => {
+    setRenameAsset(null);
+    // Refresh undo state after rename
+    await refreshUndoState();
+    // Rescan to refresh the file list
+    if (projectPath) {
+      openProject(projectPath);
+    }
+  }, [projectPath, openProject, refreshUndoState]);
 
   const showCheckbox = selectedPaths.size > 0;
 
@@ -318,29 +522,40 @@ export function AssetList() {
             className="flex-1 py-2 px-3 flex items-center gap-1 cursor-pointer hover:text-text-primary transition-colors select-none"
             onClick={() => setSortField("name")}
           >
-            {t("assetList.name")}
+            {t("columns.name")}
             <SortIndicator field="name" currentField={sortField} direction={sortDirection} />
           </div>
-          <div
-            className="w-24 py-2 px-3 shrink-0 flex items-center gap-1 cursor-pointer hover:text-text-primary transition-colors select-none"
-            onClick={() => setSortField("type")}
-          >
-            {t("assetList.type")}
-            <SortIndicator field="type" currentField={sortField} direction={sortDirection} />
-          </div>
-          <div
-            className="w-24 py-2 px-3 text-right shrink-0 flex items-center justify-end gap-1 cursor-pointer hover:text-text-primary transition-colors select-none"
-            onClick={() => setSortField("size")}
-          >
-            {t("assetList.size")}
-            <SortIndicator field="size" currentField={sortField} direction={sortDirection} />
-          </div>
-          <div
-            className="w-32 py-2 px-3 text-right shrink-0 flex items-center justify-end gap-1 cursor-pointer hover:text-text-primary transition-colors select-none"
-            onClick={() => setSortField("dimensions")}
-          >
-            {t("assetList.dimensions")}
-            <SortIndicator field="dimensions" currentField={sortField} direction={sortDirection} />
+          {visibleColumns.filter(c => c !== "name").map((columnId) => {
+            const getWidth = (id: ColumnId) => {
+              switch (id) {
+                case "type": return "w-24";
+                case "size": return "w-24";
+                case "dimensions": return "w-32";
+                case "vertices": return "w-24";
+                case "faces": return "w-24";
+                case "duration": return "w-20";
+                case "sampleRate": return "w-24";
+                case "extension": return "w-20";
+                default: return "w-24";
+              }
+            };
+            return (
+              <div
+                key={columnId}
+                className={cn(
+                  "py-2 px-3 shrink-0 flex items-center gap-1 transition-colors select-none cursor-pointer hover:text-text-primary",
+                  getWidth(columnId),
+                  columnId !== "type" && "justify-end text-right"
+                )}
+                onClick={() => setSortField(columnId as SortField)}
+              >
+                {t(`columns.${columnId}`)}
+                <SortIndicator field={columnId as SortField} currentField={sortField} direction={sortDirection} />
+              </div>
+            );
+          })}
+          <div className="py-1 px-2 shrink-0">
+            <ColumnConfigDropdown t={t} />
           </div>
         </div>
 
@@ -364,11 +579,13 @@ export function AssetList() {
                   isSelected={selectedAsset?.path === asset.path}
                   isChecked={selectedPaths.has(asset.path)}
                   onClick={(e) => handleAssetClick(asset, virtualItem.index, e)}
+                  onContextMenu={(e) => handleContextMenu(e, asset)}
                   onCheckChange={(checked) => handleCheckChange(asset.path, checked)}
                   typeLabel={getTypeLabel(asset.asset_type)}
                   showCheckbox={showCheckbox}
                   gitStatus={gitStatus}
                   assetTags={assetTags}
+                  visibleColumns={visibleColumns}
                   t={t}
                   style={{
                     position: "absolute",
@@ -393,11 +610,37 @@ export function AssetList() {
         onComplete={handleRenameComplete}
       />
 
+      {/* Single Rename Dialog */}
+      {renameAsset && (
+        <RenameDialog
+          isOpen={true}
+          onClose={() => setRenameAsset(null)}
+          assetPath={renameAsset.path}
+          currentName={renameAsset.name}
+          onComplete={handleSingleRenameComplete}
+        />
+      )}
+
       {/* Tag Manager Dialog */}
       <TagManager
         isOpen={showTagManager}
         onClose={() => setShowTagManager(false)}
       />
+
+      {/* Context Menu */}
+      {contextMenu.asset && (
+        <ContextMenu
+          isOpen={contextMenu.isOpen}
+          position={contextMenu.position}
+          onClose={closeContextMenu}
+          assetPath={contextMenu.asset.path}
+          assetTags={allAssetTags[contextMenu.asset.path] || []}
+          onCopyPath={handleCopyPath}
+          onRevealInFinder={handleRevealInFinder}
+          onRename={handleRename}
+          onOpenTagManager={() => setShowTagManager(true)}
+        />
+      )}
     </>
   );
 }

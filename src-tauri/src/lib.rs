@@ -977,6 +977,88 @@ fn get_godot_project_info(path: String) -> Result<godot::GodotProjectInfo, Strin
         .ok_or_else(|| "Failed to parse project.godot file".to_string())
 }
 
+// ============ File System Commands ============
+
+#[tauri::command]
+fn reveal_in_finder(path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .args(["-R", &path])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .args(["/select,", &path])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // Try to open the parent directory
+        if let Some(parent) = std::path::Path::new(&path).parent() {
+            std::process::Command::new("xdg-open")
+                .arg(parent)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn rename_file(old_path: String, new_name: String) -> Result<String, String> {
+    use std::path::Path;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let old_path_ref = Path::new(&old_path);
+    if !old_path_ref.exists() {
+        return Err("File does not exist".to_string());
+    }
+
+    let parent = old_path_ref.parent().ok_or("Cannot get parent directory")?;
+    let new_path = parent.join(&new_name);
+
+    if new_path.exists() {
+        return Err("A file with this name already exists".to_string());
+    }
+
+    // Record for undo
+    let old_name = old_path_ref.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_string();
+
+    let new_path_str = new_path.to_string_lossy().to_string();
+
+    std::fs::rename(&old_path_ref, &new_path).map_err(|e| e.to_string())?;
+
+    // Add to undo history
+    {
+        let mut manager = UNDO_MANAGER.lock();
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        let operation = undo::FileOperation {
+            operation_type: undo::OperationType::Rename,
+            original_path: old_path.clone(),
+            new_path: Some(new_path_str.clone()),
+            timestamp,
+        };
+
+        manager.record_batch(
+            format!("Rename {} to {}", old_name, new_name),
+            vec![operation],
+        );
+    }
+
+    Ok(new_path_str)
+}
+
 // ============ Undo Commands ============
 
 #[tauri::command]
@@ -1154,6 +1236,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler(tauri::generate_handler![
             scan_project,
             scan_project_async,
@@ -1186,6 +1269,9 @@ pub fn run() {
             can_undo,
             clear_undo_history,
             get_undo_count,
+            // File System
+            reveal_in_finder,
+            rename_file,
             // Tags
             get_all_tags,
             create_tag,

@@ -194,5 +194,60 @@
     "clearFilter": "Clear Filter",
     "manageTitle": "Manage Tags",
     "confirmDelete": "Are you sure you want to delete this tag?"
+  },
+  "contextMenu": {
+    "copyPath": "Copy Path",
+    "revealInFinder": "Reveal in Finder",
+    "rename": "Rename",
+    "delete": "Delete",
+    "tags": "Tags"
+  },
+  "columns": {
+    "configure": "Configure Columns",
+    "name": "Name",
+    "type": "Type",
+    "size": "Size",
+    "dimensions": "Dimensions",
+    "vertices": "Vertices",
+    "faces": "Faces",
+    "duration": "Duration",
+    "sampleRate": "Sample Rate",
+    "extension": "Extension"
+  },
+  "rename": {
+    "currentName": "Current name",
+    "newName": "New name",
+    "enterName": "Enter new name...",
+    "emptyName": "Name cannot be empty",
+    "invalidChars": "Name contains invalid characters"
+  },
+  "filters": {
+    "advanced": "Filters",
+    "advancedFilters": "Advanced Filters",
+    "reset": "Reset",
+    "fileSize": "File Size (MB)",
+    "dimensions": "Image Dimensions (px)",
+    "width": "W",
+    "height": "H",
+    "min": "Min",
+    "max": "Max",
+    "extensions": "File Extensions",
+    "noExtensions": "No files scanned"
+  },
+  "search": {
+    "recentSearches": "Recent Searches",
+    "clearAll": "Clear"
+  },
+  "modelViewer": {
+    "loading": "Loading model...",
+    "loadError": "Failed to load model",
+    "webglError": "WebGL not supported",
+    "unsupportedFormat": "Format not supported. Use GLTF, GLB, or OBJ.",
+    "controls": "Drag to rotate • Scroll to zoom",
+    "reset": "Reset view"
+  },
+  "common": {
+    "cancel": "Cancel",
+    "undo": "Undo"
   }
 }
