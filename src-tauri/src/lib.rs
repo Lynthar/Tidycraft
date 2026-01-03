@@ -21,7 +21,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 // Global scan state for cancellation
 static SCAN_STATE: Mutex<Option<Arc<ScanState>>> = Mutex::new(None);
@@ -1237,6 +1237,16 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .setup(|app| {
+            // Open devtools in debug builds
+            #[cfg(debug_assertions)]
+            {
+                if let Some(window) = app.get_webview_window("main") {
+                    window.open_devtools();
+                }
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             scan_project,
             scan_project_async,

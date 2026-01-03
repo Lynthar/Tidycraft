@@ -286,7 +286,7 @@ export function AssetList() {
     refreshUndoState,
     advancedFilters,
   } = useProjectStore();
-  const { loadTags, assetTags: allAssetTags, tagFilter } = useTagsStore();
+  const { loadTags, assetTags: allAssetTags, tagFilters } = useTagsStore();
   const { columns } = useColumnStore();
   const parentRef = useRef<HTMLDivElement>(null);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
@@ -320,16 +320,17 @@ export function AssetList() {
   const assets = useMemo(() => {
     let filteredAssets = getFilteredAssets();
 
-    // Apply tag filter if active
-    if (tagFilter) {
+    // Apply tag filters if active (asset must have ALL selected tags)
+    if (tagFilters.length > 0) {
       filteredAssets = filteredAssets.filter((asset) => {
         const assetTagList = allAssetTags[asset.path] || [];
-        return assetTagList.some((tag) => tag.id === tagFilter);
+        const assetTagIds = assetTagList.map((tag) => tag.id);
+        return tagFilters.every((filterId) => assetTagIds.includes(filterId));
       });
     }
 
     return filteredAssets;
-  }, [getFilteredAssets, tagFilter, allAssetTags, typeFilter, searchQuery, selectedDirectory, sortField, sortDirection, advancedFilters]);
+  }, [getFilteredAssets, tagFilters, allAssetTags, typeFilter, searchQuery, selectedDirectory, sortField, sortDirection, advancedFilters]);
 
   const virtualizer = useVirtualizer({
     count: assets.length,
