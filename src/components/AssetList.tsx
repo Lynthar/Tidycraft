@@ -284,6 +284,7 @@ export function AssetList() {
     searchQuery,
     selectedDirectory,
     refreshUndoState,
+    advancedFilters,
   } = useProjectStore();
   const { loadTags, assetTags: allAssetTags, tagFilter } = useTagsStore();
   const { columns } = useColumnStore();
@@ -328,7 +329,7 @@ export function AssetList() {
     }
 
     return filteredAssets;
-  }, [getFilteredAssets, tagFilter, allAssetTags, typeFilter, searchQuery, selectedDirectory, sortField, sortDirection]);
+  }, [getFilteredAssets, tagFilter, allAssetTags, typeFilter, searchQuery, selectedDirectory, sortField, sortDirection, advancedFilters]);
 
   const virtualizer = useVirtualizer({
     count: assets.length,

@@ -227,6 +227,7 @@
     "advanced": "Filters",
     "advancedFilters": "Advanced Filters",
     "reset": "Reset",
+    "assetType": "Asset Type",
     "fileSize": "File Size (MB)",
     "dimensions": "Image Dimensions (px)",
     "width": "W",

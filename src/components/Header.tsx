@@ -5,7 +5,6 @@ import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
 import { useThemeStore } from "../stores/themeStore";
 import { formatShortcut, SHORTCUTS } from "../hooks/useKeyboardShortcuts";
-import type { AssetType } from "../types/asset";
 import { AdvancedFiltersPanel } from "./AdvancedFilters";
 import { SearchHistory } from "./SearchHistory";
 import { useSearchHistoryStore } from "../stores/searchHistoryStore";
@@ -21,30 +20,14 @@ export function Header({ searchInputRef }: HeaderProps) {
     isScanning,
     scanResult,
     searchQuery,
-    typeFilter,
     gitInfo,
     canUndo,
     openProject,
     setSearchQuery,
-    setTypeFilter,
     undoLastOperation,
     refreshUndoState,
   } = useProjectStore();
   const { theme, toggleTheme } = useThemeStore();
-
-  const ASSET_TYPES: { value: AssetType | null; label: string }[] = [
-    { value: null, label: t("assetTypes.all") },
-    { value: "texture", label: t("assetTypes.texture") },
-    { value: "model", label: t("assetTypes.model") },
-    { value: "audio", label: t("assetTypes.audio") },
-    { value: "animation", label: t("assetTypes.animation") },
-    { value: "material", label: t("assetTypes.material") },
-    { value: "prefab", label: t("assetTypes.prefab") },
-    { value: "scene", label: t("assetTypes.scene") },
-    { value: "script", label: t("assetTypes.script") },
-    { value: "data", label: t("assetTypes.data") },
-    { value: "other", label: t("assetTypes.other") },
-  ];
 
   const handleOpenFolder = async () => {
     const selected = await open({
@@ -155,7 +138,7 @@ export function Header({ searchInputRef }: HeaderProps) {
       {/* Search and Filter */}
       {scanResult && (
         <div className="flex items-center gap-3 flex-1 max-w-xl">
-          {/* Unified Search and Filter */}
+          {/* Search Input */}
           <div className="relative flex-1">
             <Search
               size={14}
@@ -178,21 +161,18 @@ export function Header({ searchInputRef }: HeaderProps) {
                   setShowSearchHistory(false);
                 }
               }}
-              className="w-full h-8 pl-8 pr-20 text-sm bg-background border border-border rounded
+              className="w-full h-8 pl-8 pr-8 text-sm bg-background border border-border rounded
                          text-text-primary placeholder:text-text-secondary
                          focus:outline-none focus:border-primary transition-colors"
             />
-            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery("")}
-                  className="p-0.5 text-text-secondary hover:text-text-primary transition-colors"
-                >
-                  <X size={14} />
-                </button>
-              )}
-              <AdvancedFiltersPanel />
-            </div>
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-text-secondary hover:text-text-primary transition-colors"
+              >
+                <X size={14} />
+              </button>
+            )}
             {/* Search History Dropdown */}
             <SearchHistory
               isVisible={showSearchHistory}
@@ -206,20 +186,8 @@ export function Header({ searchInputRef }: HeaderProps) {
             />
           </div>
 
-          {/* Type Filter */}
-          <select
-            value={typeFilter || ""}
-            onChange={(e) => setTypeFilter((e.target.value as AssetType) || null)}
-            className="h-8 px-2 text-sm bg-background border border-border rounded
-                       text-text-primary focus:outline-none focus:border-primary
-                       transition-colors cursor-pointer"
-          >
-            {ASSET_TYPES.map((type) => (
-              <option key={type.value || "all"} value={type.value || ""}>
-                {type.label}
-              </option>
-            ))}
-          </select>
+          {/* Advanced Filters - Separate from search input */}
+          <AdvancedFiltersPanel />
         </div>
       )}
 
