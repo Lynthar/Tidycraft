@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Image, Box, FileText, X, Copy, Check, Maximize2 } from "lucide-react";
+import { Image, Box, FileText, X, Copy, Check, Maximize2, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
+import { useTagsStore } from "../stores/tagsStore";
 import { formatFileSize, formatDuration } from "../lib/utils";
 import { VideoPlayer } from "./VideoPlayer";
 import { AudioPlayer } from "./AudioPlayer";
@@ -12,11 +13,16 @@ import { ModelViewer3D } from "./ModelViewer3D";
 export function AssetPreview() {
   const { t } = useTranslation();
   const { selectedAsset, setSelectedAsset, scanResult } = useProjectStore();
+  const { tags, assetTags, addTagToAsset, removeTagFromAsset } = useTagsStore();
   const [thumbnail, setThumbnail] = useState<string | null>(null);
   const [loadingThumbnail, setLoadingThumbnail] = useState(false);
   const [copiedPath, setCopiedPath] = useState(false);
   const [copiedGuid, setCopiedGuid] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [showTagPicker, setShowTagPicker] = useState(false);
+
+  // Get tags for current asset
+  const currentAssetTags = selectedAsset ? (assetTags[selectedAsset.path] || []) : [];
 
   // Video file extensions
   const VIDEO_EXTENSIONS = ["mp4", "webm", "mov", "avi", "mkv", "m4v"];
@@ -308,6 +314,79 @@ export function AssetPreview() {
               </div>
             </div>
           )}
+
+          {/* Tags */}
+          <div>
+            <h4 className="text-text-secondary text-xs uppercase mb-2">{t("tags.title")}</h4>
+            <div className="space-y-2">
+              {/* Current tags */}
+              <div className="flex flex-wrap gap-1">
+                {currentAssetTags.map((tag) => (
+                  <span
+                    key={tag.id}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs group"
+                    style={{
+                      backgroundColor: `${tag.color}20`,
+                      color: tag.color,
+                    }}
+                  >
+                    <span
+                      className="w-2 h-2 rounded-full"
+                      style={{ backgroundColor: tag.color }}
+                    />
+                    {tag.name}
+                    <button
+                      onClick={() => removeTagFromAsset(selectedAsset.path, tag.id)}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity hover:text-error"
+                    >
+                      <X size={10} />
+                    </button>
+                  </span>
+                ))}
+                {currentAssetTags.length === 0 && (
+                  <span className="text-xs text-text-secondary italic">{t("tags.noTags")}</span>
+                )}
+              </div>
+              {/* Add tag button */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowTagPicker(!showTagPicker)}
+                  className="flex items-center gap-1 px-2 py-1 text-xs text-text-secondary hover:text-text-primary hover:bg-background rounded transition-colors"
+                >
+                  <Plus size={12} />
+                  {t("tags.addTag")}
+                </button>
+                {showTagPicker && (
+                  <div className="absolute left-0 top-full mt-1 bg-card-bg border border-border rounded-lg shadow-lg z-50 py-1 min-w-[150px] max-h-48 overflow-y-auto">
+                    {tags.filter((tag) => !currentAssetTags.some((t) => t.id === tag.id)).length === 0 ? (
+                      <div className="px-3 py-2 text-xs text-text-secondary italic">
+                        {tags.length === 0 ? t("tags.noTags") : t("tags.allTagsAdded", "All tags added")}
+                      </div>
+                    ) : (
+                      tags
+                        .filter((tag) => !currentAssetTags.some((t) => t.id === tag.id))
+                        .map((tag) => (
+                          <button
+                            key={tag.id}
+                            onClick={() => {
+                              addTagToAsset(selectedAsset.path, tag.id);
+                              setShowTagPicker(false);
+                            }}
+                            className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-left hover:bg-background transition-colors"
+                          >
+                            <span
+                              className="w-3 h-3 rounded-full shrink-0"
+                              style={{ backgroundColor: tag.color }}
+                            />
+                            <span style={{ color: tag.color }}>{tag.name}</span>
+                          </button>
+                        ))
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
 
           {/* Path */}
           <div>

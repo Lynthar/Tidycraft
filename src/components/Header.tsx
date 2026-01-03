@@ -155,7 +155,7 @@ export function Header({ searchInputRef }: HeaderProps) {
       {/* Search and Filter */}
       {scanResult && (
         <div className="flex items-center gap-3 flex-1 max-w-xl">
-          {/* Search Input */}
+          {/* Unified Search and Filter */}
           <div className="relative flex-1">
             <Search
               size={14}
@@ -170,22 +170,29 @@ export function Header({ searchInputRef }: HeaderProps) {
               onFocus={() => setShowSearchHistory(true)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && searchQuery.trim()) {
-                  addToHistory(searchQuery);
+                  addToHistory(searchQuery.trim());
+                  setShowSearchHistory(false);
+                  (e.target as HTMLInputElement).blur();
+                } else if (e.key === "Escape") {
+                  setSearchQuery("");
                   setShowSearchHistory(false);
                 }
               }}
-              className="w-full h-8 pl-8 pr-8 text-sm bg-background border border-border rounded
+              className="w-full h-8 pl-8 pr-20 text-sm bg-background border border-border rounded
                          text-text-primary placeholder:text-text-secondary
                          focus:outline-none focus:border-primary transition-colors"
             />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery("")}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary"
-              >
-                <X size={14} />
-              </button>
-            )}
+            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery("")}
+                  className="p-0.5 text-text-secondary hover:text-text-primary transition-colors"
+                >
+                  <X size={14} />
+                </button>
+              )}
+              <AdvancedFiltersPanel />
+            </div>
             {/* Search History Dropdown */}
             <SearchHistory
               isVisible={showSearchHistory}
@@ -213,9 +220,6 @@ export function Header({ searchInputRef }: HeaderProps) {
               </option>
             ))}
           </select>
-
-          {/* Advanced Filters */}
-          <AdvancedFiltersPanel />
         </div>
       )}
 

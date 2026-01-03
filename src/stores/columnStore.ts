@@ -10,7 +10,8 @@ export type ColumnId =
   | "faces"
   | "duration"
   | "sampleRate"
-  | "extension";
+  | "extension"
+  | "tags";
 
 export interface ColumnConfig {
   id: ColumnId;
@@ -31,6 +32,7 @@ const DEFAULT_COLUMNS: ColumnConfig[] = [
   { id: "type", visible: true, width: 96 },
   { id: "size", visible: true, width: 96 },
   { id: "dimensions", visible: true, width: 128 },
+  { id: "tags", visible: true, width: 120 },
   { id: "vertices", visible: false, width: 96 },
   { id: "faces", visible: false, width: 96 },
   { id: "duration", visible: false, width: 80 },
