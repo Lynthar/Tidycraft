@@ -17,7 +17,7 @@ export function Sidebar() {
   } = useProjectStore();
 
   return (
-    <aside className="w-64 bg-card-bg border-r border-border flex flex-col shrink-0">
+    <aside className="w-full h-full bg-card-bg border-r border-border flex flex-col">
       {/* View Mode Tabs */}
       <div className="flex border-b border-border shrink-0">
         <button

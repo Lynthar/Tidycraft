@@ -1,6 +1,8 @@
 import { useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { Group, Panel, Separator } from "react-resizable-panels";
 import { Header } from "./components/Header";
+import { ProjectList } from "./components/ProjectList";
 import { Sidebar } from "./components/Sidebar";
 import { AssetList } from "./components/AssetList";
 import { AssetPreview } from "./components/AssetPreview";
@@ -19,7 +21,10 @@ function App() {
     isAnalyzing,
     runAnalysis,
     locateAsset,
+    getProjectList,
   } = useProjectStore();
+
+  const projects = getProjectList();
 
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -110,13 +115,65 @@ function App() {
       <Header searchInputRef={searchInputRef} />
 
       <div className="flex-1 flex overflow-hidden">
-        <Sidebar />
+        <Group
+          orientation="horizontal"
+          id="tidycraft-panels"
+          className="flex-1 h-full"
+          style={{ height: "100%" }}
+        >
+          {/* Project List - only show when there are projects */}
+          {projects.length > 0 && (
+            <>
+              <Panel
+                id="projects"
+                defaultSize="12%"
+                minSize="8%"
+                maxSize="25%"
+                className="overflow-hidden"
+              >
+                <ProjectList />
+              </Panel>
+              <Separator className="w-1 bg-border hover:bg-primary/50 active:bg-primary transition-colors cursor-col-resize" />
+            </>
+          )}
 
-        <main className="flex-1 bg-background overflow-hidden">
-          {renderMainContent()}
-        </main>
+          <Panel
+            id="sidebar"
+            defaultSize="20%"
+            minSize="12%"
+            maxSize="40%"
+            className="overflow-hidden"
+          >
+            <Sidebar />
+          </Panel>
+          <Separator className="w-1 bg-border hover:bg-primary/50 active:bg-primary transition-colors cursor-col-resize" />
 
-        {showPreview && <AssetPreview />}
+          <Panel
+            id="main"
+            defaultSize={showPreview ? "50%" : "68%"}
+            minSize="30%"
+            className="overflow-hidden"
+          >
+            <main className="h-full bg-background overflow-hidden">
+              {renderMainContent()}
+            </main>
+          </Panel>
+
+          {showPreview && (
+            <>
+              <Separator className="w-1 bg-border hover:bg-primary/50 active:bg-primary transition-colors cursor-col-resize" />
+              <Panel
+                id="preview"
+                defaultSize="18%"
+                minSize="15%"
+                maxSize="35%"
+                className="overflow-hidden"
+              >
+                <AssetPreview />
+              </Panel>
+            </>
+          )}
+        </Group>
       </div>
 
       <StatusBar />

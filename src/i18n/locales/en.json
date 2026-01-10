@@ -2,6 +2,11 @@
   "app": {
     "name": "Tidycraft"
   },
+  "projects": {
+    "title": "Projects",
+    "addProject": "Add Project",
+    "close": "Close Project"
+  },
   "header": {
     "openFolder": "Open Folder",
     "searchPlaceholder": "Search assets...",
@@ -102,7 +107,8 @@
     "guid": "GUID",
     "copyGuid": "Copy GUID",
     "path": "Path",
-    "copyPath": "Copy path"
+    "copyPath": "Copy path",
+    "openWithDefaultApp": "Open with Default App"
   },
   "statusBar": {
     "ready": "Ready",
@@ -139,9 +145,17 @@
     "noFilteredIssues": "No {{filter}} issues"
   },
   "settings": {
+    "title": "Settings",
     "language": "Language",
     "english": "English",
-    "chinese": "Chinese"
+    "chinese": "Chinese",
+    "gitSection": "Git",
+    "showBranchInfo": "Show Branch Info",
+    "showBranchInfoDesc": "Display current branch name in header",
+    "showAheadBehind": "Show Ahead/Behind",
+    "showAheadBehindDesc": "Display commits ahead/behind remote",
+    "showGitStatusIndicators": "Show File Status",
+    "showGitStatusIndicatorsDesc": "Display git status badges on files"
   },
   "stats": {
     "noData": "No data available",
@@ -199,6 +213,7 @@
     "confirmDelete": "Are you sure you want to delete this tag?"
   },
   "contextMenu": {
+    "openWithDefaultApp": "Open with Default App",
     "copyPath": "Copy Path",
     "revealInFinder": "Reveal in Finder",
     "rename": "Rename",
@@ -255,6 +270,7 @@
   },
   "common": {
     "cancel": "Cancel",
-    "undo": "Undo"
+    "undo": "Undo",
+    "done": "Done"
   }
 }

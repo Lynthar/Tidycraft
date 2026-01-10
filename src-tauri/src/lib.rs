@@ -1009,6 +1009,32 @@ fn reveal_in_finder(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn open_with_default_app(path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &path])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn rename_file(old_path: String, new_name: String) -> Result<String, String> {
     use std::path::Path;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1281,6 +1307,7 @@ pub fn run() {
             get_undo_count,
             // File System
             reveal_in_finder,
+            open_with_default_app,
             rename_file,
             // Tags
             get_all_tags,

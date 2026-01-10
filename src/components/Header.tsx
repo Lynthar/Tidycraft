@@ -1,12 +1,14 @@
 import { RefObject, useState, useRef, useEffect } from "react";
-import { FolderOpen, RefreshCw, Search, X, Globe, Sun, Moon, GitBranch, ChevronDown, Check, Undo2 } from "lucide-react";
+import { FolderOpen, RefreshCw, Search, X, Globe, Sun, Moon, GitBranch, ChevronDown, Check, Undo2, Settings } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
 import { useThemeStore } from "../stores/themeStore";
+import { useSettingsStore } from "../stores/settingsStore";
 import { formatShortcut, SHORTCUTS } from "../hooks/useKeyboardShortcuts";
 import { AdvancedFiltersPanel } from "./AdvancedFilters";
 import { SearchHistory } from "./SearchHistory";
+import { SettingsModal } from "./SettingsModal";
 import { useSearchHistoryStore } from "../stores/searchHistoryStore";
 
 interface HeaderProps {
@@ -28,6 +30,8 @@ export function Header({ searchInputRef }: HeaderProps) {
     refreshUndoState,
   } = useProjectStore();
   const { theme, toggleTheme } = useThemeStore();
+  const { showBranchInfo, showAheadBehind } = useSettingsStore();
+  const [showSettings, setShowSettings] = useState(false);
 
   const handleOpenFolder = async () => {
     const selected = await open({
@@ -118,11 +122,11 @@ export function Header({ searchInputRef }: HeaderProps) {
           </>
         )}
         {/* Git Branch Info */}
-        {gitInfo?.is_repo && gitInfo.branch && (
+        {showBranchInfo && gitInfo?.is_repo && gitInfo.branch && (
           <div className="flex items-center gap-1.5 text-sm text-text-secondary">
             <GitBranch size={14} />
             <span>{gitInfo.branch}</span>
-            {(gitInfo.ahead > 0 || gitInfo.behind > 0) && (
+            {showAheadBehind && (gitInfo.ahead > 0 || gitInfo.behind > 0) && (
               <span className="text-xs">
                 {gitInfo.ahead > 0 && <span className="text-green-400">↑{gitInfo.ahead}</span>}
                 {gitInfo.behind > 0 && <span className="text-orange-400 ml-1">↓{gitInfo.behind}</span>}
@@ -192,6 +196,15 @@ export function Header({ searchInputRef }: HeaderProps) {
       )}
 
       <div className="flex items-center gap-2 shrink-0">
+        {/* Settings */}
+        <button
+          onClick={() => setShowSettings(true)}
+          className="p-2 rounded hover:bg-background text-text-secondary hover:text-text-primary transition-colors"
+          title={t("settings.title")}
+        >
+          <Settings size={18} />
+        </button>
+
         {/* Theme Toggle */}
         <button
           onClick={toggleTheme}
@@ -248,6 +261,9 @@ export function Header({ searchInputRef }: HeaderProps) {
           <span>{t("header.openFolder")}</span>
         </button>
       </div>
+
+      {/* Settings Modal */}
+      <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
     </header>
   );
 }

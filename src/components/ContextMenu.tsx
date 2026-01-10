@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Copy, Tag as TagIcon, FolderOpen, Trash2, Edit3, Check, ChevronRight } from "lucide-react";
+import { Copy, Tag as TagIcon, FolderOpen, Trash2, Edit3, Check, ChevronRight, ExternalLink } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useTagsStore } from "../stores/tagsStore";
 import { cn } from "../lib/utils";
@@ -18,6 +18,7 @@ interface ContextMenuProps {
   assetTags: Tag[];
   onCopyPath: () => void;
   onRevealInFinder: () => void;
+  onOpenWithDefaultApp: () => void;
   onRename: () => void;
   onDelete?: () => void;
   onOpenTagManager: () => void;
@@ -31,6 +32,7 @@ export function ContextMenu({
   assetTags,
   onCopyPath,
   onRevealInFinder,
+  onOpenWithDefaultApp,
   onRename,
   onDelete,
   onOpenTagManager,
@@ -94,18 +96,26 @@ export function ContextMenu({
 
   const menuItems = [
     {
-      icon: <Copy size={14} />,
-      label: t("contextMenu.copyPath"),
-      onClick: () => {
-        onCopyPath();
-        onClose();
-      },
-    },
-    {
       icon: <FolderOpen size={14} />,
       label: t("contextMenu.revealInFinder"),
       onClick: () => {
         onRevealInFinder();
+        onClose();
+      },
+    },
+    {
+      icon: <ExternalLink size={14} />,
+      label: t("contextMenu.openWithDefaultApp"),
+      onClick: () => {
+        onOpenWithDefaultApp();
+        onClose();
+      },
+    },
+    {
+      icon: <Copy size={14} />,
+      label: t("contextMenu.copyPath"),
+      onClick: () => {
+        onCopyPath();
         onClose();
       },
     },
