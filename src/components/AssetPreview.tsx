@@ -9,6 +9,7 @@ import { VideoPlayer } from "./VideoPlayer";
 import { AudioPlayer } from "./AudioPlayer";
 import { ImageLightbox } from "./ImageLightbox";
 import { ModelViewer3D } from "./ModelViewer3D";
+import { ModelLightbox } from "./ModelLightbox";
 
 export function AssetPreview() {
   const { t } = useTranslation();
@@ -19,6 +20,7 @@ export function AssetPreview() {
   const [copiedPath, setCopiedPath] = useState(false);
   const [copiedGuid, setCopiedGuid] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [modelLightboxOpen, setModelLightboxOpen] = useState(false);
   const [showTagPicker, setShowTagPicker] = useState(false);
 
   // Get tags for current asset
@@ -152,7 +154,13 @@ export function AssetPreview() {
     // 3D Model preview with Three.js
     if (selectedAsset.asset_type === "model") {
       if (is3DModel) {
-        return <ModelViewer3D filePath={selectedAsset.path} extension={selectedAsset.extension} />;
+        return (
+          <ModelViewer3D
+            filePath={selectedAsset.path}
+            extension={selectedAsset.extension}
+            onFullscreen={() => setModelLightboxOpen(true)}
+          />
+        );
       }
       // Fallback for unsupported 3D formats
       return (
@@ -448,6 +456,17 @@ export function AssetPreview() {
           imageSrc={`data:image/png;base64,${thumbnail}`}
           imageName={selectedAsset.name}
           onClose={() => setLightboxOpen(false)}
+        />
+      )}
+
+      {/* 3D Model Lightbox */}
+      {is3DModel && (
+        <ModelLightbox
+          isOpen={modelLightboxOpen}
+          filePath={selectedAsset.path}
+          extension={selectedAsset.extension}
+          modelName={selectedAsset.name}
+          onClose={() => setModelLightboxOpen(false)}
         />
       )}
     </div>
