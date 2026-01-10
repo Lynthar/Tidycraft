@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Image, Box, FileText, X, Copy, Check, Maximize2, Plus } from "lucide-react";
+import { Image, Box, FileText, X, Copy, Check, Maximize2, Plus, ExternalLink, FolderOpen } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
 import { useTagsStore } from "../stores/tagsStore";
@@ -72,6 +72,24 @@ export function AssetPreview() {
     }
   };
 
+  const openWithDefaultApp = async () => {
+    if (!selectedAsset) return;
+    try {
+      await invoke("open_with_default_app", { path: selectedAsset.path });
+    } catch (err) {
+      console.error("Failed to open with default app:", err);
+    }
+  };
+
+  const revealInFinder = async () => {
+    if (!selectedAsset) return;
+    try {
+      await invoke("reveal_in_finder", { path: selectedAsset.path });
+    } catch (err) {
+      console.error("Failed to reveal in finder:", err);
+    }
+  };
+
   const getTypeLabel = (type: string): string => {
     const key = `assetTypes.${type}` as const;
     return t(key);
@@ -79,7 +97,7 @@ export function AssetPreview() {
 
   if (!selectedAsset) {
     return (
-      <div className="w-72 bg-card-bg border-l border-border flex flex-col items-center justify-center text-text-secondary p-4">
+      <div className="w-full h-full bg-card-bg border-l border-border flex flex-col items-center justify-center text-text-secondary p-4">
         <FileText size={48} className="opacity-30 mb-2" />
         <p className="text-sm text-center">{t("assetPreview.selectAsset")}</p>
       </div>
@@ -161,16 +179,32 @@ export function AssetPreview() {
   };
 
   return (
-    <div className="w-72 bg-card-bg border-l border-border flex flex-col overflow-hidden">
+    <div className="w-full h-full bg-card-bg border-l border-border flex flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between p-3 border-b border-border">
         <h3 className="font-medium text-sm truncate flex-1">{selectedAsset.name}</h3>
-        <button
-          onClick={() => setSelectedAsset(null)}
-          className="p-1 hover:bg-background rounded text-text-secondary hover:text-text-primary"
-        >
-          <X size={14} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={revealInFinder}
+            className="p-1 hover:bg-background rounded text-text-secondary hover:text-text-primary"
+            title={t("contextMenu.revealInFinder")}
+          >
+            <FolderOpen size={14} />
+          </button>
+          <button
+            onClick={openWithDefaultApp}
+            className="p-1 hover:bg-background rounded text-text-secondary hover:text-text-primary"
+            title={t("assetPreview.openWithDefaultApp")}
+          >
+            <ExternalLink size={14} />
+          </button>
+          <button
+            onClick={() => setSelectedAsset(null)}
+            className="p-1 hover:bg-background rounded text-text-secondary hover:text-text-primary"
+          >
+            <X size={14} />
+          </button>
+        </div>
       </div>
 
       {/* Preview */}

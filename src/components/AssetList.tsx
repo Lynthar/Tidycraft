@@ -7,6 +7,7 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useProjectStore } from "../stores/projectStore";
 import { useTagsStore } from "../stores/tagsStore";
 import { useColumnStore, type ColumnId } from "../stores/columnStore";
+import { useSettingsStore } from "../stores/settingsStore";
 import { cn, formatFileSize } from "../lib/utils";
 import { BatchRenameDialog } from "./BatchRenameDialog";
 import { RenameDialog } from "./RenameDialog";
@@ -70,6 +71,7 @@ interface AssetRowProps {
   typeLabel: string;
   showCheckbox: boolean;
   gitStatus?: GitFileStatus;
+  showGitStatusIndicators: boolean;
   assetTags: Tag[];
   visibleColumns: ColumnId[];
   t: (key: string) => string;
@@ -86,6 +88,7 @@ function AssetRow({
   typeLabel,
   showCheckbox,
   gitStatus,
+  showGitStatusIndicators,
   assetTags,
   visibleColumns,
   t,
@@ -168,7 +171,7 @@ function AssetRow({
         <div className="flex items-center gap-2">
           <AssetIcon type={asset.asset_type} />
           <span className="truncate">{asset.name}</span>
-          {gitStatus && gitStatus !== "unchanged" && <GitStatusBadge status={gitStatus} t={t} />}
+          {showGitStatusIndicators && gitStatus && gitStatus !== "unchanged" && <GitStatusBadge status={gitStatus} t={t} />}
         </div>
       </div>
       {visibleColumns.filter(c => c !== "name").map((columnId) => {
@@ -288,6 +291,7 @@ export function AssetList() {
   } = useProjectStore();
   const { loadTags, assetTags: allAssetTags, tagFilters } = useTagsStore();
   const { columns } = useColumnStore();
+  const { showGitStatusIndicators } = useSettingsStore();
   const parentRef = useRef<HTMLDivElement>(null);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [showBatchRename, setShowBatchRename] = useState(false);
@@ -443,6 +447,16 @@ export function AssetList() {
         await invoke("reveal_in_finder", { path: contextMenu.asset.path });
       } catch (err) {
         console.error("Failed to reveal in finder:", err);
+      }
+    }
+  }, [contextMenu.asset]);
+
+  const handleOpenWithDefaultApp = useCallback(async () => {
+    if (contextMenu.asset) {
+      try {
+        await invoke("open_with_default_app", { path: contextMenu.asset.path });
+      } catch (err) {
+        console.error("Failed to open with default app:", err);
       }
     }
   }, [contextMenu.asset]);
@@ -608,6 +622,7 @@ export function AssetList() {
                   typeLabel={getTypeLabel(asset.asset_type)}
                   showCheckbox={showCheckbox}
                   gitStatus={gitStatus}
+                  showGitStatusIndicators={showGitStatusIndicators}
                   assetTags={assetTags}
                   visibleColumns={visibleColumns}
                   t={t}
@@ -661,6 +676,7 @@ export function AssetList() {
           assetTags={allAssetTags[contextMenu.asset.path] || []}
           onCopyPath={handleCopyPath}
           onRevealInFinder={handleRevealInFinder}
+          onOpenWithDefaultApp={handleOpenWithDefaultApp}
           onRename={handleRename}
           onOpenTagManager={() => setShowTagManager(true)}
         />

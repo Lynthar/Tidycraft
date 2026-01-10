@@ -2,6 +2,11 @@
   "app": {
     "name": "Tidycraft"
   },
+  "projects": {
+    "title": "项目",
+    "addProject": "添加项目",
+    "close": "关闭项目"
+  },
   "header": {
     "openFolder": "打开文件夹",
     "searchPlaceholder": "搜索资产...",
@@ -102,7 +107,8 @@
     "guid": "GUID",
     "copyGuid": "复制 GUID",
     "path": "路径",
-    "copyPath": "复制路径"
+    "copyPath": "复制路径",
+    "openWithDefaultApp": "用默认应用打开"
   },
   "statusBar": {
     "ready": "就绪",
@@ -139,9 +145,17 @@
     "noFilteredIssues": "没有{{filter}}类型的问题"
   },
   "settings": {
+    "title": "设置",
     "language": "语言",
     "english": "英语",
-    "chinese": "中文"
+    "chinese": "中文",
+    "gitSection": "Git",
+    "showBranchInfo": "显示分支信息",
+    "showBranchInfoDesc": "在标题栏显示当前分支名称",
+    "showAheadBehind": "显示领先/落后",
+    "showAheadBehindDesc": "显示与远程仓库的提交差异",
+    "showGitStatusIndicators": "显示文件状态",
+    "showGitStatusIndicatorsDesc": "在文件上显示 Git 状态标记"
   },
   "stats": {
     "noData": "暂无数据",
@@ -199,6 +213,7 @@
     "confirmDelete": "确定要删除此标签吗？"
   },
   "contextMenu": {
+    "openWithDefaultApp": "用默认应用打开",
     "copyPath": "复制路径",
     "revealInFinder": "在 Finder 中显示",
     "rename": "重命名",
@@ -255,6 +270,7 @@
   },
   "common": {
     "cancel": "取消",
-    "undo": "撤销"
+    "undo": "撤销",
+    "done": "完成"
   }
 }
