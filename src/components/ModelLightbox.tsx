@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
@@ -6,16 +6,17 @@ import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
 import { FBXLoader } from "three/addons/loaders/FBXLoader.js";
 import { MTLLoader } from "three/addons/loaders/MTLLoader.js";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { RotateCcw, Box, Maximize2 } from "lucide-react";
+import { X, RotateCcw, Box, Grid3X3, Sun, Moon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-// Supported 3D model formats
 const SUPPORTED_FORMATS = ["gltf", "glb", "fbx", "obj", "dae"];
 
-interface ModelViewer3DProps {
+interface ModelLightboxProps {
+  isOpen: boolean;
   filePath: string;
   extension: string;
-  onFullscreen?: () => void;
+  modelName: string;
+  onClose: () => void;
 }
 
 interface LoadingStats {
@@ -24,7 +25,7 @@ interface LoadingStats {
   meshCount: number;
 }
 
-export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer3DProps) {
+export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose }: ModelLightboxProps) {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -35,13 +36,17 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
   const isMountedRef = useRef(true);
   const mixerRef = useRef<THREE.AnimationMixer | null>(null);
   const clockRef = useRef<THREE.Clock>(new THREE.Clock());
+  const gridRef = useRef<THREE.GridHelper | null>(null);
+  const lightsRef = useRef<THREE.Light[]>([]);
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState<LoadingStats | null>(null);
+  const [showGrid, setShowGrid] = useState(true);
+  const [darkMode, setDarkMode] = useState(true);
 
   // Clean up Three.js resources
-  const cleanup = () => {
+  const cleanup = useCallback(() => {
     isMountedRef.current = false;
     if (animationIdRef.current) {
       cancelAnimationFrame(animationIdRef.current);
@@ -78,9 +83,11 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
       sceneRef.current = null;
     }
     cameraRef.current = null;
-  };
+    gridRef.current = null;
+    lightsRef.current = [];
+  }, []);
 
-  // Fix materials for models that lack proper materials
+  // Fix materials for models
   const fixMaterials = (object: THREE.Object3D): { meshCount: number; vertexCount: number } => {
     let meshCount = 0;
     let vertexCount = 0;
@@ -89,7 +96,6 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
       if (child instanceof THREE.Mesh) {
         meshCount++;
 
-        // Count vertices
         if (child.geometry) {
           const posAttr = child.geometry.getAttribute("position");
           if (posAttr) {
@@ -97,7 +103,6 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
           }
         }
 
-        // Ensure mesh has valid material
         const ensureMaterial = (mat: THREE.Material | null): THREE.Material => {
           if (!mat) {
             return new THREE.MeshStandardMaterial({
@@ -108,7 +113,6 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
             });
           }
 
-          // Fix invisible materials - MeshBasicMaterial without texture
           if (mat instanceof THREE.MeshBasicMaterial && !mat.map) {
             return new THREE.MeshStandardMaterial({
               color: mat.color || 0x888888,
@@ -118,9 +122,8 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
             });
           }
 
-          // Convert MeshPhongMaterial (common in FBX) to MeshStandardMaterial for better rendering
           if (mat instanceof THREE.MeshPhongMaterial) {
-            const stdMat = new THREE.MeshStandardMaterial({
+            return new THREE.MeshStandardMaterial({
               color: mat.color || 0x888888,
               map: mat.map,
               normalMap: mat.normalMap,
@@ -128,10 +131,8 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
               roughness: 0.7,
               side: THREE.DoubleSide,
             });
-            return stdMat;
           }
 
-          // Convert MeshLambertMaterial to MeshStandardMaterial
           if (mat instanceof THREE.MeshLambertMaterial) {
             return new THREE.MeshStandardMaterial({
               color: mat.color || 0x888888,
@@ -142,13 +143,11 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
             });
           }
 
-          // Fix transparent materials with zero opacity
           if (mat.transparent && mat.opacity === 0) {
             mat.opacity = 1;
             mat.transparent = false;
           }
 
-          // Show both sides
           mat.side = THREE.DoubleSide;
           mat.needsUpdate = true;
 
@@ -169,7 +168,7 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
     return { meshCount, vertexCount };
   };
 
-  // Setup animations if available
+  // Setup animations
   const setupAnimations = (object: THREE.Object3D): THREE.AnimationMixer | null => {
     const animations = (object as THREE.Object3D & { animations?: THREE.AnimationClip[] }).animations;
     if (!animations || animations.length === 0) {
@@ -186,12 +185,61 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
     return mixer;
   };
 
+  // Handle keyboard events
   useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      switch (e.key) {
+        case "Escape":
+          onClose();
+          break;
+        case "g":
+        case "G":
+          setShowGrid((prev) => !prev);
+          break;
+        case "l":
+        case "L":
+          setDarkMode((prev) => !prev);
+          break;
+        case "r":
+        case "R":
+          resetCamera();
+          break;
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
+
+  // Toggle grid visibility
+  useEffect(() => {
+    if (gridRef.current) {
+      gridRef.current.visible = showGrid;
+    }
+  }, [showGrid]);
+
+  // Toggle dark/light mode
+  useEffect(() => {
+    if (sceneRef.current) {
+      sceneRef.current.background = new THREE.Color(darkMode ? 0x1a1a1a : 0xf0f0f0);
+    }
+    if (gridRef.current) {
+      gridRef.current.material.opacity = darkMode ? 0.3 : 0.5;
+    }
+  }, [darkMode]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      cleanup();
+      return;
+    }
+
     isMountedRef.current = true;
 
     if (!containerRef.current) return;
 
-    // Cleanup previous instance
     cleanup();
     isMountedRef.current = true;
 
@@ -199,25 +247,27 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
     setError(null);
 
     const container = containerRef.current;
-    const width = container.clientWidth || 250;
-    const height = container.clientHeight || 250;
+    const width = container.clientWidth || window.innerWidth;
+    const height = container.clientHeight || window.innerHeight - 120;
 
     // Create scene
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x1a1a1a);
+    scene.background = new THREE.Color(darkMode ? 0x1a1a1a : 0xf0f0f0);
     sceneRef.current = scene;
 
     // Create camera
     const camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 1000);
-    camera.position.set(2, 2, 2);
+    camera.position.set(3, 3, 3);
     cameraRef.current = camera;
 
-    // Create renderer with error handling
+    // Create renderer
     let renderer: THREE.WebGLRenderer;
     try {
       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
       renderer.setSize(width, height);
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       container.appendChild(renderer.domElement);
       rendererRef.current = renderer;
     } catch (err) {
@@ -233,110 +283,65 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
     controls.dampingFactor = 0.05;
     controls.enableZoom = true;
     controls.enablePan = true;
+    controls.minDistance = 0.5;
+    controls.maxDistance = 50;
     controlsRef.current = controls;
 
     // Add lights
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(ambientLight);
+    lightsRef.current.push(ambientLight);
 
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2);
     directionalLight.position.set(5, 10, 7.5);
+    directionalLight.castShadow = true;
+    directionalLight.shadow.mapSize.width = 2048;
+    directionalLight.shadow.mapSize.height = 2048;
     scene.add(directionalLight);
+    lightsRef.current.push(directionalLight);
 
-    const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.5);
+    const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.4);
     directionalLight2.position.set(-5, -5, -5);
     scene.add(directionalLight2);
+    lightsRef.current.push(directionalLight2);
+
+    const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
+    fillLight.position.set(0, -5, 0);
+    scene.add(fillLight);
+    lightsRef.current.push(fillLight);
 
     // Add grid helper
-    const gridHelper = new THREE.GridHelper(10, 10, 0x444444, 0x333333);
+    const gridHelper = new THREE.GridHelper(20, 20, 0x444444, 0x333333);
+    gridHelper.material.opacity = darkMode ? 0.3 : 0.5;
+    gridHelper.material.transparent = true;
+    gridHelper.visible = showGrid;
     scene.add(gridHelper);
+    gridRef.current = gridHelper;
 
-    // Load model based on extension
+    // Load model
     const modelUrl = convertFileSrc(filePath);
     const ext = extension.toLowerCase();
-
-    // Calculate resource path for textures (model's directory converted to asset:// URL)
     const modelDir = filePath.substring(0, filePath.lastIndexOf('/') + 1);
-    // Note: convertFileSrc already returns path without trailing slash, we need to add one
-    // so texture paths like "texture.png" become "asset://path/to/dir/texture.png"
     const resourcePath = convertFileSrc(modelDir);
 
-    console.log(`[ModelViewer3D] Loading ${ext.toUpperCase()} model from: ${modelUrl}`);
-    console.log(`[ModelViewer3D] Model directory: ${modelDir}`);
-    console.log(`[ModelViewer3D] Resource path for textures: ${resourcePath}`);
-
-    // Create a custom LoadingManager with URL modifier
     const loadingManager = new THREE.LoadingManager();
     loadingManager.setURLModifier((url: string) => {
-      console.log(`[ModelViewer3D] LoadingManager URL modifier called with: ${url}`);
-
-      // If already an asset:// URL, return as-is
       if (url.startsWith('asset://') || url.startsWith('data:') || url.startsWith('blob:')) {
         return url;
       }
-
-      // Handle http/https URLs (external textures) - return as-is
       if (url.startsWith('http://') || url.startsWith('https://')) {
         return url;
       }
-
-      // Handle absolute paths (from FBX/OBJ files)
       if (url.startsWith('/')) {
-        const converted = convertFileSrc(url);
-        console.log(`[ModelViewer3D] Converting absolute path: ${url} -> ${converted}`);
-        return converted;
+        return convertFileSrc(url);
       }
-
-      // Handle relative paths - resolve relative to model directory
-      // Extract just the filename in case the path has directories we don't have
       const filename = url.split('/').pop() || url;
-      const fullPath = modelDir + filename;
-      const converted = convertFileSrc(fullPath);
-      console.log(`[ModelViewer3D] Converting relative path: ${url} -> ${converted}`);
-      return converted;
+      return convertFileSrc(modelDir + filename);
     });
-
-    // Create a URL converter function for textures
-    const convertTextureUrl = (url: string): string => {
-      if (!url) return url;
-
-      // If already an asset:// URL, return as-is
-      if (url.startsWith('asset://') || url.startsWith('data:') || url.startsWith('blob:')) {
-        return url;
-      }
-
-      // Handle http/https URLs (external textures) - return as-is
-      if (url.startsWith('http://') || url.startsWith('https://')) {
-        return url;
-      }
-
-      // Handle absolute paths
-      if (url.startsWith('/')) {
-        const converted = convertFileSrc(url);
-        console.log(`[ModelViewer3D] Converting absolute texture path: ${url} -> ${converted}`);
-        return converted;
-      }
-
-      // Handle relative paths - extract filename and resolve relative to model directory
-      const filename = url.split(/[/\\]/).pop() || url;
-      const fullPath = modelDir + filename;
-      const converted = convertFileSrc(fullPath);
-      console.log(`[ModelViewer3D] Converting relative texture path: ${url} -> ${converted}`);
-      return converted;
-    };
-
-    // Override LoadingManager's resolveURL to intercept all URL resolutions
-    loadingManager.resolveURL = (url: string): string => {
-      console.log(`[ModelViewer3D] resolveURL called with: ${url}`);
-      return convertTextureUrl(url);
-    };
 
     const onLoad = (object: THREE.Object3D) => {
       if (!isMountedRef.current) return;
 
-      console.log(`[ModelViewer3D] Model loaded successfully:`, object);
-
-      // Fix materials and get stats
       const modelStats = fixMaterials(object);
 
       // Center the model
@@ -349,19 +354,18 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
       // Scale to fit
       const maxDim = Math.max(size.x, size.y, size.z);
       if (maxDim > 0) {
-        const scale = 2 / maxDim;
+        const scale = 3 / maxDim;
         object.scale.multiplyScalar(scale);
       }
 
       scene.add(object);
 
-      // Setup animations if available
+      // Setup animations
       const mixer = setupAnimations(object);
       if (mixer) {
         mixerRef.current = mixer;
       }
 
-      // Set stats
       setStats({
         format: ext.toUpperCase(),
         vertexCount: modelStats.vertexCount,
@@ -373,14 +377,9 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
 
     const onError = (err: unknown) => {
       if (!isMountedRef.current) return;
-      console.error(`[ModelViewer3D] Failed to load ${ext.toUpperCase()} model:`, {
-        filePath,
-        modelUrl,
-        error: err,
-      });
+      console.error("Failed to load model:", err);
       const message = err instanceof Error ? err.message : String(err);
 
-      // Provide more helpful error messages
       if (message.includes("404") || message.includes("not found")) {
         setError(t("modelViewer.fileNotFound", "File not found"));
       } else if (message.includes("parse") || message.includes("invalid")) {
@@ -392,21 +391,15 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
     };
 
     if (!SUPPORTED_FORMATS.includes(ext)) {
-      setError(t("modelViewer.unsupportedFormat", `Format .${ext} not supported. Use GLTF, GLB, FBX, or OBJ.`));
+      setError(t("modelViewer.unsupportedFormat", `Format .${ext} not supported`));
       setIsLoading(false);
     } else {
       try {
         if (ext === "gltf" || ext === "glb") {
           const loader = new GLTFLoader(loadingManager);
           loader.setResourcePath(resourcePath);
-          loader.load(
-            modelUrl,
-            (gltf) => onLoad(gltf.scene),
-            undefined,
-            onError
-          );
+          loader.load(modelUrl, (gltf) => onLoad(gltf.scene), undefined, onError);
         } else if (ext === "obj") {
-          // Try to load MTL file if it exists (same name, .mtl extension)
           const mtlPath = filePath.replace(/\.obj$/i, ".mtl");
           const mtlUrl = convertFileSrc(mtlPath);
 
@@ -422,7 +415,6 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
             },
             undefined,
             () => {
-              // MTL failed, load OBJ without materials
               const objLoader = new OBJLoader(loadingManager);
               objLoader.load(modelUrl, onLoad, undefined, onError);
             }
@@ -432,16 +424,10 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
           loader.setResourcePath(resourcePath);
           loader.load(modelUrl, onLoad, undefined, onError);
         } else if (ext === "dae") {
-          // COLLADA support - use dynamic import to avoid loading if not needed
           import("three/addons/loaders/ColladaLoader.js").then(({ ColladaLoader }) => {
             const loader = new ColladaLoader(loadingManager);
             loader.setResourcePath(resourcePath);
-            loader.load(
-              modelUrl,
-              (collada) => onLoad(collada.scene),
-              undefined,
-              onError
-            );
+            loader.load(modelUrl, (collada) => onLoad(collada.scene), undefined, onError);
           }).catch(onError);
         }
       } catch (err) {
@@ -454,7 +440,6 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
       if (!isMountedRef.current) return;
       animationIdRef.current = requestAnimationFrame(animate);
 
-      // Update animation mixer if present
       if (mixerRef.current) {
         const delta = clockRef.current.getDelta();
         mixerRef.current.update(delta);
@@ -472,8 +457,8 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
     // Handle resize
     const handleResize = () => {
       if (!containerRef.current || !cameraRef.current || !rendererRef.current) return;
-      const newWidth = containerRef.current.clientWidth || 250;
-      const newHeight = containerRef.current.clientHeight || 250;
+      const newWidth = containerRef.current.clientWidth || window.innerWidth;
+      const newHeight = containerRef.current.clientHeight || window.innerHeight - 120;
       cameraRef.current.aspect = newWidth / newHeight;
       cameraRef.current.updateProjectionMatrix();
       rendererRef.current.setSize(newWidth, newHeight);
@@ -485,65 +470,85 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
       window.removeEventListener("resize", handleResize);
       cleanup();
     };
-  }, [filePath, extension, t]);
+  }, [isOpen, filePath, extension, t, cleanup, darkMode, showGrid]);
 
   const resetCamera = () => {
     if (cameraRef.current && controlsRef.current) {
-      cameraRef.current.position.set(2, 2, 2);
+      cameraRef.current.position.set(3, 3, 3);
       controlsRef.current.reset();
     }
   };
 
+  if (!isOpen) return null;
+
   return (
-    <div className="w-full bg-background rounded overflow-hidden">
+    <div className="fixed inset-0 z-50 bg-black/95 flex flex-col">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 bg-black/50 text-white">
+        <span className="text-sm font-medium truncate flex-1">{modelName}</span>
+        <div className="flex items-center gap-1">
+          {stats && (
+            <span className="text-xs text-white/60 mr-4">
+              {stats.format} • {(stats.vertexCount / 1000).toFixed(1)}K vertices • {stats.meshCount} meshes
+            </span>
+          )}
+          <button
+            onClick={() => setShowGrid(!showGrid)}
+            className={`p-2 rounded transition-colors ${showGrid ? 'bg-white/20' : 'hover:bg-white/10'}`}
+            title="Toggle grid (G)"
+          >
+            <Grid3X3 size={18} />
+          </button>
+          <button
+            onClick={() => setDarkMode(!darkMode)}
+            className="p-2 rounded hover:bg-white/10 transition-colors"
+            title="Toggle background (L)"
+          >
+            {darkMode ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
+          <button
+            onClick={resetCamera}
+            className="p-2 rounded hover:bg-white/10 transition-colors"
+            title="Reset view (R)"
+          >
+            <RotateCcw size={18} />
+          </button>
+          <button
+            onClick={onClose}
+            className="p-2 rounded hover:bg-white/10 transition-colors ml-2"
+            title="Close (Esc)"
+          >
+            <X size={18} />
+          </button>
+        </div>
+      </div>
+
+      {/* 3D Viewer Container */}
       <div
         ref={containerRef}
-        className="w-full aspect-square relative"
+        className="flex-1 overflow-hidden relative"
       >
         {isLoading && (
           <div className="absolute inset-0 flex items-center justify-center bg-[#1a1a1a] z-10">
-            <div className="text-center text-text-secondary">
-              <Box size={32} className="mx-auto mb-2 animate-pulse text-blue-400" />
+            <div className="text-center text-white/70">
+              <Box size={48} className="mx-auto mb-3 animate-pulse text-blue-400" />
               <span className="text-sm">{t("modelViewer.loading", "Loading model...")}</span>
             </div>
           </div>
         )}
         {error && (
           <div className="absolute inset-0 flex items-center justify-center bg-[#1a1a1a] z-10">
-            <div className="text-center text-error px-4">
-              <Box size={32} className="mx-auto mb-2 opacity-50" />
+            <div className="text-center text-red-400 px-4">
+              <Box size={48} className="mx-auto mb-3 opacity-50" />
               <span className="text-sm">{error}</span>
             </div>
           </div>
         )}
       </div>
-      <div className="p-2 flex items-center justify-between border-t border-border">
-        <div className="text-xs text-text-secondary space-y-0.5">
-          <div>{t("modelViewer.controls", "Drag to rotate • Scroll to zoom")}</div>
-          {stats && (
-            <div className="text-[10px] text-text-secondary/70">
-              {stats.format} • {(stats.vertexCount / 1000).toFixed(1)}K vertices • {stats.meshCount} meshes
-            </div>
-          )}
-        </div>
-        <div className="flex items-center gap-1">
-          {onFullscreen && (
-            <button
-              onClick={onFullscreen}
-              className="p-1 rounded hover:bg-card-bg text-text-secondary hover:text-text-primary transition-colors"
-              title={t("modelViewer.fullscreen", "Fullscreen")}
-            >
-              <Maximize2 size={14} />
-            </button>
-          )}
-          <button
-            onClick={resetCamera}
-            className="p-1 rounded hover:bg-card-bg text-text-secondary hover:text-text-primary transition-colors"
-            title={t("modelViewer.reset", "Reset view")}
-          >
-            <RotateCcw size={14} />
-          </button>
-        </div>
+
+      {/* Footer hint */}
+      <div className="text-center py-2 text-white/50 text-xs">
+        {t("modelViewer.fullscreenHint", "Drag to rotate • Scroll to zoom • Right-click to pan • G for grid • L for light • Esc to close")}
       </div>
     </div>
   );
