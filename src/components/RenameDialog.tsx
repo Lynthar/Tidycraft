@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { X, AlertCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
+import { useProjectStore } from "../stores/projectStore";
 
 interface RenameDialogProps {
   isOpen: boolean;
@@ -19,6 +20,7 @@ export function RenameDialog({
   onComplete,
 }: RenameDialogProps) {
   const { t } = useTranslation();
+  const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const [newName, setNewName] = useState(currentName);
   const [isRenaming, setIsRenaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,9 +66,16 @@ export function RenameDialog({
     setIsRenaming(true);
     setError(null);
 
+    if (!activeProjectId) {
+      setError(t("rename.noProject", "No active project"));
+      setIsRenaming(false);
+      return;
+    }
+
     try {
       const newFullName = trimmedName + extension;
       await invoke("rename_file", {
+        projectId: activeProjectId,
         oldPath: assetPath,
         newName: newFullName,
       });

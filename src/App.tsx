@@ -22,6 +22,7 @@ function App() {
     runAnalysis,
     locateAsset,
     getProjectList,
+    activeProjectId,
   } = useProjectStore();
 
   const projects = getProjectList();
@@ -38,8 +39,9 @@ function App() {
   const showPreview = scanResult && selectedAsset && viewMode === "assets";
 
   const handleExportJson = async () => {
+    if (!activeProjectId) return;
     try {
-      const json = await invoke<string>("export_to_json");
+      const json = await invoke<string>("export_to_json", { projectId: activeProjectId });
       const blob = new Blob([json], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -53,8 +55,9 @@ function App() {
   };
 
   const handleExportCsv = async () => {
+    if (!activeProjectId) return;
     try {
-      const csv = await invoke<string>("export_to_csv");
+      const csv = await invoke<string>("export_to_csv", { projectId: activeProjectId });
       const blob = new Blob([csv], { type: "text/csv" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -68,8 +71,9 @@ function App() {
   };
 
   const handleExportHtml = async () => {
+    if (!activeProjectId) return;
     try {
-      const html = await invoke<string>("export_to_html");
+      const html = await invoke<string>("export_to_html", { projectId: activeProjectId });
       const blob = new Blob([html], { type: "text/html" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");

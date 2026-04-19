@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import type { Tag, AssetTagsMap } from "../types/asset";
+import { useProjectStore } from "./projectStore";
 
 interface TagsState {
   // State
@@ -12,7 +13,7 @@ interface TagsState {
 
   // Actions
   loadTags: () => Promise<void>;
-  createTag: (name: string, color: string) => Promise<Tag>;
+  createTag: (name: string, color: string) => Promise<Tag | null>;
   updateTag: (tagId: string, name?: string, color?: string) => Promise<void>;
   deleteTag: (tagId: string) => Promise<void>;
   addTagToAsset: (assetPath: string, tagId: string) => Promise<void>;
@@ -24,6 +25,11 @@ interface TagsState {
   getAssetTags: (assetPath: string) => Tag[];
 }
 
+// Tags are scoped to the currently active project on the backend; this store
+// mirrors that project's tags. Switching projects means re-loading.
+const activeProjectId = (): string | null =>
+  useProjectStore.getState().activeProjectId;
+
 export const useTagsStore = create<TagsState>((set, get) => ({
   tags: [],
   assetTags: {},
@@ -32,11 +38,16 @@ export const useTagsStore = create<TagsState>((set, get) => ({
   tagFilters: [],
 
   loadTags: async () => {
+    const projectId = activeProjectId();
+    if (!projectId) {
+      set({ tags: [], assetTags: {}, isLoading: false });
+      return;
+    }
     set({ isLoading: true });
     try {
       const [tags, assetTags] = await Promise.all([
-        invoke<Tag[]>("get_all_tags"),
-        invoke<AssetTagsMap>("get_all_asset_tags"),
+        invoke<Tag[]>("get_all_tags", { projectId }),
+        invoke<AssetTagsMap>("get_all_asset_tags", { projectId }),
       ]);
       set({ tags, assetTags, isLoading: false });
     } catch (err) {
@@ -46,13 +57,17 @@ export const useTagsStore = create<TagsState>((set, get) => ({
   },
 
   createTag: async (name: string, color: string) => {
-    const tag = await invoke<Tag>("create_tag", { name, color });
+    const projectId = activeProjectId();
+    if (!projectId) return null;
+    const tag = await invoke<Tag>("create_tag", { projectId, name, color });
     set((state) => ({ tags: [...state.tags, tag] }));
     return tag;
   },
 
   updateTag: async (tagId: string, name?: string, color?: string) => {
-    await invoke<Tag>("update_tag", { tagId, name, color });
+    const projectId = activeProjectId();
+    if (!projectId) return;
+    await invoke<Tag>("update_tag", { projectId, tagId, name, color });
     set((state) => ({
       tags: state.tags.map((t) =>
         t.id === tagId
@@ -63,7 +78,9 @@ export const useTagsStore = create<TagsState>((set, get) => ({
   },
 
   deleteTag: async (tagId: string) => {
-    await invoke("delete_tag", { tagId });
+    const projectId = activeProjectId();
+    if (!projectId) return;
+    await invoke("delete_tag", { projectId, tagId });
     set((state) => ({
       tags: state.tags.filter((t) => t.id !== tagId),
       assetTags: Object.fromEntries(
@@ -76,7 +93,9 @@ export const useTagsStore = create<TagsState>((set, get) => ({
   },
 
   addTagToAsset: async (assetPath: string, tagId: string) => {
-    await invoke("add_tag_to_asset", { assetPath, tagId });
+    const projectId = activeProjectId();
+    if (!projectId) return;
+    await invoke("add_tag_to_asset", { projectId, assetPath, tagId });
     const { tags, assetTags } = get();
     const tag = tags.find((t) => t.id === tagId);
     if (tag) {
@@ -93,7 +112,9 @@ export const useTagsStore = create<TagsState>((set, get) => ({
   },
 
   removeTagFromAsset: async (assetPath: string, tagId: string) => {
-    await invoke("remove_tag_from_asset", { assetPath, tagId });
+    const projectId = activeProjectId();
+    if (!projectId) return;
+    await invoke("remove_tag_from_asset", { projectId, assetPath, tagId });
     const { assetTags } = get();
     set({
       assetTags: {
@@ -104,7 +125,9 @@ export const useTagsStore = create<TagsState>((set, get) => ({
   },
 
   addTagToAssets: async (assetPaths: string[], tagId: string) => {
-    await invoke("add_tag_to_assets", { assetPaths, tagId });
+    const projectId = activeProjectId();
+    if (!projectId) return;
+    await invoke("add_tag_to_assets", { projectId, assetPaths, tagId });
     const { tags, assetTags } = get();
     const tag = tags.find((t) => t.id === tagId);
     if (tag) {
@@ -151,3 +174,10 @@ export const useTagsStore = create<TagsState>((set, get) => ({
     return get().assetTags[assetPath] || [];
   },
 }));
+
+// Re-load tags whenever the active project changes.
+useProjectStore.subscribe((state, prev) => {
+  if (state.activeProjectId !== prev.activeProjectId) {
+    useTagsStore.getState().loadTags();
+  }
+});

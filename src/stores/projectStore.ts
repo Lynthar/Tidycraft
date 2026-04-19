@@ -291,44 +291,76 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     let unlisten: UnlistenFn | null = null;
 
     try {
-      // Listen for progress events
-      unlisten = await listen<ScanProgress>("scan-progress", (event) => {
-        const currentProject = get().projects.get(projectId);
-        if (currentProject) {
-          set(updateActiveProject(get(), { scanProgress: event.payload }));
+      // Register the project with the backend so it gets its own state slot.
+      await invoke("register_project", { projectId, path });
+
+      // Listen for this project's scan progress events.
+      unlisten = await listen<ScanProgress>(`scan-progress-${projectId}`, (event) => {
+        // Update progress against the project that owns this scan, even if
+        // the user has switched the active project mid-scan.
+        const state = get();
+        const target = state.projects.get(projectId);
+        if (!target) return;
+        const updated = { ...target, scanProgress: event.payload };
+        const newMap = new Map(state.projects);
+        newMap.set(projectId, updated);
+        const patch: Partial<ProjectState> = { projects: newMap };
+        if (state.activeProjectId === projectId) {
+          patch.scanProgress = event.payload;
         }
+        set(patch);
       });
 
       // Use incremental scan command
       const { result } = await invoke<{ result: ScanResult; stats: { cached_files: number; rescanned_files: number } }>(
         "scan_project_incremental",
-        { path }
+        { projectId, path }
       );
 
-      set(updateActiveProject(get(), {
-        scanResult: result,
-        isScanning: false,
-        selectedDirectory: path,
-        selectedAsset: null,
-        scanProgress: null,
-      }));
+      // Apply scan result to the project that owns it (not necessarily active).
+      const state = get();
+      const target = state.projects.get(projectId);
+      if (target) {
+        const updated = {
+          ...target,
+          scanResult: result,
+          isScanning: false,
+          selectedDirectory: path,
+          selectedAsset: null,
+          scanProgress: null,
+        };
+        const newMap = new Map(state.projects);
+        newMap.set(projectId, updated);
+        const patch: Partial<ProjectState> = { projects: newMap };
+        if (state.activeProjectId === projectId) {
+          Object.assign(patch, syncFromActiveProject(updated));
+        }
+        set(patch);
+      }
 
-      // Fetch git info after scan
-      get().refreshGitInfo();
+      // Fetch git info if this is still the active project.
+      if (get().activeProjectId === projectId) {
+        get().refreshGitInfo();
+      }
     } catch (err) {
       const errorMessage = String(err);
-      if (!errorMessage.includes("cancelled")) {
-        set(updateActiveProject(get(), {
-          error: errorMessage,
-          isScanning: false,
-          scanProgress: null,
-        }));
-      } else {
-        set(updateActiveProject(get(), {
-          isScanning: false,
-          scanProgress: null,
-        }));
+      const state = get();
+      const target = state.projects.get(projectId);
+      if (!target) return;
+      const isCancelled = errorMessage.includes("cancelled");
+      const updated = {
+        ...target,
+        isScanning: false,
+        scanProgress: null,
+        error: isCancelled ? null : errorMessage,
+      };
+      const newMap = new Map(state.projects);
+      newMap.set(projectId, updated);
+      const patch: Partial<ProjectState> = { projects: newMap };
+      if (state.activeProjectId === projectId) {
+        Object.assign(patch, syncFromActiveProject(updated));
       }
+      set(patch);
     } finally {
       if (unlisten) {
         unlisten();
@@ -341,6 +373,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const idToClose = projectId || activeProjectId;
 
     if (!idToClose) return;
+
+    // Tell the backend to drop its state for this project (best-effort).
+    invoke("unregister_project", { projectId: idToClose }).catch((err) => {
+      console.error("Failed to unregister project:", err);
+    });
 
     const newProjects = new Map(projects);
     newProjects.delete(idToClose);
@@ -386,18 +423,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   // Active project actions
   cancelScan: async () => {
+    const { activeProjectId } = get();
+    if (!activeProjectId) return;
     try {
-      await invoke("cancel_scan");
+      await invoke("cancel_scan", { projectId: activeProjectId });
     } catch (err) {
       console.error("Failed to cancel scan:", err);
     }
   },
 
   runAnalysis: async () => {
+    const { activeProjectId } = get();
+    if (!activeProjectId) return;
     set(updateActiveProject(get(), { isAnalyzing: true }));
 
     try {
       const result = await invoke<AnalysisResult>("analyze_assets", {
+        projectId: activeProjectId,
         configToml: null,
       });
       set(updateActiveProject(get(), {
@@ -482,12 +524,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }));
   },
 
-  // Undo actions
+  // Undo actions (scoped to active project)
   undoLastOperation: async () => {
+    const { activeProjectId } = get();
+    if (!activeProjectId) return null;
     try {
-      const result = await invoke<UndoResult>("undo_last_operation");
-      const canUndo = await invoke<boolean>("can_undo");
-      const history = await invoke<HistoryEntry[]>("get_undo_history");
+      const result = await invoke<UndoResult>("undo_last_operation", { projectId: activeProjectId });
+      const canUndo = await invoke<boolean>("can_undo", { projectId: activeProjectId });
+      const history = await invoke<HistoryEntry[]>("get_undo_history", { projectId: activeProjectId });
       set({ canUndo, undoHistory: history });
       return result;
     } catch (err) {
@@ -497,9 +541,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   refreshUndoState: async () => {
+    const { activeProjectId } = get();
+    if (!activeProjectId) {
+      set({ canUndo: false, undoHistory: [] });
+      return;
+    }
     try {
-      const canUndo = await invoke<boolean>("can_undo");
-      const history = await invoke<HistoryEntry[]>("get_undo_history");
+      const canUndo = await invoke<boolean>("can_undo", { projectId: activeProjectId });
+      const history = await invoke<HistoryEntry[]>("get_undo_history", { projectId: activeProjectId });
       set({ canUndo, undoHistory: history });
     } catch (err) {
       console.error("Failed to refresh undo state:", err);
@@ -507,8 +556,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   clearUndoHistory: async () => {
+    const { activeProjectId } = get();
+    if (!activeProjectId) return;
     try {
-      await invoke("clear_undo_history");
+      await invoke("clear_undo_history", { projectId: activeProjectId });
       set({ canUndo: false, undoHistory: [] });
     } catch (err) {
       console.error("Failed to clear undo history:", err);
@@ -517,18 +568,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   // Git actions
   refreshGitInfo: async () => {
-    const { projectPath } = get();
-    if (!projectPath) {
+    const { activeProjectId, projectPath } = get();
+    if (!activeProjectId || !projectPath) {
       set(updateActiveProject(get(), { gitInfo: null, gitStatuses: {} }));
       return;
     }
 
     try {
-      const gitInfo = await invoke<GitInfo>("get_git_info", { path: projectPath });
+      const gitInfo = await invoke<GitInfo>("get_git_info", {
+        projectId: activeProjectId,
+        path: projectPath,
+      });
       set(updateActiveProject(get(), { gitInfo }));
 
       if (gitInfo.is_repo) {
-        const response = await invoke<{ statuses: GitStatusMap }>("get_git_statuses");
+        const response = await invoke<{ statuses: GitStatusMap }>("get_git_statuses", {
+          projectId: activeProjectId,
+        });
         set(updateActiveProject(get(), { gitStatuses: response.statuses }));
       } else {
         set(updateActiveProject(get(), { gitStatuses: {} }));

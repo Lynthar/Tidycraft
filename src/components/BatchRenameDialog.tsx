@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { X, RefreshCw, Check, AlertCircle } from "lucide-react";
+import { useProjectStore } from "../stores/projectStore";
 
 type RenameOperationType =
   | "FindReplace"
@@ -40,6 +41,7 @@ export function BatchRenameDialog({
   onComplete,
 }: BatchRenameDialogProps) {
   const { t } = useTranslation();
+  const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const [operationType, setOperationType] = useState<RenameOperationType>("FindReplace");
   const [findText, setFindText] = useState("");
   const [replaceText, setReplaceText] = useState("");
@@ -94,12 +96,17 @@ export function BatchRenameDialog({
   }, [isOpen, selectedPaths, operationType, findText, replaceText, prefixSuffix]);
 
   const handleExecute = async () => {
+    if (!activeProjectId) {
+      setError("No active project");
+      return;
+    }
     setIsLoading(true);
     setError(null);
 
     try {
       const operation = buildOperation();
       const result = await invoke<BatchRenameResult>("execute_batch_rename", {
+        projectId: activeProjectId,
         paths: selectedPaths,
         operation,
       });
