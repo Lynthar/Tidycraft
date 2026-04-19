@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
+import { useProjectStore } from "../stores/projectStore";
 import {
   PieChart,
   Pie,
@@ -56,15 +57,23 @@ interface StatsDashboardProps {
 
 export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, onExportCsv, onExportHtml }: StatsDashboardProps) {
   const { t } = useTranslation();
+  const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const [stats, setStats] = useState<ProjectStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!activeProjectId) {
+      setStats(null);
+      setLoading(false);
+      return;
+    }
     const loadStats = async () => {
       try {
         setLoading(true);
-        const result = await invoke<ProjectStats>("get_project_stats");
+        const result = await invoke<ProjectStats>("get_project_stats", {
+          projectId: activeProjectId,
+        });
         setStats(result);
         setError(null);
       } catch (err) {
@@ -75,7 +84,7 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
     };
 
     loadStats();
-  }, []);
+  }, [activeProjectId]);
 
   if (loading) {
     return (

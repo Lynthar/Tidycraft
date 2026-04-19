@@ -2,6 +2,7 @@ mod analyzer;
 mod cache;
 mod git;
 mod godot;
+mod project;
 mod scanner;
 mod tags;
 mod thumbnail;
@@ -9,11 +10,10 @@ mod undo;
 mod unity;
 mod unreal;
 
-use analyzer::{AnalysisResult, Analyzer};
 use analyzer::rules::RuleConfig;
+use analyzer::{AnalysisResult, Analyzer};
 use cache::ScanCache;
 use git::{GitInfo, GitManager};
-use parking_lot::Mutex;
 use scanner::{IncrementalStats, ScanProgress, ScanResult, ScanState};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -23,112 +23,117 @@ use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 
-// Global scan state for cancellation
-static SCAN_STATE: Mutex<Option<Arc<ScanState>>> = Mutex::new(None);
-
-// Global cached scan result for analysis
-static CACHED_SCAN: Mutex<Option<ScanResult>> = Mutex::new(None);
-
-// Global Git manager
-static GIT_MANAGER: Mutex<Option<GitManager>> = Mutex::new(None);
-
-// Global undo manager
-static UNDO_MANAGER: Mutex<undo::UndoManager> = Mutex::new(undo::UndoManager::new(50));
-
-// Global tags data
-static TAGS_DATA: Mutex<Option<(String, tags::TagsData)>> = Mutex::new(None);
+// ============ Project Lifecycle ============
 
 #[tauri::command]
-fn scan_project(path: String) -> Result<ScanResult, String> {
-    // Simple synchronous scan without progress tracking
+fn register_project(project_id: String, path: String) -> Result<(), String> {
+    project::register(project_id, path);
+    Ok(())
+}
+
+#[tauri::command]
+fn unregister_project(project_id: String) -> Result<(), String> {
+    project::unregister(&project_id);
+    Ok(())
+}
+
+// ============ Scan Commands ============
+
+#[tauri::command]
+fn scan_project(project_id: String, path: String) -> Result<ScanResult, String> {
+    project::register(project_id.clone(), path.clone());
+
     let result = scanner::scan_directory_with_state(&path, None).map_err(|e| e.to_string())?;
 
-    // Cache the result
-    {
-        let mut cache = CACHED_SCAN.lock();
-        *cache = Some(result.clone());
-    }
+    project::with_mut(&project_id, |state| {
+        state.cached_scan = Some(result.clone());
+        Ok(())
+    })?;
 
     Ok(result)
 }
 
-#[tauri::command]
-async fn scan_project_async(app: AppHandle, path: String) -> Result<ScanResult, String> {
-    // Create new scan state
-    let state = Arc::new(ScanState::new());
+/// Spawn a background thread that emits `scan-progress-{project_id}` events
+/// every 100ms until the scan reaches a terminal phase.
+fn spawn_progress_reporter(
+    app: AppHandle,
+    project_id: String,
+    state: Arc<ScanState>,
+) -> thread::JoinHandle<()> {
+    let event_name = format!("scan-progress-{}", project_id);
+    thread::spawn(move || loop {
+        let progress = state.get_progress();
+        let is_done = matches!(
+            progress.phase,
+            scanner::ScanPhase::Completed | scanner::ScanPhase::Cancelled
+        );
 
-    // Store state for cancellation
-    {
-        let mut global_state = SCAN_STATE.lock();
-        *global_state = Some(state.clone());
-    }
+        let _ = app.emit(&event_name, &progress);
 
-    let state_for_progress = state.clone();
-    let app_for_progress = app.clone();
-
-    // Spawn progress reporter thread
-    let progress_handle = thread::spawn(move || {
-        loop {
-            let progress = state_for_progress.get_progress();
-            let is_done = matches!(
-                progress.phase,
-                scanner::ScanPhase::Completed | scanner::ScanPhase::Cancelled
-            );
-
-            // Emit progress event
-            let _ = app_for_progress.emit("scan-progress", &progress);
-
-            if is_done {
-                break;
-            }
-
-            thread::sleep(Duration::from_millis(100));
+        if is_done {
+            break;
         }
-    });
 
-    // Run scan in blocking thread
+        thread::sleep(Duration::from_millis(100));
+    })
+}
+
+#[tauri::command]
+async fn scan_project_async(
+    app: AppHandle,
+    project_id: String,
+    path: String,
+) -> Result<ScanResult, String> {
+    project::register(project_id.clone(), path.clone());
+
+    let state = Arc::new(ScanState::new());
+    project::with_mut(&project_id, |s| {
+        s.scan_state = Some(state.clone());
+        Ok(())
+    })?;
+
+    let progress_handle = spawn_progress_reporter(app.clone(), project_id.clone(), state.clone());
+
     let state_for_scan = state.clone();
+    let path_for_scan = path.clone();
     let result = tokio::task::spawn_blocking(move || {
-        scanner::scan_directory_with_state(&path, Some(state_for_scan))
+        scanner::scan_directory_with_state(&path_for_scan, Some(state_for_scan))
     })
     .await
     .map_err(|e| e.to_string())?;
 
-    // Wait for progress reporter to finish
     let _ = progress_handle.join();
 
-    // Clear global state
-    {
-        let mut global_state = SCAN_STATE.lock();
-        *global_state = None;
-    }
+    let _ = project::with_mut(&project_id, |s| {
+        s.scan_state = None;
+        Ok(())
+    });
 
     let scan_result = result.map_err(|e| e.to_string())?;
 
-    // Cache the result
-    {
-        let mut cache = CACHED_SCAN.lock();
-        *cache = Some(scan_result.clone());
-    }
+    project::with_mut(&project_id, |s| {
+        s.cached_scan = Some(scan_result.clone());
+        Ok(())
+    })?;
 
     Ok(scan_result)
 }
 
 #[tauri::command]
-fn cancel_scan() -> bool {
-    let global_state = SCAN_STATE.lock();
-    if let Some(state) = global_state.as_ref() {
-        state.cancel();
-        true
-    } else {
-        false
-    }
+fn cancel_scan(project_id: String) -> bool {
+    project::with_ref(&project_id, |s| {
+        Ok(s.scan_state.as_ref().map(|st| st.cancel()).is_some())
+    })
+    .unwrap_or(false)
 }
 
 #[tauri::command]
-fn get_scan_progress() -> Option<ScanProgress> {
-    let global_state = SCAN_STATE.lock();
-    global_state.as_ref().map(|s| s.get_progress())
+fn get_scan_progress(project_id: String) -> Option<ScanProgress> {
+    project::with_ref(&project_id, |s| {
+        Ok(s.scan_state.as_ref().map(|st| st.get_progress()))
+    })
+    .ok()
+    .flatten()
 }
 
 // ============ Incremental Scan Commands ============
@@ -140,63 +145,42 @@ pub struct IncrementalScanResult {
 }
 
 #[tauri::command]
-async fn scan_project_incremental(app: AppHandle, path: String) -> Result<IncrementalScanResult, String> {
-    // Create new scan state
+async fn scan_project_incremental(
+    app: AppHandle,
+    project_id: String,
+    path: String,
+) -> Result<IncrementalScanResult, String> {
+    project::register(project_id.clone(), path.clone());
+
     let state = Arc::new(ScanState::new());
+    project::with_mut(&project_id, |s| {
+        s.scan_state = Some(state.clone());
+        Ok(())
+    })?;
 
-    // Store state for cancellation
-    {
-        let mut global_state = SCAN_STATE.lock();
-        *global_state = Some(state.clone());
-    }
+    let progress_handle = spawn_progress_reporter(app.clone(), project_id.clone(), state.clone());
 
-    let state_for_progress = state.clone();
-    let app_for_progress = app.clone();
-
-    // Spawn progress reporter thread
-    let progress_handle = thread::spawn(move || {
-        loop {
-            let progress = state_for_progress.get_progress();
-            let is_done = matches!(
-                progress.phase,
-                scanner::ScanPhase::Completed | scanner::ScanPhase::Cancelled
-            );
-
-            // Emit progress event
-            let _ = app_for_progress.emit("scan-progress", &progress);
-
-            if is_done {
-                break;
-            }
-
-            thread::sleep(Duration::from_millis(100));
-        }
-    });
-
-    // Run incremental scan in blocking thread
     let state_for_scan = state.clone();
+    let path_for_scan = path.clone();
     let result = tokio::task::spawn_blocking(move || {
-        scanner::scan_directory_incremental(&path, Some(state_for_scan))
+        scanner::scan_directory_incremental(&path_for_scan, Some(state_for_scan))
     })
     .await
     .map_err(|e| e.to_string())?;
 
-    // Wait for progress reporter to finish
     let _ = progress_handle.join();
 
-    // Clear global state
-    {
-        let mut global_state = SCAN_STATE.lock();
-        *global_state = None;
-    }
+    let _ = project::with_mut(&project_id, |s| {
+        s.scan_state = None;
+        Ok(())
+    });
 
     let (scan_result, stats) = result.map_err(|e| e.to_string())?;
 
-    // Cache the result
-    {
-        let mut cache = CACHED_SCAN.lock();
-        *cache = Some(scan_result.clone());
-    }
+    project::with_mut(&project_id, |s| {
+        s.cached_scan = Some(scan_result.clone());
+        Ok(())
+    })?;
 
     Ok(IncrementalScanResult {
         result: scan_result,
@@ -217,25 +201,21 @@ async fn get_thumbnail(path: String, size: u32) -> Result<String, String> {
 // ============ Analysis Commands ============
 
 #[tauri::command]
-fn analyze_assets(config_toml: Option<String>) -> Result<AnalysisResult, String> {
-    let cache = CACHED_SCAN.lock();
-    let scan_result = cache.as_ref().ok_or("No scan result available. Please scan a project first.")?;
-
-    // Parse config or use default
+fn analyze_assets(project_id: String, config_toml: Option<String>) -> Result<AnalysisResult, String> {
     let config = if let Some(toml_str) = config_toml {
         RuleConfig::from_toml(&toml_str).map_err(|e| format!("Invalid config: {}", e))?
     } else {
         RuleConfig::default()
     };
 
-    let analyzer = Analyzer::with_config(&config);
-    let mut result = analyzer.analyze(scan_result);
-
-    // Also find duplicates
-    let duplicates = analyzer.find_duplicates(scan_result);
-    result.merge(duplicates);
-
-    Ok(result)
+    project::with_ref(&project_id, |state| {
+        let scan_result = state.require_scan()?;
+        let analyzer = Analyzer::with_config(&config);
+        let mut result = analyzer.analyze(scan_result);
+        let duplicates = analyzer.find_duplicates(scan_result);
+        result.merge(duplicates);
+        Ok(result)
+    })
 }
 
 #[tauri::command]
@@ -255,15 +235,14 @@ fn validate_config(config_toml: String) -> Result<bool, String> {
 // ============ Git Commands ============
 
 #[tauri::command]
-fn get_git_info(path: String) -> GitInfo {
+fn get_git_info(project_id: String, path: String) -> GitInfo {
     let manager = GitManager::open(Path::new(&path));
     let info = manager.get_info();
 
-    // Store the manager for later use
-    {
-        let mut global_manager = GIT_MANAGER.lock();
-        *global_manager = Some(manager);
-    }
+    let _ = project::with_mut(&project_id, |state| {
+        state.git_manager = Some(manager);
+        Ok(())
+    });
 
     info
 }
@@ -274,37 +253,40 @@ pub struct GitStatusMap {
 }
 
 #[tauri::command]
-fn get_git_statuses() -> GitStatusMap {
-    let mut global_manager = GIT_MANAGER.lock();
-
-    let statuses = if let Some(manager) = global_manager.as_mut() {
-        manager
-            .get_all_statuses()
-            .iter()
-            .map(|(path, status)| {
-                (
-                    path.to_string_lossy().to_string(),
-                    format!("{:?}", status).to_lowercase(),
-                )
-            })
-            .collect()
-    } else {
-        HashMap::new()
-    };
+fn get_git_statuses(project_id: String) -> GitStatusMap {
+    let statuses = project::with_mut(&project_id, |state| {
+        let map = if let Some(manager) = state.git_manager.as_mut() {
+            manager
+                .get_all_statuses()
+                .iter()
+                .map(|(path, status)| {
+                    (
+                        path.to_string_lossy().to_string(),
+                        format!("{:?}", status).to_lowercase(),
+                    )
+                })
+                .collect()
+        } else {
+            HashMap::new()
+        };
+        Ok(map)
+    })
+    .unwrap_or_default();
 
     GitStatusMap { statuses }
 }
 
 #[tauri::command]
-fn get_file_git_status(path: String) -> String {
-    let global_manager = GIT_MANAGER.lock();
-
-    if let Some(manager) = global_manager.as_ref() {
-        let status = manager.get_file_status(Path::new(&path));
-        format!("{:?}", status).to_lowercase()
-    } else {
-        "unknown".to_string()
-    }
+fn get_file_git_status(project_id: String, path: String) -> String {
+    project::with_ref(&project_id, |state| {
+        let status = if let Some(manager) = state.git_manager.as_ref() {
+            format!("{:?}", manager.get_file_status(Path::new(&path))).to_lowercase()
+        } else {
+            "unknown".to_string()
+        };
+        Ok(status)
+    })
+    .unwrap_or_else(|_| "unknown".to_string())
 }
 
 // ============ Unity Commands ============
@@ -335,94 +317,89 @@ pub struct DependencyEdge {
 }
 
 #[tauri::command]
-fn get_unity_dependencies() -> Result<DependencyGraph, String> {
-    let cache = CACHED_SCAN.lock();
-    let scan_result = cache.as_ref().ok_or("No scan result available")?;
+fn get_unity_dependencies(project_id: String) -> Result<DependencyGraph, String> {
+    project::with_ref(&project_id, |state| {
+        let scan_result = state.require_scan()?;
 
-    // Only work with Unity projects
-    if !matches!(scan_result.project_type, Some(scanner::ProjectType::Unity)) {
-        return Err("Not a Unity project".to_string());
-    }
-
-    let mut nodes: Vec<DependencyNode> = Vec::new();
-    let mut edges: Vec<DependencyEdge> = Vec::new();
-    let mut guid_to_path: HashMap<String, String> = HashMap::new();
-
-    // Build GUID to path mapping
-    for asset in &scan_result.assets {
-        if let Some(ref guid) = asset.unity_guid {
-            guid_to_path.insert(guid.clone(), asset.path.clone());
-            nodes.push(DependencyNode {
-                path: asset.path.clone(),
-                name: asset.name.clone(),
-                guid: Some(guid.clone()),
-                file_type: format!("{:?}", asset.asset_type).to_lowercase(),
-            });
+        if !matches!(scan_result.project_type, Some(scanner::ProjectType::Unity)) {
+            return Err("Not a Unity project".to_string());
         }
-    }
 
-    // Parse Unity files and extract references
-    for asset in &scan_result.assets {
-        let ext = asset.extension.to_lowercase();
-        if ext == "prefab" || ext == "unity" || ext == "mat" {
-            if let Some(unity_info) = unity::parse_unity_file(Path::new(&asset.path)) {
-                if let Some(ref from_guid) = asset.unity_guid {
-                    for reference in &unity_info.references {
-                        // Only add edge if target exists in our project
-                        if guid_to_path.contains_key(&reference.guid) {
-                            edges.push(DependencyEdge {
-                                from_guid: from_guid.clone(),
-                                to_guid: reference.guid.clone(),
-                            });
+        let mut nodes: Vec<DependencyNode> = Vec::new();
+        let mut edges: Vec<DependencyEdge> = Vec::new();
+        let mut guid_to_path: HashMap<String, String> = HashMap::new();
+
+        for asset in &scan_result.assets {
+            if let Some(ref guid) = asset.unity_guid {
+                guid_to_path.insert(guid.clone(), asset.path.clone());
+                nodes.push(DependencyNode {
+                    path: asset.path.clone(),
+                    name: asset.name.clone(),
+                    guid: Some(guid.clone()),
+                    file_type: format!("{:?}", asset.asset_type).to_lowercase(),
+                });
+            }
+        }
+
+        for asset in &scan_result.assets {
+            let ext = asset.extension.to_lowercase();
+            if ext == "prefab" || ext == "unity" || ext == "mat" {
+                if let Some(unity_info) = unity::parse_unity_file(Path::new(&asset.path)) {
+                    if let Some(ref from_guid) = asset.unity_guid {
+                        for reference in &unity_info.references {
+                            if guid_to_path.contains_key(&reference.guid) {
+                                edges.push(DependencyEdge {
+                                    from_guid: from_guid.clone(),
+                                    to_guid: reference.guid.clone(),
+                                });
+                            }
                         }
                     }
                 }
             }
         }
-    }
 
-    Ok(DependencyGraph { nodes, edges })
+        Ok(DependencyGraph { nodes, edges })
+    })
 }
 
 #[tauri::command]
-fn find_unused_assets() -> Result<Vec<String>, String> {
-    let cache = CACHED_SCAN.lock();
-    let scan_result = cache.as_ref().ok_or("No scan result available")?;
+fn find_unused_assets(project_id: String) -> Result<Vec<String>, String> {
+    project::with_ref(&project_id, |state| {
+        let scan_result = state.require_scan()?;
 
-    if !matches!(scan_result.project_type, Some(scanner::ProjectType::Unity)) {
-        return Err("Not a Unity project".to_string());
-    }
-
-    let mut referenced_guids: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut all_guids: HashMap<String, String> = HashMap::new();
-
-    // Collect all GUIDs
-    for asset in &scan_result.assets {
-        if let Some(ref guid) = asset.unity_guid {
-            all_guids.insert(guid.clone(), asset.path.clone());
+        if !matches!(scan_result.project_type, Some(scanner::ProjectType::Unity)) {
+            return Err("Not a Unity project".to_string());
         }
-    }
 
-    // Collect all referenced GUIDs from Unity files
-    for asset in &scan_result.assets {
-        let ext = asset.extension.to_lowercase();
-        if ext == "prefab" || ext == "unity" || ext == "mat" || ext == "controller" {
-            if let Some(unity_info) = unity::parse_unity_file(Path::new(&asset.path)) {
-                for reference in &unity_info.references {
-                    referenced_guids.insert(reference.guid.clone());
+        let mut referenced_guids: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut all_guids: HashMap<String, String> = HashMap::new();
+
+        for asset in &scan_result.assets {
+            if let Some(ref guid) = asset.unity_guid {
+                all_guids.insert(guid.clone(), asset.path.clone());
+            }
+        }
+
+        for asset in &scan_result.assets {
+            let ext = asset.extension.to_lowercase();
+            if ext == "prefab" || ext == "unity" || ext == "mat" || ext == "controller" {
+                if let Some(unity_info) = unity::parse_unity_file(Path::new(&asset.path)) {
+                    for reference in &unity_info.references {
+                        referenced_guids.insert(reference.guid.clone());
+                    }
                 }
             }
         }
-    }
 
-    // Find assets that are never referenced
-    let unused: Vec<String> = all_guids
-        .iter()
-        .filter(|(guid, _path)| !referenced_guids.contains(*guid))
-        .map(|(_guid, path)| path.clone())
-        .collect();
+        let unused: Vec<String> = all_guids
+            .iter()
+            .filter(|(guid, _path)| !referenced_guids.contains(*guid))
+            .map(|(_guid, path)| path.clone())
+            .collect();
 
-    Ok(unused)
+        Ok(unused)
+    })
 }
 
 // ============ Statistics Commands ============
@@ -447,157 +424,161 @@ pub struct FileInfo {
 }
 
 #[tauri::command]
-fn get_project_stats() -> Result<ProjectStats, String> {
-    let cache = CACHED_SCAN.lock();
-    let scan_result = cache.as_ref().ok_or("No scan result available")?;
+fn get_project_stats(project_id: String) -> Result<ProjectStats, String> {
+    project::with_ref(&project_id, |state| {
+        let scan_result = state.require_scan()?;
 
-    let mut type_distribution: HashMap<String, usize> = HashMap::new();
-    let mut size_distribution: HashMap<String, usize> = HashMap::new();
-    let mut extension_distribution: HashMap<String, usize> = HashMap::new();
-    let mut directory_sizes: HashMap<String, u64> = HashMap::new();
-    let mut all_files: Vec<FileInfo> = Vec::new();
+        let mut type_distribution: HashMap<String, usize> = HashMap::new();
+        let mut size_distribution: HashMap<String, usize> = HashMap::new();
+        let mut extension_distribution: HashMap<String, usize> = HashMap::new();
+        let mut directory_sizes: HashMap<String, u64> = HashMap::new();
+        let mut all_files: Vec<FileInfo> = Vec::new();
 
-    for asset in &scan_result.assets {
-        // Type distribution
-        let type_str = format!("{:?}", asset.asset_type).to_lowercase();
-        *type_distribution.entry(type_str.clone()).or_insert(0) += 1;
+        for asset in &scan_result.assets {
+            let type_str = format!("{:?}", asset.asset_type).to_lowercase();
+            *type_distribution.entry(type_str.clone()).or_insert(0) += 1;
 
-        // Extension distribution
-        *extension_distribution.entry(asset.extension.clone()).or_insert(0) += 1;
+            *extension_distribution.entry(asset.extension.clone()).or_insert(0) += 1;
 
-        // Size distribution (buckets)
-        let size_bucket = if asset.size < 1024 {
-            "< 1 KB"
-        } else if asset.size < 10 * 1024 {
-            "1-10 KB"
-        } else if asset.size < 100 * 1024 {
-            "10-100 KB"
-        } else if asset.size < 1024 * 1024 {
-            "100 KB - 1 MB"
-        } else if asset.size < 10 * 1024 * 1024 {
-            "1-10 MB"
-        } else {
-            "> 10 MB"
-        };
-        *size_distribution.entry(size_bucket.to_string()).or_insert(0) += 1;
+            let size_bucket = if asset.size < 1024 {
+                "< 1 KB"
+            } else if asset.size < 10 * 1024 {
+                "1-10 KB"
+            } else if asset.size < 100 * 1024 {
+                "10-100 KB"
+            } else if asset.size < 1024 * 1024 {
+                "100 KB - 1 MB"
+            } else if asset.size < 10 * 1024 * 1024 {
+                "1-10 MB"
+            } else {
+                "> 10 MB"
+            };
+            *size_distribution.entry(size_bucket.to_string()).or_insert(0) += 1;
 
-        // Directory sizes
-        if let Some(parent) = Path::new(&asset.path).parent() {
-            let dir_str = parent.to_string_lossy().to_string();
-            *directory_sizes.entry(dir_str).or_insert(0) += asset.size;
+            if let Some(parent) = Path::new(&asset.path).parent() {
+                let dir_str = parent.to_string_lossy().to_string();
+                *directory_sizes.entry(dir_str).or_insert(0) += asset.size;
+            }
+
+            all_files.push(FileInfo {
+                name: asset.name.clone(),
+                path: asset.path.clone(),
+                size: asset.size,
+                asset_type: type_str,
+            });
         }
 
-        // Collect all files for sorting
-        all_files.push(FileInfo {
-            name: asset.name.clone(),
-            path: asset.path.clone(),
-            size: asset.size,
-            asset_type: type_str,
-        });
-    }
+        all_files.sort_by(|a, b| b.size.cmp(&a.size));
+        let largest_files: Vec<FileInfo> = all_files.into_iter().take(10).collect();
 
-    // Sort by size and take top 10
-    all_files.sort_by(|a, b| b.size.cmp(&a.size));
-    let largest_files: Vec<FileInfo> = all_files.into_iter().take(10).collect();
-
-    Ok(ProjectStats {
-        total_assets: scan_result.total_count,
-        total_size: scan_result.total_size,
-        type_distribution,
-        size_distribution,
-        extension_distribution,
-        largest_files,
-        directory_sizes,
+        Ok(ProjectStats {
+            total_assets: scan_result.total_count,
+            total_size: scan_result.total_size,
+            type_distribution,
+            size_distribution,
+            extension_distribution,
+            largest_files,
+            directory_sizes,
+        })
     })
 }
 
 // ============ Export Commands ============
 
 #[tauri::command]
-fn export_to_json() -> Result<String, String> {
-    let cache = CACHED_SCAN.lock();
-    let scan_result = cache.as_ref().ok_or("No scan result available")?;
-
-    serde_json::to_string_pretty(scan_result).map_err(|e| e.to_string())
+fn export_to_json(project_id: String) -> Result<String, String> {
+    project::with_ref(&project_id, |state| {
+        let scan_result = state.require_scan()?;
+        serde_json::to_string_pretty(scan_result).map_err(|e| e.to_string())
+    })
 }
 
 #[tauri::command]
-fn export_to_csv() -> Result<String, String> {
-    let cache = CACHED_SCAN.lock();
-    let scan_result = cache.as_ref().ok_or("No scan result available")?;
+fn export_to_csv(project_id: String) -> Result<String, String> {
+    project::with_ref(&project_id, |state| {
+        let scan_result = state.require_scan()?;
 
-    let mut csv = String::from("Name,Path,Type,Extension,Size,Width,Height\n");
+        let mut csv = String::from("Name,Path,Type,Extension,Size,Width,Height\n");
 
-    for asset in &scan_result.assets {
-        let width = asset.metadata.as_ref().and_then(|m| m.width).map(|w| w.to_string()).unwrap_or_default();
-        let height = asset.metadata.as_ref().and_then(|m| m.height).map(|h| h.to_string()).unwrap_or_default();
+        for asset in &scan_result.assets {
+            let width = asset
+                .metadata
+                .as_ref()
+                .and_then(|m| m.width)
+                .map(|w| w.to_string())
+                .unwrap_or_default();
+            let height = asset
+                .metadata
+                .as_ref()
+                .and_then(|m| m.height)
+                .map(|h| h.to_string())
+                .unwrap_or_default();
 
-        csv.push_str(&format!(
-            "\"{}\",\"{}\",{:?},{},{},{},{}\n",
-            asset.name.replace('"', "\"\""),
-            asset.path.replace('"', "\"\""),
-            asset.asset_type,
-            asset.extension,
-            asset.size,
-            width,
-            height
-        ));
-    }
-
-    Ok(csv)
-}
-
-#[tauri::command]
-fn export_issues_to_json() -> Result<String, String> {
-    let cache = CACHED_SCAN.lock();
-    let scan_result = cache.as_ref().ok_or("No scan result available")?;
-
-    let config = RuleConfig::default();
-    let analyzer = Analyzer::with_config(&config);
-    let mut result = analyzer.analyze(scan_result);
-    let duplicates = analyzer.find_duplicates(scan_result);
-    result.merge(duplicates);
-
-    serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn export_to_html() -> Result<String, String> {
-    let cache = CACHED_SCAN.lock();
-    let scan_result = cache.as_ref().ok_or("No scan result available")?;
-
-    // Run analysis
-    let config = RuleConfig::default();
-    let analyzer = Analyzer::with_config(&config);
-    let mut analysis_result = analyzer.analyze(scan_result);
-    let duplicates = analyzer.find_duplicates(scan_result);
-    analysis_result.merge(duplicates);
-
-    // Calculate statistics
-    let mut type_counts: HashMap<String, usize> = HashMap::new();
-    let mut size_by_type: HashMap<String, u64> = HashMap::new();
-
-    for asset in &scan_result.assets {
-        let type_str = format!("{:?}", asset.asset_type);
-        *type_counts.entry(type_str.clone()).or_insert(0) += 1;
-        *size_by_type.entry(type_str).or_insert(0) += asset.size;
-    }
-
-    // Format file size helper
-    fn format_size(bytes: u64) -> String {
-        if bytes < 1024 {
-            format!("{} B", bytes)
-        } else if bytes < 1024 * 1024 {
-            format!("{:.1} KB", bytes as f64 / 1024.0)
-        } else if bytes < 1024 * 1024 * 1024 {
-            format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
-        } else {
-            format!("{:.2} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+            csv.push_str(&format!(
+                "\"{}\",\"{}\",{:?},{},{},{},{}\n",
+                asset.name.replace('"', "\"\""),
+                asset.path.replace('"', "\"\""),
+                asset.asset_type,
+                asset.extension,
+                asset.size,
+                width,
+                height
+            ));
         }
-    }
 
-    // Generate HTML
-    let html = format!(r#"<!DOCTYPE html>
+        Ok(csv)
+    })
+}
+
+#[tauri::command]
+fn export_issues_to_json(project_id: String) -> Result<String, String> {
+    project::with_ref(&project_id, |state| {
+        let scan_result = state.require_scan()?;
+
+        let config = RuleConfig::default();
+        let analyzer = Analyzer::with_config(&config);
+        let mut result = analyzer.analyze(scan_result);
+        let duplicates = analyzer.find_duplicates(scan_result);
+        result.merge(duplicates);
+
+        serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
+    })
+}
+
+#[tauri::command]
+fn export_to_html(project_id: String) -> Result<String, String> {
+    project::with_ref(&project_id, |state| {
+        let scan_result = state.require_scan()?;
+
+        let config = RuleConfig::default();
+        let analyzer = Analyzer::with_config(&config);
+        let mut analysis_result = analyzer.analyze(scan_result);
+        let duplicates = analyzer.find_duplicates(scan_result);
+        analysis_result.merge(duplicates);
+
+        let mut type_counts: HashMap<String, usize> = HashMap::new();
+        let mut size_by_type: HashMap<String, u64> = HashMap::new();
+
+        for asset in &scan_result.assets {
+            let type_str = format!("{:?}", asset.asset_type);
+            *type_counts.entry(type_str.clone()).or_insert(0) += 1;
+            *size_by_type.entry(type_str).or_insert(0) += asset.size;
+        }
+
+        fn format_size(bytes: u64) -> String {
+            if bytes < 1024 {
+                format!("{} B", bytes)
+            } else if bytes < 1024 * 1024 {
+                format!("{:.1} KB", bytes as f64 / 1024.0)
+            } else if bytes < 1024 * 1024 * 1024 {
+                format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+            } else {
+                format!("{:.2} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+            }
+        }
+
+        let html = format!(
+            r#"<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -696,58 +677,76 @@ fn export_to_html() -> Result<String, String> {
     </div>
 </body>
 </html>"#,
-        project_name = scan_result.root_path.split('/').last().unwrap_or("Project"),
-        date = chrono::Local::now().format("%Y-%m-%d %H:%M"),
-        total_assets = scan_result.total_count,
-        total_size = format_size(scan_result.total_size),
-        issue_count = analysis_result.issue_count,
-        pass_count = scan_result.total_count.saturating_sub(analysis_result.issue_count),
-        type_bars = {
-            let max_count = type_counts.values().max().copied().unwrap_or(1) as f64;
-            type_counts.iter().map(|(t, c)| {
-                let pct = (*c as f64 / max_count * 100.0) as u32;
-                format!(r#"<div><div class="bar" style="width: {}%"></div><div class="bar-label"><span>{}</span><span>{}</span></div></div>"#, pct, t, c)
-            }).collect::<Vec<_>>().join("\n")
-        },
-        issue_rows = analysis_result.issues.iter().take(100).map(|issue| {
-            let severity_class = match issue.severity {
-                analyzer::Severity::Error => "severity-error",
-                analyzer::Severity::Warning => "severity-warning",
-                analyzer::Severity::Info => "severity-info",
-            };
-            let file_name = issue.asset_path.split('/').last().unwrap_or(&issue.asset_path);
-            format!(
-                r#"<tr><td class="{}">{:?}</td><td>{}</td><td>{}</td><td>{}</td></tr>"#,
-                severity_class,
-                issue.severity,
-                issue.rule_name,
-                file_name,
-                issue.message
-            )
-        }).collect::<Vec<_>>().join("\n"),
-        asset_rows = scan_result.assets.iter().take(500).map(|asset| {
-            let type_class = match asset.asset_type {
-                scanner::AssetType::Texture => "texture",
-                scanner::AssetType::Model => "model",
-                scanner::AssetType::Audio => "audio",
-                _ => "other",
-            };
-            let dimensions = asset.metadata.as_ref()
-                .and_then(|m| m.width.zip(m.height))
-                .map(|(w, h)| format!("{}x{}", w, h))
-                .unwrap_or_else(|| "-".to_string());
-            format!(
-                r#"<tr><td>{}</td><td><span class="type-badge {}">{:?}</span></td><td>{}</td><td>{}</td></tr>"#,
-                asset.name,
-                type_class,
-                asset.asset_type,
-                format_size(asset.size),
-                dimensions
-            )
-        }).collect::<Vec<_>>().join("\n")
-    );
+            project_name = scan_result.root_path.split('/').last().unwrap_or("Project"),
+            date = chrono::Local::now().format("%Y-%m-%d %H:%M"),
+            total_assets = scan_result.total_count,
+            total_size = format_size(scan_result.total_size),
+            issue_count = analysis_result.issue_count,
+            pass_count = scan_result.total_count.saturating_sub(analysis_result.issue_count),
+            type_bars = {
+                let max_count = type_counts.values().max().copied().unwrap_or(1) as f64;
+                type_counts
+                    .iter()
+                    .map(|(t, c)| {
+                        let pct = (*c as f64 / max_count * 100.0) as u32;
+                        format!(
+                            r#"<div><div class="bar" style="width: {}%"></div><div class="bar-label"><span>{}</span><span>{}</span></div></div>"#,
+                            pct, t, c
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            },
+            issue_rows = analysis_result
+                .issues
+                .iter()
+                .take(100)
+                .map(|issue| {
+                    let severity_class = match issue.severity {
+                        analyzer::Severity::Error => "severity-error",
+                        analyzer::Severity::Warning => "severity-warning",
+                        analyzer::Severity::Info => "severity-info",
+                    };
+                    let file_name = issue.asset_path.split('/').last().unwrap_or(&issue.asset_path);
+                    format!(
+                        r#"<tr><td class="{}">{:?}</td><td>{}</td><td>{}</td><td>{}</td></tr>"#,
+                        severity_class, issue.severity, issue.rule_name, file_name, issue.message
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+            asset_rows = scan_result
+                .assets
+                .iter()
+                .take(500)
+                .map(|asset| {
+                    let type_class = match asset.asset_type {
+                        scanner::AssetType::Texture => "texture",
+                        scanner::AssetType::Model => "model",
+                        scanner::AssetType::Audio => "audio",
+                        _ => "other",
+                    };
+                    let dimensions = asset
+                        .metadata
+                        .as_ref()
+                        .and_then(|m| m.width.zip(m.height))
+                        .map(|(w, h)| format!("{}x{}", w, h))
+                        .unwrap_or_else(|| "-".to_string());
+                    format!(
+                        r#"<tr><td>{}</td><td><span class="type-badge {}">{:?}</span></td><td>{}</td><td>{}</td></tr>"#,
+                        asset.name,
+                        type_class,
+                        asset.asset_type,
+                        format_size(asset.size),
+                        dimensions
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
 
-    Ok(html)
+        Ok(html)
+    })
 }
 
 // ============ Batch Operations ============
@@ -781,14 +780,9 @@ pub struct BatchRenameResult {
 
 fn apply_rename_operation(name: &str, operation: &RenameOperation) -> String {
     match operation {
-        RenameOperation::FindReplace { find, replace } => {
-            name.replace(find, replace)
-        }
-        RenameOperation::AddPrefix { prefix } => {
-            format!("{}{}", prefix, name)
-        }
+        RenameOperation::FindReplace { find, replace } => name.replace(find, replace),
+        RenameOperation::AddPrefix { prefix } => format!("{}{}", prefix, name),
         RenameOperation::AddSuffix { suffix } => {
-            // Insert suffix before extension
             if let Some(dot_pos) = name.rfind('.') {
                 format!("{}{}{}", &name[..dot_pos], suffix, &name[dot_pos..])
             } else {
@@ -799,7 +793,6 @@ fn apply_rename_operation(name: &str, operation: &RenameOperation) -> String {
             name.strip_prefix(prefix).unwrap_or(name).to_string()
         }
         RenameOperation::RemoveSuffix { suffix } => {
-            // Remove suffix before extension
             if let Some(dot_pos) = name.rfind('.') {
                 let base = &name[..dot_pos];
                 let ext = &name[dot_pos..];
@@ -809,26 +802,19 @@ fn apply_rename_operation(name: &str, operation: &RenameOperation) -> String {
                 name.strip_suffix(suffix).unwrap_or(name).to_string()
             }
         }
-        RenameOperation::ToLowercase => {
-            name.to_lowercase()
-        }
-        RenameOperation::ToUppercase => {
-            name.to_uppercase()
-        }
-        RenameOperation::ToTitleCase => {
-            name.split(|c: char| c == '_' || c == '-' || c == ' ')
-                .map(|word| {
-                    let mut chars = word.chars();
-                    match chars.next() {
-                        None => String::new(),
-                        Some(first) => {
-                            first.to_uppercase().collect::<String>() + chars.as_str()
-                        }
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("_")
-        }
+        RenameOperation::ToLowercase => name.to_lowercase(),
+        RenameOperation::ToUppercase => name.to_uppercase(),
+        RenameOperation::ToTitleCase => name
+            .split(|c: char| c == '_' || c == '-' || c == ' ')
+            .map(|word| {
+                let mut chars = word.chars();
+                match chars.next() {
+                    None => String::new(),
+                    Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("_"),
     }
 }
 
@@ -856,7 +842,11 @@ fn preview_batch_rename(paths: Vec<String>, operation: RenameOperation) -> Vec<R
 }
 
 #[tauri::command]
-fn execute_batch_rename(paths: Vec<String>, operation: RenameOperation) -> BatchRenameResult {
+fn execute_batch_rename(
+    project_id: String,
+    paths: Vec<String>,
+    operation: RenameOperation,
+) -> BatchRenameResult {
     let mut success_count = 0;
     let mut error_count = 0;
     let mut errors = Vec::new();
@@ -876,24 +866,20 @@ fn execute_batch_rename(paths: Vec<String>, operation: RenameOperation) -> Batch
         let new_name = apply_rename_operation(&name, &operation);
 
         if name == new_name {
-            // No change needed
             continue;
         }
 
         let new_path = path_obj.with_file_name(&new_name);
 
-        // Check if target already exists
         if new_path.exists() {
             errors.push(format!("Target already exists: {}", new_path.display()));
             error_count += 1;
             continue;
         }
 
-        // Perform the rename
         match std::fs::rename(&path, &new_path) {
             Ok(_) => {
                 success_count += 1;
-                // Record for undo
                 paths_to_record.push((path.clone(), new_path.to_string_lossy().to_string()));
             }
             Err(e) => {
@@ -903,9 +889,7 @@ fn execute_batch_rename(paths: Vec<String>, operation: RenameOperation) -> Batch
         }
     }
 
-    // Record the operation for undo if there were successful renames
     if success_count > 0 {
-        let mut undo_manager = UNDO_MANAGER.lock();
         let file_ops: Vec<undo::FileOperation> = paths_to_record
             .into_iter()
             .map(|(original, new_path)| undo::FileOperation {
@@ -920,10 +904,13 @@ fn execute_batch_rename(paths: Vec<String>, operation: RenameOperation) -> Batch
             .collect();
 
         if !file_ops.is_empty() {
-            undo_manager.record_batch(
-                format!("Batch rename: {} files", file_ops.len()),
-                file_ops,
-            );
+            let _ = project::with_mut(&project_id, |state| {
+                state.undo_manager.record_batch(
+                    format!("Batch rename: {} files", file_ops.len()),
+                    file_ops,
+                );
+                Ok(())
+            });
         }
     }
 
@@ -940,10 +927,8 @@ fn execute_batch_rename(paths: Vec<String>, operation: RenameOperation) -> Batch
 fn get_unreal_project_info(path: String) -> Result<unreal::UnrealProjectInfo, String> {
     let root_path = Path::new(&path);
 
-    // Try to find .uproject file in the directory
     let uproject_path = unreal::find_uproject_file(root_path)
         .or_else(|| {
-            // If path itself is a .uproject file
             if path.ends_with(".uproject") {
                 Some(root_path.to_path_buf())
             } else {
@@ -952,8 +937,7 @@ fn get_unreal_project_info(path: String) -> Result<unreal::UnrealProjectInfo, St
         })
         .ok_or("No .uproject file found")?;
 
-    unreal::parse_uproject(&uproject_path)
-        .ok_or_else(|| "Failed to parse .uproject file".to_string())
+    unreal::parse_uproject(&uproject_path).ok_or_else(|| "Failed to parse .uproject file".to_string())
 }
 
 // ============ Godot Commands ============
@@ -962,7 +946,6 @@ fn get_unreal_project_info(path: String) -> Result<unreal::UnrealProjectInfo, St
 fn get_godot_project_info(path: String) -> Result<godot::GodotProjectInfo, String> {
     let root_path = Path::new(&path);
 
-    // Try to find project.godot file
     let project_path = if path.ends_with("project.godot") {
         root_path.to_path_buf()
     } else {
@@ -973,8 +956,7 @@ fn get_godot_project_info(path: String) -> Result<godot::GodotProjectInfo, Strin
         return Err("No project.godot file found".to_string());
     }
 
-    godot::parse_project_godot(&project_path)
-        .ok_or_else(|| "Failed to parse project.godot file".to_string())
+    godot::parse_project_godot(&project_path).ok_or_else(|| "Failed to parse project.godot file".to_string())
 }
 
 // ============ File System Commands ============
@@ -997,7 +979,6 @@ fn reveal_in_finder(path: String) -> Result<(), String> {
     }
     #[cfg(target_os = "linux")]
     {
-        // Try to open the parent directory
         if let Some(parent) = std::path::Path::new(&path).parent() {
             std::process::Command::new("xdg-open")
                 .arg(parent)
@@ -1035,8 +1016,7 @@ fn open_with_default_app(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn rename_file(old_path: String, new_name: String) -> Result<String, String> {
-    use std::path::Path;
+fn rename_file(project_id: String, old_path: String, new_name: String) -> Result<String, String> {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     let old_path_ref = Path::new(&old_path);
@@ -1051,19 +1031,17 @@ fn rename_file(old_path: String, new_name: String) -> Result<String, String> {
         return Err("A file with this name already exists".to_string());
     }
 
-    // Record for undo
-    let old_name = old_path_ref.file_name()
+    let old_name = old_path_ref
+        .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("")
         .to_string();
 
     let new_path_str = new_path.to_string_lossy().to_string();
 
-    std::fs::rename(&old_path_ref, &new_path).map_err(|e| e.to_string())?;
+    std::fs::rename(old_path_ref, &new_path).map_err(|e| e.to_string())?;
 
-    // Add to undo history
-    {
-        let mut manager = UNDO_MANAGER.lock();
+    let _ = project::with_mut(&project_id, |state| {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -1076,11 +1054,11 @@ fn rename_file(old_path: String, new_name: String) -> Result<String, String> {
             timestamp,
         };
 
-        manager.record_batch(
-            format!("Rename {} to {}", old_name, new_name),
-            vec![operation],
-        );
-    }
+        state
+            .undo_manager
+            .record_batch(format!("Rename {} to {}", old_name, new_name), vec![operation]);
+        Ok(())
+    });
 
     Ok(new_path_str)
 }
@@ -1088,173 +1066,145 @@ fn rename_file(old_path: String, new_name: String) -> Result<String, String> {
 // ============ Undo Commands ============
 
 #[tauri::command]
-fn get_undo_history() -> Vec<undo::HistoryEntry> {
-    let manager = UNDO_MANAGER.lock();
-    manager.get_history()
+fn get_undo_history(project_id: String) -> Vec<undo::HistoryEntry> {
+    project::with_ref(&project_id, |state| Ok(state.undo_manager.get_history())).unwrap_or_default()
 }
 
 #[tauri::command]
-fn undo_last_operation() -> Result<undo::UndoResult, String> {
-    let mut manager = UNDO_MANAGER.lock();
-    manager.undo_last()
-        .ok_or_else(|| "No operation to undo".to_string())
+fn undo_last_operation(project_id: String) -> Result<undo::UndoResult, String> {
+    project::with_mut(&project_id, |state| {
+        state
+            .undo_manager
+            .undo_last()
+            .ok_or_else(|| "No operation to undo".to_string())
+    })
 }
 
 #[tauri::command]
-fn undo_operation_by_id(id: String) -> Result<undo::UndoResult, String> {
-    let mut manager = UNDO_MANAGER.lock();
-    manager.undo_by_id(&id)
-        .ok_or_else(|| format!("Operation '{}' not found or already undone", id))
+fn undo_operation_by_id(project_id: String, id: String) -> Result<undo::UndoResult, String> {
+    project::with_mut(&project_id, |state| {
+        state
+            .undo_manager
+            .undo_by_id(&id)
+            .ok_or_else(|| format!("Operation '{}' not found or already undone", id))
+    })
 }
 
 #[tauri::command]
-fn can_undo() -> bool {
-    let manager = UNDO_MANAGER.lock();
-    manager.can_undo()
+fn can_undo(project_id: String) -> bool {
+    project::with_ref(&project_id, |state| Ok(state.undo_manager.can_undo())).unwrap_or(false)
 }
 
 #[tauri::command]
-fn clear_undo_history() {
-    let mut manager = UNDO_MANAGER.lock();
-    manager.clear_history();
+fn clear_undo_history(project_id: String) -> Result<(), String> {
+    project::with_mut(&project_id, |state| {
+        state.undo_manager.clear_history();
+        Ok(())
+    })
 }
 
 #[tauri::command]
-fn get_undo_count() -> usize {
-    let manager = UNDO_MANAGER.lock();
-    manager.undoable_count()
+fn get_undo_count(project_id: String) -> usize {
+    project::with_ref(&project_id, |state| Ok(state.undo_manager.undoable_count())).unwrap_or(0)
 }
 
 // ============ Tags Commands ============
 
-fn get_or_load_tags(project_path: &str) -> tags::TagsData {
-    let mut global_tags = TAGS_DATA.lock();
-    if let Some((path, data)) = global_tags.as_ref() {
-        if path == project_path {
-            return data.clone();
+#[tauri::command]
+fn get_all_tags(project_id: String) -> Result<Vec<tags::Tag>, String> {
+    project::with_mut(&project_id, |state| Ok(state.ensure_tags().tags.clone()))
+}
+
+#[tauri::command]
+fn create_tag(project_id: String, name: String, color: String) -> Result<tags::Tag, String> {
+    project::with_mut(&project_id, |state| {
+        let tag = state.ensure_tags().create_tag(name, color);
+        state.save_tags()?;
+        Ok(tag)
+    })
+}
+
+#[tauri::command]
+fn update_tag(
+    project_id: String,
+    tag_id: String,
+    name: Option<String>,
+    color: Option<String>,
+) -> Result<tags::Tag, String> {
+    project::with_mut(&project_id, |state| {
+        let tag = state
+            .ensure_tags()
+            .update_tag(&tag_id, name, color)
+            .ok_or("Tag not found")?;
+        state.save_tags()?;
+        Ok(tag)
+    })
+}
+
+#[tauri::command]
+fn delete_tag(project_id: String, tag_id: String) -> Result<(), String> {
+    project::with_mut(&project_id, |state| {
+        state.ensure_tags().delete_tag(&tag_id);
+        state.save_tags()
+    })
+}
+
+#[tauri::command]
+fn get_asset_tags(project_id: String, asset_path: String) -> Result<Vec<tags::Tag>, String> {
+    project::with_mut(&project_id, |state| {
+        Ok(state.ensure_tags().get_asset_tags(&asset_path))
+    })
+}
+
+#[tauri::command]
+fn add_tag_to_asset(project_id: String, asset_path: String, tag_id: String) -> Result<(), String> {
+    project::with_mut(&project_id, |state| {
+        state.ensure_tags().add_tag_to_asset(&asset_path, &tag_id);
+        state.save_tags()
+    })
+}
+
+#[tauri::command]
+fn remove_tag_from_asset(
+    project_id: String,
+    asset_path: String,
+    tag_id: String,
+) -> Result<(), String> {
+    project::with_mut(&project_id, |state| {
+        state.ensure_tags().remove_tag_from_asset(&asset_path, &tag_id);
+        state.save_tags()
+    })
+}
+
+#[tauri::command]
+fn add_tag_to_assets(
+    project_id: String,
+    asset_paths: Vec<String>,
+    tag_id: String,
+) -> Result<(), String> {
+    project::with_mut(&project_id, |state| {
+        let tags = state.ensure_tags();
+        for path in asset_paths {
+            tags.add_tag_to_asset(&path, &tag_id);
         }
-    }
-    let data = tags::TagsData::load(Path::new(project_path));
-    *global_tags = Some((project_path.to_string(), data.clone()));
-    data
-}
-
-fn save_tags(project_path: &str, data: &tags::TagsData) -> Result<(), String> {
-    let mut global_tags = TAGS_DATA.lock();
-    *global_tags = Some((project_path.to_string(), data.clone()));
-    data.save(Path::new(project_path))
+        state.save_tags()
+    })
 }
 
 #[tauri::command]
-fn get_all_tags() -> Result<Vec<tags::Tag>, String> {
-    let cache = CACHED_SCAN.lock();
-    let scan_result = cache.as_ref().ok_or("No project loaded")?;
-    let data = get_or_load_tags(&scan_result.root_path);
-    Ok(data.tags)
-}
-
-#[tauri::command]
-fn create_tag(name: String, color: String) -> Result<tags::Tag, String> {
-    let cache = CACHED_SCAN.lock();
-    let scan_result = cache.as_ref().ok_or("No project loaded")?;
-    let project_path = scan_result.root_path.clone();
-    drop(cache);
-
-    let mut data = get_or_load_tags(&project_path);
-    let tag = data.create_tag(name, color);
-    save_tags(&project_path, &data)?;
-    Ok(tag)
-}
-
-#[tauri::command]
-fn update_tag(tag_id: String, name: Option<String>, color: Option<String>) -> Result<tags::Tag, String> {
-    let cache = CACHED_SCAN.lock();
-    let scan_result = cache.as_ref().ok_or("No project loaded")?;
-    let project_path = scan_result.root_path.clone();
-    drop(cache);
-
-    let mut data = get_or_load_tags(&project_path);
-    let tag = data.update_tag(&tag_id, name, color).ok_or("Tag not found")?;
-    save_tags(&project_path, &data)?;
-    Ok(tag)
-}
-
-#[tauri::command]
-fn delete_tag(tag_id: String) -> Result<(), String> {
-    let cache = CACHED_SCAN.lock();
-    let scan_result = cache.as_ref().ok_or("No project loaded")?;
-    let project_path = scan_result.root_path.clone();
-    drop(cache);
-
-    let mut data = get_or_load_tags(&project_path);
-    data.delete_tag(&tag_id);
-    save_tags(&project_path, &data)?;
-    Ok(())
-}
-
-#[tauri::command]
-fn get_asset_tags(asset_path: String) -> Result<Vec<tags::Tag>, String> {
-    let cache = CACHED_SCAN.lock();
-    let scan_result = cache.as_ref().ok_or("No project loaded")?;
-    let data = get_or_load_tags(&scan_result.root_path);
-    Ok(data.get_asset_tags(&asset_path))
-}
-
-#[tauri::command]
-fn add_tag_to_asset(asset_path: String, tag_id: String) -> Result<(), String> {
-    let cache = CACHED_SCAN.lock();
-    let scan_result = cache.as_ref().ok_or("No project loaded")?;
-    let project_path = scan_result.root_path.clone();
-    drop(cache);
-
-    let mut data = get_or_load_tags(&project_path);
-    data.add_tag_to_asset(&asset_path, &tag_id);
-    save_tags(&project_path, &data)?;
-    Ok(())
-}
-
-#[tauri::command]
-fn remove_tag_from_asset(asset_path: String, tag_id: String) -> Result<(), String> {
-    let cache = CACHED_SCAN.lock();
-    let scan_result = cache.as_ref().ok_or("No project loaded")?;
-    let project_path = scan_result.root_path.clone();
-    drop(cache);
-
-    let mut data = get_or_load_tags(&project_path);
-    data.remove_tag_from_asset(&asset_path, &tag_id);
-    save_tags(&project_path, &data)?;
-    Ok(())
-}
-
-#[tauri::command]
-fn add_tag_to_assets(asset_paths: Vec<String>, tag_id: String) -> Result<(), String> {
-    let cache = CACHED_SCAN.lock();
-    let scan_result = cache.as_ref().ok_or("No project loaded")?;
-    let project_path = scan_result.root_path.clone();
-    drop(cache);
-
-    let mut data = get_or_load_tags(&project_path);
-    for path in asset_paths {
-        data.add_tag_to_asset(&path, &tag_id);
-    }
-    save_tags(&project_path, &data)?;
-    Ok(())
-}
-
-#[tauri::command]
-fn get_all_asset_tags() -> Result<HashMap<String, Vec<tags::Tag>>, String> {
-    let cache = CACHED_SCAN.lock();
-    let scan_result = cache.as_ref().ok_or("No project loaded")?;
-    let data = get_or_load_tags(&scan_result.root_path);
-
-    let mut result: HashMap<String, Vec<tags::Tag>> = HashMap::new();
-    for (path, _) in &data.asset_tags {
-        let tags = data.get_asset_tags(path);
-        if !tags.is_empty() {
-            result.insert(path.clone(), tags);
+fn get_all_asset_tags(project_id: String) -> Result<HashMap<String, Vec<tags::Tag>>, String> {
+    project::with_mut(&project_id, |state| {
+        let tags = state.ensure_tags();
+        let mut result: HashMap<String, Vec<tags::Tag>> = HashMap::new();
+        let paths: Vec<String> = tags.asset_tags.keys().cloned().collect();
+        for path in paths {
+            let asset_tags = tags.get_asset_tags(&path);
+            if !asset_tags.is_empty() {
+                result.insert(path, asset_tags);
+            }
         }
-    }
-    Ok(result)
+        Ok(result)
+    })
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1264,7 +1214,6 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
-            // Open devtools in debug builds
             #[cfg(debug_assertions)]
             {
                 if let Some(window) = app.get_webview_window("main") {
@@ -1274,6 +1223,10 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            // Project lifecycle
+            register_project,
+            unregister_project,
+            // Scan
             scan_project,
             scan_project_async,
             scan_project_incremental,
@@ -1281,24 +1234,31 @@ pub fn run() {
             get_scan_progress,
             clear_scan_cache,
             get_thumbnail,
+            // Analysis
             analyze_assets,
             get_default_config,
             validate_config,
+            // Git
             get_git_info,
             get_git_statuses,
             get_file_git_status,
+            // Unity
             parse_unity_file,
             get_unity_dependencies,
             find_unused_assets,
+            // Stats / export
             get_project_stats,
             export_to_json,
             export_to_csv,
             export_issues_to_json,
             export_to_html,
+            // Batch ops
             preview_batch_rename,
             execute_batch_rename,
+            // Engine info
             get_unreal_project_info,
             get_godot_project_info,
+            // Undo
             get_undo_history,
             undo_last_operation,
             undo_operation_by_id,
