@@ -217,8 +217,34 @@
     "copyPath": "Copy Path",
     "revealInFinder": "Reveal in Finder",
     "rename": "Rename",
+    "duplicate": "Duplicate",
+    "moveTo": "Move to…",
+    "copyTo": "Copy to…",
     "delete": "Delete",
     "tags": "Tags"
+  },
+  "moveCopy": {
+    "titleMove": "Move {{count}} file(s)",
+    "titleCopy": "Copy {{count}} file(s)",
+    "sourceList": "Files",
+    "pickTarget": "Pick target folder",
+    "noTree": "No project loaded",
+    "andMore": "and {{count}} more",
+    "confirmMove": "Move here",
+    "confirmCopy": "Copy here",
+    "moving": "Moving…",
+    "copying": "Copying…",
+    "errorsTitle": "Some files could not be processed"
+  },
+  "deleteConfirm": {
+    "titleSingle": "Move file to trash?",
+    "titleBatch": "Move {{count}} files to trash?",
+    "hint": "Files are sent to your system recycle bin. You can restore them from there.",
+    "andMore": "and {{count}} more",
+    "confirm": "Move to Trash",
+    "deleting": "Deleting...",
+    "errorsTitle": "Some files could not be deleted",
+    "summarySuccess": "Moved {{count}} file(s) to trash"
   },
   "columns": {
     "configure": "Configure Columns",

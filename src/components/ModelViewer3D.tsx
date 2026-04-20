@@ -8,6 +8,7 @@ import { MTLLoader } from "three/addons/loaders/MTLLoader.js";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { RotateCcw, Box, Maximize2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { buildTextureUrlResolver } from "../lib/modelUrlResolver";
 
 // Supported 3D model formats
 const SUPPORTED_FORMATS = ["gltf", "glb", "fbx", "obj", "dae"];
@@ -257,79 +258,7 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
 
     // Calculate resource path for textures (model's directory converted to asset:// URL)
     const modelDir = filePath.substring(0, filePath.lastIndexOf('/') + 1);
-    // Note: convertFileSrc already returns path without trailing slash, we need to add one
-    // so texture paths like "texture.png" become "asset://path/to/dir/texture.png"
     const resourcePath = convertFileSrc(modelDir);
-
-    console.log(`[ModelViewer3D] Loading ${ext.toUpperCase()} model from: ${modelUrl}`);
-    console.log(`[ModelViewer3D] Model directory: ${modelDir}`);
-    console.log(`[ModelViewer3D] Resource path for textures: ${resourcePath}`);
-
-    // Create a custom LoadingManager with URL modifier
-    const loadingManager = new THREE.LoadingManager();
-    loadingManager.setURLModifier((url: string) => {
-      console.log(`[ModelViewer3D] LoadingManager URL modifier called with: ${url}`);
-
-      // If already an asset:// URL, return as-is
-      if (url.startsWith('asset://') || url.startsWith('data:') || url.startsWith('blob:')) {
-        return url;
-      }
-
-      // Handle http/https URLs (external textures) - return as-is
-      if (url.startsWith('http://') || url.startsWith('https://')) {
-        return url;
-      }
-
-      // Handle absolute paths (from FBX/OBJ files)
-      if (url.startsWith('/')) {
-        const converted = convertFileSrc(url);
-        console.log(`[ModelViewer3D] Converting absolute path: ${url} -> ${converted}`);
-        return converted;
-      }
-
-      // Handle relative paths - resolve relative to model directory
-      // Extract just the filename in case the path has directories we don't have
-      const filename = url.split('/').pop() || url;
-      const fullPath = modelDir + filename;
-      const converted = convertFileSrc(fullPath);
-      console.log(`[ModelViewer3D] Converting relative path: ${url} -> ${converted}`);
-      return converted;
-    });
-
-    // Create a URL converter function for textures
-    const convertTextureUrl = (url: string): string => {
-      if (!url) return url;
-
-      // If already an asset:// URL, return as-is
-      if (url.startsWith('asset://') || url.startsWith('data:') || url.startsWith('blob:')) {
-        return url;
-      }
-
-      // Handle http/https URLs (external textures) - return as-is
-      if (url.startsWith('http://') || url.startsWith('https://')) {
-        return url;
-      }
-
-      // Handle absolute paths
-      if (url.startsWith('/')) {
-        const converted = convertFileSrc(url);
-        console.log(`[ModelViewer3D] Converting absolute texture path: ${url} -> ${converted}`);
-        return converted;
-      }
-
-      // Handle relative paths - extract filename and resolve relative to model directory
-      const filename = url.split(/[/\\]/).pop() || url;
-      const fullPath = modelDir + filename;
-      const converted = convertFileSrc(fullPath);
-      console.log(`[ModelViewer3D] Converting relative texture path: ${url} -> ${converted}`);
-      return converted;
-    };
-
-    // Override LoadingManager's resolveURL to intercept all URL resolutions
-    loadingManager.resolveURL = (url: string): string => {
-      console.log(`[ModelViewer3D] resolveURL called with: ${url}`);
-      return convertTextureUrl(url);
-    };
 
     const onLoad = (object: THREE.Object3D) => {
       if (!isMountedRef.current) return;
@@ -395,45 +324,56 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
       setError(t("modelViewer.unsupportedFormat", `Format .${ext} not supported. Use GLTF, GLB, FBX, or OBJ.`));
       setIsLoading(false);
     } else {
-      try {
-        if (ext === "gltf" || ext === "glb") {
-          const loader = new GLTFLoader(loadingManager);
-          loader.setResourcePath(resourcePath);
-          loader.load(
-            modelUrl,
-            (gltf) => onLoad(gltf.scene),
-            undefined,
-            onError
-          );
-        } else if (ext === "obj") {
-          // Try to load MTL file if it exists (same name, .mtl extension)
-          const mtlPath = filePath.replace(/\.obj$/i, ".mtl");
-          const mtlUrl = convertFileSrc(mtlPath);
+      // Kick off loading in an async IIFE so we can await the sibling-texture
+      // scan before wiring the URL modifier. The scan is a single filesystem
+      // walk of the model's directory, typically <10ms.
+      (async () => {
+        const urlModifier = await buildTextureUrlResolver(filePath);
+        if (!isMountedRef.current) return;
 
-          const mtlLoader = new MTLLoader(loadingManager);
-          mtlLoader.setResourcePath(resourcePath);
-          mtlLoader.load(
-            mtlUrl,
-            (materials) => {
-              materials.preload();
-              const objLoader = new OBJLoader(loadingManager);
-              objLoader.setMaterials(materials);
-              objLoader.load(modelUrl, onLoad, undefined, onError);
-            },
-            undefined,
-            () => {
-              // MTL failed, load OBJ without materials
-              const objLoader = new OBJLoader(loadingManager);
-              objLoader.load(modelUrl, onLoad, undefined, onError);
-            }
-          );
-        } else if (ext === "fbx") {
-          const loader = new FBXLoader(loadingManager);
-          loader.setResourcePath(resourcePath);
-          loader.load(modelUrl, onLoad, undefined, onError);
-        } else if (ext === "dae") {
-          // COLLADA support - use dynamic import to avoid loading if not needed
-          import("three/addons/loaders/ColladaLoader.js").then(({ ColladaLoader }) => {
+        const loadingManager = new THREE.LoadingManager();
+        loadingManager.setURLModifier(urlModifier);
+        // Some Three.js loaders use resolveURL instead of the URL modifier; set both.
+        loadingManager.resolveURL = urlModifier;
+
+        try {
+          if (ext === "gltf" || ext === "glb") {
+            const loader = new GLTFLoader(loadingManager);
+            loader.setResourcePath(resourcePath);
+            loader.load(
+              modelUrl,
+              (gltf) => onLoad(gltf.scene),
+              undefined,
+              onError
+            );
+          } else if (ext === "obj") {
+            const mtlPath = filePath.replace(/\.obj$/i, ".mtl");
+            const mtlUrl = convertFileSrc(mtlPath);
+
+            const mtlLoader = new MTLLoader(loadingManager);
+            mtlLoader.setResourcePath(resourcePath);
+            mtlLoader.load(
+              mtlUrl,
+              (materials) => {
+                materials.preload();
+                const objLoader = new OBJLoader(loadingManager);
+                objLoader.setMaterials(materials);
+                objLoader.load(modelUrl, onLoad, undefined, onError);
+              },
+              undefined,
+              () => {
+                // MTL failed, load OBJ without materials
+                const objLoader = new OBJLoader(loadingManager);
+                objLoader.load(modelUrl, onLoad, undefined, onError);
+              }
+            );
+          } else if (ext === "fbx") {
+            const loader = new FBXLoader(loadingManager);
+            loader.setResourcePath(resourcePath);
+            loader.load(modelUrl, onLoad, undefined, onError);
+          } else if (ext === "dae") {
+            const { ColladaLoader } = await import("three/addons/loaders/ColladaLoader.js");
+            if (!isMountedRef.current) return;
             const loader = new ColladaLoader(loadingManager);
             loader.setResourcePath(resourcePath);
             loader.load(
@@ -442,11 +382,11 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
               undefined,
               onError
             );
-          }).catch(onError);
+          }
+        } catch (err) {
+          onError(err);
         }
-      } catch (err) {
-        onError(err);
-      }
+      })();
     }
 
     // Animation loop

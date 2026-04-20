@@ -190,6 +190,35 @@ export interface Tag {
 
 export type AssetTagsMap = Record<string, Tag[]>;
 
+// ============ Delete Types ============
+
+export interface DeleteError {
+  path: string;
+  message: string;
+}
+
+export interface DeleteResult {
+  success_paths: string[];
+  errors: DeleteError[];
+}
+
+// ============ Move / Copy / Duplicate ============
+
+export interface FileOpError {
+  path: string;
+  message: string;
+}
+
+export interface FileOpSuccess {
+  original_path: string;
+  new_path: string;
+}
+
+export interface FileOpResult {
+  successes: FileOpSuccess[];
+  errors: FileOpError[];
+}
+
 // ============ Filesystem Watcher Types ============
 
 /// Payload of the `fs-change-{projectId}` Tauri event.
