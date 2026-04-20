@@ -189,3 +189,18 @@ export interface Tag {
 }
 
 export type AssetTagsMap = Record<string, Tag[]>;
+
+// ============ Filesystem Watcher Types ============
+
+/// Payload of the `fs-change-{projectId}` Tauri event.
+export interface FsChangeEvent {
+  /** Assets that were added or modified. Merge into scanResult.assets by `path`. */
+  updated: AssetInfo[];
+  /** Paths that were deleted. Remove from scanResult.assets. */
+  removed: string[];
+  /** Freshly rebuilt directory tree — swap wholesale. */
+  directory_tree: DirectoryNode;
+  total_count: number;
+  total_size: number;
+  type_counts: Record<string, number>;
+}

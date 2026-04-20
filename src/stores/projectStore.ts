@@ -1,7 +1,25 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import type { ScanResult, AssetInfo, ScanProgress, AssetType, AnalysisResult, UndoResult, HistoryEntry, GitInfo, GitStatusMap } from "../types/asset";
+import type { ScanResult, AssetInfo, ScanProgress, AssetType, AnalysisResult, UndoResult, HistoryEntry, GitInfo, GitStatusMap, FsChangeEvent } from "../types/asset";
+
+// Per-project filesystem-watcher unlisten handles. Kept outside the zustand
+// store because function references don't belong in serialized state, and
+// we need to dispose them on closeProject.
+const fsWatchers = new Map<string, UnlistenFn>();
+
+async function stopFsWatch(projectId: string) {
+  const unlisten = fsWatchers.get(projectId);
+  if (unlisten) {
+    unlisten();
+    fsWatchers.delete(projectId);
+  }
+  try {
+    await invoke("stop_watching", { projectId });
+  } catch (err) {
+    console.error("Failed to stop watcher:", err);
+  }
+}
 
 type ViewMode = "assets" | "issues" | "stats";
 
@@ -226,6 +244,56 @@ const syncFromActiveProject = (project: ProjectData | undefined): Partial<Projec
   };
 };
 
+// Apply a filesystem-change event from the backend watcher into the store.
+// Runs outside any specific store action — targets the project the event was
+// emitted for, even if the user has switched away. See openProject's scan
+// handler for the same pattern.
+function applyFsChange(projectId: string, event: FsChangeEvent) {
+  const state = useProjectStore.getState();
+  const target = state.projects.get(projectId);
+  if (!target || !target.scanResult) return;
+
+  const merged = new Map<string, AssetInfo>();
+  for (const a of target.scanResult.assets) merged.set(a.path, a);
+  for (const p of event.removed) merged.delete(p);
+  for (const a of event.updated) merged.set(a.path, a);
+
+  const newScanResult: ScanResult = {
+    ...target.scanResult,
+    assets: Array.from(merged.values()),
+    directory_tree: event.directory_tree,
+    total_count: event.total_count,
+    total_size: event.total_size,
+    type_counts: event.type_counts,
+  };
+
+  // Reconcile selectedAsset: swap to the fresh copy if it was re-parsed, or
+  // drop it if the file was deleted.
+  let newSelectedAsset = target.selectedAsset;
+  if (newSelectedAsset) {
+    if (event.removed.includes(newSelectedAsset.path)) {
+      newSelectedAsset = null;
+    } else {
+      const fresh = event.updated.find((a) => a.path === newSelectedAsset!.path);
+      if (fresh) newSelectedAsset = fresh;
+    }
+  }
+
+  const updated: ProjectData = {
+    ...target,
+    scanResult: newScanResult,
+    selectedAsset: newSelectedAsset,
+  };
+  const newMap = new Map(state.projects);
+  newMap.set(projectId, updated);
+
+  const patch: Partial<ProjectState> = { projects: newMap };
+  if (state.activeProjectId === projectId) {
+    Object.assign(patch, syncFromActiveProject(updated));
+  }
+  useProjectStore.setState(patch);
+}
+
 export const useProjectStore = create<ProjectState>((set, get) => ({
   // Multi-project initial state
   projects: new Map(),
@@ -263,8 +331,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   gitStatuses: {},
 
   // Multi-project actions
-  openProject: async (path: string) => {
+  openProject: async (rawPath: string) => {
     const { projects } = get();
+
+    // Normalize path separators. The Tauri dialog returns OS-native paths
+    // (backslashes on Windows) but everything downstream — the scanner,
+    // `selectedDirectory` filtering, `convertFileSrc`, tree navigation —
+    // expects forward slashes. Backend does the same for scan result paths.
+    const path = rawPath.replace(/\\/g, "/");
 
     // Check if project is already open
     const existingProject = Array.from(projects.values()).find(p => p.projectPath === path);
@@ -276,6 +350,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     // Create new project
     const projectId = generateProjectId();
+
+    // Register with the backend BEFORE flipping activeProjectId, so that
+    // subscribers like tagsStore (which re-load on activeProjectId change)
+    // don't race an unregistered project into their invoke calls.
+    try {
+      await invoke("register_project", { projectId, path });
+    } catch (err) {
+      console.error("Failed to register project:", err);
+      return;
+    }
+
     const projectData = createDefaultProjectData(projectId, path);
     projectData.isScanning = true;
 
@@ -291,9 +376,6 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     let unlisten: UnlistenFn | null = null;
 
     try {
-      // Register the project with the backend so it gets its own state slot.
-      await invoke("register_project", { projectId, path });
-
       // Listen for this project's scan progress events.
       unlisten = await listen<ScanProgress>(`scan-progress-${projectId}`, (event) => {
         // Update progress against the project that owns this scan, even if
@@ -342,6 +424,21 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (get().activeProjectId === projectId) {
         get().refreshGitInfo();
       }
+
+      // Start the filesystem watcher now that the cache is populated.
+      // Events that arrive before the scan completes would be no-ops on the
+      // backend (no cached_scan to patch), so ordering matters.
+      try {
+        const fsUnlisten = await listen<FsChangeEvent>(
+          `fs-change-${projectId}`,
+          (event) => applyFsChange(projectId, event.payload)
+        );
+        fsWatchers.set(projectId, fsUnlisten);
+        await invoke("start_watching", { projectId });
+      } catch (err) {
+        console.error("Failed to start watcher:", err);
+        await stopFsWatch(projectId);
+      }
     } catch (err) {
       const errorMessage = String(err);
       const state = get();
@@ -373,6 +470,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const idToClose = projectId || activeProjectId;
 
     if (!idToClose) return;
+
+    // Stop the watcher first so no events arrive for state we're about to
+    // drop. Best-effort; fire-and-forget.
+    stopFsWatch(idToClose).catch((err) => {
+      console.error("Failed to stop watcher:", err);
+    });
 
     // Tell the backend to drop its state for this project (best-effort).
     invoke("unregister_project", { projectId: idToClose }).catch((err) => {

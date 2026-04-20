@@ -174,6 +174,21 @@ impl Default for ScanState {
     }
 }
 
+/// Convert a `Path` to a string using forward slashes as the separator.
+///
+/// All paths we send to the frontend go through this — the frontend expects
+/// a single separator so its path filtering, `convertFileSrc`, and all the
+/// `lastIndexOf("/")` call sites work the same on Windows as on macOS/Linux.
+/// Windows filenames cannot contain `\`, so the replace is lossless there.
+pub(crate) fn path_to_string(path: &Path) -> String {
+    let s = path.to_string_lossy().to_string();
+    if cfg!(windows) {
+        s.replace('\\', "/")
+    } else {
+        s
+    }
+}
+
 /// Get asset type from file extension
 fn get_asset_type(extension: &str) -> AssetType {
     match extension.to_lowercase().as_str() {
@@ -388,13 +403,13 @@ fn detect_project_type(root_path: &Path) -> Option<ProjectType> {
 }
 
 /// Build directory tree recursively
-fn build_directory_tree(path: &Path, assets: &[AssetInfo]) -> DirectoryNode {
+pub(crate) fn build_directory_tree(path: &Path, assets: &[AssetInfo]) -> DirectoryNode {
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| path.to_string_lossy().to_string());
+        .unwrap_or_else(|| path_to_string(path));
 
-    let path_str = path.to_string_lossy().to_string();
+    let path_str = path_to_string(path);
 
     // Get direct children directories
     let mut children: Vec<DirectoryNode> = Vec::new();
@@ -541,7 +556,7 @@ pub fn scan_directory_with_state(
                 s.current.store(current, Ordering::Relaxed);
                 // Only update current_file every 100 files to reduce lock contention
                 if current % 100 == 0 {
-                    *s.current_file.write() = entry.path().to_string_lossy().to_string();
+                    *s.current_file.write() = path_to_string(entry.path());
                 }
             }
 
@@ -600,7 +615,7 @@ pub fn scan_directory_with_state(
             };
 
             Some(AssetInfo {
-                path: entry_path.to_string_lossy().to_string(),
+                path: path_to_string(entry_path),
                 name: file_name,
                 extension,
                 asset_type,
@@ -661,7 +676,7 @@ pub fn scan_directory_with_state(
     }
 
     Ok(ScanResult {
-        root_path: path.to_string(),
+        root_path: path_to_string(Path::new(path)),
         directory_tree,
         assets,
         total_count,
@@ -732,7 +747,7 @@ pub fn parse_asset_file(
     };
 
     Some(AssetInfo {
-        path: path.to_string_lossy().to_string(),
+        path: path_to_string(path),
         name: file_name,
         extension,
         asset_type,
@@ -812,10 +827,12 @@ pub fn scan_directory_incremental(
         file_entries.push((entry, modified));
     }
 
-    // Collect all current file paths for pruning
+    // Collect all current file paths for pruning. Use normalized (forward-slash)
+    // paths so they align with what's stored in AssetInfo.path — the cache keys
+    // off the exact same string.
     let current_paths: Vec<String> = file_entries
         .iter()
-        .map(|(e, _)| e.path().to_string_lossy().to_string())
+        .map(|(e, _)| path_to_string(e.path()))
         .collect();
 
     // Prune deleted files from cache
@@ -825,7 +842,7 @@ pub fn scan_directory_incremental(
     let files_to_scan: Vec<&(walkdir::DirEntry, u64)> = file_entries
         .iter()
         .filter(|(entry, modified)| {
-            let path_str = entry.path().to_string_lossy().to_string();
+            let path_str = path_to_string(entry.path());
             let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
             cache.needs_rescan(&path_str, *modified, size)
         })
@@ -865,7 +882,7 @@ pub fn scan_directory_incremental(
             if let Some(ref s) = state_clone {
                 s.current.store(current, Ordering::Relaxed);
                 if current % 100 == 0 {
-                    *s.current_file.write() = entry.path().to_string_lossy().to_string();
+                    *s.current_file.write() = path_to_string(entry.path());
                 }
             }
 
@@ -932,7 +949,7 @@ pub fn scan_directory_incremental(
     }
 
     let result = ScanResult {
-        root_path: path.to_string(),
+        root_path: path_to_string(Path::new(path)),
         directory_tree,
         assets,
         total_count,
