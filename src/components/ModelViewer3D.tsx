@@ -263,8 +263,6 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
     const onLoad = (object: THREE.Object3D) => {
       if (!isMountedRef.current) return;
 
-      console.log(`[ModelViewer3D] Model loaded successfully:`, object);
-
       // Fix materials and get stats
       const modelStats = fixMaterials(object);
 

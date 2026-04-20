@@ -211,6 +211,34 @@ fn get_asset_type(extension: &str) -> AssetType {
     }
 }
 
+/// Dispatch metadata parsing for a single asset based on its type + extension.
+/// Used by both the full scan and the incremental per-file reparse so the set
+/// of supported formats lives in one place.
+fn parse_metadata_for(path: &Path, extension: &str, asset_type: &AssetType) -> Option<AssetMetadata> {
+    let ext = extension.to_lowercase();
+    match asset_type {
+        AssetType::Texture => match ext.as_str() {
+            // Formats the `image` crate fully decodes (enabled via Cargo features).
+            "png" | "jpg" | "jpeg" | "bmp" | "gif" | "tga"
+            | "tif" | "tiff" | "webp" | "hdr" | "exr" => parse_image_metadata(path),
+            // DDS has too many compressed sub-formats for `image` to decode
+            // reliably; we parse the header ourselves.
+            "dds" => parse_dds_metadata(path),
+            _ => None,
+        },
+        AssetType::Model => match ext.as_str() {
+            "gltf" | "glb" => parse_gltf_metadata(path),
+            "obj" => parse_obj_metadata(path),
+            _ => None,
+        },
+        AssetType::Audio => match ext.as_str() {
+            "mp3" | "ogg" | "wav" => parse_audio_metadata(path),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// Parse image metadata (dimensions, alpha)
 fn parse_image_metadata(path: &Path) -> Option<AssetMetadata> {
     match image::open(path) {
@@ -232,6 +260,48 @@ fn parse_image_metadata(path: &Path) -> Option<AssetMetadata> {
         }
         Err(_) => None,
     }
+}
+
+/// Parse DDS (DirectDraw Surface) header for width/height/alpha.
+///
+/// DDS files are very common for game textures (BC1/BC3/BC7 compressed) but
+/// the `image` crate's DDS support doesn't cover most of the compressed
+/// variants. We only need the header, so a minimal 128-byte reader does the
+/// job regardless of the inner format.
+///
+/// Layout (all little-endian):
+///   0..4   : magic "DDS "
+///   4..8   : dwSize (must be 124)
+///   8..12  : dwFlags
+///   12..16 : dwHeight
+///   16..20 : dwWidth
+///   ...
+///   76..108: DDS_PIXELFORMAT (32-byte struct)
+///       80..84: ddspf.dwFlags (DDPF_ALPHAPIXELS = 0x1)
+fn parse_dds_metadata(path: &Path) -> Option<AssetMetadata> {
+    let mut file = File::open(path).ok()?;
+    let mut buf = [0u8; 128];
+    std::io::Read::read_exact(&mut file, &mut buf).ok()?;
+
+    if &buf[0..4] != b"DDS " {
+        return None;
+    }
+    let header_size = u32::from_le_bytes(buf[4..8].try_into().ok()?);
+    if header_size != 124 {
+        return None;
+    }
+
+    let height = u32::from_le_bytes(buf[12..16].try_into().ok()?);
+    let width = u32::from_le_bytes(buf[16..20].try_into().ok()?);
+    let ddspf_flags = u32::from_le_bytes(buf[80..84].try_into().ok()?);
+    let has_alpha = (ddspf_flags & 0x1) != 0;
+
+    Some(AssetMetadata {
+        width: Some(width),
+        height: Some(height),
+        has_alpha: Some(has_alpha),
+        ..Default::default()
+    })
 }
 
 /// Parse glTF model metadata
@@ -578,34 +648,7 @@ pub fn scan_directory_with_state(
             // Determine asset type
             let asset_type = get_asset_type(&extension);
 
-            // Parse metadata based on asset type
-            let asset_metadata = match asset_type {
-                AssetType::Texture => {
-                    let ext_lower = extension.to_lowercase();
-                    match ext_lower.as_str() {
-                        "png" | "jpg" | "jpeg" | "bmp" | "gif" | "tga" => {
-                            parse_image_metadata(entry_path)
-                        }
-                        _ => None,
-                    }
-                }
-                AssetType::Model => {
-                    let ext_lower = extension.to_lowercase();
-                    match ext_lower.as_str() {
-                        "gltf" | "glb" => parse_gltf_metadata(entry_path),
-                        "obj" => parse_obj_metadata(entry_path),
-                        _ => None,
-                    }
-                }
-                AssetType::Audio => {
-                    let ext_lower = extension.to_lowercase();
-                    match ext_lower.as_str() {
-                        "mp3" | "ogg" | "wav" => parse_audio_metadata(entry_path),
-                        _ => None,
-                    }
-                }
-                _ => None,
-            };
+            let asset_metadata = parse_metadata_for(entry_path, &extension, &asset_type);
 
             // Try to get Unity GUID if it's a Unity project
             let unity_guid = if matches!(project_type_clone, Some(ProjectType::Unity)) {
@@ -712,32 +755,7 @@ pub fn parse_asset_file(
     // Determine asset type
     let asset_type = get_asset_type(&extension);
 
-    // Parse metadata based on asset type
-    let asset_metadata = match asset_type {
-        AssetType::Texture => {
-            let ext_lower = extension.to_lowercase();
-            match ext_lower.as_str() {
-                "png" | "jpg" | "jpeg" | "bmp" | "gif" | "tga" => parse_image_metadata(path),
-                _ => None,
-            }
-        }
-        AssetType::Model => {
-            let ext_lower = extension.to_lowercase();
-            match ext_lower.as_str() {
-                "gltf" | "glb" => parse_gltf_metadata(path),
-                "obj" => parse_obj_metadata(path),
-                _ => None,
-            }
-        }
-        AssetType::Audio => {
-            let ext_lower = extension.to_lowercase();
-            match ext_lower.as_str() {
-                "mp3" | "ogg" | "wav" => parse_audio_metadata(path),
-                _ => None,
-            }
-        }
-        _ => None,
-    };
+    let asset_metadata = parse_metadata_for(path, &extension, &asset_type);
 
     // Try to get Unity GUID if it's a Unity project
     let unity_guid = if matches!(project_type, Some(ProjectType::Unity)) {
@@ -1039,6 +1057,70 @@ mod tests {
         assert!(matches!(get_asset_type("xyz"), AssetType::Other));
         assert!(matches!(get_asset_type("unknown"), AssetType::Other));
         assert!(matches!(get_asset_type(""), AssetType::Other));
+    }
+
+    fn make_dds_bytes(width: u32, height: u32, alpha: bool) -> Vec<u8> {
+        let mut buf = vec![0u8; 128];
+        buf[0..4].copy_from_slice(b"DDS ");
+        buf[4..8].copy_from_slice(&124u32.to_le_bytes()); // dwSize
+        buf[12..16].copy_from_slice(&height.to_le_bytes()); // dwHeight
+        buf[16..20].copy_from_slice(&width.to_le_bytes());  // dwWidth
+        buf[76..80].copy_from_slice(&32u32.to_le_bytes()); // ddspf.dwSize
+        let flags: u32 = if alpha { 0x1 } else { 0 };
+        buf[80..84].copy_from_slice(&flags.to_le_bytes());
+        buf
+    }
+
+    #[test]
+    fn test_parse_dds_valid_header() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("test.dds");
+        fs::write(&path, make_dds_bytes(1024, 512, true)).unwrap();
+
+        let meta = parse_dds_metadata(&path).expect("valid DDS should parse");
+        assert_eq!(meta.width, Some(1024));
+        assert_eq!(meta.height, Some(512));
+        assert_eq!(meta.has_alpha, Some(true));
+    }
+
+    #[test]
+    fn test_parse_dds_no_alpha() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("test.dds");
+        fs::write(&path, make_dds_bytes(256, 256, false)).unwrap();
+
+        let meta = parse_dds_metadata(&path).expect("valid DDS should parse");
+        assert_eq!(meta.has_alpha, Some(false));
+    }
+
+    #[test]
+    fn test_parse_dds_bad_magic() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("fake.dds");
+        let mut buf = make_dds_bytes(64, 64, false);
+        buf[0..4].copy_from_slice(b"XXXX");
+        fs::write(&path, buf).unwrap();
+
+        assert!(parse_dds_metadata(&path).is_none());
+    }
+
+    #[test]
+    fn test_parse_dds_truncated() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("short.dds");
+        fs::write(&path, b"DDS ").unwrap();
+
+        assert!(parse_dds_metadata(&path).is_none());
+    }
+
+    #[test]
+    fn test_parse_metadata_dispatch_dds() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("tex.dds");
+        fs::write(&path, make_dds_bytes(128, 64, true)).unwrap();
+
+        let meta = parse_metadata_for(&path, "dds", &AssetType::Texture);
+        assert_eq!(meta.and_then(|m| m.width), Some(128));
     }
 
     #[test]
