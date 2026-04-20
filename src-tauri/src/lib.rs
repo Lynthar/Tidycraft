@@ -9,6 +9,7 @@ mod thumbnail;
 mod undo;
 mod unity;
 mod unreal;
+mod watcher;
 
 use analyzer::rules::RuleConfig;
 use analyzer::{AnalysisResult, Analyzer};
@@ -191,6 +192,26 @@ async fn scan_project_incremental(
 #[tauri::command]
 fn clear_scan_cache(path: String) -> Result<(), String> {
     ScanCache::clear(&path).map_err(|e| e.to_string())
+}
+
+// ============ Filesystem Watcher ============
+
+#[tauri::command]
+fn start_watching(app: AppHandle, project_id: String) -> Result<(), String> {
+    let root_path = project::with_ref(&project_id, |s| Ok(s.root_path.clone()))?;
+    let w = watcher::start(app, project_id.clone(), root_path)?;
+    project::with_mut(&project_id, |s| {
+        s.watcher = Some(w);
+        Ok(())
+    })
+}
+
+#[tauri::command]
+fn stop_watching(project_id: String) -> Result<(), String> {
+    project::with_mut(&project_id, |s| {
+        s.watcher = None;
+        Ok(())
+    })
 }
 
 #[tauri::command]
@@ -1233,6 +1254,8 @@ pub fn run() {
             cancel_scan,
             get_scan_progress,
             clear_scan_cache,
+            start_watching,
+            stop_watching,
             get_thumbnail,
             // Analysis
             analyze_assets,

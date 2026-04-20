@@ -13,6 +13,7 @@ use crate::git::GitManager;
 use crate::scanner::{ScanResult, ScanState};
 use crate::tags::TagsData;
 use crate::undo::UndoManager;
+use crate::watcher::ProjectWatcher;
 
 pub struct ProjectState {
     pub id: String,
@@ -22,6 +23,8 @@ pub struct ProjectState {
     pub git_manager: Option<GitManager>,
     pub undo_manager: UndoManager,
     pub tags_data: Option<TagsData>,
+    /// Live filesystem watcher. Dropping this stops the background watch.
+    pub watcher: Option<ProjectWatcher>,
 }
 
 impl ProjectState {
@@ -34,6 +37,7 @@ impl ProjectState {
             git_manager: None,
             undo_manager: UndoManager::new(50),
             tags_data: None,
+            watcher: None,
         }
     }
 
