@@ -27,3 +27,7 @@ npm-debug.log*
 # Tauri
 src-tauri/WixTools/
 src-tauri/target/
+
+# Claude Code workspace — local context, not project docs
+.claude/
+CLAUDE.md
