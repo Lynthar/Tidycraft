@@ -11,6 +11,9 @@ import { useSettingsStore } from "../stores/settingsStore";
 import { cn, formatFileSize } from "../lib/utils";
 import { BatchRenameDialog } from "./BatchRenameDialog";
 import { RenameDialog } from "./RenameDialog";
+import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
+import { MoveCopyDialog } from "./MoveCopyDialog";
+import type { FileOpResult } from "../types/asset";
 import { BatchTagSelector, TagBadge } from "./TagSelector";
 import { TagManager } from "./TagManager";
 import { ContextMenu } from "./ContextMenu";
@@ -308,6 +311,14 @@ export function AssetList() {
     asset: AssetInfo | null;
   }>({ isOpen: false, position: { x: 0, y: 0 }, asset: null });
 
+  // Delete confirmation: list of paths the user has requested to send to trash.
+  const [deleteDialogPaths, setDeleteDialogPaths] = useState<string[] | null>(null);
+
+  // Move / Copy dialog: null means closed. `mode` distinguishes the two flows.
+  const [moveCopyDialog, setMoveCopyDialog] = useState<
+    { mode: "move" | "copy"; paths: string[] } | null
+  >(null);
+
   // Get visible columns
   const visibleColumns = columns.filter((c) => c.visible).map((c) => c.id);
 
@@ -477,6 +488,99 @@ export function AssetList() {
       openProject(projectPath);
     }
   }, [projectPath, openProject, refreshUndoState]);
+
+  // Rule shared by delete / move / copy / duplicate: if the right-clicked asset
+  // is part of the current multi-selection, operate on the whole selection.
+  // Otherwise it's a single-asset op even if other items happen to be selected.
+  const targetPathsFromContext = useCallback((): string[] | null => {
+    const ctxAsset = contextMenu.asset;
+    if (!ctxAsset) return null;
+    if (selectedPaths.size > 0 && selectedPaths.has(ctxAsset.path)) {
+      return Array.from(selectedPaths);
+    }
+    return [ctxAsset.path];
+  }, [contextMenu.asset, selectedPaths]);
+
+  const handleDelete = useCallback(() => {
+    const targets = targetPathsFromContext();
+    if (targets) setDeleteDialogPaths(targets);
+  }, [targetPathsFromContext]);
+
+  const handleMoveTo = useCallback(() => {
+    const targets = targetPathsFromContext();
+    if (targets) setMoveCopyDialog({ mode: "move", paths: targets });
+  }, [targetPathsFromContext]);
+
+  const handleCopyTo = useCallback(() => {
+    const targets = targetPathsFromContext();
+    if (targets) setMoveCopyDialog({ mode: "copy", paths: targets });
+  }, [targetPathsFromContext]);
+
+  // Duplicate is same-dir with auto-suffix — no dialog, no target picker. Just
+  // fire-and-forget; watcher propagates the new files into the asset list.
+  const handleDuplicate = useCallback(async () => {
+    const targets = targetPathsFromContext();
+    if (!targets) return;
+    try {
+      const result = await invoke<FileOpResult>("duplicate_assets", { paths: targets });
+      if (result.errors.length > 0) {
+        console.warn("Duplicate had errors:", result.errors);
+      }
+    } catch (err) {
+      console.error("Failed to duplicate:", err);
+    }
+  }, [targetPathsFromContext]);
+
+  // Del key triggers delete for the current multi-selection when nothing
+  // interactive has focus. We deliberately don't handle Del for the
+  // single-click `selectedAsset` — that's ambiguous with simply navigating.
+  // Ctrl/Cmd+D triggers same-dir duplicate for the same target set.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+
+      if (e.key === "Delete") {
+        if (deleteDialogPaths) return; // already open
+        if (selectedPaths.size === 0) return;
+        e.preventDefault();
+        setDeleteDialogPaths(Array.from(selectedPaths));
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d" && !e.shiftKey) {
+        if (selectedPaths.size === 0) return;
+        e.preventDefault();
+        (async () => {
+          try {
+            await invoke<FileOpResult>("duplicate_assets", {
+              paths: Array.from(selectedPaths),
+            });
+          } catch (err) {
+            console.error("Failed to duplicate:", err);
+          }
+        })();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedPaths, deleteDialogPaths]);
+
+  // After delete finishes: clear selection for any paths that were actually
+  // sent to trash. The filesystem watcher will remove them from scanResult
+  // on its own, so no rescan is needed.
+  const handleDeleteDone = useCallback(
+    (result: { success_paths: string[] }) => {
+      if (result.success_paths.length === 0) return;
+      const succeeded = new Set(result.success_paths);
+      setSelectedPaths((prev) => {
+        const next = new Set(prev);
+        for (const p of succeeded) next.delete(p);
+        return next;
+      });
+    },
+    []
+  );
 
   const showCheckbox = selectedPaths.size > 0;
 
@@ -678,9 +782,40 @@ export function AssetList() {
           onRevealInFinder={handleRevealInFinder}
           onOpenWithDefaultApp={handleOpenWithDefaultApp}
           onRename={handleRename}
+          onDuplicate={handleDuplicate}
+          onMoveTo={handleMoveTo}
+          onCopyTo={handleCopyTo}
+          onDelete={handleDelete}
           onOpenTagManager={() => setShowTagManager(true)}
         />
       )}
+
+      {/* Delete Confirmation */}
+      <DeleteConfirmDialog
+        isOpen={deleteDialogPaths !== null}
+        paths={deleteDialogPaths ?? []}
+        onClose={() => setDeleteDialogPaths(null)}
+        onDone={handleDeleteDone}
+      />
+
+      {/* Move / Copy */}
+      <MoveCopyDialog
+        isOpen={moveCopyDialog !== null}
+        mode={moveCopyDialog?.mode ?? "move"}
+        paths={moveCopyDialog?.paths ?? []}
+        onClose={() => setMoveCopyDialog(null)}
+        onDone={(result) => {
+          // Clear selection for paths that actually moved/copied; the watcher
+          // takes care of removing / inserting them in scanResult.assets.
+          if (result.successes.length === 0) return;
+          const moved = new Set(result.successes.map((s) => s.original_path));
+          setSelectedPaths((prev) => {
+            const next = new Set(prev);
+            for (const p of moved) next.delete(p);
+            return next;
+          });
+        }}
+      />
     </>
   );
 }

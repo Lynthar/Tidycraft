@@ -1036,6 +1036,369 @@ fn open_with_default_app(path: String) -> Result<(), String> {
     Ok(())
 }
 
+// ============ Texture resolution for 3D model loaders ============
+//
+// FBX/OBJ/DAE files often embed texture filenames without a directory part
+// (e.g. just "colormap.png"), or with a directory that was valid on the author's
+// machine but is wrong for the recipient. When Three.js's loaders ask for such a
+// texture, the Tauri asset protocol returns 500. We pre-walk common sibling
+// directories (`Textures/`, `Materials/`, etc.) for the model and return a
+// filename → absolute-path lookup that the frontend uses in its URL modifier.
+
+const TEXTURE_EXTS: &[&str] = &[
+    "png", "jpg", "jpeg", "tga", "bmp", "gif",
+    "dds", "hdr", "exr", "tif", "tiff", "webp", "psd",
+];
+
+/// Subdirs to scan below the model's own directory.
+const SIBLING_SUBDIRS: &[&str] = &[
+    "",
+    "Textures", "textures",
+    "Texture", "texture",
+    "Materials", "materials",
+    "Material", "material",
+    "Maps", "maps",
+    "Tex", "tex",
+    "Images", "images",
+];
+
+/// Subdirs to scan below the model's *parent* directory (for layouts where the
+/// textures live as a sibling of the model folder, e.g. `Models/foo.fbx` +
+/// `Textures/tex.png`).
+const PARENT_SUBDIRS: &[&str] = &[
+    "Textures", "textures",
+    "Texture", "texture",
+    "Materials", "materials",
+    "Maps", "maps",
+];
+
+fn collect_texture_files(dir: &Path, out: &mut HashMap<String, String>) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let ext = match path.extension().and_then(|e| e.to_str()) {
+            Some(e) => e.to_lowercase(),
+            None => continue,
+        };
+        if !TEXTURE_EXTS.iter().any(|&e| e == ext) {
+            continue;
+        }
+        let filename = match path.file_name().and_then(|n| n.to_str()) {
+            Some(n) => n.to_lowercase(),
+            None => continue,
+        };
+        // First hit wins — callers walk dirs in preference order so that a
+        // model-local texture beats a neighboring-folder duplicate.
+        out.entry(filename)
+            .or_insert_with(|| scanner::path_to_string(&path));
+    }
+}
+
+#[tauri::command]
+fn resolve_texture_siblings(model_path: String) -> HashMap<String, String> {
+    let model = Path::new(&model_path);
+    let model_dir = match model.parent() {
+        Some(p) => p.to_path_buf(),
+        None => return HashMap::new(),
+    };
+
+    let mut result: HashMap<String, String> = HashMap::new();
+
+    for subdir in SIBLING_SUBDIRS {
+        let dir = if subdir.is_empty() {
+            model_dir.clone()
+        } else {
+            model_dir.join(subdir)
+        };
+        collect_texture_files(&dir, &mut result);
+    }
+
+    if let Some(parent) = model_dir.parent() {
+        for subdir in PARENT_SUBDIRS {
+            collect_texture_files(&parent.join(subdir), &mut result);
+        }
+    }
+
+    result
+}
+
+#[derive(Serialize)]
+pub struct DeleteError {
+    pub path: String,
+    pub message: String,
+}
+
+#[derive(Serialize)]
+pub struct DeleteResult {
+    pub success_paths: Vec<String>,
+    pub errors: Vec<DeleteError>,
+}
+
+// ============ Move / Copy / Duplicate ============
+
+#[derive(Serialize)]
+pub struct FileOpError {
+    pub path: String,
+    pub message: String,
+}
+
+#[derive(Serialize)]
+pub struct FileOpSuccess {
+    pub original_path: String,
+    pub new_path: String,
+}
+
+#[derive(Serialize)]
+pub struct FileOpResult {
+    pub successes: Vec<FileOpSuccess>,
+    pub errors: Vec<FileOpError>,
+}
+
+fn unix_timestamp() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Move each path into `target_dir`. Per-file rename; target must not already
+/// exist at the destination. Successful moves are batched into the project's
+/// undo manager so the user can revert.
+#[tauri::command]
+fn move_assets(
+    project_id: String,
+    paths: Vec<String>,
+    target_dir: String,
+) -> FileOpResult {
+    let mut successes: Vec<FileOpSuccess> = Vec::new();
+    let mut errors: Vec<FileOpError> = Vec::new();
+
+    let target = Path::new(&target_dir);
+    if !target.is_dir() {
+        errors.push(FileOpError {
+            path: target_dir.clone(),
+            message: "Target is not a directory".to_string(),
+        });
+        return FileOpResult { successes, errors };
+    }
+
+    for path in paths {
+        let src = Path::new(&path);
+        let name = match src.file_name() {
+            Some(n) => n.to_os_string(),
+            None => {
+                errors.push(FileOpError {
+                    path: path.clone(),
+                    message: "Invalid source path".to_string(),
+                });
+                continue;
+            }
+        };
+        let dst = target.join(&name);
+
+        if src == dst {
+            // No-op: source already in target directory. Skip silently.
+            continue;
+        }
+        if dst.exists() {
+            errors.push(FileOpError {
+                path: path.clone(),
+                message: format!("Target already exists: {}", scanner::path_to_string(&dst)),
+            });
+            continue;
+        }
+
+        match std::fs::rename(src, &dst) {
+            Ok(_) => successes.push(FileOpSuccess {
+                original_path: path,
+                new_path: scanner::path_to_string(&dst),
+            }),
+            Err(e) => errors.push(FileOpError {
+                path,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    if !successes.is_empty() {
+        let ts = unix_timestamp();
+        let ops: Vec<undo::FileOperation> = successes
+            .iter()
+            .map(|s| undo::FileOperation {
+                operation_type: undo::OperationType::Move,
+                original_path: s.original_path.clone(),
+                new_path: Some(s.new_path.clone()),
+                timestamp: ts,
+            })
+            .collect();
+        let _ = project::with_mut(&project_id, |state| {
+            state.undo_manager.record_batch(
+                format!("Move {} file(s)", ops.len()),
+                ops,
+            );
+            Ok(())
+        });
+    }
+
+    FileOpResult { successes, errors }
+}
+
+/// Copy each path into `target_dir`. Fails on collision (unlike duplicate).
+/// No undo recording — user can just delete the copies if they're unwanted.
+#[tauri::command]
+fn copy_assets(paths: Vec<String>, target_dir: String) -> FileOpResult {
+    let mut successes: Vec<FileOpSuccess> = Vec::new();
+    let mut errors: Vec<FileOpError> = Vec::new();
+
+    let target = Path::new(&target_dir);
+    if !target.is_dir() {
+        errors.push(FileOpError {
+            path: target_dir.clone(),
+            message: "Target is not a directory".to_string(),
+        });
+        return FileOpResult { successes, errors };
+    }
+
+    for path in paths {
+        let src = Path::new(&path);
+        let name = match src.file_name() {
+            Some(n) => n.to_os_string(),
+            None => {
+                errors.push(FileOpError {
+                    path: path.clone(),
+                    message: "Invalid source path".to_string(),
+                });
+                continue;
+            }
+        };
+        let dst = target.join(&name);
+
+        if dst.exists() {
+            errors.push(FileOpError {
+                path: path.clone(),
+                message: format!(
+                    "Target already exists: {} (use Duplicate for same-name copies)",
+                    scanner::path_to_string(&dst)
+                ),
+            });
+            continue;
+        }
+
+        match std::fs::copy(src, &dst) {
+            Ok(_) => successes.push(FileOpSuccess {
+                original_path: path,
+                new_path: scanner::path_to_string(&dst),
+            }),
+            Err(e) => errors.push(FileOpError {
+                path,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    FileOpResult { successes, errors }
+}
+
+/// Build a sibling path by adding " copy" (and a counter if needed) before the
+/// extension. Matches macOS Finder's convention; works on all platforms.
+fn unique_copy_path(src: &Path) -> Option<std::path::PathBuf> {
+    let parent = src.parent()?;
+    let stem = src.file_stem().and_then(|s| s.to_str())?.to_string();
+    let ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| format!(".{}", e))
+        .unwrap_or_default();
+
+    let first = parent.join(format!("{} copy{}", stem, ext));
+    if !first.exists() {
+        return Some(first);
+    }
+    for i in 2..1000 {
+        let candidate = parent.join(format!("{} copy {}{}", stem, i, ext));
+        if !candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    // Extreme fallback — timestamp suffix guarantees uniqueness.
+    Some(parent.join(format!("{} copy {}{}", stem, unix_timestamp(), ext)))
+}
+
+/// Create an in-place copy of each file with an auto-suffixed name (`foo.png`
+/// → `foo copy.png`, `foo copy 2.png`, …). No undo — trash the copies if unwanted.
+#[tauri::command]
+fn duplicate_assets(paths: Vec<String>) -> FileOpResult {
+    let mut successes: Vec<FileOpSuccess> = Vec::new();
+    let mut errors: Vec<FileOpError> = Vec::new();
+
+    for path in paths {
+        let src = Path::new(&path);
+        if !src.is_file() {
+            errors.push(FileOpError {
+                path: path.clone(),
+                message: "Source is not a regular file".to_string(),
+            });
+            continue;
+        }
+        let dst = match unique_copy_path(src) {
+            Some(d) => d,
+            None => {
+                errors.push(FileOpError {
+                    path: path.clone(),
+                    message: "Cannot derive duplicate name (no parent or bad stem)".to_string(),
+                });
+                continue;
+            }
+        };
+
+        match std::fs::copy(src, &dst) {
+            Ok(_) => successes.push(FileOpSuccess {
+                original_path: path,
+                new_path: scanner::path_to_string(&dst),
+            }),
+            Err(e) => errors.push(FileOpError {
+                path,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    FileOpResult { successes, errors }
+}
+
+/// Send each path to the OS recycle bin / trash. Per-path success/error is
+/// reported separately so the UI can show partial results (e.g. some files on
+/// a network drive that doesn't support trash).
+///
+/// No `project_id` parameter: the filesystem watcher will pick up the resulting
+/// remove events and update `scanResult.assets` automatically.
+#[tauri::command]
+fn delete_assets(paths: Vec<String>) -> DeleteResult {
+    let mut success_paths = Vec::new();
+    let mut errors = Vec::new();
+
+    for path in paths {
+        match trash::delete(&path) {
+            Ok(_) => success_paths.push(path),
+            Err(e) => errors.push(DeleteError {
+                path,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    DeleteResult {
+        success_paths,
+        errors,
+    }
+}
+
 #[tauri::command]
 fn rename_file(project_id: String, old_path: String, new_name: String) -> Result<String, String> {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1292,6 +1655,11 @@ pub fn run() {
             reveal_in_finder,
             open_with_default_app,
             rename_file,
+            delete_assets,
+            move_assets,
+            copy_assets,
+            duplicate_assets,
+            resolve_texture_siblings,
             // Tags
             get_all_tags,
             create_tag,

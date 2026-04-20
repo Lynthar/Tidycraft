@@ -1,5 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { Copy, Tag as TagIcon, FolderOpen, Trash2, Edit3, Check, ChevronRight, ExternalLink } from "lucide-react";
+import {
+  Copy,
+  CopyPlus,
+  FolderInput,
+  Tag as TagIcon,
+  FolderOpen,
+  Trash2,
+  Edit3,
+  Check,
+  ChevronRight,
+  ExternalLink,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useTagsStore } from "../stores/tagsStore";
 import { cn } from "../lib/utils";
@@ -20,6 +31,9 @@ interface ContextMenuProps {
   onRevealInFinder: () => void;
   onOpenWithDefaultApp: () => void;
   onRename: () => void;
+  onDuplicate?: () => void;
+  onMoveTo?: () => void;
+  onCopyTo?: () => void;
   onDelete?: () => void;
   onOpenTagManager: () => void;
 }
@@ -34,6 +48,9 @@ export function ContextMenu({
   onRevealInFinder,
   onOpenWithDefaultApp,
   onRename,
+  onDuplicate,
+  onMoveTo,
+  onCopyTo,
   onDelete,
   onOpenTagManager,
 }: ContextMenuProps) {
@@ -128,8 +145,45 @@ export function ContextMenu({
         onClose();
       },
     },
+    ...(onDuplicate
+      ? [
+          {
+            icon: <CopyPlus size={14} />,
+            label: t("contextMenu.duplicate"),
+            onClick: () => {
+              onDuplicate();
+              onClose();
+            },
+          },
+        ]
+      : []),
+    ...(onMoveTo
+      ? [
+          {
+            icon: <FolderInput size={14} />,
+            label: t("contextMenu.moveTo"),
+            onClick: () => {
+              onMoveTo();
+              onClose();
+            },
+          },
+        ]
+      : []),
+    ...(onCopyTo
+      ? [
+          {
+            icon: <CopyPlus size={14} />,
+            label: t("contextMenu.copyTo"),
+            onClick: () => {
+              onCopyTo();
+              onClose();
+            },
+          },
+        ]
+      : []),
     ...(onDelete
       ? [
+          { type: "separator" as const },
           {
             icon: <Trash2 size={14} />,
             label: t("contextMenu.delete"),

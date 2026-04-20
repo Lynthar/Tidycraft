@@ -217,8 +217,34 @@
     "copyPath": "复制路径",
     "revealInFinder": "在 Finder 中显示",
     "rename": "重命名",
+    "duplicate": "创建副本",
+    "moveTo": "移动到…",
+    "copyTo": "复制到…",
     "delete": "删除",
     "tags": "标签"
+  },
+  "moveCopy": {
+    "titleMove": "移动 {{count}} 个文件",
+    "titleCopy": "复制 {{count}} 个文件",
+    "sourceList": "文件列表",
+    "pickTarget": "选择目标文件夹",
+    "noTree": "未加载项目",
+    "andMore": "以及另外 {{count}} 个",
+    "confirmMove": "移动到此处",
+    "confirmCopy": "复制到此处",
+    "moving": "移动中…",
+    "copying": "复制中…",
+    "errorsTitle": "部分文件无法处理"
+  },
+  "deleteConfirm": {
+    "titleSingle": "移至回收站?",
+    "titleBatch": "移动 {{count}} 个文件至回收站?",
+    "hint": "文件将发送到系统回收站,可从回收站恢复。",
+    "andMore": "以及另外 {{count}} 个",
+    "confirm": "移至回收站",
+    "deleting": "删除中...",
+    "errorsTitle": "部分文件无法删除",
+    "summarySuccess": "已将 {{count}} 个文件移至回收站"
   },
   "columns": {
     "configure": "配置列",

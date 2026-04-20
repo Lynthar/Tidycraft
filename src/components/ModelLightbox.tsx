@@ -8,6 +8,7 @@ import { MTLLoader } from "three/addons/loaders/MTLLoader.js";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { X, RotateCcw, Box, Grid3X3, Sun, Moon } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { buildTextureUrlResolver } from "../lib/modelUrlResolver";
 
 const SUPPORTED_FORMATS = ["gltf", "glb", "fbx", "obj", "dae"];
 
@@ -324,21 +325,6 @@ export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose 
     const modelDir = filePath.substring(0, filePath.lastIndexOf('/') + 1);
     const resourcePath = convertFileSrc(modelDir);
 
-    const loadingManager = new THREE.LoadingManager();
-    loadingManager.setURLModifier((url: string) => {
-      if (url.startsWith('asset://') || url.startsWith('data:') || url.startsWith('blob:')) {
-        return url;
-      }
-      if (url.startsWith('http://') || url.startsWith('https://')) {
-        return url;
-      }
-      if (url.startsWith('/')) {
-        return convertFileSrc(url);
-      }
-      const filename = url.split('/').pop() || url;
-      return convertFileSrc(modelDir + filename);
-    });
-
     const onLoad = (object: THREE.Object3D) => {
       if (!isMountedRef.current) return;
 
@@ -394,45 +380,54 @@ export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose 
       setError(t("modelViewer.unsupportedFormat", `Format .${ext} not supported`));
       setIsLoading(false);
     } else {
-      try {
-        if (ext === "gltf" || ext === "glb") {
-          const loader = new GLTFLoader(loadingManager);
-          loader.setResourcePath(resourcePath);
-          loader.load(modelUrl, (gltf) => onLoad(gltf.scene), undefined, onError);
-        } else if (ext === "obj") {
-          const mtlPath = filePath.replace(/\.obj$/i, ".mtl");
-          const mtlUrl = convertFileSrc(mtlPath);
+      (async () => {
+        const urlModifier = await buildTextureUrlResolver(filePath);
+        if (!isMountedRef.current) return;
 
-          const mtlLoader = new MTLLoader(loadingManager);
-          mtlLoader.setResourcePath(resourcePath);
-          mtlLoader.load(
-            mtlUrl,
-            (materials) => {
-              materials.preload();
-              const objLoader = new OBJLoader(loadingManager);
-              objLoader.setMaterials(materials);
-              objLoader.load(modelUrl, onLoad, undefined, onError);
-            },
-            undefined,
-            () => {
-              const objLoader = new OBJLoader(loadingManager);
-              objLoader.load(modelUrl, onLoad, undefined, onError);
-            }
-          );
-        } else if (ext === "fbx") {
-          const loader = new FBXLoader(loadingManager);
-          loader.setResourcePath(resourcePath);
-          loader.load(modelUrl, onLoad, undefined, onError);
-        } else if (ext === "dae") {
-          import("three/addons/loaders/ColladaLoader.js").then(({ ColladaLoader }) => {
+        const loadingManager = new THREE.LoadingManager();
+        loadingManager.setURLModifier(urlModifier);
+        loadingManager.resolveURL = urlModifier;
+
+        try {
+          if (ext === "gltf" || ext === "glb") {
+            const loader = new GLTFLoader(loadingManager);
+            loader.setResourcePath(resourcePath);
+            loader.load(modelUrl, (gltf) => onLoad(gltf.scene), undefined, onError);
+          } else if (ext === "obj") {
+            const mtlPath = filePath.replace(/\.obj$/i, ".mtl");
+            const mtlUrl = convertFileSrc(mtlPath);
+
+            const mtlLoader = new MTLLoader(loadingManager);
+            mtlLoader.setResourcePath(resourcePath);
+            mtlLoader.load(
+              mtlUrl,
+              (materials) => {
+                materials.preload();
+                const objLoader = new OBJLoader(loadingManager);
+                objLoader.setMaterials(materials);
+                objLoader.load(modelUrl, onLoad, undefined, onError);
+              },
+              undefined,
+              () => {
+                const objLoader = new OBJLoader(loadingManager);
+                objLoader.load(modelUrl, onLoad, undefined, onError);
+              }
+            );
+          } else if (ext === "fbx") {
+            const loader = new FBXLoader(loadingManager);
+            loader.setResourcePath(resourcePath);
+            loader.load(modelUrl, onLoad, undefined, onError);
+          } else if (ext === "dae") {
+            const { ColladaLoader } = await import("three/addons/loaders/ColladaLoader.js");
+            if (!isMountedRef.current) return;
             const loader = new ColladaLoader(loadingManager);
             loader.setResourcePath(resourcePath);
             loader.load(modelUrl, (collada) => onLoad(collada.scene), undefined, onError);
-          }).catch(onError);
+          }
+        } catch (err) {
+          onError(err);
         }
-      } catch (err) {
-        onError(err);
-      }
+      })();
     }
 
     // Animation loop
