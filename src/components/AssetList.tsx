@@ -1,6 +1,6 @@
 import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Image, Box, Volume2, File, Edit3, X, ArrowUp, ArrowDown, Plus, Pencil, Trash2, AlertCircle, Settings } from "lucide-react";
+import { Image, Box, Volume2, Video, File, Edit3, X, ArrowUp, ArrowDown, Plus, Pencil, Trash2, AlertCircle, Settings } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
@@ -32,6 +32,8 @@ function AssetIcon({ type }: { type: AssetType }) {
       return <Box {...iconProps} className="text-blue-400" />;
     case "audio":
       return <Volume2 {...iconProps} className="text-yellow-400" />;
+    case "video":
+      return <Video {...iconProps} className="text-purple-400" />;
     default:
       return <File {...iconProps} className="text-gray-400" />;
   }

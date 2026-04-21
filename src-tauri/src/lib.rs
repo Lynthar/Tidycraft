@@ -235,6 +235,8 @@ fn analyze_assets(project_id: String, config_toml: Option<String>) -> Result<Ana
         let mut result = analyzer.analyze(scan_result);
         let duplicates = analyzer.find_duplicates(scan_result);
         result.merge(duplicates);
+        let missing = analyzer.find_missing_references(scan_result);
+        result.merge(missing);
         Ok(result)
     })
 }
@@ -561,6 +563,8 @@ fn export_issues_to_json(project_id: String) -> Result<String, String> {
         let mut result = analyzer.analyze(scan_result);
         let duplicates = analyzer.find_duplicates(scan_result);
         result.merge(duplicates);
+        let missing = analyzer.find_missing_references(scan_result);
+        result.merge(missing);
 
         serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
     })
@@ -576,6 +580,8 @@ fn export_to_html(project_id: String) -> Result<String, String> {
         let mut analysis_result = analyzer.analyze(scan_result);
         let duplicates = analyzer.find_duplicates(scan_result);
         analysis_result.merge(duplicates);
+        let missing = analyzer.find_missing_references(scan_result);
+        analysis_result.merge(missing);
 
         let mut type_counts: HashMap<String, usize> = HashMap::new();
         let mut size_by_type: HashMap<String, u64> = HashMap::new();

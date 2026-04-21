@@ -242,6 +242,7 @@ fn asset_type_key(t: &AssetType) -> String {
         AssetType::Texture => "texture",
         AssetType::Model => "model",
         AssetType::Audio => "audio",
+        AssetType::Video => "video",
         AssetType::Animation => "animation",
         AssetType::Material => "material",
         AssetType::Prefab => "prefab",

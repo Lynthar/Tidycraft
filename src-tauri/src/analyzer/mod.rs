@@ -152,6 +152,15 @@ impl Analyzer {
     pub fn find_duplicates(&self, scan_result: &ScanResult) -> AnalysisResult {
         rules::duplicate::find_duplicates(&scan_result.assets)
     }
+
+    /// Check for Unity GUID references that don't resolve to any asset in
+    /// the project. No-op for non-Unity projects.
+    pub fn find_missing_references(&self, scan_result: &ScanResult) -> AnalysisResult {
+        rules::missing_reference::find_missing_references(
+            &scan_result.assets,
+            &scan_result.project_type,
+        )
+    }
 }
 
 impl Default for Analyzer {

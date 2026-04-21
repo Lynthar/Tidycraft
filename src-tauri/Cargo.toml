@@ -42,6 +42,8 @@ notify = "6"
 notify-debouncer-full = "0.3"
 trash = "5"
 fbxcel-dom = "0.0"
+mp4 = "0.14"
+matroska-demuxer = "0.7"
 
 [dev-dependencies]
 tempfile = "3"

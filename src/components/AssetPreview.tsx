@@ -296,6 +296,43 @@ export function AssetPreview() {
             </div>
           )}
 
+          {/* Video Metadata */}
+          {selectedAsset.asset_type === "video" && metadata && (
+            <div>
+              <h4 className="text-text-secondary text-xs uppercase mb-2">{t("assetPreview.videoInfo")}</h4>
+              <div className="space-y-1.5">
+                {metadata.duration_secs !== undefined && (
+                  <div className="flex justify-between">
+                    <span className="text-text-secondary">{t("assetPreview.duration")}:</span>
+                    <span className="text-text-primary">
+                      {formatDuration(metadata.duration_secs)}
+                    </span>
+                  </div>
+                )}
+                {metadata.width !== undefined && metadata.height !== undefined && (
+                  <div className="flex justify-between">
+                    <span className="text-text-secondary">{t("assetPreview.resolution")}:</span>
+                    <span className="text-text-primary">
+                      {metadata.width} × {metadata.height}
+                    </span>
+                  </div>
+                )}
+                {metadata.framerate !== undefined && metadata.framerate > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-text-secondary">{t("assetPreview.framerate")}:</span>
+                    <span className="text-text-primary">{metadata.framerate.toFixed(2)} fps</span>
+                  </div>
+                )}
+                {metadata.video_codec && (
+                  <div className="flex justify-between">
+                    <span className="text-text-secondary">{t("assetPreview.codec")}:</span>
+                    <span className="text-text-primary font-mono text-xs">{metadata.video_codec}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Audio Metadata */}
           {selectedAsset.asset_type === "audio" && metadata && (
             <div>
