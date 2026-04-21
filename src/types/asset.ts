@@ -2,6 +2,7 @@ export type AssetType =
   | "texture"
   | "model"
   | "audio"
+  | "video"
   | "animation"
   | "material"
   | "prefab"
@@ -21,11 +22,14 @@ export interface AssetMetadata {
   vertex_count?: number;
   face_count?: number;
   material_count?: number;
-  // Audio metadata
+  // Audio / video metadata (duration is shared)
   duration_secs?: number;
   sample_rate?: number;
   channels?: number;
   bit_depth?: number;
+  // Video-specific
+  framerate?: number;
+  video_codec?: string;
 }
 
 export interface AssetInfo {

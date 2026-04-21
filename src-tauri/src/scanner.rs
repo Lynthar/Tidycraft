@@ -40,6 +40,7 @@ pub enum AssetType {
     Texture,
     Model,
     Audio,
+    Video,
     Animation,
     Material,
     Prefab,
@@ -59,11 +60,14 @@ pub struct AssetMetadata {
     pub vertex_count: Option<u32>,
     pub face_count: Option<u32>,
     pub material_count: Option<u32>,
-    // Audio metadata
+    // Audio / video metadata (duration is shared)
     pub duration_secs: Option<f64>,
     pub sample_rate: Option<u32>,
     pub channels: Option<u32>,
     pub bit_depth: Option<u32>,
+    // Video-specific
+    pub framerate: Option<f32>,
+    pub video_codec: Option<String>,
 }
 
 impl Default for AssetMetadata {
@@ -79,6 +83,8 @@ impl Default for AssetMetadata {
             sample_rate: None,
             channels: None,
             bit_depth: None,
+            framerate: None,
+            video_codec: None,
         }
     }
 }
@@ -199,6 +205,8 @@ fn get_asset_type(extension: &str) -> AssetType {
         "fbx" | "obj" | "gltf" | "glb" | "blend" | "dae" | "3ds" | "max" => AssetType::Model,
         // Audio
         "wav" | "mp3" | "ogg" | "flac" | "aiff" | "aac" | "wma" => AssetType::Audio,
+        // Video
+        "mp4" | "mov" | "m4v" | "webm" | "mkv" | "avi" => AssetType::Video,
         // Unity specific
         "prefab" => AssetType::Prefab,
         "unity" => AssetType::Scene,
@@ -237,6 +245,11 @@ fn parse_metadata_for(path: &Path, extension: &str, asset_type: &AssetType) -> O
         AssetType::Audio => match ext.as_str() {
             "mp3" | "ogg" | "wav" => parse_audio_metadata(path),
             _ => None,
+        },
+        AssetType::Video => match ext.as_str() {
+            "mp4" | "mov" | "m4v" => parse_mp4_metadata(path),
+            "webm" | "mkv" => parse_matroska_metadata(path),
+            _ => None, // AVI: no pure-Rust parser we ship with yet
         },
         _ => None,
     }
@@ -524,6 +537,82 @@ fn parse_obj_metadata(path: &Path) -> Option<AssetMetadata> {
         }
         Err(_) => None,
     }
+}
+
+/// Parse MP4 / MOV / M4V container metadata: duration, resolution, framerate,
+/// and the first video track's codec. Uses the pure-Rust `mp4` crate.
+fn parse_mp4_metadata(path: &Path) -> Option<AssetMetadata> {
+    use std::io::BufReader;
+
+    let file = File::open(path).ok()?;
+    let size = file.metadata().ok()?.len();
+    let reader = BufReader::new(file);
+    let mp4 = mp4::Mp4Reader::read_header(reader, size).ok()?;
+
+    let duration_secs = Some(mp4.duration().as_secs_f64());
+
+    // First video track wins. Audio-only MP4s (rare) yield duration but no
+    // resolution / codec / framerate.
+    for track in mp4.tracks().values() {
+        if track.track_type().ok() == Some(mp4::TrackType::Video) {
+            let video_codec = track.media_type().ok().map(|m| m.to_string());
+            return Some(AssetMetadata {
+                width: Some(track.width() as u32),
+                height: Some(track.height() as u32),
+                duration_secs,
+                framerate: Some(track.frame_rate() as f32),
+                video_codec,
+                ..Default::default()
+            });
+        }
+    }
+
+    Some(AssetMetadata {
+        duration_secs,
+        ..Default::default()
+    })
+}
+
+/// Parse WebM / MKV (Matroska) metadata via `matroska-demuxer`.
+fn parse_matroska_metadata(path: &Path) -> Option<AssetMetadata> {
+    use matroska_demuxer::{MatroskaFile, TrackType};
+
+    let file = File::open(path).ok()?;
+    let mkv = MatroskaFile::open(file).ok()?;
+
+    let info = mkv.info();
+    // Matroska stores duration in "timestamp units"; each unit is
+    // `timestamp_scale` nanoseconds (default 1e6 = 1ms). Convert to seconds.
+    let ts_scale = info.timestamp_scale().get() as f64;
+    let duration_secs = info
+        .duration()
+        .map(|d| d * ts_scale / 1_000_000_000.0);
+
+    for track in mkv.tracks() {
+        if track.track_type() == TrackType::Video {
+            let codec_id = track.codec_id().to_string();
+            if let Some(v) = track.video() {
+                return Some(AssetMetadata {
+                    width: Some(v.pixel_width().get() as u32),
+                    height: Some(v.pixel_height().get() as u32),
+                    duration_secs,
+                    video_codec: Some(codec_id),
+                    ..Default::default()
+                });
+            }
+            // Video track but no Video block (rare/malformed) — still record codec.
+            return Some(AssetMetadata {
+                duration_secs,
+                video_codec: Some(codec_id),
+                ..Default::default()
+            });
+        }
+    }
+
+    Some(AssetMetadata {
+        duration_secs,
+        ..Default::default()
+    })
 }
 
 /// Parse audio metadata using symphonia
@@ -853,6 +942,7 @@ pub fn scan_directory_with_state(
             AssetType::Texture => "texture",
             AssetType::Model => "model",
             AssetType::Audio => "audio",
+            AssetType::Video => "video",
             AssetType::Animation => "animation",
             AssetType::Material => "material",
             AssetType::Prefab => "prefab",
@@ -1108,6 +1198,7 @@ pub fn scan_directory_incremental(
             AssetType::Texture => "texture",
             AssetType::Model => "model",
             AssetType::Audio => "audio",
+            AssetType::Video => "video",
             AssetType::Animation => "animation",
             AssetType::Material => "material",
             AssetType::Prefab => "prefab",

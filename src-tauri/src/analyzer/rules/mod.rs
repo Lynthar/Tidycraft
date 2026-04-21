@@ -1,5 +1,6 @@
 pub mod audio;
 pub mod duplicate;
+pub mod missing_reference;
 pub mod model;
 pub mod naming;
 pub mod texture;
