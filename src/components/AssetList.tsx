@@ -391,7 +391,10 @@ export function AssetList() {
     }
 
     return filteredAssets;
-  }, [getFilteredAssets, tagFilters, allAssetTags, typeFilter, searchQuery, selectedDirectory, sortField, sortDirection, advancedFilters]);
+    // `scanResult` is included so watcher-driven asset list changes
+    // (add/remove) invalidate this memo — the store-level cache inside
+    // getFilteredAssets handles the filter+sort memoization itself.
+  }, [scanResult, getFilteredAssets, tagFilters, allAssetTags, typeFilter, searchQuery, selectedDirectory, sortField, sortDirection, advancedFilters]);
 
   const virtualizer = useVirtualizer({
     count: assets.length,

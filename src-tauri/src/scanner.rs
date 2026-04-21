@@ -804,8 +804,48 @@ fn detect_project_type(root_path: &Path) -> Option<ProjectType> {
     Some(ProjectType::Generic)
 }
 
-/// Build directory tree recursively
-pub(crate) fn build_directory_tree(path: &Path, assets: &[AssetInfo]) -> DirectoryNode {
+/// Per-directory direct-file aggregates, keyed by normalized (forward-slash)
+/// parent path. Precomputed once in one O(N) pass so the recursive tree
+/// build becomes O(D + fs::read_dir) instead of O(D × N).
+struct DirStats {
+    file_count: usize,
+    total_size: u64,
+}
+
+fn precompute_dir_stats(assets: &[AssetInfo]) -> HashMap<String, DirStats> {
+    // Rough heuristic: ~1 dir per 10 files. Slight overshoot just avoids
+    // the first couple of HashMap resizes.
+    let mut map: HashMap<String, DirStats> = HashMap::with_capacity(assets.len() / 10 + 16);
+    for asset in assets {
+        let Some(parent) = Path::new(&asset.path).parent() else {
+            continue;
+        };
+        let key = path_to_string(parent);
+        let entry = map
+            .entry(key)
+            .or_insert(DirStats { file_count: 0, total_size: 0 });
+        entry.file_count += 1;
+        entry.total_size += asset.size;
+    }
+    map
+}
+
+/// Build the directory tree for the project.
+///
+/// Historically this was O(D × N) — each of the D directory nodes filtered
+/// the full assets slice looking for its direct children. On a 10k-file /
+/// 200-dir project that's 2M comparisons per rebuild, and watcher events
+/// trigger a full rebuild on every fs-change batch.
+///
+/// New implementation: one O(N) preprocessing pass groups assets by their
+/// parent directory path into a HashMap, then the recursive tree build only
+/// does an O(1) hashmap lookup per node for its direct counts.
+pub(crate) fn build_directory_tree(root: &Path, assets: &[AssetInfo]) -> DirectoryNode {
+    let stats = precompute_dir_stats(assets);
+    build_dir_node(root, &stats)
+}
+
+fn build_dir_node(path: &Path, stats: &HashMap<String, DirStats>) -> DirectoryNode {
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -813,41 +853,29 @@ pub(crate) fn build_directory_tree(path: &Path, assets: &[AssetInfo]) -> Directo
 
     let path_str = path_to_string(path);
 
-    // Get direct children directories
+    // Walk subdirectories via fs::read_dir so empty dirs still appear in the
+    // tree (common for fresh project folders the user is organizing).
     let mut children: Vec<DirectoryNode> = Vec::new();
-
     if let Ok(entries) = fs::read_dir(path) {
         for entry in entries.flatten() {
             let entry_path = entry.path();
             if entry_path.is_dir() {
-                // Skip hidden directories
                 let dir_name = entry_path.file_name().unwrap_or_default().to_string_lossy();
                 if !dir_name.starts_with('.') {
-                    children.push(build_directory_tree(&entry_path, assets));
+                    children.push(build_dir_node(&entry_path, stats));
                 }
             }
         }
     }
-
-    // Sort children by name
     children.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
 
-    // Count files and size in this directory (not recursive)
-    let (file_count, total_size) = assets
-        .iter()
-        .filter(|a| {
-            Path::new(&a.path)
-                .parent()
-                .map(|p| p == path)
-                .unwrap_or(false)
-        })
-        .fold((0, 0u64), |(count, size), asset| {
-            (count + 1, size + asset.size)
-        });
+    // O(1) lookup of direct-file counts from the pre-grouped map.
+    let direct = stats.get(&path_str);
+    let direct_count = direct.map(|s| s.file_count).unwrap_or(0);
+    let direct_size = direct.map(|s| s.total_size).unwrap_or(0);
 
-    // Add children counts
-    let total_file_count = file_count + children.iter().map(|c| c.file_count).sum::<usize>();
-    let total_dir_size = total_size + children.iter().map(|c| c.total_size).sum::<u64>();
+    let total_file_count = direct_count + children.iter().map(|c| c.file_count).sum::<usize>();
+    let total_dir_size = direct_size + children.iter().map(|c| c.total_size).sum::<u64>();
 
     DirectoryNode {
         name,
