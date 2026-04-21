@@ -21,6 +21,14 @@ async function stopFsWatch(projectId: string) {
   }
 }
 
+// Store-level memoization cache for getFilteredAssets. Shared across all
+// components (AssetList, StatusBar, …) so they don't independently re-run
+// the filter+sort on 10k+ assets. Invalidated automatically on any input
+// identity change — scanResult, filters, and sort state are all replaced
+// (not mutated) by their setters, so reference equality is a correct check.
+let filterCacheInputs: readonly unknown[] | null = null;
+let filterCacheResult: AssetInfo[] = [];
+
 type ViewMode = "assets" | "issues" | "stats";
 
 export type SortField = "name" | "type" | "size" | "dimensions" | "vertices" | "faces" | "duration" | "sampleRate" | "extension";
@@ -720,6 +728,28 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const { scanResult, selectedDirectory, searchQuery, typeFilter, sortField, sortDirection, advancedFilters } = get();
     if (!scanResult) return [];
 
+    // Cheap identity check: if every input is the same reference as the
+    // previous call, return the cached result. Because setters replace
+    // values (new scanResult objects on fs-change, new advancedFilters
+    // objects on setAdvancedFilters, etc.) this catches every real change
+    // without needing deep equality.
+    const inputs = [
+      scanResult,
+      selectedDirectory,
+      searchQuery,
+      typeFilter,
+      sortField,
+      sortDirection,
+      advancedFilters,
+    ] as const;
+    if (
+      filterCacheInputs !== null &&
+      filterCacheInputs.length === inputs.length &&
+      inputs.every((v, i) => Object.is(v, filterCacheInputs![i]))
+    ) {
+      return filterCacheResult;
+    }
+
     let assets = [...scanResult.assets];
 
     // Filter by selected directory
@@ -809,6 +839,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       return sortDirection === "asc" ? comparison : -comparison;
     });
 
+    filterCacheInputs = inputs;
+    filterCacheResult = assets;
     return assets;
   },
 }));
