@@ -60,6 +60,32 @@ export function ContextMenu({
   const [showTagSubmenu, setShowTagSubmenu] = useState(false);
   const [submenuPosition, setSubmenuPosition] = useState<"right" | "left">("right");
 
+  // Debounced close so quick diagonal cursor movements between the parent
+  // button and the submenu don't prematurely unmount it. Leaving fires a
+  // 150ms timer that re-entering cancels.
+  const closeTimerRef = useRef<number | null>(null);
+  const openSubmenu = () => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+    setShowTagSubmenu(true);
+  };
+  const scheduleCloseSubmenu = () => {
+    if (closeTimerRef.current !== null) return;
+    closeTimerRef.current = window.setTimeout(() => {
+      setShowTagSubmenu(false);
+      closeTimerRef.current = null;
+    }, 150);
+  };
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current !== null) {
+        window.clearTimeout(closeTimerRef.current);
+      }
+    };
+  }, []);
+
   useEffect(() => {
     if (!isOpen) return;
 
@@ -209,8 +235,8 @@ export function ContextMenu({
       {/* Tag Submenu Item */}
       <div
         className="relative"
-        onMouseEnter={() => setShowTagSubmenu(true)}
-        onMouseLeave={() => setShowTagSubmenu(false)}
+        onMouseEnter={openSubmenu}
+        onMouseLeave={scheduleCloseSubmenu}
       >
         <button className="flex items-center justify-between gap-2 w-full px-3 py-1.5 text-sm text-left hover:bg-background transition-colors">
           <div className="flex items-center gap-2">
@@ -220,12 +246,16 @@ export function ContextMenu({
           <ChevronRight size={12} className="text-text-secondary" />
         </button>
 
-        {/* Tag Submenu */}
+        {/* Tag Submenu — zero gap to avoid a "no-element" transit zone between
+            parent and submenu. The close timer in the wrapper handlers covers
+            diagonal cursor paths that briefly dip outside both rects. */}
         {showTagSubmenu && (
           <div
+            onMouseEnter={openSubmenu}
+            onMouseLeave={scheduleCloseSubmenu}
             className={cn(
               "absolute top-0 bg-card-bg border border-border rounded-lg shadow-xl py-1 min-w-[160px]",
-              submenuPosition === "right" ? "left-full ml-1" : "right-full mr-1"
+              submenuPosition === "right" ? "left-full" : "right-full"
             )}
           >
             {tags.length === 0 ? (
