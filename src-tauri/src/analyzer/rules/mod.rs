@@ -4,6 +4,7 @@ pub mod missing_reference;
 pub mod model;
 pub mod naming;
 pub mod texture;
+pub mod texture_colorspace;
 
 use crate::analyzer::Issue;
 use crate::scanner::AssetInfo;

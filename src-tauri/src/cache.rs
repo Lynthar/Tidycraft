@@ -29,7 +29,7 @@ impl ScanCache {
     /// Bump whenever the set of extracted metadata fields changes so older
     /// caches with missing fields (e.g. FBX vertex/face before Phase 1.4a,
     /// SVG dimensions before the 2026-04 pass) get rejected and re-scanned.
-    const CACHE_VERSION: u32 = 3;
+    const CACHE_VERSION: u32 = 4;
 
     /// Create a new empty cache
     pub fn new(project_path: &str) -> Self {

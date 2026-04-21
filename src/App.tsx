@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { Header } from "./components/Header";
@@ -10,6 +10,7 @@ import { IssueList } from "./components/IssueList";
 import { StatsDashboard } from "./components/StatsDashboard";
 import { StatusBar } from "./components/StatusBar";
 import { useProjectStore } from "./stores/projectStore";
+import { restoreSession } from "./stores/sessionStore";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 
 function App() {
@@ -28,6 +29,13 @@ function App() {
   const projects = getProjectList();
 
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // On boot, restore the projects that were open in the last session. Runs
+  // exactly once — `sessionStore` has an internal `restored` guard so React
+  // strict-mode double-mount doesn't trigger a second restore.
+  useEffect(() => {
+    restoreSession();
+  }, []);
 
   // Initialize keyboard shortcuts
   useKeyboardShortcuts({

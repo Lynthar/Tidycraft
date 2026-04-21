@@ -1,11 +1,14 @@
 //! 撤销管理模块
 //!
-//! 提供批量文件操作的内存级撤销功能。
-//! 历史记录仅在程序运行期间保留，关闭后丢失。
+//! 批量文件操作的撤销栈。v2 (Phase 3.1): 历史持久化到
+//! `{data_dir}/tidycraft/undo/{sha256(root)[..16]}.json`,每次
+//! record_batch / undo / clear 后落盘,register_project 时回读。
+//! 文件在用户/磁盘操作失败时只记录不崩,保证撤销功能本身不阻塞主流程。
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// 单个文件操作记录
@@ -84,14 +87,68 @@ pub struct UndoManager {
     history: Vec<BatchOperation>,
     /// 最大历史记录数
     max_history: usize,
+    /// 磁盘持久化路径。`None` 表示纯内存(测试 / fallback)。
+    persist_path: Option<PathBuf>,
 }
 
 impl UndoManager {
-    /// 创建新的撤销管理器
+    /// 创建纯内存的撤销管理器(无持久化)。主要给测试用;生产代码走
+    /// `load_for_project`。
     pub const fn new(max_history: usize) -> Self {
         Self {
             history: Vec::new(),
             max_history,
+            persist_path: None,
+        }
+    }
+
+    /// 为某个项目构造 UndoManager,并从磁盘读回历史(如果存在)。
+    /// 回读后会按 `max_history` trim 掉过旧的批次。
+    pub fn load_for_project(project_root: &Path, max_history: usize) -> Self {
+        let persist_path = Self::persist_path_for(project_root);
+        let mut history: Vec<BatchOperation> = Vec::new();
+
+        if let Some(ref p) = persist_path {
+            if let Ok(content) = fs::read_to_string(p) {
+                if let Ok(loaded) = serde_json::from_str::<Vec<BatchOperation>>(&content) {
+                    let start = loaded.len().saturating_sub(max_history);
+                    history = loaded[start..].to_vec();
+                }
+            }
+        }
+
+        Self {
+            history,
+            max_history,
+            persist_path,
+        }
+    }
+
+    /// 以项目根路径的 SHA256(前 16 hex) 做文件名,避免路径特殊字符 /
+    /// 冲突问题,也能跨 app 会话稳定命中同一文件。
+    fn persist_path_for(project_root: &Path) -> Option<PathBuf> {
+        let mut hasher = Sha256::new();
+        hasher.update(project_root.to_string_lossy().as_bytes());
+        let hash = format!("{:x}", hasher.finalize());
+        dirs::data_dir().map(|d| {
+            d.join("tidycraft")
+                .join("undo")
+                .join(format!("{}.json", &hash[..16]))
+        })
+    }
+
+    /// 写盘 best-effort:目录不存在会建;写失败静默忽略以不阻塞撤销操作。
+    fn save_to_disk(&self) {
+        let Some(path) = &self.persist_path else {
+            return;
+        };
+        if let Some(parent) = path.parent() {
+            if fs::create_dir_all(parent).is_err() {
+                return;
+            }
+        }
+        if let Ok(json) = serde_json::to_string_pretty(&self.history) {
+            let _ = fs::write(path, json);
         }
     }
 
@@ -115,6 +172,7 @@ impl UndoManager {
             self.history.remove(0);
         }
 
+        self.save_to_disk();
         id
     }
 
@@ -134,6 +192,7 @@ impl UndoManager {
 
         // 标记为已撤销
         self.history[index].undone = true;
+        self.save_to_disk();
 
         Some(UndoResult {
             success: result.failed_count == 0,
@@ -159,6 +218,7 @@ impl UndoManager {
 
         // 标记为已撤销
         self.history[index].undone = true;
+        self.save_to_disk();
 
         Some(UndoResult {
             success: result.failed_count == 0,
@@ -200,6 +260,7 @@ impl UndoManager {
     /// 清空历史记录
     pub fn clear_history(&mut self) {
         self.history.clear();
+        self.save_to_disk();
     }
 
     /// 获取最近一次操作的描述

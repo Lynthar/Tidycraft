@@ -68,6 +68,11 @@ pub struct AssetMetadata {
     // Video-specific
     pub framerate: Option<f32>,
     pub video_codec: Option<String>,
+    // Texture color space: "sRGB" | "Linear" | "Unknown". Extracted where
+    // the file format exposes it (PNG chunks); absent otherwise.
+    pub color_space: Option<String>,
+    // Mipmap level count (DDS). 1 = base only, no mipmaps.
+    pub mipmap_count: Option<u32>,
 }
 
 impl Default for AssetMetadata {
@@ -85,6 +90,8 @@ impl Default for AssetMetadata {
             bit_depth: None,
             framerate: None,
             video_codec: None,
+            color_space: None,
+            mipmap_count: None,
         }
     }
 }
@@ -226,8 +233,14 @@ fn parse_metadata_for(path: &Path, extension: &str, asset_type: &AssetType) -> O
     let ext = extension.to_lowercase();
     match asset_type {
         AssetType::Texture => match ext.as_str() {
-            // Formats the `image` crate fully decodes (enabled via Cargo features).
-            "png" | "jpg" | "jpeg" | "bmp" | "gif" | "tga"
+            // PNG gets the color-space chunk scan on top of the image::open pass.
+            "png" => {
+                let mut m = parse_image_metadata(path)?;
+                m.color_space = parse_png_color_space(path);
+                Some(m)
+            }
+            // Other formats the `image` crate fully decodes (enabled via Cargo features).
+            "jpg" | "jpeg" | "bmp" | "gif" | "tga"
             | "tif" | "tiff" | "webp" | "hdr" | "exr" => parse_image_metadata(path),
             // DDS has too many compressed sub-formats for `image` to decode
             // reliably; we parse the header ourselves.
@@ -376,7 +389,7 @@ fn parse_svg_metadata(path: &Path) -> Option<AssetMetadata> {
     None
 }
 
-/// Parse DDS (DirectDraw Surface) header for width/height/alpha.
+/// Parse DDS (DirectDraw Surface) header for width/height/alpha/mipmap count.
 ///
 /// DDS files are very common for game textures (BC1/BC3/BC7 compressed) but
 /// the `image` crate's DDS support doesn't cover most of the compressed
@@ -389,6 +402,9 @@ fn parse_svg_metadata(path: &Path) -> Option<AssetMetadata> {
 ///   8..12  : dwFlags
 ///   12..16 : dwHeight
 ///   16..20 : dwWidth
+///   20..24 : dwPitchOrLinearSize
+///   24..28 : dwDepth
+///   28..32 : dwMipMapCount
 ///   ...
 ///   76..108: DDS_PIXELFORMAT (32-byte struct)
 ///       80..84: ddspf.dwFlags (DDPF_ALPHAPIXELS = 0x1)
@@ -407,15 +423,72 @@ fn parse_dds_metadata(path: &Path) -> Option<AssetMetadata> {
 
     let height = u32::from_le_bytes(buf[12..16].try_into().ok()?);
     let width = u32::from_le_bytes(buf[16..20].try_into().ok()?);
+    let raw_mipmaps = u32::from_le_bytes(buf[28..32].try_into().ok()?);
     let ddspf_flags = u32::from_le_bytes(buf[80..84].try_into().ok()?);
     let has_alpha = (ddspf_flags & 0x1) != 0;
+
+    // DDS header reports 0 when the MIPMAPCOUNT flag is absent; treat that
+    // as "no mipmaps generated" (effectively 1 level — the base).
+    let mipmap_count = Some(raw_mipmaps.max(1));
 
     Some(AssetMetadata {
         width: Some(width),
         height: Some(height),
         has_alpha: Some(has_alpha),
+        mipmap_count,
         ..Default::default()
     })
+}
+
+/// Walk PNG chunks looking for color-space signals. Returns "sRGB" if an
+/// explicit sRGB chunk or an iCCP (embedded ICC profile) is present;
+/// otherwise None so callers can distinguish "explicitly sRGB" from "no
+/// color-profile info at all" — important because the naming rule only
+/// fires on *known* sRGB encodings to avoid false positives on old PNGs.
+///
+/// PNG chunk layout (after 8-byte magic): repeated [4-byte big-endian length]
+/// [4-byte type] [length bytes of data] [4-byte CRC]. Chunks before IDAT
+/// carry the color metadata we care about.
+fn parse_png_color_space(path: &Path) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let mut file = File::open(path).ok()?;
+    let mut magic = [0u8; 8];
+    file.read_exact(&mut magic).ok()?;
+    if &magic != b"\x89PNG\r\n\x1a\n" {
+        return None;
+    }
+
+    let mut has_srgb = false;
+    let mut has_iccp = false;
+
+    // Cap the walk to protect against malformed files.
+    for _ in 0..64 {
+        let mut head = [0u8; 8];
+        if file.read_exact(&mut head).is_err() {
+            break;
+        }
+        let len = u32::from_be_bytes(head[0..4].try_into().ok()?);
+        let kind = &head[4..8];
+
+        if kind == b"IDAT" || kind == b"IEND" {
+            break;
+        }
+        match kind {
+            b"sRGB" => has_srgb = true,
+            b"iCCP" => has_iccp = true,
+            _ => {}
+        }
+
+        // Skip chunk data + 4-byte CRC.
+        file.seek(SeekFrom::Current(len as i64 + 4)).ok()?;
+    }
+
+    if has_srgb || has_iccp {
+        Some("sRGB".to_string())
+    } else {
+        None
+    }
 }
 
 /// Parse glTF model metadata

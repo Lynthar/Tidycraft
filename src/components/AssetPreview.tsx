@@ -261,6 +261,22 @@ export function AssetPreview() {
                     </span>
                   </div>
                 )}
+                {metadata.color_space && (
+                  <div className="flex justify-between">
+                    <span className="text-text-secondary">{t("assetPreview.colorSpace")}:</span>
+                    <span className="text-text-primary">{metadata.color_space}</span>
+                  </div>
+                )}
+                {metadata.mipmap_count !== undefined && (
+                  <div className="flex justify-between">
+                    <span className="text-text-secondary">{t("assetPreview.mipmaps")}:</span>
+                    <span className="text-text-primary">
+                      {metadata.mipmap_count === 1
+                        ? t("assetPreview.mipmapsNone")
+                        : metadata.mipmap_count}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           )}

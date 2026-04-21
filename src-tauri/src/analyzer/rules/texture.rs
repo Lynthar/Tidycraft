@@ -182,6 +182,30 @@ impl Rule for TextureRule {
             });
         }
 
+        // DDS-only: warn when a large texture ships without a mipmap chain.
+        // Only DDS stores mipmap_count; for other formats the engine generates
+        // them on import so the file alone doesn't tell us. 512px threshold
+        // skirts UI textures that legitimately ship base-only.
+        if let Some(mips) = metadata.mipmap_count {
+            if mips <= 1 && (width >= 512 || height >= 512) {
+                return Some(Issue {
+                    rule_id: "texture.no_mipmaps".to_string(),
+                    rule_name: "No Mipmap Chain".to_string(),
+                    severity: Severity::Info,
+                    message: format!(
+                        "DDS texture {}x{} ships without mipmaps. Distant rendering will show aliasing / moiré and sample the full resolution each frame.",
+                        width, height
+                    ),
+                    asset_path: asset.path.clone(),
+                    suggestion: Some(
+                        "Regenerate the DDS with mipmaps, or confirm this is intentional (UI / LUT textures can skip)."
+                            .to_string(),
+                    ),
+                    auto_fixable: false,
+                });
+            }
+        }
+
         None
     }
 }
