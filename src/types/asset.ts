@@ -30,6 +30,9 @@ export interface AssetMetadata {
   // Video-specific
   framerate?: number;
   video_codec?: string;
+  // Texture extras
+  color_space?: string;
+  mipmap_count?: number;
 }
 
 export interface AssetInfo {

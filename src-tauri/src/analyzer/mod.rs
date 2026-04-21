@@ -97,6 +97,9 @@ impl Analyzer {
             analyzer.add_rule(Box::new(rules::texture::TextureRule::new(
                 config.texture.clone(),
             )));
+            // Color-space mismatch check piggybacks on the same enabled flag —
+            // it's always on by default and doesn't carry its own config.
+            analyzer.add_rule(Box::new(rules::texture_colorspace::TextureColorSpaceRule));
         }
 
         // Add model rules

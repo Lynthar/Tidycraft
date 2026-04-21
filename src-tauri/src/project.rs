@@ -29,13 +29,15 @@ pub struct ProjectState {
 
 impl ProjectState {
     pub fn new(id: String, root_path: String) -> Self {
+        // Load cross-session undo history keyed by the project's root path.
+        let undo_manager = UndoManager::load_for_project(Path::new(&root_path), 50);
         Self {
             id,
             root_path,
             scan_state: None,
             cached_scan: None,
             git_manager: None,
-            undo_manager: UndoManager::new(50),
+            undo_manager,
             tags_data: None,
             watcher: None,
         }
