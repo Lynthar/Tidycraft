@@ -47,7 +47,9 @@ export function Header({ searchInputRef }: HeaderProps) {
 
   const handleRescan = () => {
     if (projectPath) {
-      openProject(projectPath);
+      // `force: true` bypasses the "already open, just switch to it" guard
+      // in openProject so the scan actually runs again.
+      openProject(projectPath, { force: true });
     }
   };
 

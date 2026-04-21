@@ -120,7 +120,7 @@ interface ProjectState {
   gitStatuses: GitStatusMap;
 
   // Multi-project actions
-  openProject: (path: string) => Promise<void>;
+  openProject: (path: string, options?: { force?: boolean }) => Promise<void>;
   closeProject: (projectId?: string) => void;
   setActiveProject: (projectId: string) => void;
   getProjectList: () => { id: string; name: string; path: string; isActive: boolean }[];
@@ -331,7 +331,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   gitStatuses: {},
 
   // Multi-project actions
-  openProject: async (rawPath: string) => {
+  openProject: async (rawPath: string, options?: { force?: boolean }) => {
     const { projects } = get();
 
     // Normalize path separators. The Tauri dialog returns OS-native paths
@@ -340,20 +340,24 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // expects forward slashes. Backend does the same for scan result paths.
     const path = rawPath.replace(/\\/g, "/");
 
-    // Check if project is already open
     const existingProject = Array.from(projects.values()).find(p => p.projectPath === path);
-    if (existingProject) {
-      // Just switch to it
+
+    // If the project is already open and this isn't a force-rescan, just
+    // switch the active project.
+    if (existingProject && !options?.force) {
       get().setActiveProject(existingProject.id);
       return;
     }
 
-    // Create new project
-    const projectId = generateProjectId();
+    // Reuse the existing projectId on force-rescan so the backend's
+    // ProjectState (undo history, watcher, tags, git manager) survives.
+    const projectId = existingProject?.id ?? generateProjectId();
 
     // Register with the backend BEFORE flipping activeProjectId, so that
     // subscribers like tagsStore (which re-load on activeProjectId change)
-    // don't race an unregistered project into their invoke calls.
+    // don't race an unregistered project into their invoke calls. The backend
+    // registry is idempotent — calling register again on an existing project
+    // is a no-op.
     try {
       await invoke("register_project", { projectId, path });
     } catch (err) {
@@ -361,8 +365,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       return;
     }
 
-    const projectData = createDefaultProjectData(projectId, path);
-    projectData.isScanning = true;
+    // For force-rescan, keep the user's UI state (view mode, filters,
+    // selection, etc.) and only reset the scan-related fields.
+    const projectData: ProjectData = existingProject
+      ? {
+          ...existingProject,
+          isScanning: true,
+          error: null,
+          scanProgress: null,
+          scanResult: null,
+        }
+      : { ...createDefaultProjectData(projectId, path), isScanning: true };
 
     const newProjects = new Map(projects);
     newProjects.set(projectId, projectData);
@@ -428,16 +441,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // Start the filesystem watcher now that the cache is populated.
       // Events that arrive before the scan completes would be no-ops on the
       // backend (no cached_scan to patch), so ordering matters.
-      try {
-        const fsUnlisten = await listen<FsChangeEvent>(
-          `fs-change-${projectId}`,
-          (event) => applyFsChange(projectId, event.payload)
-        );
-        fsWatchers.set(projectId, fsUnlisten);
-        await invoke("start_watching", { projectId });
-      } catch (err) {
-        console.error("Failed to start watcher:", err);
-        await stopFsWatch(projectId);
+      // On force-rescan, the watcher is already running from the original
+      // open — skip to avoid stacking duplicate listeners / watch handles.
+      if (!fsWatchers.has(projectId)) {
+        try {
+          const fsUnlisten = await listen<FsChangeEvent>(
+            `fs-change-${projectId}`,
+            (event) => applyFsChange(projectId, event.payload)
+          );
+          fsWatchers.set(projectId, fsUnlisten);
+          await invoke("start_watching", { projectId });
+        } catch (err) {
+          console.error("Failed to start watcher:", err);
+          await stopFsWatch(projectId);
+        }
       }
     } catch (err) {
       const errorMessage = String(err);

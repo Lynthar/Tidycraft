@@ -194,7 +194,7 @@ fn get_asset_type(extension: &str) -> AssetType {
     match extension.to_lowercase().as_str() {
         // Textures
         "png" | "jpg" | "jpeg" | "tga" | "psd" | "tiff" | "tif" | "exr" | "hdr" | "webp"
-        | "dds" | "bmp" | "gif" => AssetType::Texture,
+        | "dds" | "bmp" | "gif" | "svg" => AssetType::Texture,
         // Models
         "fbx" | "obj" | "gltf" | "glb" | "blend" | "dae" | "3ds" | "max" => AssetType::Model,
         // Audio
@@ -224,11 +224,14 @@ fn parse_metadata_for(path: &Path, extension: &str, asset_type: &AssetType) -> O
             // DDS has too many compressed sub-formats for `image` to decode
             // reliably; we parse the header ourselves.
             "dds" => parse_dds_metadata(path),
+            // SVG is vector XML; we just pull width/height from the root tag.
+            "svg" => parse_svg_metadata(path),
             _ => None,
         },
         AssetType::Model => match ext.as_str() {
             "gltf" | "glb" => parse_gltf_metadata(path),
             "obj" => parse_obj_metadata(path),
+            "fbx" => parse_fbx_metadata(path),
             _ => None,
         },
         AssetType::Audio => match ext.as_str() {
@@ -260,6 +263,104 @@ fn parse_image_metadata(path: &Path) -> Option<AssetMetadata> {
         }
         Err(_) => None,
     }
+}
+
+/// Extract the value of a quoted XML attribute from a tag body.
+/// Handles both single and double quotes. Returns the raw inner text
+/// (callers decide what to do with units / whitespace).
+fn xml_attr<'a>(attrs: &'a str, name: &str) -> Option<&'a str> {
+    // Look for `name=` preceded by whitespace or tag start (avoids matching
+    // attributes that happen to have `name` as a suffix, e.g. `viewName=`).
+    let needle = format!("{}=", name);
+    let mut search_from = 0;
+    while let Some(rel) = attrs[search_from..].find(&needle) {
+        let abs = search_from + rel;
+        let before_ok = abs == 0
+            || attrs.as_bytes()[abs - 1].is_ascii_whitespace()
+            || attrs.as_bytes()[abs - 1] == b'<';
+        if !before_ok {
+            search_from = abs + needle.len();
+            continue;
+        }
+        let rest = &attrs[abs + needle.len()..];
+        let first = rest.chars().next()?;
+        if first != '"' && first != '\'' {
+            return None;
+        }
+        let end_rel = rest[1..].find(first)?;
+        return Some(&rest[1..1 + end_rel]);
+    }
+    None
+}
+
+/// Parse a numeric SVG length (width / height). Accepts plain numbers and
+/// `px`-suffixed values; rejects `%`, `em`, `vw`, etc. so callers fall back
+/// to `viewBox` for percentage-sized SVGs.
+fn parse_svg_length(raw: &str) -> Option<u32> {
+    let trimmed = raw.trim().trim_end_matches("px").trim();
+    if trimmed.is_empty() || trimmed.ends_with('%') {
+        return None;
+    }
+    if trimmed
+        .chars()
+        .any(|c| c.is_ascii_alphabetic() && c != 'e' && c != 'E')
+    {
+        return None; // has non-px unit suffix
+    }
+    let v: f64 = trimmed.parse().ok()?;
+    if v.is_finite() && v > 0.0 {
+        Some(v.round() as u32)
+    } else {
+        None
+    }
+}
+
+/// Parse SVG root tag for width/height. SVG is XML; we don't pull in a full
+/// parser — the root element is always near the top of the file and fits
+/// in the first few KB.
+fn parse_svg_metadata(path: &Path) -> Option<AssetMetadata> {
+    use std::io::Read;
+    let mut file = File::open(path).ok()?;
+    // 16KB covers even heavily-commented SVG headers; root tag is always early.
+    let mut buf = Vec::with_capacity(16 * 1024);
+    (&mut file).take(16 * 1024).read_to_end(&mut buf).ok()?;
+    let content = std::str::from_utf8(&buf).ok()?;
+
+    let svg_start = content.find("<svg").or_else(|| content.find("<SVG"))?;
+    let after_tag = &content[svg_start + 4..];
+    let tag_end = after_tag.find('>')?;
+    let attrs = &after_tag[..tag_end];
+
+    let width = xml_attr(attrs, "width").and_then(parse_svg_length);
+    let height = xml_attr(attrs, "height").and_then(parse_svg_length);
+
+    if let (Some(w), Some(h)) = (width, height) {
+        return Some(AssetMetadata {
+            width: Some(w),
+            height: Some(h),
+            has_alpha: Some(true),
+            ..Default::default()
+        });
+    }
+
+    // Fallback: viewBox="min-x min-y width height"
+    if let Some(vb) = xml_attr(attrs, "viewBox") {
+        let nums: Vec<&str> = vb.split_whitespace().collect();
+        if nums.len() == 4 {
+            let w: f64 = nums[2].parse().ok()?;
+            let h: f64 = nums[3].parse().ok()?;
+            if w > 0.0 && h > 0.0 && w.is_finite() && h.is_finite() {
+                return Some(AssetMetadata {
+                    width: Some(w.round() as u32),
+                    height: Some(h.round() as u32),
+                    has_alpha: Some(true),
+                    ..Default::default()
+                });
+            }
+        }
+    }
+
+    None
 }
 
 /// Parse DDS (DirectDraw Surface) header for width/height/alpha.
@@ -331,6 +432,75 @@ fn parse_gltf_metadata(path: &Path) -> Option<AssetMetadata> {
         }
         Err(_) => None,
     }
+}
+
+/// Parse FBX model metadata (vertex/face/material count).
+///
+/// FBX is Autodesk's proprietary interchange format — both binary (most common
+/// today) and ASCII variants exist. `fbxcel-dom` handles both and gives us a
+/// typed DOM; we iterate the object list, match on `Geometry::Mesh` + `Material`,
+/// and pull raw node children for the cheap counts we need. For polygon count
+/// we exploit FBX's convention that `PolygonVertexIndex` uses a negative
+/// sentinel (bit-inverted last index) to mark each polygon's end — so the
+/// number of negatives equals the face/polygon count regardless of tri/quad/n-gon.
+fn parse_fbx_metadata(path: &Path) -> Option<AssetMetadata> {
+    use fbxcel_dom::any::AnyDocument;
+    use fbxcel_dom::v7400::object::{geometry::TypedGeometryHandle, TypedObjectHandle};
+    use std::io::BufReader;
+
+    let file = File::open(path).ok()?;
+    let reader = BufReader::new(file);
+    let any_doc = AnyDocument::from_seekable_reader(reader).ok()?;
+
+    // AnyDocument is `#[non_exhaustive]` — only V7400 is actually emitted for
+    // modern FBX, but we must handle the open enum.
+    let doc = match any_doc {
+        AnyDocument::V7400(_, doc) => doc,
+        _ => return None,
+    };
+
+    let mut vertex_count: u64 = 0;
+    let mut face_count: u64 = 0;
+    let mut material_count: u32 = 0;
+
+    for obj in doc.objects() {
+        match obj.get_typed() {
+            TypedObjectHandle::Geometry(TypedGeometryHandle::Mesh(mesh)) => {
+                // Vertices: flat [x0, y0, z0, x1, y1, z1, ...] f64 array.
+                if let Some(verts_node) = mesh.node().children_by_name("Vertices").next() {
+                    if let Some(attr) = verts_node.attributes().get(0) {
+                        if let Ok(arr) = attr.get_arr_f64_or_type() {
+                            vertex_count += (arr.len() / 3) as u64;
+                        }
+                    }
+                }
+                // PolygonVertexIndex: flat i32 array; each polygon's last
+                // index is XOR'd with -1, so counting negatives = face count.
+                if let Some(pvi_node) = mesh.node().children_by_name("PolygonVertexIndex").next() {
+                    if let Some(attr) = pvi_node.attributes().get(0) {
+                        if let Ok(arr) = attr.get_arr_i32_or_type() {
+                            face_count += arr.iter().filter(|&&v| v < 0).count() as u64;
+                        }
+                    }
+                }
+            }
+            TypedObjectHandle::Material(_) => {
+                material_count = material_count.saturating_add(1);
+            }
+            _ => {}
+        }
+    }
+
+    if vertex_count == 0 && face_count == 0 && material_count == 0 {
+        return None;
+    }
+
+    Some(AssetMetadata {
+        vertex_count: Some(vertex_count.min(u32::MAX as u64) as u32),
+        face_count: Some(face_count.min(u32::MAX as u64) as u32),
+        material_count: Some(material_count),
+        ..Default::default()
+    })
 }
 
 /// Parse OBJ model metadata
@@ -1008,6 +1178,9 @@ mod tests {
         assert!(matches!(get_asset_type("psd"), AssetType::Texture));
         assert!(matches!(get_asset_type("PNG"), AssetType::Texture));
         assert!(matches!(get_asset_type("JPG"), AssetType::Texture));
+        assert!(matches!(get_asset_type("svg"), AssetType::Texture));
+        assert!(matches!(get_asset_type("dds"), AssetType::Texture));
+        assert!(matches!(get_asset_type("webp"), AssetType::Texture));
     }
 
     #[test]
@@ -1121,6 +1294,82 @@ mod tests {
 
         let meta = parse_metadata_for(&path, "dds", &AssetType::Texture);
         assert_eq!(meta.and_then(|m| m.width), Some(128));
+    }
+
+    #[test]
+    fn test_parse_svg_explicit_width_height() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("icon.svg");
+        fs::write(
+            &path,
+            r#"<?xml version="1.0"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="32"><rect/></svg>"#,
+        )
+        .unwrap();
+        let meta = parse_svg_metadata(&path).expect("valid SVG should parse");
+        assert_eq!(meta.width, Some(48));
+        assert_eq!(meta.height, Some(32));
+        assert_eq!(meta.has_alpha, Some(true));
+    }
+
+    #[test]
+    fn test_parse_svg_px_suffix() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("icon.svg");
+        fs::write(
+            &path,
+            r#"<svg width="100px" height="50px" xmlns="http://www.w3.org/2000/svg"></svg>"#,
+        )
+        .unwrap();
+        let meta = parse_svg_metadata(&path).unwrap();
+        assert_eq!(meta.width, Some(100));
+        assert_eq!(meta.height, Some(50));
+    }
+
+    #[test]
+    fn test_parse_svg_viewbox_fallback() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("icon.svg");
+        fs::write(
+            &path,
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 16"></svg>"#,
+        )
+        .unwrap();
+        let meta = parse_svg_metadata(&path).unwrap();
+        assert_eq!(meta.width, Some(24));
+        assert_eq!(meta.height, Some(16));
+    }
+
+    #[test]
+    fn test_parse_svg_percent_falls_back_to_viewbox() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("icon.svg");
+        fs::write(
+            &path,
+            r#"<svg width="100%" height="100%" viewBox="0 0 200 100"></svg>"#,
+        )
+        .unwrap();
+        let meta = parse_svg_metadata(&path).unwrap();
+        assert_eq!(meta.width, Some(200));
+        assert_eq!(meta.height, Some(100));
+    }
+
+    #[test]
+    fn test_parse_svg_missing_all_sizing() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("icon.svg");
+        fs::write(&path, r#"<svg xmlns="http://www.w3.org/2000/svg"></svg>"#).unwrap();
+        assert!(parse_svg_metadata(&path).is_none());
+    }
+
+    #[test]
+    fn test_parse_svg_single_quoted_attrs() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("icon.svg");
+        fs::write(&path, r#"<svg width='64' height='64'></svg>"#).unwrap();
+        let meta = parse_svg_metadata(&path).unwrap();
+        assert_eq!(meta.width, Some(64));
+        assert_eq!(meta.height, Some(64));
     }
 
     #[test]

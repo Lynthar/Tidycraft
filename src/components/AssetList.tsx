@@ -77,7 +77,57 @@ interface AssetRowProps {
   showGitStatusIndicators: boolean;
   assetTags: Tag[];
   visibleColumns: ColumnId[];
+  columnWidths: Record<string, number>;
   t: (key: string) => string;
+}
+
+const MIN_COL_WIDTH = 60;
+const MAX_COL_WIDTH = 500;
+
+/// Drag-to-resize grab handle on the right edge of a header cell. Uses
+/// document-level mousemove/mouseup so cursor leaving the handle mid-drag
+/// doesn't abort. Stops propagation to avoid triggering the parent header's
+/// sort-on-click.
+function ColumnResizeHandle({
+  columnId,
+  currentWidth,
+}: {
+  columnId: ColumnId;
+  currentWidth: number;
+}) {
+  const setColumnWidth = useColumnStore((s) => s.setColumnWidth);
+
+  const onMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startWidth = currentWidth;
+
+    const onMove = (me: MouseEvent) => {
+      const delta = me.clientX - startX;
+      const next = Math.max(MIN_COL_WIDTH, Math.min(MAX_COL_WIDTH, startWidth + delta));
+      setColumnWidth(columnId, next);
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  };
+
+  return (
+    <div
+      onMouseDown={onMouseDown}
+      onClick={(e) => e.stopPropagation()}
+      className="absolute top-0 right-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/50 active:bg-primary z-10"
+      aria-hidden
+    />
+  );
 }
 
 function AssetRow({
@@ -94,6 +144,7 @@ function AssetRow({
   showGitStatusIndicators,
   assetTags,
   visibleColumns,
+  columnWidths,
   t,
 }: AssetRowProps) {
   const dimensions =
@@ -130,21 +181,6 @@ function AssetRow({
     }
   };
 
-  const getColumnWidth = (columnId: ColumnId): string => {
-    switch (columnId) {
-      case "type": return "w-24";
-      case "size": return "w-24";
-      case "dimensions": return "w-32";
-      case "tags": return "w-[120px]";
-      case "vertices": return "w-24";
-      case "faces": return "w-24";
-      case "duration": return "w-20";
-      case "sampleRate": return "w-24";
-      case "extension": return "w-20";
-      default: return "w-24";
-    }
-  };
-
   return (
     <div
       className={cn(
@@ -178,12 +214,14 @@ function AssetRow({
         </div>
       </div>
       {visibleColumns.filter(c => c !== "name").map((columnId) => {
+        const width = columnWidths[columnId];
         // Special handling for tags column
         if (columnId === "tags") {
           return (
             <div
               key={columnId}
-              className="py-2 px-3 shrink-0 w-[120px]"
+              className="py-2 px-3 shrink-0 overflow-hidden"
+              style={{ width }}
             >
               <div className="flex items-center gap-1 overflow-hidden">
                 {assetTags.slice(0, 2).map((tag) => (
@@ -203,11 +241,11 @@ function AssetRow({
           <div
             key={columnId}
             className={cn(
-              "py-2 px-3 text-text-secondary shrink-0",
-              getColumnWidth(columnId),
+              "py-2 px-3 text-text-secondary shrink-0 overflow-hidden truncate",
               columnId !== "type" && "text-right",
               (columnId === "dimensions" || columnId === "vertices" || columnId === "faces") && "font-mono text-xs"
             )}
+            style={{ width }}
           >
             {getColumnValue(columnId)}
           </div>
@@ -319,8 +357,14 @@ export function AssetList() {
     { mode: "move" | "copy"; paths: string[] } | null
   >(null);
 
-  // Get visible columns
+  // Get visible columns + width lookup. Widths are pixel values driven by the
+  // column store and mutated live by ColumnResizeHandle drag handlers.
   const visibleColumns = columns.filter((c) => c.visible).map((c) => c.id);
+  const columnWidths = useMemo<Record<string, number>>(() => {
+    const map: Record<string, number> = {};
+    for (const c of columns) map[c.id] = c.width;
+    return map;
+  }, [columns]);
 
   // Load tags when project is loaded
   useEffect(() => {
@@ -664,35 +708,23 @@ export function AssetList() {
             <SortIndicator field="name" currentField={sortField} direction={sortDirection} />
           </div>
           {visibleColumns.filter(c => c !== "name").map((columnId) => {
-            const getWidth = (id: ColumnId) => {
-              switch (id) {
-                case "type": return "w-24";
-                case "size": return "w-24";
-                case "dimensions": return "w-32";
-                case "tags": return "w-[120px]";
-                case "vertices": return "w-24";
-                case "faces": return "w-24";
-                case "duration": return "w-20";
-                case "sampleRate": return "w-24";
-                case "extension": return "w-20";
-                default: return "w-24";
-              }
-            };
+            const width = columnWidths[columnId];
             // Tags column is not sortable
             const isSortable = columnId !== "tags";
             return (
               <div
                 key={columnId}
                 className={cn(
-                  "py-2 px-3 shrink-0 flex items-center gap-1 transition-colors select-none",
-                  getWidth(columnId),
+                  "py-2 px-3 shrink-0 flex items-center gap-1 transition-colors select-none relative overflow-hidden",
                   columnId !== "type" && columnId !== "tags" && "justify-end text-right",
                   isSortable && "cursor-pointer hover:text-text-primary"
                 )}
+                style={{ width }}
                 onClick={() => isSortable && setSortField(columnId as SortField)}
               >
-                {t(`columns.${columnId}`)}
+                <span className="truncate">{t(`columns.${columnId}`)}</span>
                 {isSortable && <SortIndicator field={columnId as SortField} currentField={sortField} direction={sortDirection} />}
+                <ColumnResizeHandle columnId={columnId} currentWidth={width} />
               </div>
             );
           })}
@@ -729,6 +761,7 @@ export function AssetList() {
                   showGitStatusIndicators={showGitStatusIndicators}
                   assetTags={assetTags}
                   visibleColumns={visibleColumns}
+                  columnWidths={columnWidths}
                   t={t}
                   style={{
                     position: "absolute",
