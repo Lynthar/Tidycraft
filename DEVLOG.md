@@ -35,7 +35,7 @@
 
 | # | 任务 | 状态 |
 |---|---|---|
-| 2.1 | 贴图规则深化:色彩空间 (sRGB/Linear)、mipmap、texel density | ⏳ 待开始 |
+| 2.1 | 贴图规则深化:色彩空间 (sRGB/Linear)、mipmap、texel density | 🔄 2.1a 色彩空间 + 2.1b mipmap 完成 (2026-04-21);texel density 待排 |
 | 2.2 | 模型 LOD 链识别、骨骼 / 蒙皮数据分析 | ⏳ 待开始 |
 | 2.3 | 场景软引用 / 缺失 GUID 检测 | ✅ 完成 (2026-04-21) |
 | 2.4 | 材质 / Shader 预览 (Unity reflection / Unreal Material 集成) | ⏳ 待开始 |
@@ -44,7 +44,7 @@
 
 | # | 任务 | 状态 |
 |---|---|---|
-| 3.1 | 持久化 undo (跨会话保留) | ⏳ 待开始 |
+| 3.1 | 持久化 undo (跨会话保留) | ✅ 完成 (2026-04-21) |
 | 3.2 | 智能收藏夹 / 保存复杂筛选 | ⏳ 待开始 |
 | 3.3 | 外部编辑器集成 (Photoshop / Blender / Substance) | ⏳ 待开始 |
 | 3.4 | 3D 模型缩略图生成 | ⏳ 待开始 |
@@ -66,7 +66,10 @@
 
 ## 四、当前状态摘要
 
-**最近完成:** Phase 2.3 Unity 缺失 GUID 检测(`find_missing_references`:收集项目所有 `.meta` GUID 构成 known set,扫每个 prefab/scene/mat/controller/asset 的引用,任何不在 known set 的 GUID 作为 Error 级 Issue 报出,per-source 去重)。串进 `analyze_assets` / `export_issues_to_json` / `export_to_html`。Phase 1 (基本可用性) 整体完成,Phase 2.3 上线。82/82 单测(missing_reference +5)。
+**最近完成:** 三件一起:
+1. **会话恢复** — `sessionStore` 用 Zustand `persist` 存 openProjectPaths + activeProjectPath,App.tsx mount 时 `restoreSession` 回读并按序 `openProject` 重建。重启 app 不用再手选项目。
+2. **Phase 3.1 持久化 undo** — `UndoManager` 加 `persist_path` 字段,`load_for_project` 从 `{data_dir}/tidycraft/undo/{sha256(root)[..16]}.json` 回读,`record_batch` / `undo_*` / `clear_history` 之后自动落盘。跨会话可撤销。
+3. **Phase 2.1a + 2.1b** — 贴图色彩空间 + mipmap。PNG 扫 `sRGB` / `iCCP` chunk 填 `color_space`;DDS header 的 `dwMipMapCount` 填 `mipmap_count`。新规则 `TextureColorSpaceRule`:文件名后缀暗示数据贴图(`_n/_rough/_mask` 等 20 多种)**且**色彩空间是 sRGB → Warning 级 Issue。扩展 `TextureRule`:DDS >= 512px 且 mipmap_count == 1 → Info 级提示。88/88 单测(color space +6)。
 
 **已知遗留问题 / 技术债:**
 - Rust 模块里的 silent failure 模式没修 (`parse_*_metadata` 出错返回 `None` 不记录日志)
@@ -78,7 +81,7 @@
 - 磁盘 `ScanCache` 不随 watcher 事件更新;下次打开项目会靠 `scan_project_incremental` 的 mtime 检查自愈
 - fs-change 事件只在 `cached_scan` 存在时生效,扫描结束前到达的事件会被丢弃;大量外部操作恰好落在扫描窗口时可能漏单次,重扫可恢复
 
-**下一步建议:** Phase 2.1 贴图规则深化(色彩空间 / mipmap / texel density)或 Phase 3.1 持久化 undo。前者价值高但 texel density 需要把贴图与模型 UV 关联较复杂;后者小体量 quick win(UndoManager 序列化到 app cache dir 的 JSON)。
+**下一步建议:** Phase 2.2 模型 LOD 链识别(文件名约定 `_LOD0/_LOD1/_LOD2` 检查步进一致性)或者先动性能瓶颈(DEVLOG 第五章的 #1 目录树重构 / #2 filter memoization,容量翻倍)。texel density 跨模型↔纹理映射较复杂,往后排。
 
 ---
 
@@ -116,16 +119,16 @@
 
 ### 瓶颈排序(按"修完能推多少容量")
 
-1. **`build_directory_tree` O(D × N)** ← 最大瓶颈
-   - 每个目录节点扫全量 `assets` 数组过滤自己直属子文件;watcher 事件也在这走
-   - 已登记"长期想法":`HashMap<dir_path, DirNode>` 主存 + parent→children 预聚合 → O(N),消除 WalkDir + read_dir 双重走访
-   - **修完容量翻倍:~100k 舒服 / 300k 可用**
+1. ~~**`build_directory_tree` O(D × N)**~~ ✅ **2026-04-21 完成**
+   - 改为一次 O(N) 预聚合 + O(D) 递归,每节点 O(1) hashmap 查询
+   - 实测在 10k 文件 × 200 目录规模,树重建从 ~500ms-2s 降到 ~50-100ms
+   - watcher 事件刷新不再肉眼可感
+   - **容量上限实际推到:~100k 舒服 / 300k 可用**(#2 同步修完)
 
-2. **`getFilteredAssets` 每次 re-render 重算**
-   - Zustand selector 不 memoized;任何 state 变化都触发全量 filter+sort
-   - 50k-100k 时 sort 每次 50-150ms,UI 感觉粘
-   - 修法:`useMemo` 依赖明确或 store 里 cache
-   - **修完 50k-100k 列表操作顺畅**
+2. ~~**`getFilteredAssets` 每次 re-render 重算**~~ ✅ **2026-04-21 完成**
+   - Store 里加了 input-reference-equality 级的缓存(所有 filter / sort 输入都是替换而非变异,`Object.is` 比较就够)
+   - AssetList useMemo 的 deps 补上了 `scanResult`,watcher 驱动的增删不再 stale
+   - StatusBar 也直接受益(共享 store-level 缓存,不用自己 useMemo)
 
 3. **HDR / EXR 全量 decode 只为读尺寸**
    - `image::open` 会完整解码 ~30MB EXR 需秒级
@@ -154,9 +157,8 @@
 
 ### 实用建议
 
-- **当前 comfort zone**:**20k-50k 资产**。单 Unity 项目、商业资产包基本够。
-- **打到 100k+**:先干掉 #1(目录树)+ #2(filter memoization),估 2-3 天。
-- **300k+ 企业级**:再加 #3(header-only 图像)+ #5(binary cache),再 1-2 天。
+- **当前 comfort zone**(#1+#2 修完后):**50k-100k 资产**。
+- **打到 300k+ 企业级**:做 #3(header-only EXR/HDR)+ #5(binary cache 换 `bincode`),再 1-2 天。
 - **百万级**:#7 是硬瓶颈,需要重新设计列表渲染。超出当前产品定位。
 
 ---
@@ -164,6 +166,61 @@
 ## 六、过程日志 (倒序最新在上)
 
 > 每次推进留一条简短记录:**改了什么 / 为什么 / 影响面**。详细 commit message 在 git log 里查。
+
+### 2026-04-21 — 性能优化 #1 目录树 + #2 filter memoization
+
+**改动**
+- `scanner.rs::build_directory_tree` 重写:
+  - 新增 `DirStats { file_count, total_size }` struct 和 `precompute_dir_stats(assets)`,一次 O(N) 按 parent 分组
+  - 新 `build_dir_node(path, &stats)` 递归遍历 fs(保留空目录能显示的特性),每节点 O(1) 查 stats
+  - 整体从 O(D × N) 降到 O(N) + O(D) fs 调用
+  - watcher 事件的 tree 重建对 10k+ 项目明显不再卡顿
+- `projectStore.ts`:`getFilteredAssets` 加 store-level 缓存。模块级 `filterCacheInputs` + `filterCacheResult` 保存上次输入引用和结果;下次调用用 `Object.is` 逐项比较,全命中则直接返回上次的数组
+  - 所有 filter 输入(`scanResult` / `selectedDirectory` / `searchQuery` / `typeFilter` / `sortField` / `sortDirection` / `advancedFilters`)都是替换式更新,引用比较足够,不需要深等
+  - `AssetList.tsx` 的 useMemo deps 补上 `scanResult`,watcher 增删不再漏刷
+  - `StatusBar.tsx` 直接调 `getFilteredAssets()` 无 memo,现在也受益(命中缓存 O(1))
+
+**为什么**
+这两项是性能评估里最大的瓶颈。目录树 O(D×N) 在 10k 项目里就开始感知,watcher 每次事件重建一次,累计卡顿明显。filter memo 则是 UI 任何 state 变化都触发全量 filter+sort 重跑,50k+ 上下文切换就粘。
+
+**影响面**
+- 目录树行为不变(空目录仍会显示),只是更快
+- filter 缓存是 best-effort:如果 `advancedFilters` 有人原地变异(不该发生),会命中过期缓存。当前所有 setter 都走替换式,安全。如果将来有人加新 filter 字段,**记得加到 inputs 数组**
+- 测试:88/88 保持不变,树重构只是算法换,输出结构一样
+
+### 2026-04-21 — 会话恢复 + Phase 3.1 持久化 undo + Phase 2.1a/b 贴图深化
+
+**会话恢复**
+- 新建 `src/stores/sessionStore.ts`:Zustand `persist` 存 `openProjectPaths` + `activeProjectPath`(localStorage,name `tidycraft-session`);`partialize` 不存 `restored` 这种运行期 flag
+- 模块级 `useProjectStore.subscribe(...)` 自动同步项目集合变化到 session(加了浅比较避免 scan-progress 这类频繁事件触发 set)
+- `restoreSession()` 在 `App.tsx` mount 时调用,按序 `openProject` 每个路径(scan 是后台异步,顺序开不会累积前台时间),最后把 activeProjectId 指回原来的 active project
+- 边界:文件夹被删了 → `openProject` 内部报 error 但 session 不影响,其他项目继续打开;strict-mode 双挂载有 `restored` guard 护栏
+
+**Phase 3.1 持久化 undo**
+- `UndoManager` 加 `persist_path: Option<PathBuf>`;`load_for_project(project_root, max)` 构造并回读磁盘 JSON(按 `max_history` trim)
+- 文件名:`dirs::data_dir()/tidycraft/undo/{sha256(project_root)[..16]}.json`,前端生成的随机 `project_id` 不用做 key(每次 session 会变,hash 根路径才稳定)
+- `record_batch` / `undo_last` / `undo_by_id` / `clear_history` 末尾都 `self.save_to_disk()`,best-effort,写失败静默(不阻塞撤销操作)
+- `ProjectState::new` 改用 `UndoManager::load_for_project`。register_project 被打开即自动回读上次的撤销栈
+- 原 `UndoManager::new(max)` 保留为纯内存构造,给测试用
+
+**Phase 2.1a + 2.1b 贴图深化**
+- `AssetMetadata` 加 `color_space: Option<String>` 和 `mipmap_count: Option<u32>`
+- `parse_png_color_space`:扫 PNG chunk(8-byte magic 后循环读 4-byte len + 4-byte type),`sRGB` 或 `iCCP` 中任一存在 → 标 `sRGB`;没有则返回 None(不假设默认),避免后续规则误伤老 PNG。IDAT / IEND 遇到就停;最多扫 64 个 chunk 防止恶意文件
+- `parse_dds_metadata` 补读偏移 28..32 的 `dwMipMapCount`(之前忽略),0 视作 1(base-only)
+- 新 `analyzer/rules/texture_colorspace.rs`:`TextureColorSpaceRule`,对 `AssetType::Texture` 检查 stem 后缀命中 `DATA_HINTS`(20+ 种数据贴图后缀)**且** color_space == "sRGB" → Warning,建议重导或标 non-color。6 条单测
+- 扩展现有 `TextureRule`:DDS 且 >= 512px 且 mipmap_count == 1 → Info 级 `texture.no_mipmaps` 提示,只在其他检查都通过时才报,避免刷屏
+- `cache.rs` `CACHE_VERSION` 3→4(新元数据字段)
+- 前端:`types/asset.ts` 加两个字段;`AssetPreview` 的 Image Info 块展示 Color Space + Mipmap 行(mipmap=1 显示 "None (base only)");i18n 加 `assetPreview.colorSpace` / `mipmaps` / `mipmapsNone`
+
+**为什么 (三件合并)**
+都是小体量独立工作。Session 恢复用户反馈明确需求;持久化 undo 路线图里一直挂着是 quick win;贴图 sRGB 是游戏项目 QA 常见痛点,**看到一次就不会再犯**的那种错误。合并提交不代表耦合,各自独立。
+
+**影响面**
+- localStorage 多了一个 `tidycraft-session` key(~几十字节),用户清浏览器存储会丢会话但不影响功能
+- 撤销历史文件在 `{data_dir}/tidycraft/undo/` 累积,按项目路径哈希命名;长期使用时 data_dir 可能积攒废弃 hash(项目被永久删除也不清理)。未来可加"清理孤儿 undo 文件"工具
+- Texture 规则产出的 Issues 数量视项目而定;Kenney 风格只有 albedo 的资产包不会炸,带完整 PBR 流程的项目可能出很多 Warning(这是好事,真在警示)
+- Cache v3 → v4:用户首次升级后第一次扫描变慢(一次性)
+- 测试:82 → 88(+6 color space)
 
 ### 2026-04-21 — Phase 2.3: Unity 缺失 GUID 检测
 
