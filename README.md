@@ -224,13 +224,29 @@ tidycraft/
 
 ## 🗺️ Roadmap
 
-- [ ] Dependency analysis & reference tracking
-- [ ] Statistics dashboard & reports
-- [ ] Git integration (change detection)
-- [ ] Incremental scanning
-- [ ] Batch rename operations
-- [ ] Custom rule scripting
-- [ ] Export reports (JSON, CSV, HTML)
+Shipped:
+
+- [x] Dependency analysis & reference tracking (Unity GUID graph, unused-asset detection)
+- [x] Statistics dashboard & reports
+- [x] Git integration (branch info, per-file change status)
+- [x] Incremental scanning (mtime/size cache)
+- [x] Batch rename operations (with persistent undo)
+- [x] Export reports (JSON, CSV, HTML)
+- [x] Live filesystem watcher (auto-refresh on file changes)
+- [x] Multi-project workspace + cross-session restore
+- [x] Tag system with multi-select filtering
+- [x] Safe delete / move / copy / duplicate (OS trash)
+
+In progress:
+
+- [ ] Visual redesign — Forge Dark theme migration (see `REDESIGN.md`)
+- [ ] Command Palette (⌘K)
+- [ ] Gallery / grid view
+- [ ] AI tag suggestions
+
+Backlog:
+
+- [ ] Custom rule scripting (`tidycraft.toml` is parsed but not yet wired through the UI)
 
 ---
 
