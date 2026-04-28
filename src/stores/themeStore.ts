@@ -13,10 +13,8 @@ const getInitialTheme = (): Theme => {
   if (saved === "light" || saved === "dark") {
     return saved;
   }
-  // Check system preference
-  if (window.matchMedia("(prefers-color-scheme: light)").matches) {
-    return "light";
-  }
+  // Forge Dark is the default per redesign spec; system preference is ignored
+  // so the brand visual hits everyone the same way on first launch.
   return "dark";
 };
 
