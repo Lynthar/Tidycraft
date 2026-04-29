@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { X, AlertCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
 import { formatFileSize } from "../lib/utils";
@@ -13,8 +13,13 @@ export function StatusBar() {
 
   if (error) {
     return (
-      <footer className="h-6 bg-error/20 border-t border-error px-4 flex items-center text-xs text-error">
-        {t("statusBar.error")}: {error}
+      <footer className="tc-status" data-state="error">
+        <span className="tc-status-err-icon">
+          <AlertCircle size={13} />
+        </span>
+        <span style={{ fontSize: 11.5, fontWeight: 500 }}>
+          {t("statusBar.error")}: {error}
+        </span>
       </footer>
     );
   }
@@ -30,34 +35,25 @@ export function StatusBar() {
       : "";
 
     return (
-      <footer className="h-6 bg-card-bg border-t border-border px-4 flex items-center text-xs text-text-secondary">
-        <div className="flex items-center gap-3 flex-1">
-          <span className="text-primary">{t(`scanPhase.${scanProgress.phase}`)}</span>
-          {scanProgress.total && scanProgress.total > 0 && (
-            <>
-              <span>|</span>
-              <span>
-                {scanProgress.current} / {scanProgress.total} ({progressPercent}%)
-              </span>
-              <div className="w-32 h-1.5 bg-background rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-primary transition-all duration-200"
-                  style={{ width: `${progressPercent}%` }}
-                />
-              </div>
-            </>
-          )}
-          {currentFile && (
-            <>
-              <span>|</span>
-              <span className="truncate max-w-64">{currentFile}</span>
-            </>
-          )}
-        </div>
-        <button
-          onClick={cancelScan}
-          className="flex items-center gap-1 px-2 py-0.5 hover:bg-error/20 hover:text-error rounded transition-colors"
-        >
+      <footer className="tc-status" data-state="scanning">
+        <span className="tc-scan-phase">{t(`scanPhase.${scanProgress.phase}`)}…</span>
+        {scanProgress.total && scanProgress.total > 0 && (
+          <>
+            <span className="mono" style={{ color: "var(--text-2)" }}>
+              {scanProgress.current} / {scanProgress.total}{" "}
+              <span style={{ color: "var(--text-3)" }}>({progressPercent}%)</span>
+            </span>
+            <span
+              className="tc-scan-progress"
+              style={{ ["--p" as string]: `${progressPercent}%` } as React.CSSProperties}
+            >
+              <i />
+            </span>
+          </>
+        )}
+        {currentFile && <span className="tc-scan-file">…/{currentFile}</span>}
+        <span className="tc-status-spacer" />
+        <button onClick={cancelScan} className="tc-scan-cancel">
           <X size={12} />
           {t("statusBar.cancel")}
         </button>
@@ -67,12 +63,10 @@ export function StatusBar() {
 
   if (isScanning) {
     return (
-      <footer className="h-6 bg-card-bg border-t border-border px-4 flex items-center text-xs text-text-secondary">
-        <span>{t("statusBar.startingScan")}</span>
-        <button
-          onClick={cancelScan}
-          className="ml-auto flex items-center gap-1 px-2 py-0.5 hover:bg-error/20 hover:text-error rounded transition-colors"
-        >
+      <footer className="tc-status" data-state="scanning">
+        <span className="tc-scan-phase">{t("statusBar.startingScan")}</span>
+        <span className="tc-status-spacer" />
+        <button onClick={cancelScan} className="tc-scan-cancel">
           <X size={12} />
           {t("statusBar.cancel")}
         </button>
@@ -81,58 +75,62 @@ export function StatusBar() {
   }
 
   if (!scanResult) {
-    return (
-      <footer className="h-6 bg-card-bg border-t border-border px-4 flex items-center text-xs text-text-secondary">
-        {t("statusBar.ready")}
-      </footer>
-    );
+    return <footer className="tc-status">{t("statusBar.ready")}</footer>;
   }
 
   const typeCounts = scanResult.type_counts;
   const projectType = scanResult.project_type;
 
   return (
-    <footer className="h-6 bg-card-bg border-t border-border px-4 flex items-center justify-between text-xs">
-      <div className="flex items-center gap-4 text-text-secondary">
-        {projectType && projectType !== "generic" && (
-          <>
-            <span className="px-1.5 py-0.5 bg-primary/20 text-primary rounded text-[10px] uppercase font-medium">
-              {projectType}
-            </span>
-            <span>|</span>
-          </>
-        )}
-        <span>
-          {t("statusBar.total")}: <span className="text-text-primary">{scanResult.total_count}</span> {t("statusBar.assets")}
+    <footer className="tc-status">
+      {projectType && projectType !== "generic" && (
+        <span
+          className="tc-status-item"
+          style={{
+            padding: "1px 6px",
+            borderRadius: 3,
+            background: "color-mix(in oklch, var(--primary) 18%, transparent)",
+            color: "var(--primary-strong)",
+            fontSize: 10,
+            textTransform: "uppercase",
+            fontWeight: 600,
+            letterSpacing: "0.04em",
+          }}
+        >
+          {projectType}
         </span>
-        <span>|</span>
-        <span>
-          {t("assetList.size")}: <span className="text-text-primary">{formatFileSize(scanResult.total_size)}</span>
+      )}
+      <span className="tc-status-item">
+        {t("statusBar.total")}{" "}
+        <span className="tc-num">
+          {scanResult.total_count} {t("statusBar.assets")}
         </span>
-        <span>|</span>
-        <span className="flex gap-3">
-          {typeCounts.texture && (
-            <span>
-              <span className="text-green-400">{t("statusBar.textures")}:</span> {typeCounts.texture}
-            </span>
-          )}
-          {typeCounts.model && (
-            <span>
-              <span className="text-blue-400">{t("statusBar.models")}:</span> {typeCounts.model}
-            </span>
-          )}
-          {typeCounts.audio && (
-            <span>
-              <span className="text-yellow-400">{t("statusBar.audio")}:</span> {typeCounts.audio}
-            </span>
-          )}
+      </span>
+      <span className="tc-status-item">
+        {t("assetList.size")} <span className="tc-num">{formatFileSize(scanResult.total_size)}</span>
+      </span>
+      {typeCounts.texture && (
+        <span className="tc-status-item text-c-texture">
+          {t("statusBar.textures")} {typeCounts.texture}
         </span>
-      </div>
-
-      <div className="text-text-secondary">
-        {t("statusBar.showing")}: <span className="text-text-primary">{filteredAssets.length}</span> {t("statusBar.assets")} (
-        {formatFileSize(filteredSize)})
-      </div>
+      )}
+      {typeCounts.model && (
+        <span className="tc-status-item text-c-model">
+          {t("statusBar.models")} {typeCounts.model}
+        </span>
+      )}
+      {typeCounts.audio && (
+        <span className="tc-status-item text-c-audio">
+          {t("statusBar.audio")} {typeCounts.audio}
+        </span>
+      )}
+      <span className="tc-status-spacer" />
+      <span className="tc-status-item">
+        {t("statusBar.showing")}{" "}
+        <span className="tc-num">
+          {filteredAssets.length} {t("statusBar.assets")} ({formatFileSize(filteredSize)})
+        </span>
+      </span>
     </footer>
   );
 }

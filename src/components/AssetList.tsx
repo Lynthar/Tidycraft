@@ -27,15 +27,15 @@ function AssetIcon({ type }: { type: AssetType }) {
 
   switch (type) {
     case "texture":
-      return <Image {...iconProps} className="text-green-400" />;
+      return <Image {...iconProps} className="text-c-texture" />;
     case "model":
-      return <Box {...iconProps} className="text-blue-400" />;
+      return <Box {...iconProps} className="text-c-model" />;
     case "audio":
-      return <Volume2 {...iconProps} className="text-yellow-400" />;
+      return <Volume2 {...iconProps} className="text-c-audio" />;
     case "video":
-      return <Video {...iconProps} className="text-purple-400" />;
+      return <Video {...iconProps} className="text-c-video" />;
     default:
-      return <File {...iconProps} className="text-gray-400" />;
+      return <File {...iconProps} className="text-c-other" />;
   }
 }
 

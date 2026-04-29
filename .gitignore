@@ -31,3 +31,6 @@ src-tauri/target/
 # Claude Code workspace — local context, not project docs
 .claude/
 CLAUDE.md
+
+# Design handoff — reference only, not built into the app
+design_handoff_tidycraft_redesign/

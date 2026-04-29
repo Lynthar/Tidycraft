@@ -45,14 +45,13 @@ export default {
           3: "var(--text-3)",
           4: "var(--text-4)",
         },
-        // Accent (Forge amber primary)
+        // Accent (v2: independent teal/cyan; in v1 it aliased --primary,
+        // but no component currently uses bg-accent so the cutover is safe)
         accent: {
-          DEFAULT: "var(--primary)",
-          strong: "var(--primary-strong)",
-          soft: "var(--primary-soft)",
-          tint: "var(--primary-tint)",
+          DEFAULT: "var(--accent)",
+          soft: "var(--accent-soft)",
         },
-        "on-accent": "var(--on-primary)",
+        "on-accent": "var(--on-accent)",
         // Asset type colors (11)
         "c-texture": "var(--c-texture)",
         "c-model": "var(--c-model)",
