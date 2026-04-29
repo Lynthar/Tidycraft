@@ -137,12 +137,22 @@ export function ProjectSwitcher() {
                   | "unreal"
                   | "godot"
                   | "generic";
+                // Outer is a div with role="button" because we need a nested
+                // close <button> inside, and <button> in <button> is illegal.
                 return (
-                  <button
+                  <div
                     key={p.id}
                     className="tc-projmenu-item"
                     data-current={p.isActive ? "true" : undefined}
                     onClick={() => handleSelect(p.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        handleSelect(p.id);
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
                     title={p.path}
                   >
                     <span className="tc-projmenu-glyph" data-engine={engineKey}>
@@ -180,7 +190,7 @@ export function ProjectSwitcher() {
                         <X size={12} />
                       </button>
                     </span>
-                  </button>
+                  </div>
                 );
               })}
             </div>
