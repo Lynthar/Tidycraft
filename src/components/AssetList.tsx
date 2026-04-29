@@ -20,23 +20,24 @@ import { ContextMenu } from "./ContextMenu";
 import type { AssetInfo, AssetType, GitFileStatus, Tag } from "../types/asset";
 import type { SortField } from "../stores/projectStore";
 
-const ROW_HEIGHT = 36; // Height of each row in pixels
+const ROW_HEIGHT = 40; // Row height matches .tc-row + 22px glyph + padding
 
 function AssetIcon({ type }: { type: AssetType }) {
-  const iconProps = { size: 16, className: "shrink-0" };
-
-  switch (type) {
-    case "texture":
-      return <Image {...iconProps} className="text-c-texture" />;
-    case "model":
-      return <Box {...iconProps} className="text-c-model" />;
-    case "audio":
-      return <Volume2 {...iconProps} className="text-c-audio" />;
-    case "video":
-      return <Video {...iconProps} className="text-c-video" />;
-    default:
-      return <File {...iconProps} className="text-c-other" />;
-  }
+  const icon = (() => {
+    const size = 13;
+    switch (type) {
+      case "texture": return <Image size={size} />;
+      case "model":   return <Box size={size} />;
+      case "audio":   return <Volume2 size={size} />;
+      case "video":   return <Video size={size} />;
+      default:        return <File size={size} />;
+    }
+  })();
+  return (
+    <span className="tc-asset-glyph" data-type={type}>
+      {icon}
+    </span>
+  );
 }
 
 function GitStatusBadge({ status, t }: { status: GitFileStatus; t: (key: string) => string }) {
@@ -185,12 +186,9 @@ function AssetRow({
 
   return (
     <div
-      className={cn(
-        "flex items-center border-b border-border cursor-pointer transition-colors text-sm",
-        "hover:bg-background",
-        isSelected && "bg-primary/20",
-        isChecked && "bg-primary/10"
-      )}
+      className="tc-row"
+      data-selected={isSelected ? "true" : undefined}
+      data-checked={isChecked ? "true" : undefined}
       style={style}
       onClick={onClick}
       onContextMenu={onContextMenu}
@@ -209,9 +207,9 @@ function AssetRow({
         </div>
       )}
       <div className="flex-1 py-2 px-3 min-w-0">
-        <div className="flex items-center gap-2">
+        <div className="tc-name-cell">
           <AssetIcon type={asset.asset_type} />
-          <span className="truncate">{asset.name}</span>
+          <span className="tc-name">{asset.name}</span>
           {showGitStatusIndicators && gitStatus && gitStatus !== "unchanged" && <GitStatusBadge status={gitStatus} t={t} />}
         </div>
       </div>
@@ -662,48 +660,44 @@ export function AssetList() {
 
   return (
     <>
-      <div className="h-full flex flex-col overflow-hidden">
+      <div className="tc-main">
         {/* Selection Toolbar */}
         {selectedPaths.size > 0 && (
-          <div className="flex items-center justify-between bg-primary/10 border-b border-primary/30 px-3 py-2 shrink-0">
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-primary font-medium">
-                {selectedPaths.size} {t("assetList.selected", "selected")}
-              </span>
-              <button
-                onClick={handleSelectAll}
-                className="text-sm text-text-secondary hover:text-text-primary transition-colors"
-              >
-                {selectedPaths.size === assets.length
-                  ? t("assetList.deselectAll", "Deselect all")
-                  : t("assetList.selectAll", "Select all")}
-              </button>
-            </div>
-            <div className="flex items-center gap-2">
-              <BatchTagSelector
-                selectedPaths={Array.from(selectedPaths)}
-                onOpenManager={() => setShowTagManager(true)}
-              />
-              <button
-                onClick={() => setShowBatchRename(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-primary text-white rounded hover:bg-primary/90 transition-colors"
-              >
-                <Edit3 size={14} />
-                {t("assetList.batchRename", "Batch Rename")}
-              </button>
-              <button
-                onClick={clearSelection}
-                className="p-1.5 text-text-secondary hover:text-text-primary transition-colors"
-                title={t("assetList.clearSelection", "Clear selection")}
-              >
-                <X size={16} />
-              </button>
-            </div>
+          <div className="tc-batch-bar">
+            <span className="tc-batch-count">
+              <strong>{selectedPaths.size}</strong>
+              {t("assetList.selected", "selected")}
+            </span>
+            <button onClick={handleSelectAll} className="tc-batch-link">
+              {selectedPaths.size === assets.length
+                ? t("assetList.deselectAll", "Deselect all")
+                : t("assetList.selectAll", "Select all")}
+            </button>
+            <span className="tc-batch-spacer" />
+            <BatchTagSelector
+              selectedPaths={Array.from(selectedPaths)}
+              onOpenManager={() => setShowTagManager(true)}
+            />
+            <button
+              onClick={() => setShowBatchRename(true)}
+              className="tc-batch-action"
+              data-primary="true"
+            >
+              <Edit3 size={13} />
+              {t("assetList.batchRename", "Batch Rename")}
+            </button>
+            <button
+              onClick={clearSelection}
+              className="tc-batch-action"
+              title={t("assetList.clearSelection", "Clear selection")}
+            >
+              <X size={13} />
+            </button>
           </div>
         )}
 
         {/* Header */}
-        <div className="flex items-center bg-card-bg border-b border-border text-text-secondary text-sm font-medium shrink-0">
+        <div className="tc-list-header">
           {showCheckbox && <div className="w-8 py-2 px-2 shrink-0" />}
           <div
             className="flex-1 py-2 px-3 flex items-center gap-1 cursor-pointer hover:text-text-primary transition-colors select-none"
@@ -739,7 +733,7 @@ export function AssetList() {
         </div>
 
         {/* Virtual List */}
-        <div ref={parentRef} className="flex-1 overflow-auto">
+        <div ref={parentRef} className="tc-list-body">
           <div
             style={{
               height: `${virtualizer.getTotalSize()}px`,

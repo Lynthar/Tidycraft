@@ -1,6 +1,20 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Image, Box, FileText, X, Copy, Check, Maximize2, Plus, ExternalLink, FolderOpen } from "lucide-react";
+import {
+  Image,
+  Box,
+  Volume2,
+  Video,
+  File,
+  FileText,
+  X,
+  Copy,
+  Check,
+  Maximize2,
+  Plus,
+  ExternalLink,
+  FolderOpen,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
 import { useTagsStore } from "../stores/tagsStore";
@@ -10,6 +24,20 @@ import { AudioPlayer } from "./AudioPlayer";
 import { ImageLightbox } from "./ImageLightbox";
 import { ModelViewer3D } from "./ModelViewer3D";
 import { ModelLightbox } from "./ModelLightbox";
+import type { AssetType } from "../types/asset";
+
+const VIDEO_EXTENSIONS = ["mp4", "webm", "mov", "avi", "mkv", "m4v"];
+const MODEL_3D_EXTENSIONS = ["gltf", "glb", "fbx", "obj", "dae"];
+
+function GlyphIcon({ type, size = 11 }: { type: AssetType; size?: number }) {
+  switch (type) {
+    case "texture": return <Image size={size} />;
+    case "model":   return <Box size={size} />;
+    case "audio":   return <Volume2 size={size} />;
+    case "video":   return <Video size={size} />;
+    default:        return <File size={size} />;
+  }
+}
 
 export function AssetPreview() {
   const { t } = useTranslation();
@@ -23,16 +51,12 @@ export function AssetPreview() {
   const [modelLightboxOpen, setModelLightboxOpen] = useState(false);
   const [showTagPicker, setShowTagPicker] = useState(false);
 
-  // Get tags for current asset
   const currentAssetTags = selectedAsset ? (assetTags[selectedAsset.path] || []) : [];
 
-  // Video file extensions
-  const VIDEO_EXTENSIONS = ["mp4", "webm", "mov", "avi", "mkv", "m4v"];
-  const isVideo = selectedAsset && VIDEO_EXTENSIONS.includes(selectedAsset.extension.toLowerCase());
-
-  // 3D model extensions supported by Three.js
-  const MODEL_3D_EXTENSIONS = ["gltf", "glb", "fbx", "obj", "dae"];
-  const is3DModel = selectedAsset && MODEL_3D_EXTENSIONS.includes(selectedAsset.extension.toLowerCase());
+  const isVideo =
+    selectedAsset && VIDEO_EXTENSIONS.includes(selectedAsset.extension.toLowerCase());
+  const is3DModel =
+    selectedAsset && MODEL_3D_EXTENSIONS.includes(selectedAsset.extension.toLowerCase());
 
   useEffect(() => {
     if (!selectedAsset || selectedAsset.asset_type !== "texture") {
@@ -99,25 +123,37 @@ export function AssetPreview() {
 
   if (!selectedAsset) {
     return (
-      <div className="w-full h-full bg-card-bg border-l border-border flex flex-col items-center justify-center text-text-secondary p-4">
-        <FileText size={48} className="opacity-30 mb-2" />
-        <p className="text-sm text-center">{t("assetPreview.selectAsset")}</p>
-      </div>
+      <aside className="tc-preview">
+        <div className="tc-preview-empty">
+          <FileText size={42} style={{ opacity: 0.3, marginBottom: 8 }} />
+          <p style={{ fontSize: 12.5 }}>{t("assetPreview.selectAsset")}</p>
+        </div>
+      </aside>
     );
   }
 
   const renderPreview = () => {
-    // Video preview
     if (isVideo) {
       return <VideoPlayer filePath={selectedAsset.path} />;
     }
 
-    // Image preview with lightbox
     if (selectedAsset.asset_type === "texture") {
       if (loadingThumbnail) {
         return (
-          <div className="w-full aspect-square bg-background rounded flex items-center justify-center">
-            <span className="text-text-secondary text-sm">{t("assetPreview.loading")}</span>
+          <div
+            style={{
+              width: "100%",
+              aspectRatio: "1 / 1",
+              background: "var(--panel-2)",
+              border: "1px solid var(--line)",
+              borderRadius: 8,
+              display: "grid",
+              placeItems: "center",
+              color: "var(--text-3)",
+              fontSize: 12,
+            }}
+          >
+            {t("assetPreview.loading")}
           </div>
         );
       }
@@ -127,31 +163,48 @@ export function AssetPreview() {
             <img
               src={`data:image/png;base64,${thumbnail}`}
               alt={selectedAsset.name}
-              className="w-full aspect-square object-contain bg-background rounded cursor-pointer"
+              style={{
+                width: "100%",
+                aspectRatio: "1 / 1",
+                objectFit: "contain",
+                background: "var(--panel-2)",
+                border: "1px solid var(--line)",
+                borderRadius: 8,
+                cursor: "pointer",
+              }}
               onClick={() => setLightboxOpen(true)}
             />
             <div
-              className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer rounded"
+              className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+              style={{ borderRadius: 8 }}
               onClick={() => setLightboxOpen(true)}
             >
-              <Maximize2 size={24} className="text-white" />
+              <Maximize2 size={22} className="text-white" />
             </div>
           </div>
         );
       }
       return (
-        <div className="w-full aspect-square bg-background rounded flex items-center justify-center">
-          <Image size={48} className="text-green-400/50" />
+        <div
+          style={{
+            width: "100%",
+            aspectRatio: "1 / 1",
+            background: "var(--panel-2)",
+            border: "1px solid var(--line)",
+            borderRadius: 8,
+            display: "grid",
+            placeItems: "center",
+          }}
+        >
+          <Image size={42} style={{ color: "var(--c-texture)", opacity: 0.5 }} />
         </div>
       );
     }
 
-    // Audio preview with waveform
     if (selectedAsset.asset_type === "audio") {
       return <AudioPlayer filePath={selectedAsset.path} />;
     }
 
-    // 3D Model preview with Three.js
     if (selectedAsset.asset_type === "model") {
       if (is3DModel) {
         return (
@@ -162,17 +215,36 @@ export function AssetPreview() {
           />
         );
       }
-      // Fallback for unsupported 3D formats
       return (
-        <div className="w-full aspect-square bg-background rounded flex items-center justify-center">
-          <Box size={48} className="text-blue-400/50" />
+        <div
+          style={{
+            width: "100%",
+            aspectRatio: "1 / 1",
+            background: "var(--panel-2)",
+            border: "1px solid var(--line)",
+            borderRadius: 8,
+            display: "grid",
+            placeItems: "center",
+          }}
+        >
+          <Box size={42} style={{ color: "var(--c-model)", opacity: 0.5 }} />
         </div>
       );
     }
 
     return (
-      <div className="w-full aspect-square bg-background rounded flex items-center justify-center">
-        <FileText size={48} className="text-gray-400/50" />
+      <div
+        style={{
+          width: "100%",
+          aspectRatio: "1 / 1",
+          background: "var(--panel-2)",
+          border: "1px solid var(--line)",
+          borderRadius: 8,
+          display: "grid",
+          placeItems: "center",
+        }}
+      >
+        <FileText size={42} style={{ color: "var(--text-4)" }} />
       </div>
     );
   };
@@ -187,317 +259,366 @@ export function AssetPreview() {
   };
 
   return (
-    <div className="w-full h-full bg-card-bg border-l border-border flex flex-col overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between p-3 border-b border-border">
-        <h3 className="font-medium text-sm truncate flex-1">{selectedAsset.name}</h3>
-        <div className="flex items-center gap-1">
+    <aside className="tc-preview">
+      <div className="tc-preview-head">
+        <div className="tc-preview-title">
+          <span
+            className="tc-asset-glyph"
+            data-type={selectedAsset.asset_type}
+            style={{ width: 18, height: 18 }}
+          >
+            <GlyphIcon type={selectedAsset.asset_type} />
+          </span>
+          <span className="tc-name" title={selectedAsset.name}>
+            {selectedAsset.name}
+          </span>
+        </div>
+        <div className="tc-preview-actions">
           <button
             onClick={revealInFinder}
-            className="p-1 hover:bg-background rounded text-text-secondary hover:text-text-primary"
+            className="tc-icon-btn"
+            style={{ width: 26, height: 26 }}
             title={t("contextMenu.revealInFinder")}
           >
-            <FolderOpen size={14} />
+            <FolderOpen size={13} />
           </button>
           <button
             onClick={openWithDefaultApp}
-            className="p-1 hover:bg-background rounded text-text-secondary hover:text-text-primary"
+            className="tc-icon-btn"
+            style={{ width: 26, height: 26 }}
             title={t("assetPreview.openWithDefaultApp")}
           >
-            <ExternalLink size={14} />
+            <ExternalLink size={13} />
           </button>
           <button
             onClick={() => setSelectedAsset(null)}
-            className="p-1 hover:bg-background rounded text-text-secondary hover:text-text-primary"
+            className="tc-icon-btn"
+            style={{ width: 26, height: 26 }}
+            title="Close"
           >
-            <X size={14} />
+            <X size={13} />
           </button>
         </div>
       </div>
 
-      {/* Preview */}
-      <div className="p-3 border-b border-border">{renderPreview()}</div>
+      <div className="tc-preview-body">
+        {/* Preview canvas */}
+        <div style={{ padding: "12px 14px" }}>{renderPreview()}</div>
 
-      {/* Details */}
-      <div className="flex-1 overflow-auto p-3">
-        <div className="space-y-3 text-sm">
-          {/* Basic Info */}
-          <div>
-            <h4 className="text-text-secondary text-xs uppercase mb-2">{t("assetPreview.basicInfo")}</h4>
-            <div className="space-y-1.5">
-              <div className="flex justify-between">
-                <span className="text-text-secondary">{t("assetPreview.type")}:</span>
-                <span className="text-text-primary">{getTypeLabel(selectedAsset.asset_type)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-text-secondary">{t("assetPreview.extension")}:</span>
-                <span className="text-text-primary">.{selectedAsset.extension}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-text-secondary">{t("assetPreview.size")}:</span>
-                <span className="text-text-primary">{formatFileSize(selectedAsset.size)}</span>
-              </div>
-            </div>
+        {/* Basic info */}
+        <div className="tc-meta-section">
+          <div className="tc-meta-label">{t("assetPreview.basicInfo")}</div>
+          <dl className="tc-kv-grid">
+            <dt>{t("assetPreview.type")}</dt>
+            <dd>{getTypeLabel(selectedAsset.asset_type)}</dd>
+            <dt>{t("assetPreview.extension")}</dt>
+            <dd>.{selectedAsset.extension}</dd>
+            <dt>{t("assetPreview.size")}</dt>
+            <dd>{formatFileSize(selectedAsset.size)}</dd>
+          </dl>
+        </div>
+
+        {/* Image metadata */}
+        {selectedAsset.asset_type === "texture" && metadata && (
+          <div className="tc-meta-section">
+            <div className="tc-meta-label">{t("assetPreview.imageInfo")}</div>
+            <dl className="tc-kv-grid">
+              {metadata.width && metadata.height && (
+                <>
+                  <dt>{t("assetPreview.dimensions")}</dt>
+                  <dd>
+                    {metadata.width} × {metadata.height}
+                  </dd>
+                </>
+              )}
+              {metadata.has_alpha !== undefined && (
+                <>
+                  <dt>{t("assetPreview.hasAlpha")}</dt>
+                  <dd>{metadata.has_alpha ? t("assetPreview.yes") : t("assetPreview.no")}</dd>
+                </>
+              )}
+              {metadata.color_space && (
+                <>
+                  <dt>{t("assetPreview.colorSpace")}</dt>
+                  <dd>{metadata.color_space}</dd>
+                </>
+              )}
+              {metadata.mipmap_count !== undefined && (
+                <>
+                  <dt>{t("assetPreview.mipmaps")}</dt>
+                  <dd>
+                    {metadata.mipmap_count === 1
+                      ? t("assetPreview.mipmapsNone")
+                      : metadata.mipmap_count}
+                  </dd>
+                </>
+              )}
+            </dl>
           </div>
+        )}
 
-          {/* Image Metadata */}
-          {selectedAsset.asset_type === "texture" && metadata && (
-            <div>
-              <h4 className="text-text-secondary text-xs uppercase mb-2">{t("assetPreview.imageInfo")}</h4>
-              <div className="space-y-1.5">
-                {metadata.width && metadata.height && (
-                  <div className="flex justify-between">
-                    <span className="text-text-secondary">{t("assetPreview.dimensions")}:</span>
-                    <span className="text-text-primary">
-                      {metadata.width} x {metadata.height}
-                    </span>
-                  </div>
-                )}
-                {metadata.has_alpha !== undefined && (
-                  <div className="flex justify-between">
-                    <span className="text-text-secondary">{t("assetPreview.hasAlpha")}:</span>
-                    <span className="text-text-primary">
-                      {metadata.has_alpha ? t("assetPreview.yes") : t("assetPreview.no")}
-                    </span>
-                  </div>
-                )}
-                {metadata.color_space && (
-                  <div className="flex justify-between">
-                    <span className="text-text-secondary">{t("assetPreview.colorSpace")}:</span>
-                    <span className="text-text-primary">{metadata.color_space}</span>
-                  </div>
-                )}
-                {metadata.mipmap_count !== undefined && (
-                  <div className="flex justify-between">
-                    <span className="text-text-secondary">{t("assetPreview.mipmaps")}:</span>
-                    <span className="text-text-primary">
-                      {metadata.mipmap_count === 1
-                        ? t("assetPreview.mipmapsNone")
-                        : metadata.mipmap_count}
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
+        {/* Model metadata */}
+        {selectedAsset.asset_type === "model" && metadata && (
+          <div className="tc-meta-section">
+            <div className="tc-meta-label">{t("assetPreview.modelInfo")}</div>
+            <dl className="tc-kv-grid">
+              {metadata.vertex_count !== undefined && (
+                <>
+                  <dt>{t("assetPreview.vertices")}</dt>
+                  <dd>{metadata.vertex_count.toLocaleString()}</dd>
+                </>
+              )}
+              {metadata.face_count !== undefined && (
+                <>
+                  <dt>{t("assetPreview.faces")}</dt>
+                  <dd>{metadata.face_count.toLocaleString()}</dd>
+                </>
+              )}
+              {metadata.material_count !== undefined && (
+                <>
+                  <dt>{t("assetPreview.materials")}</dt>
+                  <dd>{metadata.material_count}</dd>
+                </>
+              )}
+            </dl>
+          </div>
+        )}
 
-          {/* Model Metadata */}
-          {selectedAsset.asset_type === "model" && metadata && (
-            <div>
-              <h4 className="text-text-secondary text-xs uppercase mb-2">{t("assetPreview.modelInfo")}</h4>
-              <div className="space-y-1.5">
-                {metadata.vertex_count !== undefined && (
-                  <div className="flex justify-between">
-                    <span className="text-text-secondary">{t("assetPreview.vertices")}:</span>
-                    <span className="text-text-primary">
-                      {metadata.vertex_count.toLocaleString()}
-                    </span>
-                  </div>
-                )}
-                {metadata.face_count !== undefined && (
-                  <div className="flex justify-between">
-                    <span className="text-text-secondary">{t("assetPreview.faces")}:</span>
-                    <span className="text-text-primary">
-                      {metadata.face_count.toLocaleString()}
-                    </span>
-                  </div>
-                )}
-                {metadata.material_count !== undefined && (
-                  <div className="flex justify-between">
-                    <span className="text-text-secondary">{t("assetPreview.materials")}:</span>
-                    <span className="text-text-primary">{metadata.material_count}</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
+        {/* Video metadata */}
+        {selectedAsset.asset_type === "video" && metadata && (
+          <div className="tc-meta-section">
+            <div className="tc-meta-label">{t("assetPreview.videoInfo")}</div>
+            <dl className="tc-kv-grid">
+              {metadata.duration_secs !== undefined && (
+                <>
+                  <dt>{t("assetPreview.duration")}</dt>
+                  <dd>{formatDuration(metadata.duration_secs)}</dd>
+                </>
+              )}
+              {metadata.width !== undefined && metadata.height !== undefined && (
+                <>
+                  <dt>{t("assetPreview.resolution")}</dt>
+                  <dd>
+                    {metadata.width} × {metadata.height}
+                  </dd>
+                </>
+              )}
+              {metadata.framerate !== undefined && metadata.framerate > 0 && (
+                <>
+                  <dt>{t("assetPreview.framerate")}</dt>
+                  <dd>{metadata.framerate.toFixed(2)} fps</dd>
+                </>
+              )}
+              {metadata.video_codec && (
+                <>
+                  <dt>{t("assetPreview.codec")}</dt>
+                  <dd>{metadata.video_codec}</dd>
+                </>
+              )}
+            </dl>
+          </div>
+        )}
 
-          {/* Video Metadata */}
-          {selectedAsset.asset_type === "video" && metadata && (
-            <div>
-              <h4 className="text-text-secondary text-xs uppercase mb-2">{t("assetPreview.videoInfo")}</h4>
-              <div className="space-y-1.5">
-                {metadata.duration_secs !== undefined && (
-                  <div className="flex justify-between">
-                    <span className="text-text-secondary">{t("assetPreview.duration")}:</span>
-                    <span className="text-text-primary">
-                      {formatDuration(metadata.duration_secs)}
-                    </span>
-                  </div>
-                )}
-                {metadata.width !== undefined && metadata.height !== undefined && (
-                  <div className="flex justify-between">
-                    <span className="text-text-secondary">{t("assetPreview.resolution")}:</span>
-                    <span className="text-text-primary">
-                      {metadata.width} × {metadata.height}
-                    </span>
-                  </div>
-                )}
-                {metadata.framerate !== undefined && metadata.framerate > 0 && (
-                  <div className="flex justify-between">
-                    <span className="text-text-secondary">{t("assetPreview.framerate")}:</span>
-                    <span className="text-text-primary">{metadata.framerate.toFixed(2)} fps</span>
-                  </div>
-                )}
-                {metadata.video_codec && (
-                  <div className="flex justify-between">
-                    <span className="text-text-secondary">{t("assetPreview.codec")}:</span>
-                    <span className="text-text-primary font-mono text-xs">{metadata.video_codec}</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
+        {/* Audio metadata */}
+        {selectedAsset.asset_type === "audio" && metadata && (
+          <div className="tc-meta-section">
+            <div className="tc-meta-label">{t("assetPreview.audioInfo")}</div>
+            <dl className="tc-kv-grid">
+              {metadata.duration_secs !== undefined && (
+                <>
+                  <dt>{t("assetPreview.duration")}</dt>
+                  <dd>{formatDuration(metadata.duration_secs)}</dd>
+                </>
+              )}
+              {metadata.sample_rate !== undefined && (
+                <>
+                  <dt>{t("assetPreview.sampleRate")}</dt>
+                  <dd>{(metadata.sample_rate / 1000).toFixed(1)} kHz</dd>
+                </>
+              )}
+              {metadata.channels !== undefined && (
+                <>
+                  <dt>{t("assetPreview.channels")}</dt>
+                  <dd>{getChannelLabel(metadata.channels)}</dd>
+                </>
+              )}
+              {metadata.bit_depth !== undefined && (
+                <>
+                  <dt>{t("assetPreview.bitDepth")}</dt>
+                  <dd>{metadata.bit_depth}-bit</dd>
+                </>
+              )}
+            </dl>
+          </div>
+        )}
 
-          {/* Audio Metadata */}
-          {selectedAsset.asset_type === "audio" && metadata && (
-            <div>
-              <h4 className="text-text-secondary text-xs uppercase mb-2">{t("assetPreview.audioInfo")}</h4>
-              <div className="space-y-1.5">
-                {metadata.duration_secs !== undefined && (
-                  <div className="flex justify-between">
-                    <span className="text-text-secondary">{t("assetPreview.duration")}:</span>
-                    <span className="text-text-primary">
-                      {formatDuration(metadata.duration_secs)}
-                    </span>
-                  </div>
-                )}
-                {metadata.sample_rate !== undefined && (
-                  <div className="flex justify-between">
-                    <span className="text-text-secondary">{t("assetPreview.sampleRate")}:</span>
-                    <span className="text-text-primary">
-                      {(metadata.sample_rate / 1000).toFixed(1)} kHz
-                    </span>
-                  </div>
-                )}
-                {metadata.channels !== undefined && (
-                  <div className="flex justify-between">
-                    <span className="text-text-secondary">{t("assetPreview.channels")}:</span>
-                    <span className="text-text-primary">
-                      {getChannelLabel(metadata.channels)}
-                    </span>
-                  </div>
-                )}
-                {metadata.bit_depth !== undefined && (
-                  <div className="flex justify-between">
-                    <span className="text-text-secondary">{t("assetPreview.bitDepth")}:</span>
-                    <span className="text-text-primary">{metadata.bit_depth}-bit</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Unity GUID */}
-          {projectType === "unity" && selectedAsset.unity_guid && (
-            <div>
-              <h4 className="text-text-secondary text-xs uppercase mb-2">{t("assetPreview.unity")}</h4>
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-2">
-                  <span className="text-text-secondary shrink-0">{t("assetPreview.guid")}:</span>
-                  <span className="text-text-primary font-mono text-xs truncate flex-1">
-                    {selectedAsset.unity_guid}
-                  </span>
-                  <button
-                    onClick={() => copyToClipboard(selectedAsset.unity_guid!, "guid")}
-                    className="p-1 hover:bg-background rounded text-text-secondary hover:text-text-primary shrink-0"
-                    title={t("assetPreview.copyGuid")}
-                  >
-                    {copiedGuid ? <Check size={12} className="text-success" /> : <Copy size={12} />}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Tags */}
-          <div>
-            <h4 className="text-text-secondary text-xs uppercase mb-2">{t("tags.title")}</h4>
-            <div className="space-y-2">
-              {/* Current tags */}
-              <div className="flex flex-wrap gap-1">
-                {currentAssetTags.map((tag) => (
+        {/* Tags */}
+        <div className="tc-meta-section">
+          <div className="tc-meta-label">{t("tags.title")}</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+              {currentAssetTags.map((tag) => (
+                <span
+                  key={tag.id}
+                  className="group"
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                    padding: "2px 6px 2px 7px",
+                    borderRadius: 999,
+                    fontSize: 11,
+                    backgroundColor: `${tag.color}1F`,
+                    color: tag.color,
+                    border: `1px solid ${tag.color}33`,
+                  }}
+                >
                   <span
-                    key={tag.id}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs group"
                     style={{
-                      backgroundColor: `${tag.color}20`,
-                      color: tag.color,
+                      width: 6,
+                      height: 6,
+                      borderRadius: "50%",
+                      backgroundColor: tag.color,
+                    }}
+                  />
+                  {tag.name}
+                  <button
+                    onClick={() => removeTagFromAsset(selectedAsset.path, tag.id)}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity"
+                    style={{
+                      background: "transparent",
+                      border: 0,
+                      color: "inherit",
+                      cursor: "pointer",
+                      padding: 0,
+                      marginLeft: 2,
+                      display: "inline-flex",
                     }}
                   >
-                    <span
-                      className="w-2 h-2 rounded-full"
-                      style={{ backgroundColor: tag.color }}
-                    />
-                    {tag.name}
-                    <button
-                      onClick={() => removeTagFromAsset(selectedAsset.path, tag.id)}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity hover:text-error"
-                    >
-                      <X size={10} />
-                    </button>
-                  </span>
-                ))}
-                {currentAssetTags.length === 0 && (
-                  <span className="text-xs text-text-secondary italic">{t("tags.noTags")}</span>
-                )}
-              </div>
-              {/* Add tag button */}
-              <div className="relative">
-                <button
-                  onClick={() => setShowTagPicker(!showTagPicker)}
-                  className="flex items-center gap-1 px-2 py-1 text-xs text-text-secondary hover:text-text-primary hover:bg-background rounded transition-colors"
+                    <X size={10} />
+                  </button>
+                </span>
+              ))}
+              {currentAssetTags.length === 0 && (
+                <span style={{ fontSize: 11, color: "var(--text-3)", fontStyle: "italic" }}>
+                  {t("tags.noTags")}
+                </span>
+              )}
+            </div>
+            <div style={{ position: "relative" }}>
+              <button
+                onClick={() => setShowTagPicker(!showTagPicker)}
+                className="tc-batch-action"
+                style={{ height: 24, padding: "0 8px", fontSize: 11 }}
+              >
+                <Plus size={11} />
+                {t("tags.addTag")}
+              </button>
+              {showTagPicker && (
+                <div
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    top: "calc(100% + 4px)",
+                    zIndex: 50,
+                    minWidth: 160,
+                    maxHeight: 200,
+                    overflowY: "auto",
+                    padding: "4px 0",
+                    background: "var(--panel)",
+                    border: "1px solid var(--line)",
+                    borderRadius: 8,
+                    boxShadow: "var(--shadow-pop)",
+                  }}
                 >
-                  <Plus size={12} />
-                  {t("tags.addTag")}
-                </button>
-                {showTagPicker && (
-                  <div className="absolute left-0 top-full mt-1 bg-card-bg border border-border rounded-lg shadow-lg z-50 py-1 min-w-[150px] max-h-48 overflow-y-auto">
-                    {tags.filter((tag) => !currentAssetTags.some((t) => t.id === tag.id)).length === 0 ? (
-                      <div className="px-3 py-2 text-xs text-text-secondary italic">
-                        {tags.length === 0 ? t("tags.noTags") : t("tags.allTagsAdded", "All tags added")}
-                      </div>
-                    ) : (
-                      tags
-                        .filter((tag) => !currentAssetTags.some((t) => t.id === tag.id))
-                        .map((tag) => (
-                          <button
-                            key={tag.id}
-                            onClick={() => {
-                              addTagToAsset(selectedAsset.path, tag.id);
-                              setShowTagPicker(false);
+                  {tags.filter((tag) => !currentAssetTags.some((tt) => tt.id === tag.id)).length === 0 ? (
+                    <div
+                      style={{
+                        padding: "6px 12px",
+                        fontSize: 11,
+                        color: "var(--text-3)",
+                        fontStyle: "italic",
+                      }}
+                    >
+                      {tags.length === 0 ? t("tags.noTags") : t("tags.allTagsAdded", "All tags added")}
+                    </div>
+                  ) : (
+                    tags
+                      .filter((tag) => !currentAssetTags.some((tt) => tt.id === tag.id))
+                      .map((tag) => (
+                        <button
+                          key={tag.id}
+                          onClick={() => {
+                            addTagToAsset(selectedAsset.path, tag.id);
+                            setShowTagPicker(false);
+                          }}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                            width: "100%",
+                            padding: "6px 12px",
+                            fontSize: 11.5,
+                            textAlign: "left",
+                            color: "var(--text)",
+                            background: "transparent",
+                            border: 0,
+                            cursor: "pointer",
+                          }}
+                          onMouseEnter={(e) =>
+                            (e.currentTarget.style.background = "var(--panel-hover)")
+                          }
+                          onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                        >
+                          <span
+                            style={{
+                              width: 10,
+                              height: 10,
+                              borderRadius: "50%",
+                              backgroundColor: tag.color,
+                              flexShrink: 0,
                             }}
-                            className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-left hover:bg-background transition-colors"
-                          >
-                            <span
-                              className="w-3 h-3 rounded-full shrink-0"
-                              style={{ backgroundColor: tag.color }}
-                            />
-                            <span style={{ color: tag.color }}>{tag.name}</span>
-                          </button>
-                        ))
-                    )}
-                  </div>
-                )}
-              </div>
+                          />
+                          <span style={{ color: tag.color }}>{tag.name}</span>
+                        </button>
+                      ))
+                  )}
+                </div>
+              )}
             </div>
           </div>
+        </div>
 
-          {/* Path */}
-          <div>
-            <h4 className="text-text-secondary text-xs uppercase mb-2">{t("assetPreview.path")}</h4>
-            <div className="flex items-start gap-2">
-              <span className="text-text-primary text-xs font-mono break-all flex-1">
-                {selectedAsset.path}
-              </span>
+        {/* Unity GUID */}
+        {projectType === "unity" && selectedAsset.unity_guid && (
+          <div className="tc-meta-section">
+            <div className="tc-meta-label">{t("assetPreview.unity")}</div>
+            <div className="tc-guid-row">
+              <span style={{ color: "var(--text-3)" }}>{t("assetPreview.guid")}</span>
+              <code>{selectedAsset.unity_guid}</code>
               <button
-                onClick={() => copyToClipboard(selectedAsset.path, "path")}
-                className="p-1 hover:bg-background rounded text-text-secondary hover:text-text-primary shrink-0"
-                title={t("assetPreview.copyPath")}
+                onClick={() => copyToClipboard(selectedAsset.unity_guid!, "guid")}
+                className="tc-guid-copy"
+                title={t("assetPreview.copyGuid")}
               >
-                {copiedPath ? <Check size={12} className="text-success" /> : <Copy size={12} />}
+                {copiedGuid ? <Check size={12} style={{ color: "var(--ok)" }} /> : <Copy size={11} />}
               </button>
             </div>
+          </div>
+        )}
+
+        {/* Path */}
+        <div className="tc-meta-section">
+          <div className="tc-meta-label">{t("assetPreview.path")}</div>
+          <div className="tc-path-row">
+            <span>{selectedAsset.path}</span>
+            <button
+              onClick={() => copyToClipboard(selectedAsset.path, "path")}
+              className="tc-guid-copy"
+              title={t("assetPreview.copyPath")}
+            >
+              {copiedPath ? <Check size={12} style={{ color: "var(--ok)" }} /> : <Copy size={11} />}
+            </button>
           </div>
         </div>
       </div>
@@ -522,6 +643,6 @@ export function AssetPreview() {
           onClose={() => setModelLightboxOpen(false)}
         />
       )}
-    </div>
+    </aside>
   );
 }
