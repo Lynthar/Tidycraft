@@ -5,8 +5,8 @@ a bug, adding a feature, or forking the project. It aims to give you enough
 context to read the codebase productively within an hour.
 
 For the user-facing introduction, see [README.md](README.md) /
-[README.zh-CN.md](README.zh-CN.md). For the active roadmap and recent changes,
-see [DEVLOG.md](DEVLOG.md).
+[README.zh-CN.md](README.zh-CN.md). For the active visual-redesign roadmap,
+see [REDESIGN.md](REDESIGN.md). For pre-redesign history, use `git log`.
 
 ---
 
@@ -211,7 +211,7 @@ filesystem; the watcher emits `fs-change-{projectId}` with the delta;
 
 One exception: `rename_file` currently triggers an explicit rescan via
 `openProject(projectPath)`. Tech debt — should migrate to watcher-driven
-refresh. Tracked in DEVLOG.
+refresh.
 
 **i18n.** Every user-facing string in components goes through `t("key")`.
 Keep keys grouped by feature area (`deleteConfirm.title`, `moveCopy.moving`,
@@ -322,37 +322,34 @@ Windows and at least one POSIX target.
   (EXDEV). We don't currently fall back to copy+remove. Rare in practice.
 - **Linux inotify limits.** `/proc/sys/fs/inotify/max_user_watches` caps the
   watcher's capacity. Large projects can exhaust it; `notify` returns an
-  error we only log to stderr. Tracked in DEVLOG long-term ideas.
+  error we only log to stderr.
 - **macOS code signing.** Distribution requires Developer ID signature +
   notarization. Not set up yet.
 - **Keyboard shortcuts display.** `useKeyboardShortcuts` handles both
   `ctrlKey` and `metaKey` for detection, but the `SHORTCUTS` display table
-  hardcodes `"Ctrl"`. macOS users see incorrect labels. Low priority,
-  tracked in DEVLOG.
+  hardcodes `"Ctrl"`. macOS users see incorrect labels. Low priority.
 
 ---
 
 ## 8. Contribution Workflow
 
-1. **Read `DEVLOG.md`** before starting. It has the active roadmap, current
-   tech debt, and a "long-term ideas" list of work worth doing.
-2. **Pick a task** from the DEVLOG status table or the long-term ideas. For
-   larger work, open an issue first to discuss scope.
+1. **Read `REDESIGN.md`** before starting. It tracks the active visual-
+   redesign phases and the locked design decisions; the phase table tells
+   you what's in flight and what's on deck.
+2. **Pick a task** from the phase table, an open issue, or the README's
+   "Backlog" section. For larger work, open an issue first to discuss scope.
 3. **Follow the existing style.** Rust: `rustfmt` defaults. TS: match nearby
    files. Prefer editing existing files to creating new abstractions.
 4. **Commit in focused chunks.** One-line subject, blank line, a short body
    explaining **why** (the what is in the diff). Group related changes;
    don't bundle unrelated work.
-5. **Update `DEVLOG.md`** when you finish a roadmap item or add technical
-   debt:
+5. **Update `REDESIGN.md`** when you finish or reprioritize a phase:
    - Update the phase-status table.
-   - Add a dated entry at the top of the "过程日志 / process log" section
-     with *改动 (what changed)*, *为什么 (why)*, and *影响面 (blast radius /
-     caveats)*.
+   - Add a dated note under the relevant phase section recording *改动
+     (what changed)*, *为什么 (why)*, and *影响面 (blast radius / caveats)*.
 6. **Verify locally** before pushing: `cargo test --lib`, `pnpm build`, and a
    quick `pnpm tauri dev` sanity check.
-7. **Open the PR** with a summary linking to the DEVLOG entry you added, if
-   any.
+7. **Open the PR** with a summary that mirrors the commit body.
 
 ---
 
@@ -387,7 +384,7 @@ tidycraft/
 │       ├── undo.rs                   # Undo manager
 │       ├── git/mod.rs                # libgit2 wrapper
 │       └── thumbnail.rs              # Image thumbnail generation
-├── DEVLOG.md                         # Internal development log
+├── REDESIGN.md                       # Visual redesign phase tracker
 ├── CONTRIBUTING.md                   # This file
 ├── README.md / README.zh-CN.md       # User-facing docs
 └── tidycraft.toml                    # Optional user config (see README)
