@@ -1086,3 +1086,121 @@
   color: var(--text-3);
   padding: 32px;
 }
+
+/* =========================
+   DirectoryTree
+   ========================= */
+
+.tc-tree {
+  padding: 4px 8px 12px;
+  height: 100%;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.tc-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px 5px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--text-2);
+  position: relative;
+  user-select: none;
+}
+.tc-tree-row:hover {
+  background: var(--panel-hover);
+  color: var(--text);
+}
+.tc-tree-row[data-active="true"] {
+  background: var(--primary-tint);
+  color: var(--primary);
+}
+.tc-tree-row[data-active="true"] .tc-tree-count {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.tc-tree-chev {
+  width: 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+  color: var(--text-4);
+  flex-shrink: 0;
+  transition: transform 0.15s;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 0;
+}
+.tc-tree-chev[data-open="true"] {
+  transform: rotate(90deg);
+}
+.tc-tree-chev[data-leaf="true"] {
+  visibility: hidden;
+}
+
+.tc-tree-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+}
+
+.tc-tree-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.tc-tree-count {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  color: var(--text-3);
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: transparent;
+  flex-shrink: 0;
+}
+
+.tc-tree-empty {
+  padding: 16px 12px;
+  font-size: 12px;
+  color: var(--text-3);
+  font-style: italic;
+}
+
+/* =========================
+   Tag chip (used by TagFilterPanel rows + AssetPreview tags)
+   ========================= */
+
+.tc-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px 2px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--panel-2);
+  color: var(--text-2);
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+.tc-tag-chip[data-active="true"] {
+  background: var(--primary-tint);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.tc-tag-chip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
