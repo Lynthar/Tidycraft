@@ -1,7 +1,6 @@
 import { useState } from "react";
-import { ChevronRight, ChevronDown, Folder, FolderOpen } from "lucide-react";
+import { ChevronRight, Folder, FolderOpen } from "lucide-react";
 import { useProjectStore } from "../stores/projectStore";
-import { cn } from "../lib/utils";
 import type { DirectoryNode } from "../types/asset";
 
 interface TreeNodeProps {
@@ -28,42 +27,32 @@ function TreeNode({ node, level }: TreeNodeProps) {
   return (
     <div>
       <div
-        className={cn(
-          "flex items-center gap-1 py-1 px-2 cursor-pointer rounded text-sm",
-          "hover:bg-background transition-colors",
-          isSelected && "bg-primary/20 text-primary"
-        )}
-        style={{ paddingLeft: `${level * 12 + 4}px` }}
+        className="tc-tree-row"
+        data-active={isSelected ? "true" : undefined}
+        style={{ paddingLeft: `${level * 14 + 4}px` }}
         onClick={handleClick}
       >
-        {hasChildren ? (
-          <button
-            onClick={handleToggle}
-            className="p-0.5 hover:bg-card-bg rounded"
-          >
-            {isExpanded ? (
-              <ChevronDown size={14} />
-            ) : (
-              <ChevronRight size={14} />
-            )}
-          </button>
-        ) : (
-          <span className="w-5" />
-        )}
-
-        {isExpanded ? (
-          <FolderOpen size={16} className="text-warning shrink-0" />
-        ) : (
-          <Folder size={16} className="text-warning shrink-0" />
-        )}
-
-        <span className="truncate flex-1">{node.name}</span>
-
-        <span className="text-xs text-text-secondary shrink-0">
-          {node.file_count}
+        <button
+          className="tc-tree-chev"
+          data-open={hasChildren && isExpanded ? "true" : undefined}
+          data-leaf={!hasChildren ? "true" : undefined}
+          onClick={handleToggle}
+          tabIndex={hasChildren ? 0 : -1}
+          aria-label={hasChildren ? (isExpanded ? "Collapse" : "Expand") : undefined}
+        >
+          <ChevronRight size={11} />
+        </button>
+        <span
+          className="tc-tree-icon"
+          style={{ color: level === 0 ? "var(--primary)" : "var(--text-3)" }}
+        >
+          {isExpanded && hasChildren ? <FolderOpen size={13} /> : <Folder size={13} />}
         </span>
+        <span className="tc-tree-name" title={node.name}>
+          {node.name}
+        </span>
+        <span className="tc-tree-count">{node.file_count}</span>
       </div>
-
       {isExpanded && hasChildren && (
         <div>
           {node.children.map((child) => (
@@ -79,23 +68,15 @@ export function DirectoryTree() {
   const { scanResult, isScanning } = useProjectStore();
 
   if (isScanning) {
-    return (
-      <div className="p-4 text-text-secondary text-sm">
-        Scanning...
-      </div>
-    );
+    return <div className="tc-tree-empty">Scanning...</div>;
   }
 
   if (!scanResult) {
-    return (
-      <div className="p-4 text-text-secondary text-sm">
-        Open a folder to start
-      </div>
-    );
+    return <div className="tc-tree-empty">Open a folder to start</div>;
   }
 
   return (
-    <div className="py-2 overflow-auto h-full">
+    <div className="tc-tree">
       <TreeNode node={scanResult.directory_tree} level={0} />
     </div>
   );
