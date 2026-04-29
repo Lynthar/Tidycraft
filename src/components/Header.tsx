@@ -1,6 +1,5 @@
 import { RefObject, useState, useRef, useEffect } from "react";
 import {
-  FolderOpen,
   RefreshCw,
   Search,
   X,
@@ -12,7 +11,6 @@ import {
   Undo2,
   Settings,
 } from "lucide-react";
-import { open } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
 import { useThemeStore } from "../stores/themeStore";
@@ -21,6 +19,7 @@ import { formatShortcut, SHORTCUTS } from "../hooks/useKeyboardShortcuts";
 import { AdvancedFiltersPanel } from "./AdvancedFilters";
 import { SearchHistory } from "./SearchHistory";
 import { SettingsModal } from "./SettingsModal";
+import { ProjectSwitcher } from "./ProjectSwitcher";
 import { useSearchHistoryStore } from "../stores/searchHistoryStore";
 
 interface HeaderProps {
@@ -54,17 +53,6 @@ export function Header({ searchInputRef }: HeaderProps) {
   const [showLangDropdown, setShowLangDropdown] = useState(false);
   const [showSearchHistory, setShowSearchHistory] = useState(false);
   const langDropdownRef = useRef<HTMLDivElement>(null);
-
-  const handleOpenFolder = async () => {
-    const selected = await open({
-      directory: true,
-      multiple: false,
-      title: t("header.selectProjectFolder"),
-    });
-    if (selected && typeof selected === "string") {
-      openProject(selected);
-    }
-  };
 
   const handleRescan = () => {
     if (projectPath) {
@@ -102,12 +90,6 @@ export function Header({ searchInputRef }: HeaderProps) {
     }
   };
 
-  const projectName = projectPath
-    ? projectPath.split("/").pop() || projectPath.split("\\").pop() || "Project"
-    : null;
-
-  const projectType = scanResult?.project_type;
-
   return (
     <header className="tc-header">
       {/* Brand */}
@@ -116,10 +98,9 @@ export function Header({ searchInputRef }: HeaderProps) {
         <span className="tc-brand-name">{t("app.name")}</span>
       </div>
 
-      {/* Project bar (Phase 1: static project display; Phase 2 will replace
-          this with the project switcher dropdown) */}
-      {projectPath && (
-        <div className="tc-proj-bar">
+      {/* Project bar — undo + project switcher dropdown + git branch sidecar */}
+      <div className="tc-proj-bar">
+        {projectPath && (
           <button
             onClick={handleUndo}
             disabled={!canUndo}
@@ -128,57 +109,48 @@ export function Header({ searchInputRef }: HeaderProps) {
           >
             <Undo2 size={14} />
           </button>
-          <div className="tc-proj-switch" title={projectPath}>
-            <span className="tc-proj-dot" />
-            <span className="tc-proj-name">{projectName}</span>
-            {projectType && projectType !== "generic" && (
-              <span className="tc-proj-type" data-engine={projectType}>
-                {projectType.toUpperCase()}
-              </span>
-            )}
-            {showBranchInfo && gitInfo?.is_repo && gitInfo.branch && (
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 4,
-                  color: "var(--text-3)",
-                  fontSize: 11,
-                  marginLeft: 4,
-                  paddingLeft: 8,
-                  borderLeft: "1px solid var(--line-soft)",
-                }}
-              >
-                <GitBranch size={12} />
-                <span>{gitInfo.branch}</span>
-                {showAheadBehind && (gitInfo.ahead > 0 || gitInfo.behind > 0) && (
-                  <span style={{ fontSize: 10 }}>
-                    {gitInfo.ahead > 0 && (
-                      <span style={{ color: "var(--ok)" }}>↑{gitInfo.ahead}</span>
-                    )}
-                    {gitInfo.behind > 0 && (
-                      <span style={{ color: "var(--warn)", marginLeft: 4 }}>
-                        ↓{gitInfo.behind}
-                      </span>
-                    )}
+        )}
+        <ProjectSwitcher />
+        {projectPath && showBranchInfo && gitInfo?.is_repo && gitInfo.branch && (
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              color: "var(--text-3)",
+              fontSize: 11,
+              paddingLeft: 8,
+              borderLeft: "1px solid var(--line-soft)",
+            }}
+          >
+            <GitBranch size={12} />
+            <span>{gitInfo.branch}</span>
+            {showAheadBehind && (gitInfo.ahead > 0 || gitInfo.behind > 0) && (
+              <span style={{ fontSize: 10 }}>
+                {gitInfo.ahead > 0 && (
+                  <span style={{ color: "var(--ok)" }}>↑{gitInfo.ahead}</span>
+                )}
+                {gitInfo.behind > 0 && (
+                  <span style={{ color: "var(--warn)", marginLeft: 4 }}>
+                    ↓{gitInfo.behind}
                   </span>
                 )}
-                {gitInfo.has_changes && (
-                  <span
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: "50%",
-                      background: "var(--warn)",
-                    }}
-                    title={t("git.hasChanges")}
-                  />
-                )}
               </span>
             )}
-          </div>
-        </div>
-      )}
+            {gitInfo.has_changes && (
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  background: "var(--warn)",
+                }}
+                title={t("git.hasChanges")}
+              />
+            )}
+          </span>
+        )}
+      </div>
 
       {/* Search (only when there's a scan result to search through) */}
       {scanResult && (
@@ -322,20 +294,6 @@ export function Header({ searchInputRef }: HeaderProps) {
             <RefreshCw size={14} className={isScanning ? "animate-spin" : ""} />
           </button>
         )}
-
-        <span className="tc-divider-v" />
-
-        {/* Phase 2 will fold this into the project switcher dropdown.
-            Keeping it here so users can still open new projects until then. */}
-        <button
-          onClick={handleOpenFolder}
-          disabled={isScanning}
-          className="tc-cta"
-          title={formatShortcut(SHORTCUTS.openFolder)}
-        >
-          <FolderOpen size={14} />
-          <span>{t("header.openFolder")}</span>
-        </button>
       </div>
 
       <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />

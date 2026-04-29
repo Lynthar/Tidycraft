@@ -2,13 +2,13 @@ import { useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { Header } from "./components/Header";
-import { ProjectList } from "./components/ProjectList";
 import { Sidebar } from "./components/Sidebar";
 import { AssetList } from "./components/AssetList";
 import { AssetPreview } from "./components/AssetPreview";
 import { IssueList } from "./components/IssueList";
 import { StatsDashboard } from "./components/StatsDashboard";
 import { StatusBar } from "./components/StatusBar";
+import { EmptyState } from "./components/EmptyState";
 import { useProjectStore } from "./stores/projectStore";
 import { restoreSession } from "./stores/sessionStore";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
@@ -27,6 +27,7 @@ function App() {
   } = useProjectStore();
 
   const projects = getProjectList();
+  const isEmpty = projects.length === 0;
 
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -95,6 +96,9 @@ function App() {
   };
 
   const renderMainContent = () => {
+    if (isEmpty) {
+      return <EmptyState />;
+    }
     switch (viewMode) {
       case "assets":
         return <AssetList />;
@@ -133,26 +137,10 @@ function App() {
           className="flex-1 h-full"
           style={{ height: "100%" }}
         >
-          {/* Project List - only show when there are projects */}
-          {projects.length > 0 && (
-            <>
-              <Panel
-                id="projects"
-                defaultSize="12%"
-                minSize="8%"
-                maxSize="25%"
-                className="overflow-hidden"
-              >
-                <ProjectList />
-              </Panel>
-              <Separator className="w-1 bg-border hover:bg-primary/50 active:bg-primary transition-colors cursor-col-resize" />
-            </>
-          )}
-
           <Panel
             id="sidebar"
-            defaultSize="20%"
-            minSize="12%"
+            defaultSize="22%"
+            minSize="14%"
             maxSize="40%"
             className="overflow-hidden"
           >
@@ -162,7 +150,7 @@ function App() {
 
           <Panel
             id="main"
-            defaultSize={showPreview ? "50%" : "68%"}
+            defaultSize={showPreview ? "60%" : "78%"}
             minSize="30%"
             className="overflow-hidden"
           >
