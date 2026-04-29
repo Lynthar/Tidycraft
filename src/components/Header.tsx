@@ -1,5 +1,17 @@
 import { RefObject, useState, useRef, useEffect } from "react";
-import { FolderOpen, RefreshCw, Search, X, Globe, Sun, Moon, GitBranch, ChevronDown, Check, Undo2, Settings } from "lucide-react";
+import {
+  FolderOpen,
+  RefreshCw,
+  Search,
+  X,
+  Globe,
+  Sun,
+  Moon,
+  GitBranch,
+  Check,
+  Undo2,
+  Settings,
+} from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
@@ -14,6 +26,11 @@ import { useSearchHistoryStore } from "../stores/searchHistoryStore";
 interface HeaderProps {
   searchInputRef?: RefObject<HTMLInputElement>;
 }
+
+const LANGUAGES = [
+  { code: "en", label: "English" },
+  { code: "zh", label: "中文" },
+];
 
 export function Header({ searchInputRef }: HeaderProps) {
   const { t, i18n } = useTranslation();
@@ -31,7 +48,12 @@ export function Header({ searchInputRef }: HeaderProps) {
   } = useProjectStore();
   const { theme, toggleTheme } = useThemeStore();
   const { showBranchInfo, showAheadBehind } = useSettingsStore();
+  const { addToHistory } = useSearchHistoryStore();
+
   const [showSettings, setShowSettings] = useState(false);
+  const [showLangDropdown, setShowLangDropdown] = useState(false);
+  const [showSearchHistory, setShowSearchHistory] = useState(false);
+  const langDropdownRef = useRef<HTMLDivElement>(null);
 
   const handleOpenFolder = async () => {
     const selected = await open({
@@ -39,7 +61,6 @@ export function Header({ searchInputRef }: HeaderProps) {
       multiple: false,
       title: t("header.selectProjectFolder"),
     });
-
     if (selected && typeof selected === "string") {
       openProject(selected);
     }
@@ -47,24 +68,10 @@ export function Header({ searchInputRef }: HeaderProps) {
 
   const handleRescan = () => {
     if (projectPath) {
-      // `force: true` bypasses the "already open, just switch to it" guard
-      // in openProject so the scan actually runs again.
+      // `force: true` bypasses the "already open, just switch" guard.
       openProject(projectPath, { force: true });
     }
   };
-
-  // Language dropdown state
-  const [showLangDropdown, setShowLangDropdown] = useState(false);
-  const langDropdownRef = useRef<HTMLDivElement>(null);
-
-  // Search history state
-  const [showSearchHistory, setShowSearchHistory] = useState(false);
-  const { addToHistory } = useSearchHistoryStore();
-
-  const LANGUAGES = [
-    { code: "en", label: "English" },
-    { code: "zh", label: "中文" },
-  ];
 
   const changeLanguage = (langCode: string) => {
     i18n.changeLanguage(langCode);
@@ -82,7 +89,6 @@ export function Header({ searchInputRef }: HeaderProps) {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Refresh undo state when project changes
   useEffect(() => {
     if (projectPath) {
       refreshUndoState();
@@ -91,11 +97,8 @@ export function Header({ searchInputRef }: HeaderProps) {
 
   const handleUndo = async () => {
     const result = await undoLastOperation();
-    if (result && result.success) {
-      // Trigger rescan after undo
-      if (projectPath) {
-        openProject(projectPath);
-      }
+    if (result && result.success && projectPath) {
+      openProject(projectPath);
     }
   };
 
@@ -103,57 +106,99 @@ export function Header({ searchInputRef }: HeaderProps) {
     ? projectPath.split("/").pop() || projectPath.split("\\").pop() || "Project"
     : null;
 
+  const projectType = scanResult?.project_type;
+
   return (
-    <header className="h-12 bg-card-bg border-b border-border flex items-center justify-between px-4 gap-4">
-      <div className="flex items-center gap-3 shrink-0">
-        <span className="text-lg font-semibold text-primary">{t("app.name")}</span>
-        {projectPath && (
+    <header className="tc-header">
+      {/* Brand */}
+      <div className="tc-brand">
+        <div className="tc-brand-mark" />
+        <span className="tc-brand-name">{t("app.name")}</span>
+      </div>
+
+      {/* Project bar (Phase 1: static project display; Phase 2 will replace
+          this with the project switcher dropdown) */}
+      {projectPath && (
+        <div className="tc-proj-bar">
           <button
             onClick={handleUndo}
             disabled={!canUndo}
-            className="p-1.5 rounded hover:bg-background text-text-secondary hover:text-text-primary transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            className="tc-icon-btn"
             title={t("common.undo", "Undo")}
           >
-            <Undo2 size={16} />
+            <Undo2 size={14} />
           </button>
-        )}
-        {projectName && (
-          <>
-            <span className="text-text-secondary">|</span>
-            <span className="text-text-primary">{projectName}</span>
-          </>
-        )}
-        {/* Git Branch Info */}
-        {showBranchInfo && gitInfo?.is_repo && gitInfo.branch && (
-          <div className="flex items-center gap-1.5 text-sm text-text-secondary">
-            <GitBranch size={14} />
-            <span>{gitInfo.branch}</span>
-            {showAheadBehind && (gitInfo.ahead > 0 || gitInfo.behind > 0) && (
-              <span className="text-xs">
-                {gitInfo.ahead > 0 && <span className="text-green-400">↑{gitInfo.ahead}</span>}
-                {gitInfo.behind > 0 && <span className="text-orange-400 ml-1">↓{gitInfo.behind}</span>}
+          <div className="tc-proj-switch" title={projectPath}>
+            <span className="tc-proj-dot" />
+            <span className="tc-proj-name">{projectName}</span>
+            {projectType && projectType !== "generic" && (
+              <span className="tc-proj-type" data-engine={projectType}>
+                {projectType.toUpperCase()}
               </span>
             )}
-            {gitInfo.has_changes && (
-              <span className="w-2 h-2 rounded-full bg-yellow-400" title={t("git.hasChanges")} />
+            {showBranchInfo && gitInfo?.is_repo && gitInfo.branch && (
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  color: "var(--text-3)",
+                  fontSize: 11,
+                  marginLeft: 4,
+                  paddingLeft: 8,
+                  borderLeft: "1px solid var(--line-soft)",
+                }}
+              >
+                <GitBranch size={12} />
+                <span>{gitInfo.branch}</span>
+                {showAheadBehind && (gitInfo.ahead > 0 || gitInfo.behind > 0) && (
+                  <span style={{ fontSize: 10 }}>
+                    {gitInfo.ahead > 0 && (
+                      <span style={{ color: "var(--ok)" }}>↑{gitInfo.ahead}</span>
+                    )}
+                    {gitInfo.behind > 0 && (
+                      <span style={{ color: "var(--warn)", marginLeft: 4 }}>
+                        ↓{gitInfo.behind}
+                      </span>
+                    )}
+                  </span>
+                )}
+                {gitInfo.has_changes && (
+                  <span
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: "50%",
+                      background: "var(--warn)",
+                    }}
+                    title={t("git.hasChanges")}
+                  />
+                )}
+              </span>
             )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* Search and Filter */}
+      {/* Search (only when there's a scan result to search through) */}
       {scanResult && (
-        <div className="flex items-center gap-3 flex-1 max-w-xl">
-          {/* Search Input */}
-          <div className="relative flex-1">
-            <Search
-              size={14}
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-secondary"
-            />
+        <div
+          style={{
+            position: "relative",
+            flex: 1,
+            maxWidth: 520,
+            marginLeft: "auto",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <label className="tc-search">
+            <Search size={13} />
             <input
               ref={searchInputRef}
               type="text"
-              placeholder={`${t("header.searchPlaceholder")} (${formatShortcut(SHORTCUTS.search)})`}
+              placeholder={t("header.searchPlaceholder")}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onFocus={() => setShowSearchHistory(true)}
@@ -167,76 +212,100 @@ export function Header({ searchInputRef }: HeaderProps) {
                   setShowSearchHistory(false);
                 }
               }}
-              className="w-full h-8 pl-8 pr-8 text-sm bg-background border border-border rounded
-                         text-text-primary placeholder:text-text-secondary
-                         focus:outline-none focus:border-primary transition-colors"
             />
-            {searchQuery && (
+            {searchQuery ? (
               <button
                 onClick={() => setSearchQuery("")}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-text-secondary hover:text-text-primary transition-colors"
+                className="tc-icon-btn"
+                style={{ width: 20, height: 20 }}
+                title={t("header.clearSearch", "Clear")}
               >
-                <X size={14} />
+                <X size={12} />
               </button>
+            ) : (
+              <span className="tc-kbd">{formatShortcut(SHORTCUTS.search)}</span>
             )}
-            {/* Search History Dropdown */}
-            <SearchHistory
-              isVisible={showSearchHistory}
-              searchQuery={searchQuery}
-              onSelect={(query) => {
-                setSearchQuery(query);
-                addToHistory(query);
-                setShowSearchHistory(false);
-              }}
-              onClose={() => setShowSearchHistory(false)}
-            />
-          </div>
-
-          {/* Advanced Filters - Separate from search input */}
+          </label>
+          <SearchHistory
+            isVisible={showSearchHistory}
+            searchQuery={searchQuery}
+            onSelect={(query) => {
+              setSearchQuery(query);
+              addToHistory(query);
+              setShowSearchHistory(false);
+            }}
+            onClose={() => setShowSearchHistory(false)}
+          />
           <AdvancedFiltersPanel />
         </div>
       )}
 
-      <div className="flex items-center gap-2 shrink-0">
-        {/* Settings */}
+      {/* Header actions */}
+      <div className="tc-header-actions">
         <button
           onClick={() => setShowSettings(true)}
-          className="p-2 rounded hover:bg-background text-text-secondary hover:text-text-primary transition-colors"
+          className="tc-icon-btn"
           title={t("settings.title")}
         >
-          <Settings size={18} />
+          <Settings size={14} />
         </button>
 
-        {/* Theme Toggle */}
         <button
           onClick={toggleTheme}
-          className="p-2 rounded hover:bg-background text-text-secondary hover:text-text-primary transition-colors"
+          className="tc-icon-btn"
           title={theme === "dark" ? t("theme.switchToLight") : t("theme.switchToDark")}
         >
-          {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+          {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
         </button>
 
-        {/* Language Dropdown */}
-        <div className="relative" ref={langDropdownRef}>
+        <div style={{ position: "relative" }} ref={langDropdownRef}>
           <button
             onClick={() => setShowLangDropdown(!showLangDropdown)}
-            className="flex items-center gap-1 px-2 py-1.5 rounded hover:bg-background text-text-secondary hover:text-text-primary transition-colors"
+            className="tc-icon-btn"
+            data-active={showLangDropdown ? "true" : undefined}
             title={t("settings.language")}
           >
-            <Globe size={16} />
-            <span className="text-sm">{LANGUAGES.find(l => l.code === i18n.language)?.label || "Language"}</span>
-            <ChevronDown size={12} />
+            <Globe size={14} />
           </button>
           {showLangDropdown && (
-            <div className="absolute right-0 top-full mt-1 bg-card-bg border border-border rounded-lg shadow-lg z-50 py-1 min-w-[140px]">
+            <div
+              style={{
+                position: "absolute",
+                right: 0,
+                top: "calc(100% + 4px)",
+                zIndex: 50,
+                minWidth: 140,
+                padding: "4px 0",
+                background: "var(--panel)",
+                border: "1px solid var(--line)",
+                borderRadius: 8,
+                boxShadow: "var(--shadow-pop)",
+              }}
+            >
               {LANGUAGES.map((lang) => (
                 <button
                   key={lang.code}
                   onClick={() => changeLanguage(lang.code)}
-                  className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-left hover:bg-background transition-colors"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    width: "100%",
+                    padding: "6px 12px",
+                    fontSize: 12.5,
+                    textAlign: "left",
+                    color: "var(--text)",
+                    background: "transparent",
+                    border: 0,
+                    cursor: "pointer",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "var(--panel-hover)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                 >
-                  <span className="flex-1">{lang.label}</span>
-                  {i18n.language === lang.code && <Check size={14} className="text-primary" />}
+                  <span style={{ flex: 1 }}>{lang.label}</span>
+                  {i18n.language === lang.code && (
+                    <Check size={14} style={{ color: "var(--primary)" }} />
+                  )}
                 </button>
               ))}
             </div>
@@ -247,24 +316,28 @@ export function Header({ searchInputRef }: HeaderProps) {
           <button
             onClick={handleRescan}
             disabled={isScanning}
-            className="p-2 rounded hover:bg-background text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50"
+            className="tc-icon-btn"
             title={`${t("header.rescan")} (${formatShortcut(SHORTCUTS.rescan)})`}
           >
-            <RefreshCw size={18} className={isScanning ? "animate-spin" : ""} />
+            <RefreshCw size={14} className={isScanning ? "animate-spin" : ""} />
           </button>
         )}
+
+        <span className="tc-divider-v" />
+
+        {/* Phase 2 will fold this into the project switcher dropdown.
+            Keeping it here so users can still open new projects until then. */}
         <button
           onClick={handleOpenFolder}
           disabled={isScanning}
-          className="flex items-center gap-2 px-3 py-1.5 bg-primary text-white rounded hover:bg-primary/90 transition-colors disabled:opacity-50"
+          className="tc-cta"
           title={formatShortcut(SHORTCUTS.openFolder)}
         >
-          <FolderOpen size={16} />
+          <FolderOpen size={14} />
           <span>{t("header.openFolder")}</span>
         </button>
       </div>
 
-      {/* Settings Modal */}
       <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
     </header>
   );

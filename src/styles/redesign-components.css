@@ -155,3 +155,413 @@
   place-items: center;
   color: var(--err);
 }
+
+/* =========================
+   Header
+   ========================= */
+
+.tc-header {
+  height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 4;
+}
+
+.tc-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding-right: 12px;
+  border-right: 1px solid var(--line-soft);
+  height: 32px;
+}
+
+.tc-brand-mark {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: conic-gradient(
+    from 200deg at 50% 50%,
+    var(--primary) 0deg,
+    oklch(70% 0.14 200) 120deg,
+    var(--primary-strong) 240deg,
+    var(--primary) 360deg
+  );
+  position: relative;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 0 0 1px var(--primary) inset, 0 4px 12px -4px var(--primary);
+  flex: none;
+}
+.tc-brand-mark::after {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: 4px;
+  background: var(--panel);
+}
+.tc-brand-mark::before {
+  content: "";
+  position: absolute;
+  inset: 7px;
+  border-radius: 2px;
+  background: var(--primary);
+  z-index: 1;
+  transform: rotate(45deg);
+}
+
+.tc-brand-name {
+  font-weight: 600;
+  font-size: 14.5px;
+  letter-spacing: -0.015em;
+  color: var(--text);
+}
+
+.tc-proj-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Phase 1: static display (cursor:default). Phase 2 turns this into the
+   project-switcher dropdown trigger — at that point change cursor to
+   pointer and re-enable :hover styles. */
+.tc-proj-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 8px 0 10px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: default;
+  max-width: 360px;
+}
+
+.tc-proj-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+  flex: none;
+}
+
+.tc-proj-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: -0.005em;
+}
+
+.tc-proj-type {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 18px;
+  padding: 0 6px 0 5px;
+  border-radius: 4px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  background: var(--primary-tint);
+  color: var(--primary);
+  border: 1px solid color-mix(in oklch, var(--primary) 25%, var(--line));
+}
+.tc-proj-type[data-engine="unity"] {
+  background: color-mix(in oklch, var(--c-other) 12%, transparent);
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+.tc-proj-type[data-engine="unreal"] {
+  background: color-mix(in oklch, var(--c-prefab) 12%, transparent);
+  color: color-mix(in oklch, var(--c-prefab) 70%, var(--text));
+  border-color: color-mix(in oklch, var(--c-prefab) 30%, var(--line));
+}
+.tc-proj-type[data-engine="godot"] {
+  background: color-mix(in oklch, var(--c-animation) 12%, transparent);
+  color: color-mix(in oklch, var(--c-animation) 70%, var(--text));
+  border-color: color-mix(in oklch, var(--c-animation) 30%, var(--line));
+}
+
+.tc-search {
+  flex: 1;
+  max-width: 520px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px 0 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text-2);
+  font-size: 13px;
+  transition: border-color 0.15s, background 0.15s;
+}
+.tc-search:hover { border-color: var(--line-strong); }
+.tc-search:focus-within {
+  border-color: var(--primary);
+  background: var(--panel);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+.tc-search input {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  outline: 0;
+  color: var(--text);
+  font: inherit;
+  min-width: 0;
+}
+.tc-search input::placeholder { color: var(--text-3); }
+
+.tc-kbd {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 5px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  color: var(--text-3);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  height: 18px;
+  line-height: 1;
+  flex: none;
+}
+
+.tc-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tc-icon-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.tc-icon-btn:hover:not(:disabled) {
+  background: var(--panel-hover);
+  color: var(--text);
+}
+.tc-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.tc-icon-btn[data-active="true"] {
+  color: var(--primary);
+  background: var(--primary-tint);
+}
+
+.tc-divider-v {
+  width: 1px;
+  height: 18px;
+  background: var(--line);
+  margin: 0 4px;
+  flex: none;
+}
+
+.tc-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 12px 0 11px;
+  border-radius: 8px;
+  background: var(--primary);
+  color: var(--on-primary);
+  font-weight: 600;
+  font-size: 12.5px;
+  border: 0;
+  cursor: pointer;
+  letter-spacing: -0.005em;
+  box-shadow:
+    0 1px 0 oklch(0% 0 0 / 0.04) inset,
+    0 0 0 1px var(--primary-strong) inset,
+    0 6px 18px -8px var(--primary);
+  transition: transform 0.06s ease, filter 0.12s;
+}
+.tc-cta:hover:not(:disabled) { filter: brightness(1.05); }
+.tc-cta:active:not(:disabled) { transform: translateY(1px); }
+.tc-cta:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: none;
+}
+
+/* =========================
+   Sidebar (frame: tabs + run button + section heads;
+   tree row & tag chip styling not migrated yet — DirectoryTree
+   and TagFilterPanel keep their existing styling for now)
+   ========================= */
+
+.tc-sidebar {
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  height: 100%;
+}
+
+.tc-tabs {
+  display: flex;
+  padding: 10px 8px 0;
+  gap: 2px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.tc-tab {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 7px 6px 9px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  position: relative;
+  border-radius: 6px 6px 0 0;
+  transition: color 0.12s;
+  white-space: nowrap;
+}
+.tc-tab:hover { color: var(--text-2); }
+.tc-tab[data-active="true"] { color: var(--text); }
+.tc-tab[data-active="true"]::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: -1px;
+  height: 2px;
+  background: var(--primary);
+  border-radius: 2px 2px 0 0;
+}
+
+.tc-tab-count {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--panel-2);
+  color: var(--text-3);
+}
+.tc-tab[data-active="true"] .tc-tab-count {
+  background: var(--primary-tint);
+  color: var(--primary);
+}
+.tc-tab-count[data-tone="err"] {
+  background: color-mix(in oklch, var(--err) 14%, transparent);
+  color: var(--err);
+}
+.tc-tab-count[data-tone="warn"] {
+  background: color-mix(in oklch, var(--warn) 14%, transparent);
+  color: color-mix(in oklch, var(--warn) 75%, var(--text));
+}
+
+.tc-run-block {
+  padding: 12px 12px 10px;
+  border-bottom: 1px solid var(--line-soft);
+  flex-shrink: 0;
+}
+
+.tc-run-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 12px;
+  height: 36px;
+  border-radius: 8px;
+  background: linear-gradient(180deg, var(--primary-strong) 0%, var(--primary) 100%);
+  color: var(--on-primary);
+  border: 0;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 12.5px;
+  box-shadow:
+    0 0 0 1px var(--primary-strong) inset,
+    0 8px 22px -10px var(--primary);
+  transition: transform 0.06s, filter 0.12s;
+}
+.tc-run-btn:hover:not(:disabled) { filter: brightness(1.05); }
+.tc-run-btn:active:not(:disabled) { transform: translateY(1px); }
+.tc-run-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  filter: none;
+}
+
+.tc-section {
+  padding: 12px 12px 4px;
+  flex-shrink: 0;
+}
+.tc-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  padding: 0 4px;
+  height: 18px;
+}
+.tc-section-title {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tc-section-add {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  display: grid;
+  place-items: center;
+  color: var(--text-3);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.tc-section-add:hover {
+  background: var(--panel-hover);
+  color: var(--text);
+}
+.tc-section-add[data-active="true"] {
+  background: var(--primary-tint);
+  color: var(--primary);
+}
