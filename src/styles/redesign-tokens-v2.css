@@ -1,0 +1,236 @@
+/* ============================================================
+   Tidycraft Redesign — Design tokens v2 (proposal)
+
+   与 v1 (redesign-tokens.css) 并列存在的提案版。两者**二选一**
+   import，不要同时启用。
+
+   切换方法：编辑 src/main.tsx，把
+       import "./styles/redesign-tokens.css";
+   换成
+       import "./styles/redesign-tokens-v2.css";
+   想退回 v1 改回去即可。
+
+   ----- 与 v1 的核心差异 -----
+
+   1. 背景更深：oklch(20%) → oklch(14%)
+      工程感更强，接近 Linear / Houdini / Cursor 的甜点。
+
+   2. 背景色相微调：hue 60 → hue 50
+      仍微暖，但比 v1 的"焦黄感"更中性，长时间盯视压力更小。
+
+   3. 主色"品牌+操作"双职合一
+      v1 单一 --primary 既是品牌又是 CTA。v2 保留这个设定，
+      但把 --primary 略调暗（78% → 74%），在更深的背景上不
+      过曝。
+
+   4. 新增 --accent 三件套（青蓝 hue 200）
+      用于"次级强调 / 链接 / 非品牌 chip"。这把"主操作"和
+      "辅助强调"两层意图分开 —— v1 用同一个琥珀承担两种语义
+      会让选中态和链接颜色完全一样。
+
+      ⚠️  --accent 要在 Tailwind 中作为独立 utility，需要把
+      tailwind.config.js 里 `accent: var(--primary)` 一组改成
+      `accent: var(--accent)` / `on-accent: var(--on-accent)`。
+      切换 v2 后第一步是改这个 config，否则 bg-accent / text-
+      on-accent 仍然显示琥珀。
+
+   5. 警告色推到 hue 95（v1 是 hue 80）
+      与品牌琥珀 hue 70 的距离从 10° 扩到 25°，肉眼能稳定区分
+      "warning toast" 和 "primary button"。
+
+   6. --c-texture 推到 hue 40（v1 是 hue 50）
+      远离 primary hue 70，让 "texture chip" 不与主操作色混淆。
+      11 种资产类型其余只做小幅亮度微调。
+
+   7. --c-animation 推到 hue 175 (青)（v1 是 hue 195 偏蓝）
+      让它和 --c-data (hue 180) / --c-script (hue 240) 三者
+      在"蓝-青"区间分得开。
+
+   ----- 不变的事 -----
+
+   - 4 级文字层级（--text → --text-4）
+   - 11 种资产类型完整覆盖
+   - 4 件 git 状态色
+   - dark/light 双主题
+   - .mono / .tnum 工具类
+   ============================================================ */
+
+[data-theme="dark"] {
+  /* Surfaces — 5 层递进，主背景 14% 比 v1 显著加深 */
+  --bg:           oklch(14% 0.005 50);
+  --bg-soft:      oklch(18% 0.005 50);
+  --panel:        oklch(22% 0.006 50);
+  --panel-2:      oklch(26% 0.008 50);
+  --panel-hover:  oklch(30% 0.010 50);
+  --panel-active: oklch(34% 0.014 50);
+
+  /* Lines */
+  --line:        oklch(32% 0.008 50);
+  --line-soft:   oklch(28% 0.006 50);
+  --line-strong: oklch(42% 0.010 50);
+
+  /* Text — 4 levels */
+  --text:   oklch(96% 0.006 70);
+  --text-2: oklch(76% 0.012 65);
+  --text-3: oklch(58% 0.012 65);
+  --text-4: oklch(42% 0.010 65);
+
+  /* Primary — 琥珀，保留 Forge 身份；略调暗以适应更深背景 */
+  --primary:        oklch(74% 0.15 70);
+  --primary-strong: oklch(82% 0.16 75);
+  --primary-soft:   oklch(30% 0.06 65);
+  --primary-tint:   oklch(24% 0.04 65);
+  --on-primary:     oklch(14% 0.04 60);
+
+  /* Accent — 新增青蓝，用于次级强调 / 链接 / 非品牌 chip */
+  --accent:      oklch(72% 0.12 200);
+  --accent-soft: oklch(28% 0.05 200);
+  --on-accent:   oklch(14% 0.04 210);
+
+  /* Asset types — 11 种，hue 微调以避开 primary 与 accent */
+  --c-texture:   oklch(76% 0.16 40);    /* 暖橙（推到 hue 40 避开 primary 70） */
+  --c-model:     oklch(74% 0.15 165);   /* jade */
+  --c-audio:     oklch(73% 0.17 305);   /* violet */
+  --c-video:     oklch(72% 0.18 15);    /* rose */
+  --c-animation: oklch(76% 0.15 175);   /* 青（推到 175 与 data/script 拉开） */
+  --c-material:  oklch(78% 0.15 95);    /* ochre */
+  --c-prefab:    oklch(72% 0.16 270);   /* indigo */
+  --c-scene:     oklch(74% 0.17 330);   /* fuchsia */
+  --c-script:    oklch(74% 0.15 240);   /* azure */
+  --c-data:      oklch(72% 0.12 180);   /* teal */
+  --c-other:     oklch(66% 0.010 50);   /* 中性灰 */
+
+  /* Git status */
+  --git-new:      oklch(74% 0.16 150);
+  --git-modified: oklch(82% 0.16 80);
+  --git-deleted:  oklch(72% 0.18 25);
+  --git-renamed:  oklch(74% 0.15 240);
+
+  /* Semantic status — hue 全部与 primary (70) 错开 ≥ 25° */
+  --ok:   oklch(74% 0.15 150);  /* hue 150 */
+  --warn: oklch(82% 0.18 95);   /* hue 95 — vs primary 70，差 25° */
+  --err:  oklch(70% 0.20 25);   /* hue 25 */
+  --info: oklch(72% 0.13 220);  /* hue 220 */
+
+  /* Shadows — 加深以匹配更深的背景 */
+  --shadow-card: 0 1px 0 oklch(34% 0.008 50 / 0.5),
+                 0 20px 50px -22px oklch(0% 0 0 / 0.75);
+  --shadow-pop:  0 32px 70px -28px oklch(0% 0 0 / 0.9),
+                 0 1px 0 oklch(40% 0.010 50 / 0.6);
+
+  /* ---------- Legacy bridge (PREVIEW ONLY) ----------
+     绝大多数组件目前仍使用 globals.css 定义的 --color-* 变量
+     (bg-card-bg / text-primary / bg-primary / 等)。这一段把
+     legacy 变量重定义为 v2 对应值，让 v2 视觉立即覆盖整个 UI
+     而不必改组件代码。
+
+     ⚠️  这是预览 hack，不是终态。Phase 1 正式视觉换肤时要：
+         1. 把组件 utility 从 legacy (bg-card-bg) 迁到新 token
+            (bg-panel)
+         2. 删除本段 legacy bridge
+         3. 最终从 globals.css 移除 --color-* 定义
+     ---------------------------------------------------- */
+  --color-background: var(--bg);
+  --color-card-bg: var(--panel);
+  --color-card-bg-hover: var(--panel-hover);
+  --color-border: var(--line);
+  --color-border-subtle: var(--line-soft);
+  --color-text-primary: var(--text);
+  --color-text-secondary: var(--text-2);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-strong);
+  --color-primary-glow: oklch(74% 0.15 70 / 0.3);
+  --color-error: var(--err);
+  --color-warning: var(--warn);
+  --color-success: var(--ok);
+  --color-info: var(--info);
+}
+
+[data-theme="light"] {
+  /* Surfaces — 浅色版，hue 50 与 dark 一致保持色温感觉 */
+  --bg:           oklch(98.5% 0.004 60);
+  --bg-soft:      oklch(97% 0.006 60);
+  --panel:        oklch(100% 0 0);
+  --panel-2:      oklch(98% 0.005 60);
+  --panel-hover:  oklch(95.5% 0.012 60);
+  --panel-active: oklch(93% 0.018 60);
+
+  /* Lines */
+  --line:        oklch(91% 0.008 60);
+  --line-soft:   oklch(94% 0.006 60);
+  --line-strong: oklch(84% 0.012 60);
+
+  /* Text */
+  --text:   oklch(22% 0.014 60);
+  --text-2: oklch(44% 0.014 60);
+  --text-3: oklch(60% 0.012 60);
+  --text-4: oklch(74% 0.010 60);
+
+  /* Primary — 浅底上要降亮提饱和 */
+  --primary:        oklch(60% 0.16 60);
+  --primary-strong: oklch(52% 0.17 55);
+  --primary-soft:   oklch(94% 0.05 70);
+  --primary-tint:   oklch(96% 0.03 70);
+  --on-primary:     oklch(99% 0.005 70);
+
+  /* Accent — 浅色版青蓝 */
+  --accent:      oklch(56% 0.13 200);
+  --accent-soft: oklch(94% 0.04 200);
+  --on-accent:   oklch(99% 0.005 210);
+
+  /* Asset types */
+  --c-texture:   oklch(64% 0.17 40);
+  --c-model:     oklch(58% 0.14 165);
+  --c-audio:     oklch(58% 0.18 305);
+  --c-video:     oklch(62% 0.19 15);
+  --c-animation: oklch(60% 0.15 175);
+  --c-material:  oklch(64% 0.15 95);
+  --c-prefab:    oklch(58% 0.16 270);
+  --c-scene:     oklch(60% 0.18 330);
+  --c-script:    oklch(58% 0.15 240);
+  --c-data:      oklch(56% 0.12 180);
+  --c-other:     oklch(54% 0.012 50);
+
+  /* Git status */
+  --git-new:      oklch(58% 0.15 150);
+  --git-modified: oklch(68% 0.16 80);
+  --git-deleted:  oklch(56% 0.19 25);
+  --git-renamed:  oklch(58% 0.15 240);
+
+  /* Semantic status */
+  --ok:   oklch(58% 0.15 150);
+  --warn: oklch(68% 0.16 95);
+  --err:  oklch(56% 0.19 25);
+  --info: oklch(58% 0.13 220);
+
+  /* Shadows */
+  --shadow-card: 0 1px 0 oklch(90% 0.008 60 / 0.6),
+                 0 12px 40px -22px oklch(40% 0.08 60 / 0.18);
+  --shadow-pop:  0 24px 60px -28px oklch(40% 0.08 60 / 0.35),
+                 0 1px 0 oklch(90% 0.008 60 / 0.4);
+
+  /* Legacy bridge (PREVIEW ONLY) — 同 dark 块说明 */
+  --color-background: var(--bg);
+  --color-card-bg: var(--panel);
+  --color-card-bg-hover: var(--panel-hover);
+  --color-border: var(--line);
+  --color-border-subtle: var(--line-soft);
+  --color-text-primary: var(--text);
+  --color-text-secondary: var(--text-2);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-strong);
+  --color-primary-glow: oklch(60% 0.16 60 / 0.18);
+  --color-error: var(--err);
+  --color-warning: var(--warn);
+  --color-success: var(--ok);
+  --color-info: var(--info);
+}
+
+/* Utility classes —— 与 v1 一致，二选一 import 时各自生效 */
+.mono {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-feature-settings: "ss02", "zero";
+}
+.tnum {
+  font-variant-numeric: tabular-nums;
+}

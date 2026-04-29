@@ -1,0 +1,157 @@
+/* ============================================================
+   Tidycraft Redesign — Component-layer CSS
+
+   设计稿 (design_handoff_tidycraft_redesign/app/styles.css) 的
+   .tc-* 组件样式，按组件分段迁移过来。每段对应一个 React 组件。
+
+   原则（来自 REDESIGN.md Phase 1）：
+   - 简单原子样式（padding / flex / margin）继续用 Tailwind utility
+   - 复杂复合样式（OKLCH color-mix / 多层 shadow / 状态叠加 / 动画）
+     落在这里
+   - 颜色字面量是红线 —— 所有颜色必须 var(--xxx) 引用 token，
+     不能写 hex / oklch 字面量
+
+   迁移进度跟踪在 REDESIGN.md Phase 1 章节。
+   ============================================================ */
+
+/* =========================
+   StatusBar
+   ========================= */
+
+.tc-status {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 14px;
+  border-top: 1px solid var(--line);
+  background: var(--panel-2);
+  font-size: 11px;
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.tc-status-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tc-status-item .tc-num {
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+.tc-status-spacer {
+  flex: 1;
+}
+
+/* StatusBar — Scanning variant */
+.tc-status[data-state="scanning"] {
+  background: color-mix(in oklch, var(--primary) 8%, var(--panel-2));
+  border-top-color: color-mix(in oklch, var(--primary) 35%, var(--line));
+}
+
+/* StatusBar — Error variant */
+.tc-status[data-state="error"] {
+  background: color-mix(in oklch, var(--err) 12%, var(--panel-2));
+  border-top-color: color-mix(in oklch, var(--err) 45%, var(--line));
+  color: var(--err);
+}
+
+.tc-scan-phase {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--primary);
+  letter-spacing: 0.02em;
+}
+
+.tc-scan-phase::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--primary);
+  animation: tc-scanblink 1.2s ease-in-out infinite;
+}
+
+@keyframes tc-scanblink {
+  0%, 100% { opacity: 0.4; transform: scale(0.85); }
+  50%      { opacity: 1;   transform: scale(1);    }
+}
+
+.tc-scan-progress {
+  flex: 1;
+  height: 6px;
+  max-width: 280px;
+  border-radius: 3px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  overflow: hidden;
+  position: relative;
+}
+
+.tc-scan-progress > i {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, var(--primary), var(--primary-strong));
+  width: var(--p, 0%);
+  border-radius: 2px;
+  box-shadow: 0 0 8px color-mix(in oklch, var(--primary) 60%, transparent);
+}
+
+.tc-scan-progress > i::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, oklch(100% 0 0 / 0.3), transparent);
+  animation: tc-shimmer 1.6s linear infinite;
+}
+
+@keyframes tc-shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%);  }
+}
+
+.tc-scan-file {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10.5px;
+  color: var(--text-2);
+  max-width: 320px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+
+.tc-scan-cancel {
+  height: 22px;
+  padding: 0 10px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--text-2);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tc-scan-cancel:hover {
+  color: var(--err);
+  border-color: color-mix(in oklch, var(--err) 30%, var(--line));
+}
+
+.tc-status-err-icon {
+  width: 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+  color: var(--err);
+}
