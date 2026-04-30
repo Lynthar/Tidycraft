@@ -156,9 +156,17 @@ The frontend and backend communicate exclusively through two mechanisms:
   fields when the target equals `activeProjectId`. See `openProject` and
   `applyFsChange` for the canonical examples.
 - **`stores/tagsStore.ts`** — Follows the active project; re-subscribes and
-  reloads tags whenever `activeProjectId` changes. Other stores
-  (`settingsStore`, `themeStore`, `columnStore`, `searchHistoryStore`) are
-  global.
+  reloads tags whenever `activeProjectId` changes.
+- **`stores/sessionStore.ts`** — Cross-session restore. Persists open
+  project paths + active path; the full `ProjectData` (scanResult,
+  analysisResult, UI state) is rebuilt by re-running `openProject` at boot.
+  Internal `restored` guard prevents React strict-mode double-restore.
+- **`stores/uiStore.ts`** — Transient overlay flags (`cmdkOpen`,
+  `settingsOpen`, `tagManagerOpen`). Global store, not App-level state, so
+  `CommandPalette` can open Settings / TagManager without prop drilling.
+  Distinct from `settingsStore` (which holds persisted user preferences).
+- Other global stores: `settingsStore`, `themeStore`, `columnStore`,
+  `searchHistoryStore`.
 - **`components/`** — Flat layout, one component per file, no barrel exports.
   `AssetList` is the virtualized file list (the central UI). `ContextMenu` +
   dialogs (`RenameDialog`, `BatchRenameDialog`, `DeleteConfirmDialog`,
@@ -361,11 +369,15 @@ tidycraft/
 │   ├── components/                   # UI (flat, one per file)
 │   ├── stores/                       # Zustand state
 │   │   ├── projectStore.ts           # Multi-project hub
-│   │   └── tagsStore.ts              # Follows active project
+│   │   ├── tagsStore.ts              # Follows active project
+│   │   ├── sessionStore.ts           # Cross-session restore (paths only)
+│   │   └── uiStore.ts                # Transient modal flags (cmdkOpen, etc.)
+│   ├── styles/                       # globals.css + redesign-tokens(/-v2) + redesign-components
 │   ├── types/asset.ts                # TS mirrors of Rust structs
 │   ├── lib/                          # Shared utilities
 │   ├── hooks/                        # React hooks
 │   ├── i18n/locales/                 # en.json + zh.json
+│   ├── main.tsx                      # React entry, imports global CSS
 │   └── App.tsx
 ├── src-tauri/                        # Rust backend
 │   └── src/

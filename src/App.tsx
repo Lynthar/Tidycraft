@@ -9,7 +9,11 @@ import { IssueList } from "./components/IssueList";
 import { StatsDashboard } from "./components/StatsDashboard";
 import { StatusBar } from "./components/StatusBar";
 import { EmptyState } from "./components/EmptyState";
+import { CommandPalette } from "./components/CommandPalette";
+import { SettingsModal } from "./components/SettingsModal";
+import { TagManager } from "./components/TagManager";
 import { useProjectStore } from "./stores/projectStore";
+import { useUiStore } from "./stores/uiStore";
 import { restoreSession } from "./stores/sessionStore";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 
@@ -95,6 +99,17 @@ function App() {
     }
   };
 
+  const dispatchExport = (format: "json" | "csv" | "html") => {
+    if (format === "json") handleExportJson();
+    else if (format === "csv") handleExportCsv();
+    else handleExportHtml();
+  };
+
+  const settingsOpen = useUiStore((s) => s.settingsOpen);
+  const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
+  const tagManagerOpen = useUiStore((s) => s.tagManagerOpen);
+  const setTagManagerOpen = useUiStore((s) => s.setTagManagerOpen);
+
   const renderMainContent = () => {
     if (isEmpty) {
       return <EmptyState />;
@@ -177,6 +192,10 @@ function App() {
       </div>
 
       <StatusBar />
+
+      <CommandPalette onExport={dispatchExport} />
+      <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <TagManager isOpen={tagManagerOpen} onClose={() => setTagManagerOpen(false)} />
     </div>
   );
 }

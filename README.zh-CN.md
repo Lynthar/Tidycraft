@@ -208,29 +208,49 @@ tidycraft/
 ├── src/                    # React 前端
 │   ├── components/         # UI 组件
 │   ├── stores/             # Zustand 状态
+│   ├── styles/             # 全局 CSS + Forge 设计 token
 │   ├── types/              # TypeScript 类型
+│   ├── hooks/              # React hooks
+│   ├── i18n/locales/       # en.json + zh.json
 │   └── lib/                # 工具函数
 ├── src-tauri/              # Rust 后端
 │   └── src/
 │       ├── scanner.rs      # 资源扫描
-│       ├── analyzer.rs     # 规则引擎
+│       ├── watcher.rs      # 文件系统 watcher → fs-change 事件
+│       ├── analyzer/       # 规则引擎
 │       ├── thumbnail.rs    # 缩略图生成
 │       ├── tags.rs         # 标签管理
 │       └── lib.rs          # Tauri 命令
-└── docs/                   # 文档
+└── REDESIGN.md             # 视觉重设计阶段进度
 ```
 
 ---
 
 ## 🗺️ 路线图
 
-- [ ] 依赖分析与引用追踪
-- [ ] 统计仪表板与报告
-- [ ] Git 集成（变更检测）
-- [ ] 增量扫描
-- [ ] 批量重命名操作
-- [ ] 自定义规则脚本
-- [ ] 导出报告（JSON、CSV、HTML）
+已发布：
+
+- [x] 依赖分析与引用追踪（Unity GUID 图、未引用资源检测）
+- [x] 统计仪表板与报告
+- [x] Git 集成（分支信息、单文件变更状态）
+- [x] 增量扫描（基于 mtime/size 缓存）
+- [x] 批量重命名操作（持久化撤销）
+- [x] 导出报告（JSON、CSV、HTML）
+- [x] 文件系统实时 watcher（外部修改自动刷新）
+- [x] 多项目工作区 + 跨会话恢复
+- [x] 标签系统（支持多选筛选）
+- [x] 安全删除 / 移动 / 复制 / 副本（系统回收站）
+
+进行中：
+
+- [ ] **视觉重设计** — Forge Dark 主题迁移（见 `REDESIGN.md`）。
+  Phase 0（tokens）、Phase 1（视觉换肤）、Phase 2（ProjectSwitcher）已完成；
+  Phase 3（Command Palette ⌘K）进行中；
+  Phase 4（Gallery / grid 视图）与 Phase 5（AI 标签建议）排队中。
+
+待办：
+
+- [ ] 自定义规则脚本（`tidycraft.toml` 已解析但 UI 尚未接入）
 
 ---
 

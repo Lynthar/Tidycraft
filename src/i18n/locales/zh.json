@@ -306,5 +306,39 @@
     "cancel": "取消",
     "undo": "撤销",
     "done": "完成"
+  },
+  "commandPalette": {
+    "placeholder": "输入命令或搜索…",
+    "empty": "无匹配结果。",
+    "section": {
+      "suggestions": "推荐",
+      "navigate": "导航",
+      "resources": "资源",
+      "actions": "操作"
+    },
+    "footer": {
+      "navigate": "导航",
+      "select": "选择"
+    },
+    "items": {
+      "runAnalysis": "运行分析",
+      "runAnalysisSub": "检查命名、纹理、模型",
+      "cancelScan": "取消扫描",
+      "rescan": "重新扫描项目",
+      "goAssets": "前往资产",
+      "goIssues": "前往问题",
+      "goStats": "前往统计",
+      "switchTo": "切换到 {{name}}",
+      "manageTags": "管理标签",
+      "switchToLight": "切换到浅色主题",
+      "switchToDark": "切换到深色主题",
+      "toggleLanguageZh": "切换到中文",
+      "toggleLanguageEn": "Switch to English",
+      "exportJson": "导出 JSON",
+      "exportCsv": "导出 CSV",
+      "exportHtml": "导出 HTML",
+      "closeProject": "关闭当前项目",
+      "settings": "设置"
+    }
   }
 }

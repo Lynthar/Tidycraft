@@ -15,10 +15,10 @@ import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
 import { useThemeStore } from "../stores/themeStore";
 import { useSettingsStore } from "../stores/settingsStore";
+import { useUiStore } from "../stores/uiStore";
 import { formatShortcut, SHORTCUTS } from "../hooks/useKeyboardShortcuts";
 import { AdvancedFiltersPanel } from "./AdvancedFilters";
 import { SearchHistory } from "./SearchHistory";
-import { SettingsModal } from "./SettingsModal";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { useSearchHistoryStore } from "../stores/searchHistoryStore";
 
@@ -48,8 +48,8 @@ export function Header({ searchInputRef }: HeaderProps) {
   const { theme, toggleTheme } = useThemeStore();
   const { showBranchInfo, showAheadBehind } = useSettingsStore();
   const { addToHistory } = useSearchHistoryStore();
+  const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
 
-  const [showSettings, setShowSettings] = useState(false);
   const [showLangDropdown, setShowLangDropdown] = useState(false);
   const [showSearchHistory, setShowSearchHistory] = useState(false);
   const langDropdownRef = useRef<HTMLDivElement>(null);
@@ -215,7 +215,7 @@ export function Header({ searchInputRef }: HeaderProps) {
       {/* Header actions */}
       <div className="tc-header-actions">
         <button
-          onClick={() => setShowSettings(true)}
+          onClick={() => setSettingsOpen(true)}
           className="tc-icon-btn"
           title={t("settings.title")}
         >
@@ -296,7 +296,6 @@ export function Header({ searchInputRef }: HeaderProps) {
         )}
       </div>
 
-      <SettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
     </header>
   );
 }

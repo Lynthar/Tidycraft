@@ -306,5 +306,39 @@
     "cancel": "Cancel",
     "undo": "Undo",
     "done": "Done"
+  },
+  "commandPalette": {
+    "placeholder": "Type a command or search…",
+    "empty": "No matches.",
+    "section": {
+      "suggestions": "Suggestions",
+      "navigate": "Navigate",
+      "resources": "Resources",
+      "actions": "Actions"
+    },
+    "footer": {
+      "navigate": "navigate",
+      "select": "select"
+    },
+    "items": {
+      "runAnalysis": "Run Analysis",
+      "runAnalysisSub": "Check naming, textures, models",
+      "cancelScan": "Cancel Scan",
+      "rescan": "Rescan Project",
+      "goAssets": "Go to Assets",
+      "goIssues": "Go to Issues",
+      "goStats": "Go to Stats",
+      "switchTo": "Switch to {{name}}",
+      "manageTags": "Manage Tags",
+      "switchToLight": "Switch to Light Theme",
+      "switchToDark": "Switch to Dark Theme",
+      "toggleLanguageZh": "切换到中文",
+      "toggleLanguageEn": "Switch to English",
+      "exportJson": "Export JSON",
+      "exportCsv": "Export CSV",
+      "exportHtml": "Export HTML",
+      "closeProject": "Close Active Project",
+      "settings": "Settings"
+    }
   }
 }
