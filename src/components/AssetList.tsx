@@ -7,6 +7,7 @@ import { useProjectStore } from "../stores/projectStore";
 import { useTagsStore } from "../stores/tagsStore";
 import { useColumnStore } from "../stores/columnStore";
 import { useUiStore } from "../stores/uiStore";
+import { useSelectionStore } from "../stores/selectionStore";
 import { BatchRenameDialog } from "./BatchRenameDialog";
 import { RenameDialog } from "./RenameDialog";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
@@ -43,7 +44,13 @@ export function AssetList() {
   const setViewMode = useColumnStore((s) => s.setViewMode);
   const setTagManagerOpen = useUiStore((s) => s.setTagManagerOpen);
 
-  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+  const selectedPaths = useSelectionStore((s) => s.selectedPaths);
+  const setSelectedPaths = useSelectionStore((s) => s.setSelectedPaths);
+  const togglePath = useSelectionStore((s) => s.togglePath);
+  const addPaths = useSelectionStore((s) => s.addPaths);
+  const removePaths = useSelectionStore((s) => s.removePaths);
+  const clearSelection = useSelectionStore((s) => s.clearSelection);
+
   const [showBatchRename, setShowBatchRename] = useState(false);
   const [lastClickedIndex, setLastClickedIndex] = useState<number | null>(null);
 
@@ -108,69 +115,46 @@ export function AssetList() {
   const handleAssetClick = useCallback(
     (asset: AssetInfo, index: number, e: React.MouseEvent) => {
       if (e.ctrlKey || e.metaKey) {
-        // Toggle selection with Ctrl/Cmd
-        setSelectedPaths((prev) => {
-          const next = new Set(prev);
-          if (next.has(asset.path)) {
-            next.delete(asset.path);
-          } else {
-            next.add(asset.path);
-          }
-          return next;
-        });
+        togglePath(asset.path);
         setLastClickedIndex(index);
       } else if (e.shiftKey && lastClickedIndex !== null) {
-        // Range selection with Shift
         const start = Math.min(lastClickedIndex, index);
         const end = Math.max(lastClickedIndex, index);
-        setSelectedPaths((prev) => {
-          const next = new Set(prev);
-          for (let i = start; i <= end; i++) {
-            next.add(assets[i].path);
-          }
-          return next;
-        });
+        const range: string[] = [];
+        for (let i = start; i <= end; i++) range.push(assets[i].path);
+        addPaths(range);
       } else {
-        // Normal click - select single asset
         setSelectedAsset(asset);
         setLastClickedIndex(index);
       }
     },
-    [lastClickedIndex, assets, setSelectedAsset]
+    [lastClickedIndex, assets, setSelectedAsset, togglePath, addPaths]
   );
 
-  const handleCheckChange = useCallback((path: string, checked: boolean) => {
-    setSelectedPaths((prev) => {
-      const next = new Set(prev);
-      if (checked) {
-        next.add(path);
-      } else {
-        next.delete(path);
-      }
-      return next;
-    });
-  }, []);
+  const handleCheckChange = useCallback(
+    (path: string, checked: boolean) => {
+      if (checked) addPaths([path]);
+      else removePaths([path]);
+    },
+    [addPaths, removePaths]
+  );
 
   const handleSelectAll = useCallback(() => {
     if (selectedPaths.size === assets.length) {
-      setSelectedPaths(new Set());
+      clearSelection();
     } else {
-      setSelectedPaths(new Set(assets.map((a) => a.path)));
+      setSelectedPaths(assets.map((a) => a.path));
     }
-  }, [assets, selectedPaths.size]);
-
-  const clearSelection = useCallback(() => {
-    setSelectedPaths(new Set());
-  }, []);
+  }, [assets, selectedPaths.size, clearSelection, setSelectedPaths]);
 
   const handleRenameComplete = useCallback(async () => {
-    setSelectedPaths(new Set());
+    clearSelection();
     setShowBatchRename(false);
     await refreshUndoState();
     if (projectPath) {
       openProject(projectPath);
     }
-  }, [projectPath, openProject, refreshUndoState]);
+  }, [projectPath, openProject, refreshUndoState, clearSelection]);
 
   // Context menu handlers
   const handleContextMenu = useCallback(
@@ -319,14 +303,9 @@ export function AssetList() {
   const handleDeleteDone = useCallback(
     (result: { success_paths: string[] }) => {
       if (result.success_paths.length === 0) return;
-      const succeeded = new Set(result.success_paths);
-      setSelectedPaths((prev) => {
-        const next = new Set(prev);
-        for (const p of succeeded) next.delete(p);
-        return next;
-      });
+      removePaths(result.success_paths);
     },
-    []
+    [removePaths]
   );
 
   const showCheckbox = selectedPaths.size > 0;
@@ -504,12 +483,7 @@ export function AssetList() {
           // Clear selection for paths that actually moved/copied; the watcher
           // takes care of removing / inserting them in scanResult.assets.
           if (result.successes.length === 0) return;
-          const moved = new Set(result.successes.map((s) => s.original_path));
-          setSelectedPaths((prev) => {
-            const next = new Set(prev);
-            for (const p of moved) next.delete(p);
-            return next;
-          });
+          removePaths(result.successes.map((s) => s.original_path));
         }}
       />
     </>

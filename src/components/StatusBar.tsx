@@ -5,11 +5,8 @@ import { formatFileSize } from "../lib/utils";
 
 export function StatusBar() {
   const { t } = useTranslation();
-  const { scanResult, isScanning, error, scanProgress, cancelScan, getFilteredAssets } =
+  const { scanResult, isScanning, error, scanProgress, cancelScan } =
     useProjectStore();
-
-  const filteredAssets = getFilteredAssets();
-  const filteredSize = filteredAssets.reduce((sum, a) => sum + a.size, 0);
 
   if (error) {
     return (
@@ -124,13 +121,6 @@ export function StatusBar() {
           {t("statusBar.audio")} {typeCounts.audio}
         </span>
       )}
-      <span className="tc-status-spacer" />
-      <span className="tc-status-item">
-        {t("statusBar.showing")}{" "}
-        <span className="tc-num">
-          {filteredAssets.length} {t("statusBar.assets")} ({formatFileSize(filteredSize)})
-        </span>
-      </span>
     </footer>
   );
 }

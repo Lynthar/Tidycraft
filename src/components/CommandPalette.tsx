@@ -19,6 +19,7 @@ import {
   RefreshCw,
   Search,
   Settings,
+  Sparkles,
   Square,
   Sun,
   Tag,
@@ -58,6 +59,7 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
   const setCmdkOpen = useUiStore((s) => s.setCmdkOpen);
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
   const setTagManagerOpen = useUiStore((s) => s.setTagManagerOpen);
+  const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
 
   const projectPath = useProjectStore((s) => s.projectPath);
   const scanResult = useProjectStore((s) => s.scanResult);
@@ -240,6 +242,18 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
     }
 
     // SECTION: Actions
+    if (hasScan) {
+      list.push({
+        id: "suggest-tags",
+        section: t("commandPalette.section.actions"),
+        label: t("commandPalette.items.suggestTags"),
+        icon: <Sparkles size={13} />,
+        onSelect: () => {
+          setAiPanelOpen(true);
+          close();
+        },
+      });
+    }
     if (hasProject) {
       list.push({
         id: "manage-tags",

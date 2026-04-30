@@ -333,6 +333,7 @@
       "goStats": "前往统计",
       "switchTo": "切换到 {{name}}",
       "manageTags": "管理标签",
+      "suggestTags": "推荐标签",
       "switchToLight": "切换到浅色主题",
       "switchToDark": "切换到深色主题",
       "toggleLanguageZh": "切换到中文",
@@ -343,5 +344,23 @@
       "closeProject": "关闭当前项目",
       "settings": "设置"
     }
+  },
+  "aiTagPanel": {
+    "title": "推荐标签",
+    "subtitle": "生成于 {{time}}",
+    "subtitleLoading": "正在根据文件名、尺寸与路径推断…",
+    "loading": "正在生成推荐…",
+    "empty": "暂无可推荐的分组。请先扫描更多资产。",
+    "count_one": "{{count}} 个文件",
+    "count_other": "{{count}} 个文件",
+    "skip": "跳过",
+    "preview": "预览",
+    "apply": "应用",
+    "applyAll": "全部应用",
+    "applyingAll": "应用中…",
+    "footSummary": "{{groupCount}} 组 · {{fileCount}} 个文件",
+    "hintFilename": "出现在文件名中的高频 token",
+    "hintDimension": "共享此分辨率的纹理",
+    "hintPath": "位于同一目录下的文件"
   }
 }
