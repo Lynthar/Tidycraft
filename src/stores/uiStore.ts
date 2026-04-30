@@ -9,18 +9,22 @@ interface UiState {
   cmdkOpen: boolean;
   settingsOpen: boolean;
   tagManagerOpen: boolean;
+  aiPanelOpen: boolean;
   setCmdkOpen: (open: boolean) => void;
   toggleCmdk: () => void;
   setSettingsOpen: (open: boolean) => void;
   setTagManagerOpen: (open: boolean) => void;
+  setAiPanelOpen: (open: boolean) => void;
 }
 
 export const useUiStore = create<UiState>((set, get) => ({
   cmdkOpen: false,
   settingsOpen: false,
   tagManagerOpen: false,
+  aiPanelOpen: false,
   setCmdkOpen: (open) => set({ cmdkOpen: open }),
   toggleCmdk: () => set({ cmdkOpen: !get().cmdkOpen }),
   setSettingsOpen: (open) => set({ settingsOpen: open }),
   setTagManagerOpen: (open) => set({ tagManagerOpen: open }),
+  setAiPanelOpen: (open) => set({ aiPanelOpen: open }),
 }));

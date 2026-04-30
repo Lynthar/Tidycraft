@@ -12,6 +12,7 @@ import { EmptyState } from "./components/EmptyState";
 import { CommandPalette } from "./components/CommandPalette";
 import { SettingsModal } from "./components/SettingsModal";
 import { TagManager } from "./components/TagManager";
+import { AITagPanel } from "./components/AITagPanel";
 import { useProjectStore } from "./stores/projectStore";
 import { useUiStore } from "./stores/uiStore";
 import { restoreSession } from "./stores/sessionStore";
@@ -196,6 +197,7 @@ function App() {
       <CommandPalette onExport={dispatchExport} />
       <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <TagManager isOpen={tagManagerOpen} onClose={() => setTagManagerOpen(false)} />
+      <AITagPanel />
     </div>
   );
 }

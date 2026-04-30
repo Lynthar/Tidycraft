@@ -333,6 +333,7 @@
       "goStats": "Go to Stats",
       "switchTo": "Switch to {{name}}",
       "manageTags": "Manage Tags",
+      "suggestTags": "Suggest Tags",
       "switchToLight": "Switch to Light Theme",
       "switchToDark": "Switch to Dark Theme",
       "toggleLanguageZh": "切换到中文",
@@ -343,5 +344,23 @@
       "closeProject": "Close Active Project",
       "settings": "Settings"
     }
+  },
+  "aiTagPanel": {
+    "title": "Suggest Tags",
+    "subtitle": "Generated at {{time}}",
+    "subtitleLoading": "Inferring from filenames, dimensions and paths…",
+    "loading": "Inferring suggestions…",
+    "empty": "No groups found. Try scanning more assets first.",
+    "count_one": "{{count}} file",
+    "count_other": "{{count}} files",
+    "skip": "Skip",
+    "preview": "Preview",
+    "apply": "Apply",
+    "applyAll": "Apply all",
+    "applyingAll": "Applying…",
+    "footSummary": "{{groupCount}} groups · {{fileCount}} files",
+    "hintFilename": "Recurring token in filenames",
+    "hintDimension": "Textures sharing this resolution",
+    "hintPath": "Files under the same directory"
   }
 }

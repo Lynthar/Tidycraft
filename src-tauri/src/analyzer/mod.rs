@@ -1,4 +1,5 @@
 pub mod rules;
+pub mod tag_suggest;
 
 use crate::scanner::{AssetInfo, ScanResult};
 use rules::{Rule, RuleConfig};

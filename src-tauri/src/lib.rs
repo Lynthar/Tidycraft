@@ -12,6 +12,7 @@ mod unreal;
 mod watcher;
 
 use analyzer::rules::RuleConfig;
+use analyzer::tag_suggest::{HeuristicSuggester, TagGroup, TagSuggester};
 use analyzer::{AnalysisResult, Analyzer};
 use cache::ScanCache;
 use git::{GitInfo, GitManager};
@@ -253,6 +254,16 @@ fn validate_config(config_toml: String) -> Result<bool, String> {
         Ok(_) => Ok(true),
         Err(e) => Err(format!("Invalid config: {}", e)),
     }
+}
+
+// ============ Tag Suggestions ============
+
+#[tauri::command]
+fn suggest_tags(project_id: String) -> Result<Vec<TagGroup>, String> {
+    project::with_ref(&project_id, |state| {
+        let scan = state.require_scan()?;
+        Ok(HeuristicSuggester.suggest(scan))
+    })
 }
 
 // ============ Git Commands ============
@@ -1630,6 +1641,7 @@ pub fn run() {
             analyze_assets,
             get_default_config,
             validate_config,
+            suggest_tags,
             // Git
             get_git_info,
             get_git_statuses,
