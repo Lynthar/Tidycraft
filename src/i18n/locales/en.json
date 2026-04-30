@@ -47,7 +47,10 @@
     "selectAll": "Select all",
     "deselectAll": "Deselect all",
     "batchRename": "Batch Rename",
-    "clearSelection": "Clear selection"
+    "clearSelection": "Clear selection",
+    "viewList": "List view",
+    "viewGrid": "Grid view",
+    "galleryPending": "Gallery view coming next — {{count}} items will appear here."
   },
   "batchRename": {
     "title": "Batch Rename",
