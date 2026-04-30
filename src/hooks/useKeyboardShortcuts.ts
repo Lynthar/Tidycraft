@@ -1,5 +1,6 @@
 import { useEffect, useCallback } from "react";
 import { useProjectStore } from "../stores/projectStore";
+import { useUiStore } from "../stores/uiStore";
 import { open } from "@tauri-apps/plugin-dialog";
 
 interface KeyboardShortcuts {
@@ -37,6 +38,19 @@ export function useKeyboardShortcuts({ onOpenFolder, onFocusSearch }: KeyboardSh
     (event: KeyboardEvent) => {
       const { key, ctrlKey, metaKey, shiftKey } = event;
       const modKey = ctrlKey || metaKey;
+
+      // Ctrl/Cmd + K: toggle the command palette. Handled before the
+      // input-blur guard so it works from inside any text field too.
+      if (modKey && key.toLowerCase() === "k") {
+        event.preventDefault();
+        useUiStore.getState().toggleCmdk();
+        return;
+      }
+
+      // While the command palette owns the keyboard, every other shortcut
+      // here would compete with its own listener (Esc, ↑/↓, etc.). Bail
+      // out so CommandPalette.tsx can drive navigation cleanly.
+      if (useUiStore.getState().cmdkOpen) return;
 
       // Ignore if user is typing in an input
       const target = event.target as HTMLElement;
@@ -143,6 +157,7 @@ export const SHORTCUTS = {
   search: { key: "F", modifier: "Ctrl" },
   rescan: { key: "R", modifier: "Ctrl" },
   analyze: { key: "A", modifier: "Ctrl+Shift" },
+  commandPalette: { key: "K", modifier: "Ctrl" },
   escape: { key: "Esc", modifier: "" },
   viewAssets: { key: "1", modifier: "" },
   viewIssues: { key: "2", modifier: "" },

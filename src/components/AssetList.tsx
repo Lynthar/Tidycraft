@@ -8,6 +8,7 @@ import { useProjectStore } from "../stores/projectStore";
 import { useTagsStore } from "../stores/tagsStore";
 import { useColumnStore, type ColumnId } from "../stores/columnStore";
 import { useSettingsStore } from "../stores/settingsStore";
+import { useUiStore } from "../stores/uiStore";
 import { cn, formatFileSize } from "../lib/utils";
 import { BatchRenameDialog } from "./BatchRenameDialog";
 import { RenameDialog } from "./RenameDialog";
@@ -15,7 +16,6 @@ import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import { MoveCopyDialog } from "./MoveCopyDialog";
 import type { FileOpResult } from "../types/asset";
 import { BatchTagSelector, TagBadge } from "./TagSelector";
-import { TagManager } from "./TagManager";
 import { ContextMenu } from "./ContextMenu";
 import type { AssetInfo, AssetType, GitFileStatus, Tag } from "../types/asset";
 import type { SortField } from "../stores/projectStore";
@@ -336,7 +336,7 @@ export function AssetList() {
   const parentRef = useRef<HTMLDivElement>(null);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
   const [showBatchRename, setShowBatchRename] = useState(false);
-  const [showTagManager, setShowTagManager] = useState(false);
+  const setTagManagerOpen = useUiStore((s) => s.setTagManagerOpen);
   const [lastClickedIndex, setLastClickedIndex] = useState<number | null>(null);
 
   // Single rename state
@@ -676,7 +676,7 @@ export function AssetList() {
             <span className="tc-batch-spacer" />
             <BatchTagSelector
               selectedPaths={Array.from(selectedPaths)}
-              onOpenManager={() => setShowTagManager(true)}
+              onOpenManager={() => setTagManagerOpen(true)}
             />
             <button
               onClick={() => setShowBatchRename(true)}
@@ -796,12 +796,6 @@ export function AssetList() {
         />
       )}
 
-      {/* Tag Manager Dialog */}
-      <TagManager
-        isOpen={showTagManager}
-        onClose={() => setShowTagManager(false)}
-      />
-
       {/* Context Menu */}
       {contextMenu.asset && (
         <ContextMenu
@@ -818,7 +812,7 @@ export function AssetList() {
           onMoveTo={handleMoveTo}
           onCopyTo={handleCopyTo}
           onDelete={handleDelete}
-          onOpenTagManager={() => setShowTagManager(true)}
+          onOpenTagManager={() => setTagManagerOpen(true)}
         />
       )}
 

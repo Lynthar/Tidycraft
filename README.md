@@ -208,16 +208,20 @@ tidycraft/
 ├── src/                    # React frontend
 │   ├── components/         # UI components
 │   ├── stores/             # Zustand state
+│   ├── styles/             # Global CSS + Forge design tokens
 │   ├── types/              # TypeScript types
+│   ├── hooks/              # React hooks
+│   ├── i18n/locales/       # en.json + zh.json
 │   └── lib/                # Utilities
 ├── src-tauri/              # Rust backend
 │   └── src/
 │       ├── scanner.rs      # Asset scanning
-│       ├── analyzer.rs     # Rule engine
+│       ├── watcher.rs      # FS watcher → fs-change events
+│       ├── analyzer/       # Rule engine
 │       ├── thumbnail.rs    # Thumbnail generation
 │       ├── tags.rs         # Tag management
 │       └── lib.rs          # Tauri commands
-└── docs/                   # Documentation
+└── REDESIGN.md             # Visual redesign phase tracker
 ```
 
 ---
@@ -239,10 +243,10 @@ Shipped:
 
 In progress:
 
-- [ ] Visual redesign — Forge Dark theme migration (see `REDESIGN.md`)
-- [ ] Command Palette (⌘K)
-- [ ] Gallery / grid view
-- [ ] AI tag suggestions
+- [ ] **Visual redesign** — Forge Dark theme migration (see `REDESIGN.md`).
+  Phase 0 (tokens), 1 (visual refresh), 2 (ProjectSwitcher) shipped;
+  Phase 3 (Command Palette ⌘K) in progress; Phase 4 (Gallery / grid view) and
+  Phase 5 (AI tag suggestions) queued.
 
 Backlog:
 
