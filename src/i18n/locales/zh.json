@@ -47,7 +47,10 @@
     "selectAll": "全选",
     "deselectAll": "取消全选",
     "batchRename": "批量重命名",
-    "clearSelection": "清除选择"
+    "clearSelection": "清除选择",
+    "viewList": "列表视图",
+    "viewGrid": "网格视图",
+    "galleryPending": "网格视图即将上线 — 这里会显示 {{count}} 个资产。"
   },
   "batchRename": {
     "title": "批量重命名",

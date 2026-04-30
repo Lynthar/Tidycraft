@@ -13,6 +13,8 @@ export type ColumnId =
   | "extension"
   | "tags";
 
+export type AssetViewMode = "list" | "grid";
+
 export interface ColumnConfig {
   id: ColumnId;
   visible: boolean;
@@ -21,10 +23,13 @@ export interface ColumnConfig {
 
 interface ColumnState {
   columns: ColumnConfig[];
+  viewMode: AssetViewMode;
   setColumnVisible: (id: ColumnId, visible: boolean) => void;
   setColumnWidth: (id: ColumnId, width: number) => void;
   resetColumns: () => void;
   moveColumn: (fromIndex: number, toIndex: number) => void;
+  setViewMode: (mode: AssetViewMode) => void;
+  toggleViewMode: () => void;
 }
 
 const DEFAULT_COLUMNS: ColumnConfig[] = [
@@ -40,13 +45,17 @@ const DEFAULT_COLUMNS: ColumnConfig[] = [
   { id: "extension", visible: false, width: 80 },
 ];
 
-// Version for migration - increment when DEFAULT_COLUMNS changes
-const COLUMNS_VERSION = 2;
+// Version for migration - increment when DEFAULT_COLUMNS changes or when
+// new persisted fields are added (e.g. viewMode in v3).
+const COLUMNS_VERSION = 3;
+
+const DEFAULT_VIEW_MODE: AssetViewMode = "list";
 
 export const useColumnStore = create<ColumnState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       columns: DEFAULT_COLUMNS,
+      viewMode: DEFAULT_VIEW_MODE,
 
       setColumnVisible: (id, visible) =>
         set((state) => ({
@@ -71,16 +80,27 @@ export const useColumnStore = create<ColumnState>()(
           newColumns.splice(toIndex, 0, removed);
           return { columns: newColumns };
         }),
+
+      setViewMode: (mode) => set({ viewMode: mode }),
+
+      toggleViewMode: () =>
+        set({ viewMode: get().viewMode === "list" ? "grid" : "list" }),
     }),
     {
       name: "tidycraft-columns",
       version: COLUMNS_VERSION,
       migrate: (persistedState: unknown, version: number) => {
-        // If version is outdated, reset to defaults to include new columns like tags
-        if (version < COLUMNS_VERSION) {
-          return { columns: DEFAULT_COLUMNS };
-        }
-        return persistedState as ColumnState;
+        // v3 added viewMode. Older persisted blobs may have either an
+        // outdated columns shape (pre-v2) or no viewMode field — both
+        // resolve to: keep what we can, fill the rest with defaults.
+        const prev = (persistedState as Partial<ColumnState>) ?? {};
+        const columns =
+          version < 2 || !Array.isArray(prev.columns)
+            ? DEFAULT_COLUMNS
+            : prev.columns;
+        const viewMode: AssetViewMode =
+          prev.viewMode === "grid" ? "grid" : DEFAULT_VIEW_MODE;
+        return { columns, viewMode } as ColumnState;
       },
     }
   )
