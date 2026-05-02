@@ -47,10 +47,14 @@
     "selectAll": "Select all",
     "deselectAll": "Deselect all",
     "batchRename": "Batch Rename",
+    "move": "Move",
+    "delete": "Delete",
     "clearSelection": "Clear selection",
     "viewList": "List view",
     "viewGrid": "Grid view",
-    "galleryPending": "Gallery view coming next — {{count}} items will appear here."
+    "galleryPending": "Gallery view coming next — {{count}} items will appear here.",
+    "sortLabel": "Sort",
+    "sortToggle": "Toggle sort direction"
   },
   "batchRename": {
     "title": "Batch Rename",
@@ -128,10 +132,10 @@
     "error": "Error",
     "total": "Total",
     "assets": "assets",
-    "showing": "Showing",
-    "textures": "Textures",
-    "models": "Models",
-    "audio": "Audio"
+    "connected": "Connected",
+    "syncing": "syncing",
+    "retry": "Retry",
+    "dismiss": "Dismiss"
   },
   "scanPhase": {
     "discovering": "Discovering files",
@@ -153,20 +157,44 @@
     "warnings": "Warnings",
     "info": "Info",
     "noIssues": "No issues found!",
-    "noFilteredIssues": "No {{filter}} issues"
+    "noFilteredIssues": "No {{filter}} issues",
+    "groupByRule": "Group by rule",
+    "export": "Export…",
+    "fix": {
+      "locate": "Locate",
+      "rename": "Rename",
+      "resize": "Resize",
+      "decimate": "Decimate",
+      "review": "Review"
+    }
   },
   "settings": {
     "title": "Settings",
     "language": "Language",
     "english": "English",
     "chinese": "Chinese",
+    "appearanceSection": "Appearance",
+    "theme": "Theme",
+    "themeDark": "Dark",
+    "themeLight": "Light",
+    "themeSystem": "System",
     "gitSection": "Git",
     "showBranchInfo": "Show Branch Info",
     "showBranchInfoDesc": "Display current branch name in header",
     "showAheadBehind": "Show Ahead/Behind",
     "showAheadBehindDesc": "Display commits ahead/behind remote",
     "showGitStatusIndicators": "Show File Status",
-    "showGitStatusIndicatorsDesc": "Display git status badges on files"
+    "showGitStatusIndicatorsDesc": "Display git status badges on files",
+    "maintenanceSection": "Maintenance",
+    "thumbnailCache": "Thumbnail cache",
+    "cacheSize": "{{size}} on disk",
+    "cacheSizeUnknown": "Unable to read cache size",
+    "undoHistory": "Undo history",
+    "undoEntries_one": "{{count}} operation recorded",
+    "undoEntries_other": "{{count}} operations recorded",
+    "undoNoProject": "No active project",
+    "clear": "Clear",
+    "clearing": "Clearing…"
   },
   "stats": {
     "noData": "No data available",
@@ -316,6 +344,7 @@
     "section": {
       "suggestions": "Suggestions",
       "navigate": "Navigate",
+      "filter": "Filter",
       "resources": "Resources",
       "actions": "Actions"
     },
@@ -332,6 +361,10 @@
       "goIssues": "Go to Issues",
       "goStats": "Go to Stats",
       "switchTo": "Switch to {{name}}",
+      "filterBy": "Filter: {{type}} only",
+      "filterCount_one": "{{count}} asset",
+      "filterCount_other": "{{count}} assets",
+      "clearFilter": "Clear filter",
       "manageTags": "Manage Tags",
       "suggestTags": "Suggest Tags",
       "switchToLight": "Switch to Light Theme",

@@ -43,6 +43,15 @@ function App() {
     restoreSession();
   }, []);
 
+  // Add a body class on macOS so CSS can opt the custom titlebar in. The
+  // window's `titleBarStyle: Overlay` only takes effect on macOS — on other
+  // platforms native chrome handles things and our titlebar stays hidden.
+  useEffect(() => {
+    if (typeof navigator !== "undefined" && navigator.userAgent.includes("Mac")) {
+      document.body.classList.add("tc-platform-macos");
+    }
+  }, []);
+
   // Initialize keyboard shortcuts
   useKeyboardShortcuts({
     onFocusSearch: () => {
@@ -144,6 +153,14 @@ function App() {
 
   return (
     <div className="h-screen flex flex-col bg-background">
+      <div className="tc-titlebar" data-tauri-drag-region>
+        <span className="tc-title-text" data-tauri-drag-region>
+          Tidycraft
+        </span>
+        <span className="tc-title-text mono" data-tauri-drag-region>
+          v0.0.1
+        </span>
+      </div>
       <Header searchInputRef={searchInputRef} />
 
       <div className="flex-1 flex overflow-hidden">

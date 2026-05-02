@@ -29,12 +29,30 @@ import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
 import { useThemeStore } from "../stores/themeStore";
 import { useUiStore } from "../stores/uiStore";
+import type { AssetType } from "../types/asset";
 
 /// Maximum number of asset quick-jump matches surfaced in one query.
 /// Cap is intentional — typical projects have 1k–50k assets and rendering
 /// thousands of <button>s would tank input responsiveness. Future expansion
 /// (fuzzy ranking, Web Worker, virtualization) can replace `.slice` here.
 const ASSET_RESULT_CAP = 50;
+
+/// Canonical asset-type order for the Filter section. Keeps the menu
+/// stable across scans regardless of which types the project happens to
+/// contain. Types absent from `scanResult.type_counts` are skipped.
+const FILTER_TYPE_ORDER: AssetType[] = [
+  "texture",
+  "model",
+  "audio",
+  "video",
+  "animation",
+  "material",
+  "prefab",
+  "scene",
+  "script",
+  "data",
+  "other",
+];
 
 interface CmdItem {
   id: string;
@@ -73,6 +91,8 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
   const setActiveProject = useProjectStore((s) => s.setActiveProject);
   const locateAsset = useProjectStore((s) => s.locateAsset);
   const closeProject = useProjectStore((s) => s.closeProject);
+  const typeFilter = useProjectStore((s) => s.typeFilter);
+  const setTypeFilter = useProjectStore((s) => s.setTypeFilter);
 
   const { theme, toggleTheme } = useThemeStore();
 
@@ -110,7 +130,7 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
         section: t("commandPalette.section.suggestions"),
         label: t("commandPalette.items.runAnalysis"),
         sub: t("commandPalette.items.runAnalysisSub"),
-        shortcut: "⌘⇧A",
+        shortcut: "⌘⇧R",
         icon: <Play size={13} />,
         onSelect: () => {
           runAnalysis();
@@ -151,7 +171,7 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
         id: "go-assets",
         section: t("commandPalette.section.navigate"),
         label: t("commandPalette.items.goAssets"),
-        shortcut: "1",
+        shortcut: "⌘1",
         icon: <Files size={13} />,
         onSelect: () => {
           setViewMode("assets");
@@ -162,7 +182,7 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
         id: "go-issues",
         section: t("commandPalette.section.navigate"),
         label: t("commandPalette.items.goIssues"),
-        shortcut: "2",
+        shortcut: "⌘2",
         icon: <AlertTriangle size={13} />,
         onSelect: () => {
           setViewMode("issues");
@@ -173,7 +193,7 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
         id: "go-stats",
         section: t("commandPalette.section.navigate"),
         label: t("commandPalette.items.goStats"),
-        shortcut: "3",
+        shortcut: "⌘3",
         icon: <BarChart3 size={13} />,
         onSelect: () => {
           setViewMode("stats");
@@ -198,6 +218,57 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
           icon: <Folder size={13} />,
           onSelect: () => {
             setActiveProject(p.id);
+            close();
+          },
+        });
+      }
+    }
+
+    // SECTION: Filter — quick-toggle by asset type. Only renders types
+    // actually present in the current scan, sorted by canonical order.
+    if (hasScan && scanResult) {
+      const counts = scanResult.type_counts;
+      for (const type of FILTER_TYPE_ORDER) {
+        const count = counts[type];
+        if (!count) continue;
+        const isActive = typeFilter === type;
+        list.push({
+          id: `filter-${type}`,
+          section: t("commandPalette.section.filter"),
+          label: t("commandPalette.items.filterBy", {
+            type: t(`assetTypes.${type}`),
+          }),
+          sub: t("commandPalette.items.filterCount", { count }),
+          icon: (
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: `var(--c-${type})`,
+                outline: isActive
+                  ? "2px solid var(--primary)"
+                  : undefined,
+                outlineOffset: 1,
+              }}
+            />
+          ),
+          onSelect: () => {
+            // Toggle: clicking the active filter clears it.
+            setTypeFilter(isActive ? null : type);
+            setViewMode("assets");
+            close();
+          },
+        });
+      }
+      if (typeFilter !== null) {
+        list.push({
+          id: "filter-clear",
+          section: t("commandPalette.section.filter"),
+          label: t("commandPalette.items.clearFilter"),
+          icon: <X size={13} />,
+          onSelect: () => {
+            setTypeFilter(null);
             close();
           },
         });
@@ -362,6 +433,7 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
     deferredQuery,
     theme,
     i18n.language,
+    typeFilter,
   ]);
 
   // Filter static items by query. Resources items are pre-filtered against

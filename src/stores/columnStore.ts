@@ -33,7 +33,11 @@ interface ColumnState {
 }
 
 const DEFAULT_COLUMNS: ColumnConfig[] = [
-  { id: "name", visible: true, width: 0 }, // flex
+  // Name is now a real fixed-width column (was flex-1 before v4). Together
+  // with all other columns being shrink-0 this lets the row truly grow when
+  // the user resizes a column — previously widening size compressed name on
+  // the left, making the dragged column's right edge appear stuck.
+  { id: "name", visible: true, width: 320 },
   { id: "type", visible: true, width: 96 },
   { id: "size", visible: true, width: 96 },
   { id: "dimensions", visible: true, width: 128 },
@@ -46,8 +50,9 @@ const DEFAULT_COLUMNS: ColumnConfig[] = [
 ];
 
 // Version for migration - increment when DEFAULT_COLUMNS changes or when
-// new persisted fields are added (e.g. viewMode in v3).
-const COLUMNS_VERSION = 3;
+// new persisted fields are added (e.g. viewMode in v3, name fixed-width
+// in v4).
+const COLUMNS_VERSION = 4;
 
 const DEFAULT_VIEW_MODE: AssetViewMode = "list";
 
@@ -90,14 +95,20 @@ export const useColumnStore = create<ColumnState>()(
       name: "tidycraft-columns",
       version: COLUMNS_VERSION,
       migrate: (persistedState: unknown, version: number) => {
-        // v3 added viewMode. Older persisted blobs may have either an
-        // outdated columns shape (pre-v2) or no viewMode field — both
-        // resolve to: keep what we can, fill the rest with defaults.
+        // v3 added viewMode; v4 made name a real fixed-width column. Older
+        // persisted blobs may have an outdated columns shape (pre-v2),
+        // miss viewMode, or have name.width=0 — all reconcile to: keep
+        // what we can, fill the rest with defaults.
         const prev = (persistedState as Partial<ColumnState>) ?? {};
-        const columns =
+        let columns =
           version < 2 || !Array.isArray(prev.columns)
             ? DEFAULT_COLUMNS
             : prev.columns;
+        if (version < 4) {
+          columns = columns.map((c) =>
+            c.id === "name" && c.width === 0 ? { ...c, width: 320 } : c
+          );
+        }
         const viewMode: AssetViewMode =
           prev.viewMode === "grid" ? "grid" : DEFAULT_VIEW_MODE;
         return { columns, viewMode } as ColumnState;

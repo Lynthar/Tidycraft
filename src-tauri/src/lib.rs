@@ -220,6 +220,20 @@ async fn get_thumbnail(path: String, size: u32) -> Result<String, String> {
     thumbnail::get_thumbnail_base64(&path, size).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn get_thumbnail_cache_size() -> u64 {
+    thumbnail::get_cache_size()
+}
+
+/// Drop the entire on-disk thumbnail cache. Returns the number of bytes
+/// freed so the UI can show "Freed N MB" feedback.
+#[tauri::command]
+fn clear_thumbnail_cache() -> Result<u64, String> {
+    let before = thumbnail::get_cache_size();
+    thumbnail::clear_cache().map_err(|e| e.to_string())?;
+    Ok(before)
+}
+
 // ============ Analysis Commands ============
 
 #[tauri::command]
@@ -1637,6 +1651,8 @@ pub fn run() {
             start_watching,
             stop_watching,
             get_thumbnail,
+            get_thumbnail_cache_size,
+            clear_thumbnail_cache,
             // Analysis
             analyze_assets,
             get_default_config,

@@ -1,6 +1,11 @@
-import { X, GitBranch } from "lucide-react";
+import { useEffect, useState } from "react";
+import { X, GitBranch, Palette, Wrench, Trash2, Image as ImageIcon } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { useSettingsStore } from "../stores/settingsStore";
+import { useThemeStore, type ThemePreference } from "../stores/themeStore";
+import { useProjectStore } from "../stores/projectStore";
+import { formatFileSize } from "../lib/utils";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -49,8 +54,52 @@ function ToggleSwitch({
   );
 }
 
+function SegmentedControl<T extends string>({
+  value,
+  onChange,
+  options,
+  label,
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  options: { value: T; label: string }[];
+  label: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-sm font-medium text-text-primary">{label}</span>
+      <div
+        className="inline-flex p-0.5 rounded-md"
+        style={{ background: "var(--panel-2)", border: "1px solid var(--line)" }}
+      >
+        {options.map((opt) => {
+          const active = value === opt.value;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => onChange(opt.value)}
+              className="px-3 py-1 text-xs rounded transition-colors"
+              style={{
+                background: active ? "var(--panel)" : "transparent",
+                color: active ? "var(--text)" : "var(--text-3)",
+                fontWeight: active ? 500 : 400,
+                border: 0,
+                cursor: "pointer",
+                boxShadow: active ? "0 1px 2px oklch(0% 0 0 / 0.05)" : "none",
+              }}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const {
     showGitStatusIndicators,
     showBranchInfo,
@@ -59,6 +108,65 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     setShowBranchInfo,
     setShowAheadBehind,
   } = useSettingsStore();
+  const preference = useThemeStore((s) => s.preference);
+  const setPreference = useThemeStore((s) => s.setPreference);
+  const activeProjectId = useProjectStore((s) => s.activeProjectId);
+  const undoHistory = useProjectStore((s) => s.undoHistory);
+  const refreshUndoState = useProjectStore((s) => s.refreshUndoState);
+  const clearUndoHistory = useProjectStore((s) => s.clearUndoHistory);
+
+  const [thumbCacheBytes, setThumbCacheBytes] = useState<number | null>(null);
+  const [clearingCache, setClearingCache] = useState(false);
+  const [clearingUndo, setClearingUndo] = useState(false);
+
+  // Pull cache size whenever the modal opens. Fast (single readdir+stat
+  // pass on the cache dir), no need to debounce or memoize.
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const size = await invoke<number>("get_thumbnail_cache_size");
+        if (!cancelled) setThumbCacheBytes(size);
+      } catch (err) {
+        console.error("Failed to read thumb cache size:", err);
+        if (!cancelled) setThumbCacheBytes(null);
+      }
+    })();
+    if (activeProjectId) refreshUndoState();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, activeProjectId, refreshUndoState]);
+
+  const setLanguage = (lang: string) => {
+    i18n.changeLanguage(lang);
+    localStorage.setItem("language", lang);
+  };
+
+  const handleClearThumbCache = async () => {
+    setClearingCache(true);
+    try {
+      await invoke<number>("clear_thumbnail_cache");
+      setThumbCacheBytes(0);
+    } catch (err) {
+      console.error("Failed to clear thumbnail cache:", err);
+    } finally {
+      setClearingCache(false);
+    }
+  };
+
+  const handleClearUndoHistory = async () => {
+    if (!activeProjectId) return;
+    setClearingUndo(true);
+    try {
+      await clearUndoHistory();
+    } catch (err) {
+      console.error("Failed to clear undo history:", err);
+    } finally {
+      setClearingUndo(false);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -78,6 +186,37 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
         {/* Content */}
         <div className="p-4 space-y-6">
+          {/* Appearance Section */}
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <Palette size={16} className="text-primary" />
+              <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wide">
+                {t("settings.appearanceSection")}
+              </h3>
+            </div>
+            <div className="space-y-3 pl-6">
+              <SegmentedControl<ThemePreference>
+                value={preference}
+                onChange={setPreference}
+                label={t("settings.theme")}
+                options={[
+                  { value: "dark", label: t("settings.themeDark") },
+                  { value: "light", label: t("settings.themeLight") },
+                  { value: "system", label: t("settings.themeSystem") },
+                ]}
+              />
+              <SegmentedControl<string>
+                value={i18n.language}
+                onChange={setLanguage}
+                label={t("settings.language")}
+                options={[
+                  { value: "en", label: t("settings.english") },
+                  { value: "zh", label: t("settings.chinese") },
+                ]}
+              />
+            </div>
+          </div>
+
           {/* Git Section */}
           <div>
             <div className="flex items-center gap-2 mb-3">
@@ -105,6 +244,85 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 label={t("settings.showGitStatusIndicators")}
                 description={t("settings.showGitStatusIndicatorsDesc")}
               />
+            </div>
+          </div>
+
+          {/* Maintenance Section */}
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <Wrench size={16} className="text-primary" />
+              <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wide">
+                {t("settings.maintenanceSection")}
+              </h3>
+            </div>
+            <div className="space-y-3 pl-6">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2 flex-1 min-w-0">
+                  <ImageIcon
+                    size={14}
+                    className="text-text-secondary mt-0.5 shrink-0"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-medium text-text-primary">
+                      {t("settings.thumbnailCache")}
+                    </span>
+                    <p className="text-xs text-text-secondary mt-0.5">
+                      {thumbCacheBytes === null
+                        ? t("settings.cacheSizeUnknown")
+                        : t("settings.cacheSize", {
+                            size: formatFileSize(thumbCacheBytes),
+                          })}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleClearThumbCache}
+                  disabled={
+                    clearingCache ||
+                    thumbCacheBytes === null ||
+                    thumbCacheBytes === 0
+                  }
+                  className="px-3 py-1 text-xs rounded border border-border hover:bg-background text-text-secondary hover:text-text-primary disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {clearingCache
+                    ? t("settings.clearing")
+                    : t("settings.clear")}
+                </button>
+              </div>
+
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2 flex-1 min-w-0">
+                  <Trash2
+                    size={14}
+                    className="text-text-secondary mt-0.5 shrink-0"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-medium text-text-primary">
+                      {t("settings.undoHistory")}
+                    </span>
+                    <p className="text-xs text-text-secondary mt-0.5">
+                      {!activeProjectId
+                        ? t("settings.undoNoProject")
+                        : t("settings.undoEntries", {
+                            count: undoHistory.length,
+                          })}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleClearUndoHistory}
+                  disabled={
+                    clearingUndo ||
+                    !activeProjectId ||
+                    undoHistory.length === 0
+                  }
+                  className="px-3 py-1 text-xs rounded border border-border hover:bg-background text-text-secondary hover:text-text-primary disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {clearingUndo
+                    ? t("settings.clearing")
+                    : t("settings.clear")}
+                </button>
+              </div>
             </div>
           </div>
         </div>

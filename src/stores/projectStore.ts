@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import type { ScanResult, AssetInfo, ScanProgress, AssetType, AnalysisResult, UndoResult, HistoryEntry, GitInfo, GitStatusMap, FsChangeEvent } from "../types/asset";
+import type { ScanResult, AssetInfo, ScanProgress, AssetType, ProjectType, AnalysisResult, UndoResult, HistoryEntry, GitInfo, GitStatusMap, FsChangeEvent } from "../types/asset";
 
 // Per-project filesystem-watcher unlisten handles. Kept outside the zustand
 // store because function references don't belong in serialized state, and
@@ -108,6 +108,11 @@ interface ProjectState {
   canUndo: boolean;
   undoHistory: HistoryEntry[];
 
+  /// Monotonic timestamp bumped each time the filesystem watcher reports a
+  /// change for any project. StatusBar subscribes to this to flash a
+  /// "syncing" indicator. 0 = no events seen yet this session.
+  watcherPulse: number;
+
   // Convenience getters for active project
   projectPath: string | null;
   scanResult: ScanResult | null;
@@ -131,10 +136,19 @@ interface ProjectState {
   openProject: (path: string, options?: { force?: boolean }) => Promise<void>;
   closeProject: (projectId?: string) => void;
   setActiveProject: (projectId: string) => void;
-  getProjectList: () => { id: string; name: string; path: string; isActive: boolean }[];
+  getProjectList: () => {
+    id: string;
+    name: string;
+    path: string;
+    isActive: boolean;
+    assetCount: number | null;
+    issueCount: number | null;
+    engine: ProjectType | null;
+  }[];
 
   // Active project actions
   cancelScan: () => Promise<void>;
+  clearError: () => void;
   runAnalysis: () => Promise<void>;
   setViewMode: (mode: ViewMode) => void;
   setSelectedDirectory: (path: string | null) => void;
@@ -295,7 +309,10 @@ function applyFsChange(projectId: string, event: FsChangeEvent) {
   const newMap = new Map(state.projects);
   newMap.set(projectId, updated);
 
-  const patch: Partial<ProjectState> = { projects: newMap };
+  const patch: Partial<ProjectState> = {
+    projects: newMap,
+    watcherPulse: Date.now(),
+  };
   if (state.activeProjectId === projectId) {
     Object.assign(patch, syncFromActiveProject(updated));
   }
@@ -310,6 +327,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   // Global state
   canUndo: false,
   undoHistory: [],
+  watcherPulse: 0,
 
   // Initial convenience fields (no active project)
   projectPath: null,
@@ -541,11 +559,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   getProjectList: () => {
     const { projects, activeProjectId } = get();
-    return Array.from(projects.values()).map(p => ({
+    return Array.from(projects.values()).map((p) => ({
       id: p.id,
-      name: p.projectPath.split("/").pop() || p.projectPath.split("\\").pop() || "Project",
+      name:
+        p.projectPath.split("/").pop() ||
+        p.projectPath.split("\\").pop() ||
+        "Project",
       path: p.projectPath,
       isActive: p.id === activeProjectId,
+      assetCount: p.scanResult?.total_count ?? null,
+      issueCount: p.analysisResult?.issue_count ?? null,
+      engine: p.scanResult?.project_type ?? null,
     }));
   },
 
@@ -558,6 +582,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     } catch (err) {
       console.error("Failed to cancel scan:", err);
     }
+  },
+
+  clearError: () => {
+    set(updateActiveProject(get(), { error: null }));
   },
 
   runAnalysis: async () => {

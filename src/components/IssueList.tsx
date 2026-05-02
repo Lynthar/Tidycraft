@@ -1,6 +1,8 @@
-import { useState } from "react";
-import { AlertCircle, AlertTriangle, Info, FileWarning } from "lucide-react";
+import { useMemo, useState } from "react";
+import { AlertCircle, AlertTriangle, Info, FileWarning, Layers, Download } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
+import { useProjectStore } from "../stores/projectStore";
 import type { Issue, Severity, AnalysisResult } from "../types/asset";
 
 const SEV_TO_TONE: Record<Severity, "err" | "warn" | "info"> = {
@@ -8,6 +10,24 @@ const SEV_TO_TONE: Record<Severity, "err" | "warn" | "info"> = {
   warning: "warn",
   info: "info",
 };
+
+/// Map rule_id to a fix-action verb. The button click still calls onLocate
+/// (the actual fix is manual — we just open the asset for the user); only
+/// the label changes to suggest *what* the fix is. Falls back to "Review".
+function fixLabelKey(ruleId: string): string {
+  if (ruleId.startsWith("naming.")) return "issues.fix.rename";
+  if (
+    ruleId === "texture.max_size" ||
+    ruleId === "texture.min_size" ||
+    ruleId === "texture.pot" ||
+    ruleId === "texture.non_square"
+  )
+    return "issues.fix.resize";
+  if (ruleId === "model.vertices" || ruleId === "model.faces")
+    return "issues.fix.decimate";
+  if (ruleId === "missing_reference") return "issues.fix.locate";
+  return "issues.fix.review";
+}
 
 function SeverityIcon({ severity }: { severity: Severity }) {
   switch (severity) {
@@ -87,7 +107,9 @@ interface IssueListProps {
 
 export function IssueList({ result, isAnalyzing, onAnalyze, onLocate }: IssueListProps) {
   const { t } = useTranslation();
+  const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const [filter, setFilter] = useState<Severity | "all">("all");
+  const [groupByRule, setGroupByRule] = useState(false);
 
   if (!result && !isAnalyzing) {
     return (
@@ -119,6 +141,38 @@ export function IssueList({ result, isAnalyzing, onAnalyze, onLocate }: IssueLis
 
   const filteredIssues =
     filter === "all" ? result.issues : result.issues.filter((i) => i.severity === filter);
+
+  // Group by rule_id when toggle is on. Groups sort by rule_id ascending so
+  // the order is stable across renders. Within a group, issues keep their
+  // original order (which already matches severity → rule order).
+  const groups = useMemo(() => {
+    if (!groupByRule) return null;
+    const map = new Map<string, Issue[]>();
+    for (const issue of filteredIssues) {
+      const list = map.get(issue.rule_id) ?? [];
+      list.push(issue);
+      map.set(issue.rule_id, list);
+    }
+    return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [groupByRule, filteredIssues]);
+
+  const handleExport = async () => {
+    if (!activeProjectId) return;
+    try {
+      const json = await invoke<string>("export_issues_to_json", {
+        projectId: activeProjectId,
+      });
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "issues.json";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Failed to export issues:", err);
+    }
+  };
 
   const filterPill = (
     key: typeof filter,
@@ -188,6 +242,19 @@ export function IssueList({ result, isAnalyzing, onAnalyze, onLocate }: IssueLis
 
         <span style={{ flex: 1 }} />
 
+        <button
+          onClick={() => setGroupByRule((v) => !v)}
+          className="tc-issues-pill"
+          data-active={groupByRule ? "true" : undefined}
+        >
+          <Layers size={11} />
+          {t("issues.groupByRule")}
+        </button>
+        <button onClick={handleExport} className="tc-issues-pill">
+          <Download size={11} />
+          {t("issues.export")}
+        </button>
+
         {onAnalyze && (
           <button
             onClick={onAnalyze}
@@ -209,6 +276,24 @@ export function IssueList({ result, isAnalyzing, onAnalyze, onLocate }: IssueLis
                 : t("issues.noFilteredIssues", { filter: t(`issues.${filter}s`) })}
             </p>
           </div>
+        ) : groupByRule && groups ? (
+          groups.map(([ruleId, issues]) => (
+            <div key={ruleId}>
+              <div className="tc-issues-group-head">
+                <span>{issues[0].rule_name}</span>
+                <span className="mono">{issues.length}</span>
+              </div>
+              {issues.map((issue, index) => (
+                <IssueRow
+                  key={`${issue.asset_path}-${index}`}
+                  issue={issue}
+                  onLocate={onLocate}
+                  suggestionLabel={t("issues.suggestion")}
+                  locateLabel={t("issues.locate")}
+                />
+              ))}
+            </div>
+          ))
         ) : (
           filteredIssues.map((issue, index) => (
             <IssueRow
@@ -216,7 +301,7 @@ export function IssueList({ result, isAnalyzing, onAnalyze, onLocate }: IssueLis
               issue={issue}
               onLocate={onLocate}
               suggestionLabel={t("issues.suggestion")}
-              locateLabel={t("issues.locate")}
+              locateLabel={t(fixLabelKey(issue.rule_id))}
             />
           ))
         )}

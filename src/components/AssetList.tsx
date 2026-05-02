@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
-import { Image, Edit3, X, List, LayoutGrid } from "lucide-react";
+import { Image, Edit3, X, List, LayoutGrid, Move, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
@@ -19,6 +19,23 @@ import { AssetListView } from "./AssetListView";
 import { AssetGalleryView } from "./AssetGalleryView";
 import type { AssetInfo, AssetType } from "../types/asset";
 
+/// Canonical asset-type order for the toolbar filter pills. Mirrors the
+/// CommandPalette's Filter section so the two entry points stay
+/// consistent. Types absent from `scanResult.type_counts` are skipped.
+const FILTER_TYPE_ORDER: AssetType[] = [
+  "texture",
+  "model",
+  "audio",
+  "video",
+  "animation",
+  "material",
+  "prefab",
+  "scene",
+  "script",
+  "data",
+  "other",
+];
+
 export function AssetList() {
   const { t } = useTranslation();
   const {
@@ -32,8 +49,10 @@ export function AssetList() {
     sortField,
     sortDirection,
     setSortField,
+    toggleSortDirection,
     gitStatuses,
     typeFilter,
+    setTypeFilter,
     searchQuery,
     selectedDirectory,
     refreshUndoState,
@@ -364,6 +383,26 @@ export function AssetList() {
               {t("assetList.batchRename", "Batch Rename")}
             </button>
             <button
+              onClick={() =>
+                setMoveCopyDialog({
+                  mode: "move",
+                  paths: Array.from(selectedPaths),
+                })
+              }
+              className="tc-batch-action"
+            >
+              <Move size={13} />
+              {t("assetList.move")}
+            </button>
+            <button
+              onClick={() => setDeleteDialogPaths(Array.from(selectedPaths))}
+              className="tc-batch-action"
+              data-danger="true"
+            >
+              <Trash2 size={13} />
+              {t("assetList.delete")}
+            </button>
+            <button
               onClick={clearSelection}
               className="tc-batch-action"
               title={t("assetList.clearSelection", "Clear selection")}
@@ -375,7 +414,48 @@ export function AssetList() {
 
         {/* View toolbar */}
         <div className="tc-main-toolbar">
+          <button
+            className="tc-pill"
+            data-active={typeFilter === null ? "true" : undefined}
+            onClick={() => setTypeFilter(null)}
+          >
+            {t("assetTypes.all")}
+            <span className="mono">{scanResult.total_count}</span>
+          </button>
+          {FILTER_TYPE_ORDER.filter(
+            (type) => (scanResult.type_counts[type] ?? 0) > 0
+          ).map((type) => (
+            <button
+              key={type}
+              className="tc-pill"
+              data-active={typeFilter === type ? "true" : undefined}
+              onClick={() => setTypeFilter(type)}
+            >
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  background: `var(--c-${type})`,
+                  display: "inline-block",
+                }}
+              />
+              {t(`assetTypes.${type}` as const)}
+              <span className="mono">{scanResult.type_counts[type]}</span>
+            </button>
+          ))}
           <span className="tc-toolbar-spacer" />
+          <button
+            className="tc-pill"
+            onClick={toggleSortDirection}
+            title={t("assetList.sortToggle")}
+          >
+            {t("assetList.sortLabel")}:{" "}
+            <strong style={{ color: "var(--text)", marginLeft: 4 }}>
+              {t(`columns.${sortField}` as const)}{" "}
+              {sortDirection === "asc" ? "↑" : "↓"}
+            </strong>
+          </button>
           <div className="tc-view-toggle">
             <button
               data-active={viewMode === "list" ? "true" : undefined}

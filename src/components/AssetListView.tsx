@@ -133,7 +133,7 @@ function ColumnResizeHandle({
     <div
       onMouseDown={onMouseDown}
       onClick={(e) => e.stopPropagation()}
-      className="absolute top-0 right-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/50 active:bg-primary z-10"
+      className="tc-col-resize"
       aria-hidden
     />
   );
@@ -154,6 +154,10 @@ interface AssetRowProps {
   assetTags: Tag[];
   visibleColumns: ColumnId[];
   columnWidths: Record<string, number>;
+  /// Max `vertex_count` across the visible dataset, used to scale the inline
+  /// `.tc-bar` viz for each row. 1 acts as a safe divisor when the column
+  /// has no models or no vertex data.
+  maxVertices: number;
   t: (key: string) => string;
 }
 
@@ -172,6 +176,7 @@ function AssetRow({
   assetTags,
   visibleColumns,
   columnWidths,
+  maxVertices,
   t,
 }: AssetRowProps) {
   const dimensions =
@@ -232,7 +237,10 @@ function AssetRow({
           />
         </div>
       )}
-      <div className="flex-1 py-2 px-3 min-w-0">
+      <div
+        className="py-2 px-3 shrink-0 min-w-0 overflow-hidden"
+        style={{ width: columnWidths.name }}
+      >
         <div className="tc-name-cell">
           <AssetIcon type={asset.asset_type} />
           <span className="tc-name">{asset.name}</span>
@@ -268,15 +276,39 @@ function AssetRow({
               </div>
             );
           }
+          if (columnId === "vertices") {
+            const count = asset.metadata?.vertex_count;
+            return (
+              <div
+                key={columnId}
+                className="py-2 px-3 text-text-secondary shrink-0 overflow-hidden truncate text-right font-mono text-xs"
+                style={{ width }}
+              >
+                {count != null ? (
+                  <>
+                    <span
+                      className="tc-bar"
+                      style={
+                        {
+                          ["--bar"]: `${Math.round((count / maxVertices) * 100)}%`,
+                        } as React.CSSProperties
+                      }
+                    />
+                    {count.toLocaleString()}
+                  </>
+                ) : (
+                  "-"
+                )}
+              </div>
+            );
+          }
           return (
             <div
               key={columnId}
               className={cn(
                 "py-2 px-3 text-text-secondary shrink-0 overflow-hidden truncate",
                 columnId !== "type" && "text-right",
-                (columnId === "dimensions" ||
-                  columnId === "vertices" ||
-                  columnId === "faces") &&
+                (columnId === "dimensions" || columnId === "faces") &&
                   "font-mono text-xs"
               )}
               style={{ width }}
@@ -397,6 +429,32 @@ export function AssetListView({
     return map;
   }, [columns]);
 
+  // Total intrinsic row width = sum of all visible columns + checkbox lane
+  // (when active) + the trailing ColumnConfigDropdown wrapper (~36px).
+  // Used to size the header and the virtualizer's spacer so the row can
+  // exceed the viewport horizontally — critical for column resize: with a
+  // shrink-0 layout, growing one column has to make total content wider,
+  // not push siblings around.
+  const totalRowWidth = useMemo(() => {
+    let sum = 0;
+    if (showCheckbox) sum += 32;
+    for (const id of visibleColumns) sum += columnWidths[id] ?? 0;
+    sum += 36; // ColumnConfigDropdown trailing slot
+    return sum;
+  }, [visibleColumns, columnWidths, showCheckbox]);
+
+  // Max vertex count across the dataset for the inline `.tc-bar` viz.
+  // Recomputed when assets change; for 10k+ rows this is a single pass
+  // and the result memoizes through React's normal flow.
+  const maxVertices = useMemo(() => {
+    let max = 0;
+    for (const a of assets) {
+      const v = a.metadata?.vertex_count;
+      if (v && v > max) max = v;
+    }
+    return max || 1;
+  }, [assets]);
+
   const virtualizer = useVirtualizer({
     count: assets.length,
     getScrollElement: () => parentRef.current,
@@ -407,18 +465,26 @@ export function AssetListView({
   const virtualItems = virtualizer.getVirtualItems();
 
   return (
-    <>
-      <div className="tc-list-header">
+    <div ref={parentRef} className="tc-list-scroll">
+      <div
+        className="tc-list-header"
+        style={{ width: totalRowWidth, minWidth: "100%" }}
+      >
         {showCheckbox && <div className="w-8 py-2 px-2 shrink-0" />}
         <div
-          className="flex-1 py-2 px-3 flex items-center gap-1 cursor-pointer hover:text-text-primary transition-colors select-none"
+          className="py-2 px-3 shrink-0 flex items-center gap-1 cursor-pointer hover:text-text-primary transition-colors select-none relative overflow-hidden"
+          style={{ width: columnWidths.name }}
           onClick={() => setSortField("name")}
         >
-          {t("columns.name")}
+          <span className="truncate">{t("columns.name")}</span>
           <SortIndicator
             field="name"
             currentField={sortField}
             direction={sortDirection}
+          />
+          <ColumnResizeHandle
+            columnId="name"
+            currentWidth={columnWidths.name}
           />
         </div>
         {visibleColumns
@@ -461,14 +527,14 @@ export function AssetListView({
         </div>
       </div>
 
-      <div ref={parentRef} className="tc-list-body">
-        <div
-          style={{
-            height: `${virtualizer.getTotalSize()}px`,
-            width: "100%",
-            position: "relative",
-          }}
-        >
+      <div
+        style={{
+          height: `${virtualizer.getTotalSize()}px`,
+          width: totalRowWidth,
+          minWidth: "100%",
+          position: "relative",
+        }}
+      >
           {virtualItems.map((virtualItem) => {
             const asset = assets[virtualItem.index];
             const gitStatus = gitStatuses[asset.path];
@@ -491,6 +557,7 @@ export function AssetListView({
                 assetTags={assetTags}
                 visibleColumns={visibleColumns}
                 columnWidths={columnWidths}
+                maxVertices={maxVertices}
                 t={t}
                 style={{
                   position: "absolute",
@@ -503,8 +570,7 @@ export function AssetListView({
               />
             );
           })}
-        </div>
       </div>
-    </>
+    </div>
   );
 }

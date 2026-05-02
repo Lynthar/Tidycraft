@@ -21,6 +21,7 @@
 
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 use crate::scanner::{AssetType, ScanResult};
 
@@ -31,6 +32,11 @@ pub struct TagGroup {
     pub file_paths: Vec<String>,
     pub confidence: f32,
     pub hint: String,
+    /// Up to `SAMPLE_FILENAMES` filename stems from `file_paths`, picked
+    /// alphabetically for stability. Lets the UI show "matched 14 files:
+    /// tree_*, bush_*, grass_*" without making the user click into the
+    /// preview to inspect.
+    pub samples: Vec<String>,
 }
 
 pub trait TagSuggester {
@@ -43,6 +49,7 @@ const MIN_TOKEN_HITS: usize = 3;
 const MIN_DIM_HITS: usize = 5;
 const MIN_PATH_HITS: usize = 3;
 const MAX_GROUPS: usize = 12;
+const SAMPLE_FILENAMES: usize = 3;
 
 const HINT_FILENAME: &str = "filename token";
 const HINT_DIMENSION: &str = "dimension";
@@ -293,6 +300,18 @@ impl TagSuggester for HeuristicSuggester {
                 let count = paths.len();
                 let mut file_paths: Vec<String> = paths.into_iter().collect();
                 file_paths.sort();
+                let samples: Vec<String> = file_paths
+                    .iter()
+                    .take(SAMPLE_FILENAMES)
+                    .map(|p| {
+                        // Filename only — full paths are noisy in tight UI.
+                        Path::new(p)
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or(p)
+                            .to_string()
+                    })
+                    .collect();
                 let confidence = ((count as f32) / total).min(1.0);
                 let color = pick_color(&name);
                 TagGroup {
@@ -301,6 +320,7 @@ impl TagSuggester for HeuristicSuggester {
                     file_paths,
                     confidence,
                     hint,
+                    samples,
                 }
             })
             .collect();
