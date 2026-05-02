@@ -111,6 +111,30 @@ export function IssueList({ result, isAnalyzing, onAnalyze, onLocate }: IssueLis
   const [filter, setFilter] = useState<Severity | "all">("all");
   const [groupByRule, setGroupByRule] = useState(false);
 
+  // All hooks must run before any early-return so React's hook order stays
+  // stable across the (no-result / analyzing / has-result) branches below.
+  // Both memos no-op gracefully when `result` is null.
+  const filteredIssues = useMemo(() => {
+    if (!result) return [];
+    return filter === "all"
+      ? result.issues
+      : result.issues.filter((i) => i.severity === filter);
+  }, [result, filter]);
+
+  // Group by rule_id when toggle is on. Groups sort by rule_id ascending so
+  // the order is stable across renders. Within a group, issues keep their
+  // original order (which already matches severity → rule order).
+  const groups = useMemo(() => {
+    if (!groupByRule) return null;
+    const map = new Map<string, Issue[]>();
+    for (const issue of filteredIssues) {
+      const list = map.get(issue.rule_id) ?? [];
+      list.push(issue);
+      map.set(issue.rule_id, list);
+    }
+    return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [groupByRule, filteredIssues]);
+
   if (!result && !isAnalyzing) {
     return (
       <div className="tc-issues">
@@ -138,23 +162,6 @@ export function IssueList({ result, isAnalyzing, onAnalyze, onLocate }: IssueLis
   }
 
   if (!result) return null;
-
-  const filteredIssues =
-    filter === "all" ? result.issues : result.issues.filter((i) => i.severity === filter);
-
-  // Group by rule_id when toggle is on. Groups sort by rule_id ascending so
-  // the order is stable across renders. Within a group, issues keep their
-  // original order (which already matches severity → rule order).
-  const groups = useMemo(() => {
-    if (!groupByRule) return null;
-    const map = new Map<string, Issue[]>();
-    for (const issue of filteredIssues) {
-      const list = map.get(issue.rule_id) ?? [];
-      list.push(issue);
-      map.set(issue.rule_id, list);
-    }
-    return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-  }, [groupByRule, filteredIssues]);
 
   const handleExport = async () => {
     if (!activeProjectId) return;
