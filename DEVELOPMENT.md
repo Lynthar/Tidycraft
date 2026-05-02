@@ -1,12 +1,12 @@
-# Contributing to Tidycraft
+# Tidycraft Developer Guide
 
 Welcome. This guide is for anyone extending Tidycraft — whether you're fixing
 a bug, adding a feature, or forking the project. It aims to give you enough
 context to read the codebase productively within an hour.
 
 For the user-facing introduction, see [README.md](README.md) /
-[README.zh-CN.md](README.zh-CN.md). For the active visual-redesign roadmap,
-see [REDESIGN.md](REDESIGN.md). For pre-redesign history, use `git log`.
+[README.zh-CN.md](README.zh-CN.md). The README's "Roadmap" section tracks
+shipped features and the backlog. For change history, use `git log`.
 
 ---
 
@@ -66,7 +66,7 @@ pnpm install              # first time
 pnpm tauri dev            # full app; Vite HMR for frontend, cargo rebuild on Rust changes
 pnpm build                # tsc + vite build (frontend typecheck + bundle)
 cd src-tauri
-cargo test --lib          # 70+ unit tests
+cargo test --lib          # ~100 unit tests
 cargo check               # fast Rust typecheck without binary
 ```
 
@@ -162,16 +162,27 @@ The frontend and backend communicate exclusively through two mechanisms:
   analysisResult, UI state) is rebuilt by re-running `openProject` at boot.
   Internal `restored` guard prevents React strict-mode double-restore.
 - **`stores/uiStore.ts`** — Transient overlay flags (`cmdkOpen`,
-  `settingsOpen`, `tagManagerOpen`). Global store, not App-level state, so
-  `CommandPalette` can open Settings / TagManager without prop drilling.
-  Distinct from `settingsStore` (which holds persisted user preferences).
-- Other global stores: `settingsStore`, `themeStore`, `columnStore`,
-  `searchHistoryStore`.
+  `settingsOpen`, `tagManagerOpen`, `aiPanelOpen`). Global store, not
+  App-level state, so `CommandPalette` can open Settings / TagManager /
+  AITagPanel without prop drilling. Distinct from `settingsStore` (which
+  holds persisted user preferences).
+- **`stores/selectionStore.ts`** — Multi-selection (`selectedPaths`) lifted
+  out of AssetList so non-list components (e.g. AITagPanel's Preview action)
+  can drive it. Auto-clears on active-project change.
+- **`stores/columnStore.ts`** — Persistent list-view column visibility +
+  widths + `viewMode: 'list' | 'grid'`. Versioned (currently v4) with a
+  migrate function so layout changes don't lose user customization.
+- Other global stores: `settingsStore`, `themeStore`, `searchHistoryStore`.
 - **`components/`** — Flat layout, one component per file, no barrel exports.
-  `AssetList` is the virtualized file list (the central UI). `ContextMenu` +
-  dialogs (`RenameDialog`, `BatchRenameDialog`, `DeleteConfirmDialog`,
-  `MoveCopyDialog`) handle operations. `ModelViewer3D` / `ModelLightbox` do
-  3D preview via Three.js. Dialog pattern: the parent owns a nullable state
+  `AssetList` is the parent shell that owns selection / dialogs and
+  dispatches between `AssetListView` (virtualized list) and
+  `AssetGalleryView` (virtualized card grid) based on `columnStore.viewMode`.
+  `ContextMenu` + dialogs (`RenameDialog`, `BatchRenameDialog`,
+  `DeleteConfirmDialog`, `MoveCopyDialog`) handle operations.
+  `CommandPalette` is a hand-rolled four-section ⌘K (Suggestions / Navigate /
+  Filter / Resources / Actions). `AITagPanel` is the heuristic tag-suggest
+  overlay anchored top-left. `ModelViewer3D` / `ModelLightbox` do 3D
+  preview via Three.js. Dialog pattern: the parent owns a nullable state
   object (`{ mode, paths }` or `paths | null`), renders the dialog
   conditionally, passes `onClose` and `onDone` callbacks.
 - **`lib/modelUrlResolver.ts`** — Builds a Three.js `LoadingManager` URL
@@ -301,11 +312,11 @@ pass values via the second arg to `t()`:
 
 ## 6. Testing
 
-**Rust side:** `cargo test --lib` from `src-tauri/`. Currently 70+ tests
-across `scanner`, `analyzer`, `watcher`, `undo`, `tags`, `unity`, `unreal`,
-`godot`, `cache`. Aim to add tests for new parsers and pure functions. Skip
-integration tests that spawn the full Tauri runtime — the payoff isn't worth
-the complexity.
+**Rust side:** `cargo test --lib` from `src-tauri/`. Currently ~100 tests
+across `scanner`, `analyzer` (incl. `tag_suggest`), `watcher`, `undo`,
+`tags`, `unity`, `unreal`, `godot`, `cache`. Aim to add tests for new
+parsers and pure functions. Skip integration tests that spawn the full
+Tauri runtime — the payoff isn't worth the complexity.
 
 **Frontend side:** no test runner currently. `pnpm build` runs `tsc`, which
 is the only TS gate. If you introduce non-trivial component logic, consider
@@ -333,31 +344,28 @@ Windows and at least one POSIX target.
   error we only log to stderr.
 - **macOS code signing.** Distribution requires Developer ID signature +
   notarization. Not set up yet.
-- **Keyboard shortcuts display.** `useKeyboardShortcuts` handles both
-  `ctrlKey` and `metaKey` for detection, but the `SHORTCUTS` display table
-  hardcodes `"Ctrl"`. macOS users see incorrect labels. Low priority.
+- **Keyboard shortcuts display.** Detection in `useKeyboardShortcuts`
+  honors both `ctrlKey` and `metaKey`, so shortcuts work on every OS.
+  Display is split: `CommandPalette` hard-codes `⌘`/`⇧` glyphs (correct on
+  macOS, slightly off on Windows), while `Header` tooltips and `Sidebar`
+  Run Analysis hint use `formatShortcut(SHORTCUTS.x)` which still produces
+  `"Ctrl+X"` form. Low priority — make the helper platform-aware before
+  shipping a Windows beta.
 
 ---
 
 ## 8. Contribution Workflow
 
-1. **Read `REDESIGN.md`** before starting. It tracks the active visual-
-   redesign phases and the locked design decisions; the phase table tells
-   you what's in flight and what's on deck.
-2. **Pick a task** from the phase table, an open issue, or the README's
-   "Backlog" section. For larger work, open an issue first to discuss scope.
-3. **Follow the existing style.** Rust: `rustfmt` defaults. TS: match nearby
+1. **Pick a task** from an open issue or the README's "Backlog" section.
+   For larger work, open an issue first to discuss scope.
+2. **Follow the existing style.** Rust: `rustfmt` defaults. TS: match nearby
    files. Prefer editing existing files to creating new abstractions.
-4. **Commit in focused chunks.** One-line subject, blank line, a short body
+3. **Commit in focused chunks.** One-line subject, blank line, a short body
    explaining **why** (the what is in the diff). Group related changes;
    don't bundle unrelated work.
-5. **Update `REDESIGN.md`** when you finish or reprioritize a phase:
-   - Update the phase-status table.
-   - Add a dated note under the relevant phase section recording *改动
-     (what changed)*, *为什么 (why)*, and *影响面 (blast radius / caveats)*.
-6. **Verify locally** before pushing: `cargo test --lib`, `pnpm build`, and a
+4. **Verify locally** before pushing: `cargo test --lib`, `pnpm build`, and a
    quick `pnpm tauri dev` sanity check.
-7. **Open the PR** with a summary that mirrors the commit body.
+5. **Open the PR** with a summary that mirrors the commit body.
 
 ---
 
@@ -367,19 +375,34 @@ Windows and at least one POSIX target.
 tidycraft/
 ├── src/                              # React frontend
 │   ├── components/                   # UI (flat, one per file)
+│   │   ├── AssetList.tsx             # Parent shell: dispatches list/grid + owns dialogs
+│   │   ├── AssetListView.tsx         # Virtualized list view (column resize, sort, sticky header)
+│   │   ├── AssetGalleryView.tsx      # Virtualized card grid view
+│   │   ├── AssetPreview.tsx          # Right-pane preview (image/3D/audio/video)
+│   │   ├── CommandPalette.tsx        # ⌘K — Suggestions/Navigate/Filter/Resources/Actions
+│   │   ├── AITagPanel.tsx            # Heuristic tag-suggest overlay
+│   │   ├── SettingsModal.tsx         # Appearance / Git / Maintenance sections
+│   │   └── …                         # Dialogs, Header, Sidebar, etc.
 │   ├── stores/                       # Zustand state
-│   │   ├── projectStore.ts           # Multi-project hub
+│   │   ├── projectStore.ts           # Multi-project hub (mirror fields for active)
 │   │   ├── tagsStore.ts              # Follows active project
+│   │   ├── selectionStore.ts         # Multi-select paths (lifted from AssetList)
 │   │   ├── sessionStore.ts           # Cross-session restore (paths only)
-│   │   └── uiStore.ts                # Transient modal flags (cmdkOpen, etc.)
+│   │   ├── uiStore.ts                # Transient modal flags (cmdkOpen, aiPanelOpen, …)
+│   │   ├── columnStore.ts            # Persistent list cols + viewMode (versioned)
+│   │   ├── settingsStore.ts          # Persistent user prefs (Git display toggles)
+│   │   ├── themeStore.ts             # dark / light / system + matchMedia listener
+│   │   └── searchHistoryStore.ts     # Recent search queries
 │   ├── styles/                       # globals.css + redesign-tokens(/-v2) + redesign-components
 │   ├── types/asset.ts                # TS mirrors of Rust structs
 │   ├── lib/                          # Shared utilities
-│   ├── hooks/                        # React hooks
+│   ├── hooks/                        # React hooks (useKeyboardShortcuts)
 │   ├── i18n/locales/                 # en.json + zh.json
 │   ├── main.tsx                      # React entry, imports global CSS
 │   └── App.tsx
 ├── src-tauri/                        # Rust backend
+│   ├── capabilities/default.json     # Tauri 2 capability declarations
+│   ├── tauri.conf.json               # Window config, bundle id, asset protocol scope
 │   └── src/
 │       ├── lib.rs                    # All #[tauri::command] functions
 │       ├── project.rs                # Per-project state registry
@@ -388,16 +411,21 @@ tidycraft/
 │       ├── cache.rs                  # Disk scan cache
 │       ├── analyzer/
 │       │   ├── mod.rs                # Analyzer / Issue / Severity
+│       │   ├── tag_suggest.rs        # Heuristic tag suggester (filename / dim / path)
 │       │   └── rules/                # Rule implementations
 │       ├── unity.rs                  # Unity YAML parsers
-│       ├── unreal.rs                 # .uproject parser
-│       ├── godot.rs                  # project.godot parser
+│       ├── unreal.rs                 # .uproject parser (deep-integration stubs)
+│       ├── godot.rs                  # project.godot parser (deep-integration stubs)
 │       ├── tags.rs                   # Tag system
 │       ├── undo.rs                   # Undo manager
 │       ├── git/mod.rs                # libgit2 wrapper
-│       └── thumbnail.rs              # Image thumbnail generation
-├── REDESIGN.md                       # Visual redesign phase tracker
-├── CONTRIBUTING.md                   # This file
-├── README.md / README.zh-CN.md       # User-facing docs
-└── tidycraft.toml                    # Optional user config (see README)
+│       └── thumbnail.rs              # Image thumbnail generation + cache
+├── examples/                         # User-copyable starter configs
+│   └── tidycraft.example.toml        # Annotated sample rule config
+├── docs/                             # Non-essential / archival docs
+├── docs/                             # Auxiliary docs + screenshots/
+│   └── screenshots/                  # README image assets
+├── CLAUDE.md                         # Claude Code project instructions
+├── DEVELOPMENT.md                    # This file
+└── README.md / README.zh-CN.md       # User-facing docs
 ```
