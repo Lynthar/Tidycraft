@@ -176,37 +176,44 @@ pnpm tauri build
 
 ## ⚙️ 配置说明
 
-在项目根目录创建 `tidycraft.toml` 文件：
+把 `tidycraft.toml` 放到项目根目录，下次 Run Analysis 会自动加载。侧边栏的 **运行分析** 按钮上会出现一个小圆点提示当前使用了自定义规则。
+
+可用的样例文件：[`examples/tidycraft.example.toml`](examples/tidycraft.example.toml) —— 复制到你的项目根目录、改名为 `tidycraft.toml`，按需调整即可。字段速查：
 
 ```toml
 [naming]
-check_forbidden_chars = true
-forbidden_chars = ['<', '>', ':', '"', '|', '?', '*']
-check_chinese = true
-check_prefix = false
-required_prefix = "tex_"
+enabled = true
+forbidden_chars = ['<', '>', ':', '"', '|', '?', '*', '/', '\']
+forbid_chinese = true
+max_length = 64
+texture_prefix = "T_"      # 可选
+model_prefix = "SM_"       # 可选
+audio_prefix = "A_"        # 可选
+case_style = "snake_case"  # any | snake_case | kebab-case | PascalCase | camelCase
 
 [texture]
-check_pot = true
-check_max_size = true
-max_width = 4096
-max_height = 4096
+enabled = true
+require_pot = true
+max_size = 4096            # 像素
+min_size = 4               # 像素
+warn_non_square = false
+max_file_size = 10_485_760 # 字节
 
 [model]
-check_vertex_count = true
-max_vertices = 100000
-check_face_count = true
-max_faces = 50000
+enabled = true
+max_vertices = 100_000
+max_faces = 100_000
+max_materials = 10
 
 [audio]
-check_sample_rate = true
-allowed_sample_rates = [44100, 48000]
-check_duration = true
-max_duration_secs = 300.0
-
-[duplicate]
 enabled = true
+allowed_sample_rates = [44_100, 48_000]
+max_sfx_duration = 30.0    # 秒
+max_file_size = 20_971_520 # 字节
+prefer_mono_for_sfx = false
 ```
+
+任何字段都可省略，缺失的字段会回退到默认值。
 
 ---
 
