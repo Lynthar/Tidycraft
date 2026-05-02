@@ -23,13 +23,13 @@
 
 **Grid view** — virtualized cards with on-demand thumbnails, 3D preview pane, and the AI-suggested tag applied to matching assets.
 
-<img src="Screenshot/grid-view.png" alt="Tidycraft grid view" width="85%">
+<img src="docs/screenshots/grid-view.png" alt="Tidycraft grid view" width="85%">
 
 <br><br>
 
 **List view** — type-filter pills, sort pill, resizable columns with a vertex-count mini bar, sticky header.
 
-<img src="Screenshot/list-view.png" alt="Tidycraft list view" width="85%">
+<img src="docs/screenshots/list-view.png" alt="Tidycraft list view" width="85%">
 
 </div>
 
