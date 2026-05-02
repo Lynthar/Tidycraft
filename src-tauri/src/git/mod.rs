@@ -73,6 +73,7 @@ impl GitManager {
     }
 
     /// Check if this is a git repository
+    #[allow(dead_code)]
     pub fn is_repo(&self) -> bool {
         self.repo.is_some()
     }
@@ -191,6 +192,7 @@ impl GitManager {
     }
 
     /// Check if a path should be ignored according to .gitignore
+    #[allow(dead_code)]
     pub fn is_ignored(&self, path: &Path) -> bool {
         let Some(repo) = &self.repo else {
             return false;
@@ -205,6 +207,7 @@ impl GitManager {
     }
 
     /// Clear the status cache
+    #[allow(dead_code)]
     pub fn clear_cache(&mut self) {
         self.status_cache.clear();
     }

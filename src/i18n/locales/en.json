@@ -19,7 +19,8 @@
     "stats": "Stats",
     "runAnalysis": "Run Analysis",
     "analyzing": "Analyzing...",
-    "explorer": "Explorer"
+    "explorer": "Explorer",
+    "customConfigLoaded": "Using custom rules from tidycraft.toml"
   },
   "assetTypes": {
     "all": "All Types",

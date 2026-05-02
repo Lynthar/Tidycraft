@@ -3,6 +3,11 @@
 //! 解析 project.godot 配置文件，提取项目信息。
 //! 为未来完整的 .tscn/.tres 解析预留扩展接口。
 
+// Several types/functions here (resource classification, etc.) are kept as
+// stubs for the planned Godot deep-integration; the lib doesn't expose them
+// yet. Allow at module scope so we don't sprinkle individual attributes.
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;

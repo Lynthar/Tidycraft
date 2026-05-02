@@ -64,6 +64,10 @@ export interface ProjectData {
   advancedFilters: AdvancedFilters;
   gitInfo: GitInfo | null;
   gitStatuses: GitStatusMap;
+  /// True when this project root contains a `tidycraft.toml`. Surfaced in
+  /// the UI (Sidebar Run Analysis button) so users know whether the next
+  /// analysis will use custom rules or fall back to defaults.
+  hasCustomConfig: boolean;
 }
 
 const createDefaultProjectData = (id: string, path: string): ProjectData => ({
@@ -93,6 +97,7 @@ const createDefaultProjectData = (id: string, path: string): ProjectData => ({
   },
   gitInfo: null,
   gitStatuses: {},
+  hasCustomConfig: false,
 });
 
 const generateProjectId = (): string => {
@@ -131,6 +136,7 @@ interface ProjectState {
   advancedFilters: AdvancedFilters;
   gitInfo: GitInfo | null;
   gitStatuses: GitStatusMap;
+  hasCustomConfig: boolean;
 
   // Multi-project actions
   openProject: (path: string, options?: { force?: boolean }) => Promise<void>;
@@ -209,6 +215,7 @@ const updateActiveProject = (
   if ('advancedFilters' in updates) result.advancedFilters = updates.advancedFilters ?? state.advancedFilters;
   if ('gitInfo' in updates) result.gitInfo = updates.gitInfo ?? null;
   if ('gitStatuses' in updates) result.gitStatuses = updates.gitStatuses ?? {};
+  if ('hasCustomConfig' in updates) result.hasCustomConfig = updates.hasCustomConfig ?? false;
 
   return result;
 };
@@ -242,6 +249,7 @@ const syncFromActiveProject = (project: ProjectData | undefined): Partial<Projec
       },
       gitInfo: null,
       gitStatuses: {},
+      hasCustomConfig: false,
     };
   }
 
@@ -263,6 +271,7 @@ const syncFromActiveProject = (project: ProjectData | undefined): Partial<Projec
     advancedFilters: project.advancedFilters,
     gitInfo: project.gitInfo,
     gitStatuses: project.gitStatuses,
+    hasCustomConfig: project.hasCustomConfig,
   };
 };
 
@@ -355,6 +364,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
   gitInfo: null,
   gitStatuses: {},
+  hasCustomConfig: false,
 
   // Multi-project actions
   openProject: async (rawPath: string, options?: { force?: boolean }) => {
@@ -438,6 +448,19 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         { projectId, path }
       );
 
+      // Probe for a project-local `tidycraft.toml` so the UI can flag
+      // whether the next analysis will use custom rules. Best-effort —
+      // failure just means we'll fall back to defaults at analyze time.
+      let hasCustomConfig = false;
+      try {
+        const cfg = await invoke<string | null>("read_project_config", {
+          projectId,
+        });
+        hasCustomConfig = cfg !== null;
+      } catch (err) {
+        console.warn("Failed to probe tidycraft.toml:", err);
+      }
+
       // Apply scan result to the project that owns it (not necessarily active).
       const state = get();
       const target = state.projects.get(projectId);
@@ -449,6 +472,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           selectedDirectory: path,
           selectedAsset: null,
           scanProgress: null,
+          hasCustomConfig,
         };
         const newMap = new Map(state.projects);
         newMap.set(projectId, updated);
@@ -593,21 +617,38 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!activeProjectId) return;
     set(updateActiveProject(get(), { isAnalyzing: true }));
 
+    // Re-read config at click time (not just at scan-complete) so users
+    // can edit `tidycraft.toml` and re-run without rescanning. IO failure
+    // falls back to defaults silently — `analyze_assets` will surface
+    // toml *parse* errors via the normal error path.
+    let configToml: string | null = null;
+    let hasCustomConfig = false;
+    try {
+      configToml = await invoke<string | null>("read_project_config", {
+        projectId: activeProjectId,
+      });
+      hasCustomConfig = configToml !== null;
+    } catch (err) {
+      console.warn("Failed to read tidycraft.toml; using defaults:", err);
+    }
+
     try {
       const result = await invoke<AnalysisResult>("analyze_assets", {
         projectId: activeProjectId,
-        configToml: null,
+        configToml,
       });
       set(updateActiveProject(get(), {
         analysisResult: result,
         isAnalyzing: false,
         viewMode: "issues",
+        hasCustomConfig,
       }));
     } catch (err) {
       console.error("Failed to analyze:", err);
       set(updateActiveProject(get(), {
         error: String(err),
         isAnalyzing: false,
+        hasCustomConfig,
       }));
     }
   },

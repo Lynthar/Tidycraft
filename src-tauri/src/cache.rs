@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use crate::scanner::{AssetInfo, ScanResult};
+use crate::scanner::AssetInfo;
 
 /// Cache entry for a single file
 #[derive(Debug, Clone, Serialize, Deserialize)]

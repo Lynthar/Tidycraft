@@ -14,6 +14,7 @@ export function Sidebar() {
     analysisResult,
     isAnalyzing,
     runAnalysis,
+    hasCustomConfig,
   } = useProjectStore();
 
   const issueCount = analysisResult?.issue_count ?? 0;
@@ -68,7 +69,11 @@ export function Sidebar() {
             onClick={runAnalysis}
             disabled={isAnalyzing}
             className="tc-run-btn"
-            title={`${t("sidebar.runAnalysis")} (${formatShortcut(SHORTCUTS.analyze)})`}
+            title={
+              hasCustomConfig
+                ? `${t("sidebar.runAnalysis")} (${formatShortcut(SHORTCUTS.analyze)}) — ${t("sidebar.customConfigLoaded")}`
+                : `${t("sidebar.runAnalysis")} (${formatShortcut(SHORTCUTS.analyze)})`
+            }
           >
             {isAnalyzing ? (
               <span
@@ -80,6 +85,21 @@ export function Sidebar() {
               <Play size={13} />
             )}
             {isAnalyzing ? t("sidebar.analyzing") : t("sidebar.runAnalysis")}
+            {hasCustomConfig && !isAnalyzing && (
+              <span
+                aria-hidden
+                title={t("sidebar.customConfigLoaded")}
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: "50%",
+                  background: "var(--on-primary)",
+                  boxShadow:
+                    "0 0 0 2px color-mix(in oklch, var(--on-primary) 25%, transparent)",
+                  display: "inline-block",
+                }}
+              />
+            )}
             {!isAnalyzing && (
               <span className="mono">{formatShortcut(SHORTCUTS.analyze)}</span>
             )}

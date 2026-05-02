@@ -10,7 +10,10 @@ use crate::analyzer::Issue;
 use crate::scanner::AssetInfo;
 use serde::{Deserialize, Serialize};
 
-/// Trait for all analysis rules
+/// Trait for all analysis rules. `id` and `name` are part of the public
+/// interface for future diagnostics output (UI grouping, error messages)
+/// even though no caller in lib.rs reads them yet.
+#[allow(dead_code)]
 pub trait Rule: Send + Sync {
     /// Unique identifier for the rule
     fn id(&self) -> &str;
