@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { DirectoryTree } from "./DirectoryTree";
 import { TagFilterPanel } from "./TagFilterPanel";
 import { useProjectStore } from "../stores/projectStore";
+import { formatShortcut, SHORTCUTS } from "../hooks/useKeyboardShortcuts";
 
 export function Sidebar() {
   const { t } = useTranslation();
@@ -67,9 +68,21 @@ export function Sidebar() {
             onClick={runAnalysis}
             disabled={isAnalyzing}
             className="tc-run-btn"
+            title={`${t("sidebar.runAnalysis")} (${formatShortcut(SHORTCUTS.analyze)})`}
           >
-            <Play size={13} />
+            {isAnalyzing ? (
+              <span
+                className="tc-spinner"
+                style={{ borderTopColor: "var(--on-primary)" }}
+                aria-hidden
+              />
+            ) : (
+              <Play size={13} />
+            )}
             {isAnalyzing ? t("sidebar.analyzing") : t("sidebar.runAnalysis")}
+            {!isAnalyzing && (
+              <span className="mono">{formatShortcut(SHORTCUTS.analyze)}</span>
+            )}
           </button>
         </div>
       )}

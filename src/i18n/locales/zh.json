@@ -47,10 +47,14 @@
     "selectAll": "全选",
     "deselectAll": "取消全选",
     "batchRename": "批量重命名",
+    "move": "移动",
+    "delete": "删除",
     "clearSelection": "清除选择",
     "viewList": "列表视图",
     "viewGrid": "网格视图",
-    "galleryPending": "网格视图即将上线 — 这里会显示 {{count}} 个资产。"
+    "galleryPending": "网格视图即将上线 — 这里会显示 {{count}} 个资产。",
+    "sortLabel": "排序",
+    "sortToggle": "切换排序方向"
   },
   "batchRename": {
     "title": "批量重命名",
@@ -128,10 +132,10 @@
     "error": "错误",
     "total": "总计",
     "assets": "个资产",
-    "showing": "显示",
-    "textures": "纹理",
-    "models": "模型",
-    "audio": "音频"
+    "connected": "已连接",
+    "syncing": "同步中",
+    "retry": "重试",
+    "dismiss": "忽略"
   },
   "scanPhase": {
     "discovering": "发现文件中",
@@ -153,20 +157,44 @@
     "warnings": "警告",
     "info": "提示",
     "noIssues": "未发现问题！",
-    "noFilteredIssues": "没有{{filter}}类型的问题"
+    "noFilteredIssues": "没有{{filter}}类型的问题",
+    "groupByRule": "按规则分组",
+    "export": "导出…",
+    "fix": {
+      "locate": "定位",
+      "rename": "重命名",
+      "resize": "调整尺寸",
+      "decimate": "简化网格",
+      "review": "查看"
+    }
   },
   "settings": {
     "title": "设置",
     "language": "语言",
     "english": "英语",
     "chinese": "中文",
+    "appearanceSection": "外观",
+    "theme": "主题",
+    "themeDark": "深色",
+    "themeLight": "浅色",
+    "themeSystem": "跟随系统",
     "gitSection": "Git",
     "showBranchInfo": "显示分支信息",
     "showBranchInfoDesc": "在标题栏显示当前分支名称",
     "showAheadBehind": "显示领先/落后",
     "showAheadBehindDesc": "显示与远程仓库的提交差异",
     "showGitStatusIndicators": "显示文件状态",
-    "showGitStatusIndicatorsDesc": "在文件上显示 Git 状态标记"
+    "showGitStatusIndicatorsDesc": "在文件上显示 Git 状态标记",
+    "maintenanceSection": "维护",
+    "thumbnailCache": "缩略图缓存",
+    "cacheSize": "占用磁盘 {{size}}",
+    "cacheSizeUnknown": "无法读取缓存大小",
+    "undoHistory": "撤销历史",
+    "undoEntries_one": "已记录 {{count}} 次操作",
+    "undoEntries_other": "已记录 {{count}} 次操作",
+    "undoNoProject": "暂无活动项目",
+    "clear": "清除",
+    "clearing": "清除中…"
   },
   "stats": {
     "noData": "暂无数据",
@@ -316,6 +344,7 @@
     "section": {
       "suggestions": "推荐",
       "navigate": "导航",
+      "filter": "筛选",
       "resources": "资源",
       "actions": "操作"
     },
@@ -332,6 +361,10 @@
       "goIssues": "前往问题",
       "goStats": "前往统计",
       "switchTo": "切换到 {{name}}",
+      "filterBy": "仅显示：{{type}}",
+      "filterCount_one": "{{count}} 个资产",
+      "filterCount_other": "{{count}} 个资产",
+      "clearFilter": "清除筛选",
       "manageTags": "管理标签",
       "suggestTags": "推荐标签",
       "switchToLight": "切换到浅色主题",

@@ -91,8 +91,9 @@ export function ProjectSwitcher() {
     [closeProject]
   );
 
-  // Engine is only known for the *active* project's scanResult; other
-  // entries fall back to "generic" until we have a richer per-project cache.
+  // Each entry's engine now comes from its own scanResult via getProjectList;
+  // the trigger button still pulls from the active project's scanResult
+  // (same data, kept for backward-compat with the trigger render below).
   const activeEngine = scanResult?.project_type;
   const triggerLabel =
     activeProject?.name ?? t("projects.selectProject", "Select project");
@@ -131,7 +132,7 @@ export function ProjectSwitcher() {
           {projects.length > 0 ? (
             <div className="tc-projmenu-list">
               {projects.map((p) => {
-                const engine = p.isActive ? activeEngine : undefined;
+                const engine = p.engine ?? undefined;
                 const engineKey = (engine ?? "generic") as
                   | "unity"
                   | "unreal"
@@ -179,6 +180,22 @@ export function ProjectSwitcher() {
                       {engine && engine !== "generic" && (
                         <span className="tc-proj-type" data-engine={engine}>
                           {engine.toUpperCase()}
+                        </span>
+                      )}
+                      {p.assetCount !== null && (
+                        <span className="tc-projmenu-assets mono">
+                          {p.assetCount}
+                        </span>
+                      )}
+                      {p.issueCount !== null && p.issueCount > 0 && (
+                        <span
+                          className="tc-projmenu-iss"
+                          title={t("projects.issuesCount", {
+                            defaultValue: "{{count}} issues",
+                            count: p.issueCount,
+                          })}
+                        >
+                          {p.issueCount}
                         </span>
                       )}
                       <button

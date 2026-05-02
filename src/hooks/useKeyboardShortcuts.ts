@@ -92,8 +92,10 @@ export function useKeyboardShortcuts({ onOpenFolder, onFocusSearch }: KeyboardSh
         return;
       }
 
-      // Ctrl/Cmd + Shift + A: Run analysis
-      if (modKey && shiftKey && key.toLowerCase() === "a") {
+      // Ctrl/Cmd + Shift + R: Run analysis. Note ⌘R alone is rescan; the
+      // shift modifier disambiguates. Old binding was ⌘⇧A but that collides
+      // with Select All in many text contexts.
+      if (modKey && shiftKey && key.toLowerCase() === "r") {
         if (projectPath && !isScanning) {
           event.preventDefault();
           runAnalysis();
@@ -112,17 +114,21 @@ export function useKeyboardShortcuts({ onOpenFolder, onFocusSearch }: KeyboardSh
         return;
       }
 
-      // 1, 2, 3: Switch view modes (only when not in input)
-      if (!modKey && !shiftKey) {
+      // Ctrl/Cmd + 1/2/3: Switch view modes. The mod key avoids stealing
+      // bare digit keys from inputs and matches the design mock's labelling.
+      if (modKey && !shiftKey) {
         if (key === "1") {
+          event.preventDefault();
           setViewMode("assets");
           return;
         }
         if (key === "2") {
+          event.preventDefault();
           setViewMode("issues");
           return;
         }
         if (key === "3") {
+          event.preventDefault();
           setViewMode("stats");
           return;
         }
@@ -156,12 +162,12 @@ export const SHORTCUTS = {
   openFolder: { key: "O", modifier: "Ctrl" },
   search: { key: "F", modifier: "Ctrl" },
   rescan: { key: "R", modifier: "Ctrl" },
-  analyze: { key: "A", modifier: "Ctrl+Shift" },
+  analyze: { key: "R", modifier: "Ctrl+Shift" },
   commandPalette: { key: "K", modifier: "Ctrl" },
   escape: { key: "Esc", modifier: "" },
-  viewAssets: { key: "1", modifier: "" },
-  viewIssues: { key: "2", modifier: "" },
-  viewStats: { key: "3", modifier: "" },
+  viewAssets: { key: "1", modifier: "Ctrl" },
+  viewIssues: { key: "2", modifier: "Ctrl" },
+  viewStats: { key: "3", modifier: "Ctrl" },
 } as const;
 
 export function formatShortcut(shortcut: { key: string; modifier: string }): string {

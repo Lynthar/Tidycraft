@@ -13,6 +13,7 @@ interface TagGroup {
   file_paths: string[];
   confidence: number;
   hint: string;
+  samples: string[];
 }
 
 /// Map the Rust-side hint string to an i18n key. Backend uses fixed English
@@ -208,6 +209,14 @@ export function AITagPanel() {
                   {hintKey && (
                     <div className="tc-aitag-card-hint">
                       {t(hintKey)}
+                      {group.samples.length > 0 && (
+                        <>
+                          {" · "}
+                          {group.samples.join(", ")}
+                          {group.file_paths.length > group.samples.length &&
+                            ` …`}
+                        </>
+                      )}
                     </div>
                   )}
                   <div className="tc-aitag-card-actions">
