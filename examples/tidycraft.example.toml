@@ -1,0 +1,58 @@
+# tidycraft.example.toml — 测试用 / sample config
+#
+# 把这份文件复制到你想测试的项目根目录并重命名为 `tidycraft.toml`，
+# 下次 Run Analysis 会自动加载（侧边栏运行按钮上会出现一个琥珀色小点
+# 提示 "Using custom rules from tidycraft.toml"）。
+#
+# 这份示例故意把阈值设得比默认更严格，方便对照"加载前/后" issue 数量
+# 的变化。每段都注释了对应的默认值。
+#
+# 任何字段都可省略 —— 缺失的字段会回退到默认值。
+
+[naming]
+enabled = true
+# Default: ['<', '>', ':', '"', '|', '?', '*', '/', '\\', '\0']
+# 加上空格让现实项目里"floor color.png"这种命名也被点出来。
+forbidden_chars = ['<', '>', ':', '"', '|', '?', '*', '/', '\', ' ']
+forbid_chinese = true
+# Default: 64. 收紧到 32 让长命名暴露出来。
+max_length = 32
+# Default: Some("T_"). 保留默认。
+texture_prefix = "T_"
+# Default: None. 改为强制要求模型用 "SM_" 前缀（Unreal-style）。
+model_prefix = "SM_"
+# Default: None. 强制 SFX 用 "A_" 前缀。
+audio_prefix = "A_"
+# Default: "any". 可选 "any" / "snake_case" / "kebab-case" / "PascalCase" / "camelCase"。
+case_style = "snake_case"
+
+[texture]
+enabled = true
+require_pot = true
+# Default: 4096. 收紧到 2048 把 4K 贴图全部点亮。
+max_size = 2048
+min_size = 4
+# Default: false. 打开非正方形警告。
+warn_non_square = true
+# Default: 10 MB. 收紧到 4 MB。
+max_file_size = 4_194_304
+
+[model]
+enabled = true
+# Default: 100_000. 收紧到 10_000 让大网格全部触发"超预算"。
+max_vertices = 10_000
+# Default: 100_000.
+max_faces = 10_000
+# Default: 10. 收紧到 4 让多材质模型暴露。
+max_materials = 4
+
+[audio]
+enabled = true
+# Default: [44100, 48000]. 只允许 48 kHz，44.1 kHz 文件全部触发。
+allowed_sample_rates = [48_000]
+# Default: 30.0 秒。SFX 启发式（文件名含 sfx/sound/effect/hit/click/ui）超过这个时长会警告。
+max_sfx_duration = 5.0
+# Default: 20 MB.
+max_file_size = 10_485_760
+# Default: false. 打开 → SFX 立体声会被警告应改单声道。
+prefer_mono_for_sfx = true

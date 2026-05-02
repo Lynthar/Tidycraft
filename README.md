@@ -176,37 +176,44 @@ pnpm tauri build
 
 ## ⚙️ Configuration
 
-Create a `tidycraft.toml` in your project root:
+Drop a `tidycraft.toml` in your project root and the next analysis will pick it up automatically. The Sidebar's **Run Analysis** button shows a small dot when custom rules are loaded.
+
+A working starter config is at [`examples/tidycraft.example.toml`](examples/tidycraft.example.toml) — copy it to your project root, rename to `tidycraft.toml`, and tweak. Quick reference:
 
 ```toml
 [naming]
-check_forbidden_chars = true
-forbidden_chars = ['<', '>', ':', '"', '|', '?', '*']
-check_chinese = true
-check_prefix = false
-required_prefix = "tex_"
+enabled = true
+forbidden_chars = ['<', '>', ':', '"', '|', '?', '*', '/', '\']
+forbid_chinese = true
+max_length = 64
+texture_prefix = "T_"      # nullable
+model_prefix = "SM_"       # nullable
+audio_prefix = "A_"        # nullable
+case_style = "snake_case"  # any | snake_case | kebab-case | PascalCase | camelCase
 
 [texture]
-check_pot = true
-check_max_size = true
-max_width = 4096
-max_height = 4096
+enabled = true
+require_pot = true
+max_size = 4096            # px
+min_size = 4               # px
+warn_non_square = false
+max_file_size = 10_485_760 # bytes
 
 [model]
-check_vertex_count = true
-max_vertices = 100000
-check_face_count = true
-max_faces = 50000
+enabled = true
+max_vertices = 100_000
+max_faces = 100_000
+max_materials = 10
 
 [audio]
-check_sample_rate = true
-allowed_sample_rates = [44100, 48000]
-check_duration = true
-max_duration_secs = 300.0
-
-[duplicate]
 enabled = true
+allowed_sample_rates = [44_100, 48_000]
+max_sfx_duration = 30.0    # seconds
+max_file_size = 20_971_520 # bytes
+prefer_mono_for_sfx = false
 ```
+
+Any field can be omitted — missing fields fall back to defaults.
 
 ---
 
