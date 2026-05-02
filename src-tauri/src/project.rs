@@ -16,6 +16,10 @@ use crate::undo::UndoManager;
 use crate::watcher::ProjectWatcher;
 
 pub struct ProjectState {
+    /// Mirrors the project_id key in the registry. Kept on the state itself
+    /// so future emit-from-inside-state code paths don't need the key
+    /// passed through; not currently read.
+    #[allow(dead_code)]
     pub id: String,
     pub root_path: String,
     pub scan_state: Option<Arc<ScanState>>,

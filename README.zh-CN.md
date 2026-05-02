@@ -19,9 +19,18 @@
 
 ## 📸 截图
 
-<!-- TODO: 添加截图 -->
 <div align="center">
-<i>截图即将添加...</i>
+
+**网格视图** — 虚拟化卡片 + 按需缩略图，右侧 3D 预览面板，AI 推荐标签已应用到匹配资产上。
+
+<img src="Screenshot/grid-view.png" alt="Tidycraft 网格视图" width="85%">
+
+<br><br>
+
+**列表视图** — 类型筛选 pill、排序 pill、可拖动调整的列宽 + 顶点数微型条形图，sticky 表头。
+
+<img src="Screenshot/list-view.png" alt="Tidycraft 列表视图" width="85%">
+
 </div>
 
 ---

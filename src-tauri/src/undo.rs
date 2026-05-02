@@ -264,6 +264,7 @@ impl UndoManager {
     }
 
     /// 获取最近一次操作的描述
+    #[allow(dead_code)]
     pub fn get_last_operation_description(&self) -> Option<String> {
         self.history
             .iter()
@@ -273,6 +274,7 @@ impl UndoManager {
     }
 
     /// 获取历史记录数量
+    #[allow(dead_code)]
     pub fn history_count(&self) -> usize {
         self.history.len()
     }

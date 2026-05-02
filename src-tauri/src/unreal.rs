@@ -3,6 +3,11 @@
 //! 解析 .uproject 文件，提取项目配置信息。
 //! 为未来完整的 .uasset 解析预留扩展接口。
 
+// Path classifiers and the FileVersion serde slot are placeholders for the
+// planned UE deep-integration; the lib doesn't expose them yet. Allow at
+// module scope so we don't sprinkle individual attributes.
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};

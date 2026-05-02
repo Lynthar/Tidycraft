@@ -270,6 +270,23 @@ fn validate_config(config_toml: String) -> Result<bool, String> {
     }
 }
 
+/// Read a project's `tidycraft.toml` from its registered root, if present.
+/// Returns `Ok(None)` when the file doesn't exist (a normal state — most
+/// projects use defaults), `Ok(Some(content))` on success, or `Err` for
+/// IO failures. Validation/parsing happens later in `analyze_assets`.
+#[tauri::command]
+fn read_project_config(project_id: String) -> Result<Option<String>, String> {
+    project::with_ref(&project_id, |state| {
+        let path = Path::new(&state.root_path).join("tidycraft.toml");
+        if !path.exists() {
+            return Ok(None);
+        }
+        std::fs::read_to_string(&path)
+            .map(Some)
+            .map_err(|e| format!("Failed to read tidycraft.toml: {}", e))
+    })
+}
+
 // ============ Tag Suggestions ============
 
 #[tauri::command]
@@ -1657,6 +1674,7 @@ pub fn run() {
             analyze_assets,
             get_default_config,
             validate_config,
+            read_project_config,
             suggest_tags,
             // Git
             get_git_info,

@@ -106,6 +106,7 @@ impl TagsData {
     }
 
     /// Get all assets with a specific tag
+    #[allow(dead_code)]
     pub fn get_assets_with_tag(&self, tag_id: &str) -> Vec<String> {
         self.asset_tags
             .iter()
