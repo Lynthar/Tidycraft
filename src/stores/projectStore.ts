@@ -660,8 +660,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   runAnalysis: async () => {
-    const { activeProjectId } = get();
+    const startState = get();
+    const { activeProjectId } = startState;
     if (!activeProjectId) return;
+
+    /// Snapshot the view the user was on when they kicked off analysis.
+    /// If they navigate elsewhere mid-flight, leave them where they went —
+    /// silently yanking them back to "issues" feels intrusive. We auto-
+    /// switch only when the active view is unchanged at completion.
+    const viewModeAtStart = startState.viewMode;
+
     set(updateActiveProject(get(), { isAnalyzing: true }));
 
     // Re-read config at click time (not just at scan-complete) so users
@@ -684,12 +692,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         projectId: activeProjectId,
         configToml,
       });
-      set(updateActiveProject(get(), {
+      const endState = get();
+      const updates: Partial<ProjectData> = {
         analysisResult: result,
         isAnalyzing: false,
-        viewMode: "issues",
         hasCustomConfig,
-      }));
+      };
+      if (endState.viewMode === viewModeAtStart) {
+        updates.viewMode = "issues";
+      }
+      set(updateActiveProject(endState, updates));
     } catch (err) {
       console.error("Failed to analyze:", err);
       set(updateActiveProject(get(), {
