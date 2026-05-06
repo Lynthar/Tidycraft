@@ -57,13 +57,22 @@ export function ImageLightbox({ isOpen, imageSrc, imageName, onClose }: ImageLig
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, onClose]);
 
-  // Handle mouse wheel zoom
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? -0.1 : 0.1;
-    setScale((prev) => Math.min(Math.max(0.1, prev + delta), 5));
-    setIsFitToScreen(false);
-  }, []);
+  // Wheel-zoom uses a non-passive native listener: React's synthetic
+  // onWheel has been registered passively since React 17, which silently
+  // drops preventDefault and lets the page scroll behind the lightbox.
+  useEffect(() => {
+    if (!isOpen) return;
+    const container = containerRef.current;
+    if (!container) return;
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? -0.1 : 0.1;
+      setScale((prev) => Math.min(Math.max(0.1, prev + delta), 5));
+      setIsFitToScreen(false);
+    };
+    container.addEventListener("wheel", handleWheel, { passive: false });
+    return () => container.removeEventListener("wheel", handleWheel);
+  }, [isOpen]);
 
   // Handle mouse drag
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -174,7 +183,6 @@ export function ImageLightbox({ isOpen, imageSrc, imageName, onClose }: ImageLig
         ref={containerRef}
         className="flex-1 overflow-hidden cursor-grab active:cursor-grabbing flex items-center justify-center"
         onMouseDown={handleMouseDown}
-        onWheel={handleWheel}
       >
         <img
           src={imageSrc}
