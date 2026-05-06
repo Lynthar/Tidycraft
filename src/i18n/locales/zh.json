@@ -224,6 +224,7 @@
     "ahead": "领先",
     "behind": "落后",
     "notARepo": "非 Git 仓库",
+    "refresh": "刷新 Git 状态",
     "status": {
       "new": "新增",
       "modified": "已修改",
@@ -318,7 +319,8 @@
     "min": "最小",
     "max": "最大",
     "extensions": "文件扩展名",
-    "noExtensions": "暂无扫描文件"
+    "noExtensions": "暂无扫描文件",
+    "gitStatus": "Git 状态"
   },
   "search": {
     "recentSearches": "最近搜索",

@@ -44,6 +44,7 @@ export function Header({ searchInputRef }: HeaderProps) {
     setSearchQuery,
     undoLastOperation,
     refreshUndoState,
+    refreshGitInfo,
   } = useProjectStore();
   const { theme, toggleTheme } = useThemeStore();
   const { showBranchInfo, showAheadBehind } = useSettingsStore();
@@ -52,7 +53,18 @@ export function Header({ searchInputRef }: HeaderProps) {
 
   const [showLangDropdown, setShowLangDropdown] = useState(false);
   const [showSearchHistory, setShowSearchHistory] = useState(false);
+  const [refreshingGit, setRefreshingGit] = useState(false);
   const langDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Manual git-status refresh. The spinner is decoupled from the actual IO
+  // (a fixed 600ms) so users see immediate feedback even on small repos
+  // where the refresh completes near-instantly. Errors are swallowed by
+  // refreshGitInfo's own try/catch.
+  const handleGitRefresh = () => {
+    setRefreshingGit(true);
+    refreshGitInfo();
+    setTimeout(() => setRefreshingGit(false), 600);
+  };
 
   const handleRescan = () => {
     if (projectPath) {
@@ -148,6 +160,32 @@ export function Header({ searchInputRef }: HeaderProps) {
                 title={t("git.hasChanges")}
               />
             )}
+            <button
+              type="button"
+              onClick={handleGitRefresh}
+              title={t("git.refresh")}
+              style={{
+                background: "transparent",
+                border: 0,
+                cursor: "pointer",
+                padding: "1px 2px",
+                marginLeft: 2,
+                color: "var(--text-3)",
+                display: "inline-flex",
+                alignItems: "center",
+              }}
+              onMouseEnter={(e) =>
+                (e.currentTarget.style.color = "var(--text)")
+              }
+              onMouseLeave={(e) =>
+                (e.currentTarget.style.color = "var(--text-3)")
+              }
+            >
+              <RefreshCw
+                size={10}
+                className={refreshingGit ? "animate-spin" : ""}
+              />
+            </button>
           </span>
         )}
       </div>

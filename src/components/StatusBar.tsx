@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { X, AlertCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
@@ -23,6 +23,8 @@ export function StatusBar() {
     clearError,
   } = useProjectStore();
   const watcherPulse = useProjectStore((s) => s.watcherPulse);
+  const gitStatuses = useProjectStore((s) => s.gitStatuses);
+  const gitIsRepo = useProjectStore((s) => s.gitInfo?.is_repo ?? false);
 
   const [syncing, setSyncing] = useState(false);
   const timerRef = useRef<number | null>(null);
@@ -43,6 +45,22 @@ export function StatusBar() {
       }
     };
   }, [watcherPulse]);
+
+  /// Bucket file-level git statuses into the four counters the StatusBar
+  /// renders. Memoized on `gitStatuses` identity — refreshGitInfo replaces
+  /// the map by reference, so this only re-runs on actual git refreshes.
+  /// `renamed` and `typechange` roll into `mod` because visually they're
+  /// modifications; `untracked` and `new` both bucket into `add`.
+  const gitChanges = useMemo(() => {
+    let add = 0, mod = 0, del = 0, conflict = 0;
+    for (const status of Object.values(gitStatuses)) {
+      if (status === "new" || status === "untracked") add++;
+      else if (status === "modified" || status === "renamed" || status === "typechange") mod++;
+      else if (status === "deleted") del++;
+      else if (status === "conflicted") conflict++;
+    }
+    return { add, mod, del, conflict, total: add + mod + del + conflict };
+  }, [gitStatuses]);
 
   if (error) {
     const handleRetry = () => {
@@ -197,6 +215,46 @@ export function StatusBar() {
               {t(`assetTypes.${type}` as const)} {count}
             </span>
           ))}
+        </span>
+      )}
+      {gitIsRepo && gitChanges.total > 0 && (
+        <span
+          className="mono"
+          style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11 }}
+        >
+          {gitChanges.add > 0 && (
+            <span
+              title={`${gitChanges.add} ${t("git.status.new")}`}
+              style={{ color: "var(--ok)" }}
+            >
+              +{gitChanges.add}
+            </span>
+          )}
+          {gitChanges.mod > 0 && (
+            <span
+              title={`${gitChanges.mod} ${t("git.status.modified")}`}
+              style={{ color: "var(--warn)" }}
+            >
+              ~{gitChanges.mod}
+            </span>
+          )}
+          {gitChanges.del > 0 && (
+            <span
+              title={`${gitChanges.del} ${t("git.status.deleted")}`}
+              style={{ color: "var(--err)" }}
+            >
+              -{gitChanges.del}
+            </span>
+          )}
+          {gitChanges.conflict > 0 && (
+            <span
+              title={`${gitChanges.conflict} ${t("git.status.conflicted")}`}
+              style={{ color: "var(--err)", display: "inline-flex", alignItems: "center", gap: 2 }}
+            >
+              <AlertCircle size={11} />
+              {gitChanges.conflict}
+            </span>
+          )}
         </span>
       )}
       {syncing && (

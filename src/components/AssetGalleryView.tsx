@@ -19,14 +19,10 @@ import {
   Code,
   Database,
   FileText,
-  Plus,
-  Pencil,
-  Trash2,
-  AlertCircle,
   type LucideIcon,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { cn, formatFileSize } from "../lib/utils";
+import { formatFileSize } from "../lib/utils";
 import { useSettingsStore } from "../stores/settingsStore";
 import type {
   AssetInfo,
@@ -35,6 +31,7 @@ import type {
   GitFileStatus,
   GitStatusMap,
 } from "../types/asset";
+import { GitStatusBadge } from "./GitStatusBadge";
 
 const CARD_MIN_WIDTH = 168;
 const CARD_GAP = 12;
@@ -60,43 +57,6 @@ const GLYPH_ICONS: Record<AssetType, LucideIcon> = {
   data: Database,
   other: FileText,
 };
-
-function GitStatusBadge({
-  status,
-  t,
-}: {
-  status: GitFileStatus;
-  t: (key: string) => string;
-}) {
-  const configs: Record<
-    GitFileStatus,
-    { icon: React.ReactNode; color: string; bg: string } | null
-  > = {
-    new: { icon: <Plus size={10} />, color: "text-green-400", bg: "bg-green-400/20" },
-    modified: { icon: <Pencil size={10} />, color: "text-yellow-400", bg: "bg-yellow-400/20" },
-    deleted: { icon: <Trash2 size={10} />, color: "text-red-400", bg: "bg-red-400/20" },
-    renamed: { icon: <Pencil size={10} />, color: "text-blue-400", bg: "bg-blue-400/20" },
-    untracked: { icon: <Plus size={10} />, color: "text-gray-400", bg: "bg-gray-400/20" },
-    conflicted: { icon: <AlertCircle size={10} />, color: "text-red-500", bg: "bg-red-500/20" },
-    typechange: null,
-    ignored: null,
-    unchanged: null,
-  };
-  const config = configs[status];
-  if (!config) return null;
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[10px] font-medium",
-        config.color,
-        config.bg
-      )}
-      title={t(`git.status.${status}`)}
-    >
-      {config.icon}
-    </span>
-  );
-}
 
 interface CardThumbProps {
   asset: AssetInfo;
