@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import type { ScanResult, AssetInfo, ScanProgress, AssetType, ProjectType, AnalysisResult, UndoResult, HistoryEntry, GitInfo, GitStatusMap, FsChangeEvent } from "../types/asset";
+import type { ScanResult, AssetInfo, ScanProgress, AssetType, ProjectType, AnalysisResult, UndoResult, HistoryEntry, GitInfo, GitStatusMap, GitFileStatus, FsChangeEvent } from "../types/asset";
 
 // Per-project filesystem-watcher unlisten handles. Kept outside the zustand
 // store because function references don't belong in serialized state, and
@@ -18,6 +18,34 @@ async function stopFsWatch(projectId: string) {
     await invoke("stop_watching", { projectId });
   } catch (err) {
     console.error("Failed to stop watcher:", err);
+  }
+}
+
+// Per-project debounced git-refresh timers. Each fs-change event resets the
+// timer for that project; on quiescence we re-fetch git info + statuses so
+// the branch chip and file badges don't drift from reality. The window sits
+// above the watcher's own 500ms coalescing in `watcher.rs` — together they
+// absorb bursts (batch rename, checkout, large copy) into a single refresh.
+const gitRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const GIT_REFRESH_DEBOUNCE_MS = 800;
+
+function scheduleGitRefresh(projectId: string) {
+  const existing = gitRefreshTimers.get(projectId);
+  if (existing) clearTimeout(existing);
+  const timer = setTimeout(() => {
+    gitRefreshTimers.delete(projectId);
+    useProjectStore.getState().refreshGitInfo(projectId).catch((err) => {
+      console.error(`[gitRefresh] failed for ${projectId}:`, err);
+    });
+  }, GIT_REFRESH_DEBOUNCE_MS);
+  gitRefreshTimers.set(projectId, timer);
+}
+
+function cancelGitRefresh(projectId: string) {
+  const existing = gitRefreshTimers.get(projectId);
+  if (existing) {
+    clearTimeout(existing);
+    gitRefreshTimers.delete(projectId);
   }
 }
 
@@ -42,6 +70,7 @@ export interface AdvancedFilters {
   minHeight: number | null;
   maxHeight: number | null;
   extensions: string[];
+  gitStatusFilter: GitFileStatus[];
 }
 
 // Data for a single project
@@ -94,6 +123,7 @@ const createDefaultProjectData = (id: string, path: string): ProjectData => ({
     minHeight: null,
     maxHeight: null,
     extensions: [],
+    gitStatusFilter: [],
   },
   gitInfo: null,
   gitStatuses: {},
@@ -173,7 +203,7 @@ interface ProjectState {
   clearUndoHistory: () => Promise<void>;
 
   // Git actions
-  refreshGitInfo: () => Promise<void>;
+  refreshGitInfo: (targetProjectId?: string) => Promise<void>;
 
   // Computed
   getFilteredAssets: () => AssetInfo[];
@@ -246,6 +276,7 @@ const syncFromActiveProject = (project: ProjectData | undefined): Partial<Projec
         minHeight: null,
         maxHeight: null,
         extensions: [],
+        gitStatusFilter: [],
       },
       gitInfo: null,
       gitStatuses: {},
@@ -326,6 +357,11 @@ function applyFsChange(projectId: string, event: FsChangeEvent) {
     Object.assign(patch, syncFromActiveProject(updated));
   }
   useProjectStore.setState(patch);
+
+  // Files changed → git status may have changed too. Debounce so that a
+  // burst (e.g. batch rename, `git checkout` outside the app) collapses into
+  // one refresh rather than one per file.
+  scheduleGitRefresh(projectId);
 }
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
@@ -361,6 +397,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     minHeight: null,
     maxHeight: null,
     extensions: [],
+    gitStatusFilter: [],
   },
   gitInfo: null,
   gitStatuses: {},
@@ -483,10 +520,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         set(patch);
       }
 
-      // Fetch git info if this is still the active project.
-      if (get().activeProjectId === projectId) {
-        get().refreshGitInfo();
-      }
+      // Refresh git info for this project specifically — refreshGitInfo
+      // patches the right entry in the projects Map regardless of which
+      // project is currently active, so we don't need an "is still active"
+      // guard here.
+      get().refreshGitInfo(projectId);
 
       // Start the filesystem watcher now that the cache is populated.
       // Events that arrive before the scan completes would be no-ops on the
@@ -544,6 +582,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       console.error("Failed to stop watcher:", err);
     });
 
+    // Cancel any pending git refresh for this project — refreshGitInfo
+    // would silently drop the write anyway (project no longer in Map), but
+    // we'd rather not spend the IPC.
+    cancelGitRefresh(idToClose);
+
     // Tell the backend to drop its state for this project (best-effort).
     invoke("unregister_project", { projectId: idToClose }).catch((err) => {
       console.error("Failed to unregister project:", err);
@@ -570,7 +613,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   setActiveProject: (projectId: string) => {
-    const { projects } = get();
+    const { projects, activeProjectId } = get();
+    if (projectId === activeProjectId) return;
     const project = projects.get(projectId);
 
     if (project) {
@@ -578,6 +622,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         activeProjectId: projectId,
         ...syncFromActiveProject(project),
       });
+      // The cached gitInfo/gitStatuses for this project may be stale
+      // (e.g. user did `git checkout` while it was inactive). Re-fetch.
+      get().refreshGitInfo(projectId);
     }
   },
 
@@ -717,6 +764,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         minHeight: null,
         maxHeight: null,
         extensions: [],
+        gitStatusFilter: [],
       },
     }));
   },
@@ -764,44 +812,79 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   // Git actions
-  refreshGitInfo: async () => {
-    const { activeProjectId, projectPath } = get();
-    if (!activeProjectId || !projectPath) {
-      set(updateActiveProject(get(), { gitInfo: null, gitStatuses: {} }));
-      return;
-    }
+  //
+  // Refreshes the gitInfo + gitStatuses for a specific project. If
+  // `targetProjectId` is omitted, uses the currently active project.
+  //
+  // Race-safe: the target project id is captured once at entry and used for
+  // every backend call and every store write. Without this, async awaits
+  // between getting state and setting it could let the user switch projects
+  // mid-flight, causing project A's git data to be written to project B.
+  //
+  // The patch goes directly into the projects Map for the target id;
+  // convenience mirror fields are only updated if the target is still the
+  // active project at write time. Same pattern as `applyFsChange`.
+  refreshGitInfo: async (targetProjectId?: string) => {
+    const initialState = get();
+    const projectId = targetProjectId ?? initialState.activeProjectId;
+    if (!projectId) return;
+
+    const initialTarget = initialState.projects.get(projectId);
+    if (!initialTarget) return;
+
+    const projectPath = initialTarget.projectPath;
+
+    const patchProject = (
+      updates: Partial<Pick<ProjectData, "gitInfo" | "gitStatuses">>
+    ) => {
+      const cur = get();
+      const t = cur.projects.get(projectId);
+      // Project may have been closed mid-refresh — drop the write silently.
+      if (!t) return;
+      const updated = { ...t, ...updates };
+      const newMap = new Map(cur.projects);
+      newMap.set(projectId, updated);
+      const patch: Partial<ProjectState> = { projects: newMap };
+      if (cur.activeProjectId === projectId) {
+        if ("gitInfo" in updates) patch.gitInfo = updates.gitInfo ?? null;
+        if ("gitStatuses" in updates) patch.gitStatuses = updates.gitStatuses ?? {};
+      }
+      set(patch);
+    };
 
     try {
       const gitInfo = await invoke<GitInfo>("get_git_info", {
-        projectId: activeProjectId,
+        projectId,
         path: projectPath,
       });
-      set(updateActiveProject(get(), { gitInfo }));
+      patchProject({ gitInfo });
 
       if (gitInfo.is_repo) {
         const response = await invoke<{ statuses: GitStatusMap }>("get_git_statuses", {
-          projectId: activeProjectId,
+          projectId,
         });
-        set(updateActiveProject(get(), { gitStatuses: response.statuses }));
+        patchProject({ gitStatuses: response.statuses });
       } else {
-        set(updateActiveProject(get(), { gitStatuses: {} }));
+        patchProject({ gitStatuses: {} });
       }
     } catch (err) {
       console.error("Failed to get git info:", err);
-      set(updateActiveProject(get(), { gitInfo: null, gitStatuses: {} }));
+      patchProject({ gitInfo: null, gitStatuses: {} });
     }
   },
 
   // Computed
   getFilteredAssets: () => {
-    const { scanResult, selectedDirectory, searchQuery, typeFilter, sortField, sortDirection, advancedFilters } = get();
+    const { scanResult, selectedDirectory, searchQuery, typeFilter, sortField, sortDirection, advancedFilters, gitStatuses } = get();
     if (!scanResult) return [];
 
     // Cheap identity check: if every input is the same reference as the
     // previous call, return the cached result. Because setters replace
     // values (new scanResult objects on fs-change, new advancedFilters
     // objects on setAdvancedFilters, etc.) this catches every real change
-    // without needing deep equality.
+    // without needing deep equality. `gitStatuses` is in here because the
+    // gitStatusFilter branch below reads from it; refreshGitInfo replaces
+    // the whole map by reference, so identity tracks freshness correctly.
     const inputs = [
       scanResult,
       selectedDirectory,
@@ -810,6 +893,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       sortField,
       sortDirection,
       advancedFilters,
+      gitStatuses,
     ] as const;
     if (
       filterCacheInputs !== null &&
@@ -867,6 +951,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       assets = assets.filter((asset) =>
         advancedFilters.extensions.includes(asset.extension.toLowerCase())
       );
+    }
+    if (advancedFilters.gitStatusFilter.length > 0) {
+      const wanted = new Set(advancedFilters.gitStatusFilter);
+      assets = assets.filter((asset) => {
+        const status = gitStatuses[asset.path];
+        // Files not in gitStatuses are unchanged (the backend only emits
+        // entries for changed files), so they only match if "unchanged" is
+        // explicitly wanted — which the UI doesn't expose, so effectively
+        // never. Treat undefined as a no-match.
+        return status !== undefined && wanted.has(status);
+      });
     }
 
     // Sort assets

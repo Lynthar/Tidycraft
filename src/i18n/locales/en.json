@@ -224,6 +224,7 @@
     "ahead": "ahead",
     "behind": "behind",
     "notARepo": "Not a Git repository",
+    "refresh": "Refresh Git Status",
     "status": {
       "new": "New",
       "modified": "Modified",
@@ -318,7 +319,8 @@
     "min": "Min",
     "max": "Max",
     "extensions": "File Extensions",
-    "noExtensions": "No files scanned"
+    "noExtensions": "No files scanned",
+    "gitStatus": "Git Status"
   },
   "search": {
     "recentSearches": "Recent Searches",

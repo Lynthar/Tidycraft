@@ -325,8 +325,12 @@ fn get_git_statuses(project_id: String) -> GitStatusMap {
                 .get_all_statuses()
                 .iter()
                 .map(|(path, status)| {
+                    // Normalize to forward slashes so keys match the scanner's
+                    // asset paths on Windows. `repo.workdir().join(rel)` produces
+                    // mixed `\`+`/` on Windows; without this the frontend lookup
+                    // `gitStatuses[asset.path]` never hit.
                     (
-                        path.to_string_lossy().to_string(),
+                        scanner::path_to_string(path),
                         format!("{:?}", status).to_lowercase(),
                     )
                 })
@@ -339,19 +343,6 @@ fn get_git_statuses(project_id: String) -> GitStatusMap {
     .unwrap_or_default();
 
     GitStatusMap { statuses }
-}
-
-#[tauri::command]
-fn get_file_git_status(project_id: String, path: String) -> String {
-    project::with_ref(&project_id, |state| {
-        let status = if let Some(manager) = state.git_manager.as_ref() {
-            format!("{:?}", manager.get_file_status(Path::new(&path))).to_lowercase()
-        } else {
-            "unknown".to_string()
-        };
-        Ok(status)
-    })
-    .unwrap_or_else(|_| "unknown".to_string())
 }
 
 // ============ Unity Commands ============
@@ -1679,7 +1670,6 @@ pub fn run() {
             // Git
             get_git_info,
             get_git_statuses,
-            get_file_git_status,
             // Unity
             parse_unity_file,
             get_unity_dependencies,

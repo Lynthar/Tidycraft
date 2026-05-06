@@ -2,16 +2,20 @@ import { useState, useRef, useEffect } from "react";
 import { Filter, X, ChevronDown, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
-import type { AssetType } from "../types/asset";
+import type { AssetType, GitFileStatus } from "../types/asset";
 
 const ASSET_TYPES: AssetType[] = [
   "texture", "model", "audio", "animation", "material",
   "prefab", "scene", "script", "data", "other"
 ];
 
+const GIT_STATUS_FILTER_OPTIONS: GitFileStatus[] = [
+  "new", "modified", "deleted", "renamed", "untracked", "conflicted",
+];
+
 export function AdvancedFiltersPanel() {
   const { t } = useTranslation();
-  const { advancedFilters, setAdvancedFilters, resetAdvancedFilters, scanResult, typeFilter, setTypeFilter } = useProjectStore();
+  const { advancedFilters, setAdvancedFilters, resetAdvancedFilters, scanResult, typeFilter, setTypeFilter, gitInfo } = useProjectStore();
   const [isOpen, setIsOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -34,7 +38,8 @@ export function AdvancedFiltersPanel() {
     advancedFilters.maxWidth !== null ||
     advancedFilters.minHeight !== null ||
     advancedFilters.maxHeight !== null ||
-    advancedFilters.extensions.length > 0;
+    advancedFilters.extensions.length > 0 ||
+    advancedFilters.gitStatusFilter.length > 0;
 
   // Close panel when clicking outside
   useEffect(() => {
@@ -68,6 +73,14 @@ export function AdvancedFiltersPanel() {
     setAdvancedFilters({ extensions: newExtensions });
   };
 
+  const toggleGitStatus = (status: GitFileStatus) => {
+    const current = advancedFilters.gitStatusFilter;
+    const next = current.includes(status)
+      ? current.filter((s) => s !== status)
+      : [...current, status];
+    setAdvancedFilters({ gitStatusFilter: next });
+  };
+
   const handleReset = () => {
     resetAdvancedFilters();
     setTypeFilter(null);
@@ -97,6 +110,7 @@ export function AdvancedFiltersPanel() {
                 ? 1
                 : 0,
               advancedFilters.extensions.length > 0 ? 1 : 0,
+              advancedFilters.gitStatusFilter.length > 0 ? 1 : 0,
             ].reduce((a, b) => a + b, 0)}
           </span>
         )}
@@ -255,6 +269,29 @@ export function AdvancedFiltersPanel() {
                 )}
               </div>
             </div>
+
+            {gitInfo?.is_repo && (
+              <div>
+                <label className="block text-xs text-text-secondary uppercase mb-2">
+                  {t("filters.gitStatus")}
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {GIT_STATUS_FILTER_OPTIONS.map((status) => (
+                    <button
+                      key={status}
+                      onClick={() => toggleGitStatus(status)}
+                      className={`px-2 py-1 text-xs rounded transition-colors ${
+                        advancedFilters.gitStatusFilter.includes(status)
+                          ? "bg-primary text-white"
+                          : "bg-background text-text-secondary hover:text-text-primary"
+                      }`}
+                    >
+                      {t(`git.status.${status}`)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

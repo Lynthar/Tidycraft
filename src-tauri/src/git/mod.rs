@@ -145,11 +145,14 @@ impl GitManager {
             .unwrap_or((0, 0))
     }
 
-    /// Get all file statuses
+    /// Get all file statuses, freshly re-queried each call.
+    ///
+    /// `status_cache` exists only as the owned home for the returned borrow —
+    /// the previous cache-short-circuit was unsafe (callers had no way to
+    /// invalidate after files changed) and the lifetime of a `GitManager`
+    /// today is one refresh anyway, since `get_git_info` rebuilds it.
     pub fn get_all_statuses(&mut self) -> &HashMap<PathBuf, GitFileStatus> {
-        if !self.status_cache.is_empty() {
-            return &self.status_cache;
-        }
+        self.status_cache.clear();
 
         let Some(repo) = &self.repo else {
             return &self.status_cache;
@@ -173,25 +176,9 @@ impl GitManager {
         &self.status_cache
     }
 
-    /// Get status for a specific file
-    pub fn get_file_status(&self, path: &Path) -> GitFileStatus {
-        let Some(repo) = &self.repo else {
-            return GitFileStatus::Unchanged;
-        };
-
-        // Get relative path from repo root
-        let relative_path = match path.strip_prefix(&self.root_path) {
-            Ok(p) => p,
-            Err(_) => return GitFileStatus::Unchanged,
-        };
-
-        match repo.status_file(relative_path) {
-            Ok(status) => GitFileStatus::from(status),
-            Err(_) => GitFileStatus::Unchanged,
-        }
-    }
-
-    /// Check if a path should be ignored according to .gitignore
+    /// Check if a path should be ignored according to .gitignore. Currently
+    /// unused but kept as a primitive for future scanner integration that
+    /// would honor `.gitignore` (e.g. an opt-in "skip ignored files" mode).
     #[allow(dead_code)]
     pub fn is_ignored(&self, path: &Path) -> bool {
         let Some(repo) = &self.repo else {
@@ -204,12 +191,6 @@ impl GitManager {
         };
 
         repo.is_path_ignored(relative_path).unwrap_or(false)
-    }
-
-    /// Clear the status cache
-    #[allow(dead_code)]
-    pub fn clear_cache(&mut self) {
-        self.status_cache.clear();
     }
 }
 
