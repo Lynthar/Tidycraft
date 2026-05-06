@@ -271,19 +271,21 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
       // Fix materials and get stats
       const modelStats = fixMaterials(object);
 
-      // Center the model
+      // Center + fit. Order matters: scale BEFORE the position offset,
+      // because the resulting world transform is T·S, so a mesh ends up at
+      // `position + scale * localCenter`. Translating first only happens
+      // to look right when localCenter is already near the hierarchy root
+      // (typical of GLTF/GLB/OBJ); FBX and DAE often place the mesh node
+      // far from its root, and the previous order then drifted the model
+      // off the grid by `(scale - 1) * center`.
       const box = new THREE.Box3().setFromObject(object);
       const center = box.getCenter(new THREE.Vector3());
       const size = box.getSize(new THREE.Vector3());
-
-      object.position.sub(center);
-
-      // Scale to fit
       const maxDim = Math.max(size.x, size.y, size.z);
-      if (maxDim > 0) {
-        const scale = 2 / maxDim;
-        object.scale.multiplyScalar(scale);
-      }
+      const scale = maxDim > 0 ? 2 / maxDim : 1;
+
+      object.scale.multiplyScalar(scale);
+      object.position.sub(center.multiplyScalar(scale));
 
       scene.add(object);
 
