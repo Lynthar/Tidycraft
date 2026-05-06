@@ -58,6 +58,11 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
     }
     if (rendererRef.current) {
       rendererRef.current.dispose();
+      // dispose() frees GPU buffers but does NOT release the WebGL context;
+      // browsers cap active contexts (~16/page) so without this, swapping
+      // between many model previews exhausts them and the oldest get
+      // force-lost by the browser ("Too many active WebGL contexts").
+      rendererRef.current.forceContextLoss();
       const domElement = rendererRef.current.domElement;
       if (domElement && domElement.parentNode) {
         domElement.parentNode.removeChild(domElement);
