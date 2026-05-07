@@ -244,13 +244,61 @@ fn analyze_assets(project_id: String, config_toml: Option<String>) -> Result<Ana
         RuleConfig::default()
     };
 
+    // Build the ignore matcher up-front so a malformed pattern surfaces as
+    // an error before we touch the per-project lock.
+    let ignore_set = if config.ignore.patterns.is_empty() {
+        None
+    } else {
+        let mut builder = globset::GlobSetBuilder::new();
+        for pattern in &config.ignore.patterns {
+            let glob = globset::Glob::new(pattern)
+                .map_err(|e| format!("Invalid ignore pattern '{}': {}", pattern, e))?;
+            builder.add(glob);
+        }
+        Some(
+            builder
+                .build()
+                .map_err(|e| format!("Failed to build ignore set: {}", e))?,
+        )
+    };
+
     project::with_ref(&project_id, |state| {
         let scan_result = state.require_scan()?;
+
+        // When patterns are present, build a filtered ScanResult that owns
+        // the kept assets. We only clone when needed (most projects have
+        // no ignore patterns and reuse the cached scan reference unchanged).
+        let owned_filtered: Option<ScanResult> = if let Some(set) = ignore_set.as_ref() {
+            let root = Path::new(&state.root_path);
+            let kept: Vec<scanner::AssetInfo> = scan_result
+                .assets
+                .iter()
+                .filter(|a| {
+                    let path = Path::new(&a.path);
+                    let rel = path.strip_prefix(root).unwrap_or(path);
+                    !set.is_match(rel)
+                })
+                .cloned()
+                .collect();
+            Some(ScanResult {
+                root_path: scan_result.root_path.clone(),
+                directory_tree: scan_result.directory_tree.clone(),
+                assets: kept,
+                total_count: scan_result.total_count,
+                total_size: scan_result.total_size,
+                type_counts: scan_result.type_counts.clone(),
+                project_type: scan_result.project_type.clone(),
+            })
+        } else {
+            None
+        };
+        let scan_to_analyze: &ScanResult = owned_filtered.as_ref().unwrap_or(scan_result);
+
         let analyzer = Analyzer::with_config(&config);
-        let mut result = analyzer.analyze(scan_result);
-        let duplicates = analyzer.find_duplicates(scan_result);
+        let mut result = analyzer.analyze(scan_to_analyze);
+        let duplicates = analyzer.find_duplicates(scan_to_analyze);
         result.merge(duplicates);
-        let missing = analyzer.find_missing_references(scan_result);
+        let missing = analyzer.find_missing_references(scan_to_analyze);
         result.merge(missing);
         Ok(result)
     })
@@ -258,8 +306,27 @@ fn analyze_assets(project_id: String, config_toml: Option<String>) -> Result<Ana
 
 #[tauri::command]
 fn get_default_config() -> Result<String, String> {
-    let config = RuleConfig::default();
-    config.to_toml().map_err(|e| e.to_string())
+    Ok(analyzer::rules::config_template::DEFAULT_CONFIG_TEMPLATE.to_string())
+}
+
+/// Make sure `<project_root>/tidycraft.toml` exists, writing the commented
+/// default template if it doesn't, then return its absolute path. The
+/// frontend hands that path to `open_with_default_app` so the user edits
+/// in their preferred editor; saving and re-clicking Run Analysis is all
+/// that's needed for changes to take effect.
+#[tauri::command]
+fn ensure_project_config(project_id: String) -> Result<String, String> {
+    project::with_ref(&project_id, |state| {
+        let path = Path::new(&state.root_path).join("tidycraft.toml");
+        if !path.exists() {
+            std::fs::write(
+                &path,
+                analyzer::rules::config_template::DEFAULT_CONFIG_TEMPLATE,
+            )
+            .map_err(|e| format!("Failed to create tidycraft.toml: {}", e))?;
+        }
+        Ok(scanner::path_to_string(&path))
+    })
 }
 
 #[tauri::command]
@@ -1666,6 +1733,7 @@ pub fn run() {
             get_default_config,
             validate_config,
             read_project_config,
+            ensure_project_config,
             suggest_tags,
             // Git
             get_git_info,

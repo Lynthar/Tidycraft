@@ -4786,6 +4786,7 @@ dependencies = [
  "dirs 5.0.1",
  "fbxcel-dom",
  "git2",
+ "globset",
  "gltf",
  "ignore",
  "image",

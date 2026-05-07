@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { X, GitBranch, Palette, Wrench, Trash2, Image as ImageIcon } from "lucide-react";
+import { X, GitBranch, Palette, Wrench, Trash2, Image as ImageIcon, FileCode, ExternalLink } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { useSettingsStore } from "../stores/settingsStore";
@@ -111,6 +111,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const preference = useThemeStore((s) => s.preference);
   const setPreference = useThemeStore((s) => s.setPreference);
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
+  const hasCustomConfig = useProjectStore((s) => s.hasCustomConfig);
   const undoHistory = useProjectStore((s) => s.undoHistory);
   const refreshUndoState = useProjectStore((s) => s.refreshUndoState);
   const clearUndoHistory = useProjectStore((s) => s.clearUndoHistory);
@@ -118,6 +119,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [thumbCacheBytes, setThumbCacheBytes] = useState<number | null>(null);
   const [clearingCache, setClearingCache] = useState(false);
   const [clearingUndo, setClearingUndo] = useState(false);
+  const [editingRules, setEditingRules] = useState(false);
+  const [rulesError, setRulesError] = useState<string | null>(null);
 
   // Pull cache size whenever the modal opens. Fast (single readdir+stat
   // pass on the cache dir), no need to debounce or memoize.
@@ -165,6 +168,26 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       console.error("Failed to clear undo history:", err);
     } finally {
       setClearingUndo(false);
+    }
+  };
+
+  // Open the project's tidycraft.toml in the OS default editor. Backend
+  // creates the file from a commented template if it doesn't exist yet,
+  // so the user always has something to start from.
+  const handleEditRules = async () => {
+    if (!activeProjectId) return;
+    setEditingRules(true);
+    setRulesError(null);
+    try {
+      const path = await invoke<string>("ensure_project_config", {
+        projectId: activeProjectId,
+      });
+      await invoke("open_with_default_app", { path });
+    } catch (err) {
+      console.error("Failed to open rules editor:", err);
+      setRulesError(String(err));
+    } finally {
+      setEditingRules(false);
     }
   };
 
@@ -244,6 +267,45 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 label={t("settings.showGitStatusIndicators")}
                 description={t("settings.showGitStatusIndicatorsDesc")}
               />
+            </div>
+          </div>
+
+          {/* Analysis Rules Section */}
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <FileCode size={16} className="text-primary" />
+              <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wide">
+                {t("settings.analysisRulesSection")}
+              </h3>
+            </div>
+            <div className="space-y-3 pl-6">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm font-medium text-text-primary">
+                    {t("settings.analysisRulesEdit")}
+                  </span>
+                  <p className="text-xs text-text-secondary mt-0.5">
+                    {!activeProjectId
+                      ? t("settings.analysisRulesNoProject")
+                      : hasCustomConfig
+                      ? t("settings.analysisRulesCustom")
+                      : t("settings.analysisRulesDefault")}
+                  </p>
+                  {rulesError && (
+                    <p className="text-xs mt-1" style={{ color: "var(--err)" }}>
+                      {rulesError}
+                    </p>
+                  )}
+                </div>
+                <button
+                  onClick={handleEditRules}
+                  disabled={!activeProjectId || editingRules}
+                  className="px-3 py-1 text-xs rounded border border-border hover:bg-background text-text-secondary hover:text-text-primary disabled:opacity-50 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-1"
+                >
+                  <ExternalLink size={11} />
+                  {editingRules ? t("settings.opening") : t("settings.analysisRulesEditButton")}
+                </button>
+              </div>
             </div>
           </div>
 
