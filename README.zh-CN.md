@@ -178,7 +178,7 @@ pnpm tauri build
 
 把 `tidycraft.toml` 放到项目根目录，下次 Run Analysis 会自动加载。侧边栏的 **运行分析** 按钮上会出现一个小圆点提示当前使用了自定义规则。
 
-可用的样例文件：[`examples/tidycraft.example.toml`](examples/tidycraft.example.toml) —— 复制到你的项目根目录、改名为 `tidycraft.toml`，按需调整即可。字段速查：
+可用的样例文件：[`examples/tidycraft.example.toml`](examples/tidycraft.example.toml) —— 复制到你的项目根目录、改名为 `tidycraft.toml`，按需调整即可。每条规则的含义和调参建议见 [`docs/analyzer-rules.md`](docs/analyzer-rules.md)。字段速查：
 
 ```toml
 [naming]
