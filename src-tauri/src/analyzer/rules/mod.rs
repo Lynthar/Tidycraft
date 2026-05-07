@@ -1,4 +1,5 @@
 pub mod audio;
+pub mod config_template;
 pub mod duplicate;
 pub mod missing_reference;
 pub mod model;
@@ -9,6 +10,16 @@ pub mod texture_colorspace;
 use crate::analyzer::Issue;
 use crate::scanner::AssetInfo;
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct IgnoreConfig {
+    /// Glob patterns matched against asset paths relative to the project
+    /// root. Any asset whose relative path matches at least one pattern is
+    /// dropped before per-rule checks, duplicate detection, and missing-
+    /// reference scanning. Empty (the default) means analyze everything.
+    #[serde(default)]
+    pub patterns: Vec<String>,
+}
 
 /// Trait for all analysis rules. `id` and `name` are part of the public
 /// interface for future diagnostics output (UI grouping, error messages)
@@ -39,6 +50,8 @@ pub struct RuleConfig {
     pub model: model::ModelConfig,
     #[serde(default)]
     pub audio: audio::AudioConfig,
+    #[serde(default)]
+    pub ignore: IgnoreConfig,
 }
 
 impl Default for RuleConfig {
@@ -48,6 +61,7 @@ impl Default for RuleConfig {
             texture: texture::TextureConfig::default(),
             model: model::ModelConfig::default(),
             audio: audio::AudioConfig::default(),
+            ignore: IgnoreConfig::default(),
         }
     }
 }
@@ -56,10 +70,5 @@ impl RuleConfig {
     /// Load config from TOML string
     pub fn from_toml(content: &str) -> Result<Self, toml::de::Error> {
         toml::from_str(content)
-    }
-
-    /// Serialize config to TOML string
-    pub fn to_toml(&self) -> Result<String, toml::ser::Error> {
-        toml::to_string_pretty(self)
     }
 }
