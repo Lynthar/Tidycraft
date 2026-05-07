@@ -178,7 +178,7 @@ pnpm tauri build
 
 Drop a `tidycraft.toml` in your project root and the next analysis will pick it up automatically. The Sidebar's **Run Analysis** button shows a small dot when custom rules are loaded.
 
-A working starter config is at [`examples/tidycraft.example.toml`](examples/tidycraft.example.toml) — copy it to your project root, rename to `tidycraft.toml`, and tweak. Quick reference:
+A working starter config is at [`examples/tidycraft.example.toml`](examples/tidycraft.example.toml) — copy it to your project root, rename to `tidycraft.toml`, and tweak. For per-rule explanations and tuning advice see [`docs/analyzer-rules.md`](docs/analyzer-rules.md). Quick reference:
 
 ```toml
 [naming]

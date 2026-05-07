@@ -187,6 +187,7 @@ interface ProjectState {
   clearError: () => void;
   runAnalysis: () => Promise<void>;
   setViewMode: (mode: ViewMode) => void;
+  setHasCustomConfig: (value: boolean) => void;
   setSelectedDirectory: (path: string | null) => void;
   setSelectedAsset: (asset: AssetInfo | null) => void;
   setSearchQuery: (query: string) => void;
@@ -714,6 +715,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   setViewMode: (mode: ViewMode) => {
     set(updateActiveProject(get(), { viewMode: mode }));
+  },
+
+  setHasCustomConfig: (value: boolean) => {
+    set(updateActiveProject(get(), { hasCustomConfig: value }));
   },
 
   setSelectedDirectory: (path: string | null) => {

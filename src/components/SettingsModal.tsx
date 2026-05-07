@@ -112,6 +112,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const setPreference = useThemeStore((s) => s.setPreference);
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const hasCustomConfig = useProjectStore((s) => s.hasCustomConfig);
+  const setHasCustomConfig = useProjectStore((s) => s.setHasCustomConfig);
   const undoHistory = useProjectStore((s) => s.undoHistory);
   const refreshUndoState = useProjectStore((s) => s.refreshUndoState);
   const clearUndoHistory = useProjectStore((s) => s.clearUndoHistory);
@@ -182,6 +183,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       const path = await invoke<string>("ensure_project_config", {
         projectId: activeProjectId,
       });
+      setHasCustomConfig(true);
       await invoke("open_with_default_app", { path });
     } catch (err) {
       console.error("Failed to open rules editor:", err);
