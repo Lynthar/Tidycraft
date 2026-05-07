@@ -166,7 +166,8 @@
       "rename": "Rename",
       "resize": "Resize",
       "decimate": "Decimate",
-      "review": "Review"
+      "review": "Review",
+      "add_textures": "Add Textures"
     }
   },
   "settings": {
