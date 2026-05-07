@@ -300,6 +300,8 @@ fn analyze_assets(project_id: String, config_toml: Option<String>) -> Result<Ana
         result.merge(duplicates);
         let missing = analyzer.find_missing_references(scan_to_analyze);
         result.merge(missing);
+        let pbr = analyzer.find_pbr_set_issues(scan_to_analyze, &config.pbr_set);
+        result.merge(pbr);
         Ok(result)
     })
 }

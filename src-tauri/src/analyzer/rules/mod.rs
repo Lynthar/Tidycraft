@@ -4,6 +4,7 @@ pub mod duplicate;
 pub mod missing_reference;
 pub mod model;
 pub mod naming;
+pub mod pbr_set;
 pub mod texture;
 pub mod texture_colorspace;
 
@@ -51,6 +52,8 @@ pub struct RuleConfig {
     #[serde(default)]
     pub audio: audio::AudioConfig,
     #[serde(default)]
+    pub pbr_set: pbr_set::PbrSetConfig,
+    #[serde(default)]
     pub ignore: IgnoreConfig,
 }
 
@@ -61,6 +64,7 @@ impl Default for RuleConfig {
             texture: texture::TextureConfig::default(),
             model: model::ModelConfig::default(),
             audio: audio::AudioConfig::default(),
+            pbr_set: pbr_set::PbrSetConfig::default(),
             ignore: IgnoreConfig::default(),
         }
     }

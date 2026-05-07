@@ -4,11 +4,12 @@ Tidycraft's **Run Analysis** is an asset-quality lint. It reads your scanned pro
 
 ## How it works
 
-Clicking **Run Analysis** (or `⌘⇧R`) runs three phases on the cached scan result:
+Clicking **Run Analysis** (or `⌘⇧R`) runs four phases on the cached scan result:
 
 1. **Per-asset rule checks** — five rule families (`naming`, `texture`, `texture.color_space`, `model`, `audio`) run against every asset. Each family is stateless and returns at most one issue per asset (the first sub-rule that fires).
 2. **Duplicate detection** — files are grouped by size; same-size files are SHA256-hashed and any group with more than one match is reported (the first asset in a group is the "original", the rest are flagged).
 3. **Missing-reference detection** (Unity only) — every `.prefab` / `.unity` / `.mat` / `.controller` / `.asset` is parsed for GUID references that don't resolve to any scanned `.meta`.
+4. **PBR set completeness** — textures are grouped by directory + base stem (`T_Wood_BaseColor` + `T_Wood_Normal` are siblings); a set with the trigger channel but missing required channels is flagged.
 
 All three steps share the same `tidycraft.toml` configuration, read from your project root each time you click Run Analysis. **No rescan is needed after editing the file** — just save and re-run.
 
@@ -23,6 +24,7 @@ All three steps share the same `tidycraft.toml` configuration, read from your pr
 | `audio.*` | Audio files | warning / info |
 | `duplicate` | All assets | warning |
 | `missing_reference` | Unity prefabs / scenes / materials | error |
+| `pbr_set.incomplete` | Texture groups (cross-asset) | warning |
 
 ---
 
@@ -106,6 +108,45 @@ Skips:
 - Duplicate references to the same missing GUID within one file (reported once).
 
 **Cannot be tuned** — the check is binary. To suppress, fix the broken reference (re-link the asset in Unity) or add the source file to `[ignore].patterns`.
+
+---
+
+## PBR Set Completeness (`[pbr_set]`)
+
+Cross-asset check: textures sharing the same directory and base stem are grouped into a "set", and a set is flagged when its expected channels aren't all present. A set forms only when the **trigger channel** (default `basecolor`) is in the group, so directories of UI / particle / non-PBR textures don't produce spurious warnings.
+
+```toml
+[pbr_set]
+enabled = true
+trigger = "basecolor"
+required = ["basecolor", "normal"]
+
+[pbr_set.channels]
+basecolor = ["BaseColor", "Albedo", "Diffuse", "Color"]
+normal    = ["Normal", "Norm"]
+roughness = ["Roughness", "Rough"]
+metallic  = ["Metallic", "Metal"]
+ao        = ["AO", "AmbientOcclusion"]
+emissive  = ["Emissive", "Emission"]
+height    = ["Height", "Disp"]
+
+[pbr_set.packed]
+ORM = ["ao", "roughness", "metallic"]
+MRA = ["metallic", "roughness", "ao"]
+RMA = ["roughness", "metallic", "ao"]
+```
+
+**Suffix matching is strict** — the suffix is the substring after the **last** `_` in the file stem, and must equal-match (case-insensitive) one of the configured suffixes. `T_brand_new.png` finds suffix `new`, doesn't match anything default, is silently ignored. This avoids treating innocuous names as misnamed maps.
+
+**Packed channels** (e.g. `_ORM` carrying AO + Roughness + Metallic in one image) satisfy all the roles listed under `[pbr_set.packed]`. So a set with `_BaseColor` + `_Normal` + `_ORM` is considered complete even when `required` lists `roughness` and `metallic` separately.
+
+**To relax:**
+- Drop `normal` from `required` if your project ships flat-shaded materials.
+- Add aliases to `[pbr_set.channels]` if your team uses a custom suffix (e.g. `basecolor = ["BaseColor", "BC"]`).
+- Set `enabled = false` to turn the rule off entirely.
+- Add the directory to `[ignore].patterns` to skip a known-incomplete folder.
+
+The issue is anchored on the **trigger** texture (the BaseColor file), so clicking the issue takes you to the most recognizable member of the broken set.
 
 ---
 

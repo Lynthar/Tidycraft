@@ -165,6 +165,18 @@ impl Analyzer {
             &scan_result.project_type,
         )
     }
+
+    /// Check for incomplete PBR material sets — directories where a
+    /// BaseColor texture exists but its expected siblings (Normal,
+    /// Roughness, …) are missing. Cross-asset; takes the live config so
+    /// users can tune channel suffixes without rebuilding the analyzer.
+    pub fn find_pbr_set_issues(
+        &self,
+        scan_result: &ScanResult,
+        config: &rules::pbr_set::PbrSetConfig,
+    ) -> AnalysisResult {
+        rules::pbr_set::find_pbr_set_issues(&scan_result.assets, config)
+    }
 }
 
 impl Default for Analyzer {

@@ -51,6 +51,34 @@ max_sfx_duration = 30.0          # seconds; only enforced on files whose name su
 max_file_size = 20971520         # 20 MB
 prefer_mono_for_sfx = false
 
+# ─── PBR Set Completeness ─── (cross-asset: groups textures by base name)
+# A "set" is the group of textures sharing the same base stem in the same
+# directory, e.g. T_Wood_BaseColor.png + T_Wood_Normal.png. The check fires
+# only when the trigger channel (default: basecolor) is present, so projects
+# without PBR-style naming produce no warnings even with this rule on.
+[pbr_set]
+enabled = true
+trigger = "basecolor"            # set must contain this channel to be checked
+required = ["basecolor", "normal"]   # any role missing here → Warning
+
+# Channel role → suffix list (case-insensitive). Suffix matches the part
+# after the LAST `_` in the file stem; T_brand_new isn't a "Normal" map.
+[pbr_set.channels]
+basecolor = ["BaseColor", "Albedo", "Diffuse", "Color"]
+normal    = ["Normal", "Norm"]
+roughness = ["Roughness", "Rough"]
+metallic  = ["Metallic", "Metal"]
+ao        = ["AO", "AmbientOcclusion"]
+emissive  = ["Emissive", "Emission"]
+height    = ["Height", "Disp"]
+
+# Packed-channel suffixes that satisfy multiple roles at once. A file
+# ending in `_ORM` counts as if AO + Roughness + Metallic were all present.
+[pbr_set.packed]
+ORM = ["ao", "roughness", "metallic"]
+MRA = ["metallic", "roughness", "ao"]
+RMA = ["roughness", "metallic", "ao"]
+
 # ─── Ignore Patterns ─── (skip matched assets entirely)
 [ignore]
 # Globs matched against asset paths RELATIVE to project root.

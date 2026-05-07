@@ -166,7 +166,8 @@
       "rename": "重命名",
       "resize": "调整尺寸",
       "decimate": "简化网格",
-      "review": "查看"
+      "review": "查看",
+      "add_textures": "补全贴图"
     }
   },
   "settings": {

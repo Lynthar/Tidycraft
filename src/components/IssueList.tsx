@@ -27,6 +27,7 @@ function fixLabelKey(ruleId: string): string {
   if (ruleId === "model.vertices" || ruleId === "model.faces")
     return "issues.fix.decimate";
   if (ruleId === "missing_reference") return "issues.fix.locate";
+  if (ruleId === "pbr_set.incomplete") return "issues.fix.add_textures";
   return "issues.fix.review";
 }
 
