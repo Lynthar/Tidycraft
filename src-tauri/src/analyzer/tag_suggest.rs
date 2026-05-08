@@ -137,12 +137,34 @@ fn stem(name: &str) -> &str {
     }
 }
 
+/// True if `ch` is a CJK ideograph or Japanese kana — the ranges most
+/// likely to appear in game-asset filenames out of mainland CN / JP /
+/// TW shops. We use this for tokenizer boundary detection so a name
+/// like `Hero角色` splits into `["hero", "角色"]` instead of one
+/// runaway token. Korean Hangul could be added if it ever comes up.
+fn is_cjk(ch: char) -> bool {
+    let code = ch as u32;
+    (0x4E00..=0x9FFF).contains(&code)        // CJK Unified Ideographs
+        || (0x3400..=0x4DBF).contains(&code) // CJK Extension A
+        || (0x3040..=0x309F).contains(&code) // Hiragana
+        || (0x30A0..=0x30FF).contains(&code) // Katakana
+}
+
 /// Split a filename stem into normalized lowercase tokens. Recognizes
-/// `_`/`-`/`.`/space separators and camelCase / PascalCase boundaries.
+/// `_`/`-`/`.`/space separators, camelCase / PascalCase boundaries,
+/// and the ASCII↔CJK transition.
+///
+/// Limitation: continuous CJK runs (`角色主角.png`) stay as one token.
+/// True Chinese tokenization needs a dictionary (`jieba-rs` etc.) which
+/// would balloon the binary by ~5MB; not worth it for an opt-in
+/// suggestion feature. Users on connected-CJK projects who want finer
+/// grouping can insert `_` between meaningful units in filenames, which
+/// is best practice anyway.
 fn tokenize_stem(s: &str) -> Vec<String> {
     let mut tokens: Vec<String> = Vec::new();
     let mut current = String::new();
     let mut prev_lower = false;
+    let mut prev_cjk = false;
 
     let flush = |buf: &mut String, out: &mut Vec<String>| {
         if !buf.is_empty() {
@@ -154,7 +176,14 @@ fn tokenize_stem(s: &str) -> Vec<String> {
         if ch == '_' || ch == '-' || ch == '.' || ch == ' ' {
             flush(&mut current, &mut tokens);
             prev_lower = false;
+            prev_cjk = false;
             continue;
+        }
+        let curr_cjk = is_cjk(ch);
+        // ASCII↔CJK boundary: split here so `Hero角色` → `["hero", "角色"]`
+        // rather than collapsing into one untranslatable token.
+        if !current.is_empty() && curr_cjk != prev_cjk {
+            flush(&mut current, &mut tokens);
         }
         if ch.is_uppercase() && prev_lower {
             // camelCase boundary: emit current token, start fresh.
@@ -162,13 +191,18 @@ fn tokenize_stem(s: &str) -> Vec<String> {
         }
         current.push(ch.to_ascii_lowercase());
         prev_lower = ch.is_lowercase();
+        prev_cjk = curr_cjk;
     }
     flush(&mut current, &mut tokens);
     tokens
 }
 
 fn is_useful_token(token: &str) -> bool {
-    if token.len() < 2 {
+    // `chars().count()` instead of `len()` because byte length lies for
+    // multi-byte characters: a single CJK ideograph has byte length 3
+    // and would slip past `len() < 2`. Single-character tokens (whether
+    // `"a"` or `"中"`) carry near-zero taxonomic value, drop them.
+    if token.chars().count() < 2 {
         return false;
     }
     if token.chars().all(|c| c.is_ascii_digit()) {
@@ -250,6 +284,18 @@ impl TagSuggester for HeuristicSuggester {
             return Vec::new();
         }
 
+        // Adaptive thresholds: tiny projects (< 30 assets) would
+        // otherwise produce zero suggestions because every group falls
+        // below the noise filter. Loosen so users still see something;
+        // larger projects keep the stricter baselines that matter when
+        // the result list could otherwise drown in tokens.
+        let total_assets = scan.assets.len();
+        let (min_token_hits, min_dim_hits, min_path_hits) = if total_assets < 30 {
+            (2usize, 3usize, 2usize)
+        } else {
+            (MIN_TOKEN_HITS, MIN_DIM_HITS, MIN_PATH_HITS)
+        };
+
         // name → (paths, hint). Lower-priority hits append to the same key but
         // don't overwrite the hint; the first hint stays. Ordering of source
         // passes (filename → dimension → path) implicitly sets priority.
@@ -273,7 +319,7 @@ impl TagSuggester for HeuristicSuggester {
             }
         }
         for (token, paths) in token_assets {
-            if paths.len() < MIN_TOKEN_HITS {
+            if paths.len() < min_token_hits {
                 continue;
             }
             let entry = groups
@@ -315,7 +361,7 @@ impl TagSuggester for HeuristicSuggester {
             }
         }
         for (key, paths) in dim_assets {
-            if paths.len() < MIN_DIM_HITS {
+            if paths.len() < min_dim_hits {
                 continue;
             }
             let entry = groups
@@ -342,7 +388,7 @@ impl TagSuggester for HeuristicSuggester {
             }
         }
         for (seg, paths) in path_assets {
-            if paths.len() < MIN_PATH_HITS {
+            if paths.len() < min_path_hits {
                 continue;
             }
             // Path-segment names get the segment as-is (it's already
@@ -462,6 +508,51 @@ mod tests {
         assert!(!is_useful_token("tex"));
         assert!(is_useful_token("hero"));
         assert!(is_useful_token("diffuse"));
+    }
+
+    #[test]
+    fn tokenize_splits_at_ascii_cjk_boundary() {
+        assert_eq!(tokenize_stem("Hero角色"), vec!["hero", "角色"]);
+        assert_eq!(tokenize_stem("角色Hero"), vec!["角色", "hero"]);
+        assert_eq!(tokenize_stem("武器Sword剑"), vec!["武器", "sword", "剑"]);
+    }
+
+    #[test]
+    fn tokenize_continuous_cjk_kept_together() {
+        // Documented limitation — without a CJK dictionary we can't
+        // split connected ideographs into meaning-bearing units.
+        assert_eq!(tokenize_stem("角色主角"), vec!["角色主角"]);
+    }
+
+    #[test]
+    fn token_filter_drops_single_cjk() {
+        // `len()` is byte length; a single ideograph has byte length 3
+        // so the old `len() < 2` check let it through. The fix uses
+        // `chars().count()` which correctly counts a single ideograph
+        // as 1 character and filters it.
+        assert!(!is_useful_token("中"));
+        assert!(!is_useful_token("旧"));
+        assert!(is_useful_token("主角"));
+        assert!(is_useful_token("武器"));
+    }
+
+    #[test]
+    fn small_project_uses_loose_thresholds() {
+        // 6 assets with `hero` appearing 2 times: below the baseline of
+        // 3, but above the adaptive floor of 2. User shouldn't open the
+        // panel and see nothing on a small project.
+        let scan = fixture_scan(vec![
+            asset("/proj/a/hero_red.png", "hero_red.png", AssetType::Texture),
+            asset("/proj/a/hero_blue.png", "hero_blue.png", AssetType::Texture),
+            asset("/proj/a/sword.png", "sword.png", AssetType::Texture),
+            asset("/proj/a/shield.png", "shield.png", AssetType::Texture),
+            asset("/proj/a/potion.png", "potion.png", AssetType::Texture),
+        ]);
+        let groups = HeuristicSuggester.suggest(&scan);
+        assert!(
+            groups.iter().any(|g| g.name == "Hero"),
+            "Expected `Hero` to surface on a 5-asset project under adaptive thresholds"
+        );
     }
 
     #[test]
