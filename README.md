@@ -79,7 +79,8 @@ Some 3D model formats (FBX, OBJ, DAE) embed texture paths internally. When these
 - Create custom **color-coded tags**
 - Tag single or multiple assets at once
 - **Filter assets by tags** (single or multi-select)
-- Tags persist across sessions
+- Tags persist across sessions; rename / move syncs bindings; deleted files are reaped automatically
+- **Heuristic tag suggestions** — auto-grouped by filename token / dimension + PBR channel / path segment
 
 ### 📊 Metadata Extraction
 
@@ -90,21 +91,29 @@ Some 3D model formats (FBX, OBJ, DAE) embed texture paths internally. When these
 | **Audio** | Duration, sample rate, channels, bit depth |
 
 ### 🖼️ Asset Browser
+- **List + Grid views** with virtual scrolling — handles 10,000+ files smoothly
 - **Thumbnail preview** with disk caching
-- **Virtual scrolling** — handles 10,000+ files smoothly
+- **Command Palette** (⌘K / Ctrl+K) for quick navigation, filters, and actions
 - **Search** by filename or path
 - **Filter** by asset type
-- **3D model preview** with orbit controls
+- **3D model preview** with orbit controls (glTF / GLB / FBX / OBJ / DAE / 3DS)
+- **External editor mappings** — map extensions to Photoshop / Blender / Audacity / etc.
 
 ### 📋 Rule-Based Analysis
 
 | Category | Checks |
 |----------|--------|
 | **Naming** | Forbidden chars, Chinese chars, prefix, case style |
-| **Textures** | Power-of-two, max size |
-| **Models** | Vertex/face/material limits |
-| **Audio** | Sample rate, duration |
-| **Duplicates** | SHA256-based detection |
+| **Textures** | Power-of-two, size limits, file size, mipmap (DDS) |
+| **Texture Color Space** | sRGB-tagged data textures (normal / roughness / metallic / …) |
+| **Models** | Vertex / face / material limits |
+| **Audio** | Sample rate, duration, mono-for-SFX, file size |
+| **Duplicates** | SHA256-based content detection |
+| **Missing References** (Unity) | GUID lookups against `.meta` files |
+| **PBR Set Completeness** | Per-folder texture group missing channels (BaseColor / Normal / Roughness …) |
+| **Ignore Patterns** | Glob-based exclusion of vendored / generated paths |
+
+See [`docs/analyzer-rules.md`](docs/analyzer-rules.md) for per-rule defaults and tuning advice.
 
 ---
 
@@ -113,7 +122,7 @@ Some 3D model formats (FBX, OBJ, DAE) embed texture paths internally. When these
 | Category | Formats |
 |----------|---------|
 | **Textures** | PNG, JPG/JPEG, TGA, BMP, GIF |
-| **3D Models** | glTF, GLB, FBX, OBJ (+MTL), DAE |
+| **3D Models** | glTF, GLB, FBX, OBJ (+MTL), DAE, 3DS, `.blend` (detected; export to GLB to preview) |
 | **Audio** | WAV, MP3, OGG |
 | **Other** | Scripts, Materials, Prefabs, Scenes |
 
@@ -132,7 +141,7 @@ Some 3D model formats (FBX, OBJ, DAE) embed texture paths internally. When these
 | **Virtualization** | @tanstack/react-virtual |
 
 ### Rust Crates
-`image` · `gltf` · `tobj` · `symphonia` · `sha2` · `walkdir` · `toml` · `git2` · `rayon`
+`image` · `gltf` · `tobj` · `fbxcel-dom` · `symphonia` · `mp4` · `matroska-demuxer` · `sha2` · `walkdir` · `rayon` · `toml` · `globset` · `git2` · `notify` · `trash` · `tauri-plugin-opener`
 
 ---
 
@@ -165,12 +174,13 @@ pnpm tauri build
 
 ## 📖 Usage
 
-1. **Open Project** — Click "Open Project" and select your game project folder
-2. **Browse Assets** — Navigate the directory tree, search, and filter
-3. **Preview Assets** — Click any asset to view details and preview
-4. **Tag Assets** — Right-click to add tags for organization
-5. **Run Analysis** — Click "Run Analysis" to check for issues
-6. **Review Issues** — Switch to Issues tab to see problems
+1. **Open Project** — Click "Open Project" (or `⌘O` / `Ctrl+O`) and select your game project folder
+2. **Browse Assets** — Navigate the directory tree, switch list ↔ grid view, search, and filter
+3. **Preview Assets** — Click any asset to view details, thumbnail, or 3D viewer
+4. **Tag Assets** — Right-click to tag manually, or open the **AI Tag panel** for heuristic-grouped suggestions
+5. **Run Analysis** — `⌘⇧R` / `Ctrl+Shift+R`; tweak rules via **Settings → Analysis Rules → Edit**
+6. **Review Issues** — Switch to Issues tab; group by rule, filter by severity, jump to file
+7. **External Editors** — Map extensions to Photoshop / Blender / etc. in **Settings → External Editors**, then the `⤴` button opens directly
 
 ---
 
@@ -183,7 +193,7 @@ A working starter config is at [`examples/tidycraft.example.toml`](examples/tidy
 ```toml
 [naming]
 enabled = true
-forbidden_chars = ['<', '>', ':', '"', '|', '?', '*', '/', '\']
+forbidden_chars = [' ', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '+', '=']
 forbid_chinese = true
 max_length = 64
 texture_prefix = "T_"      # nullable
@@ -211,6 +221,21 @@ allowed_sample_rates = [44_100, 48_000]
 max_sfx_duration = 30.0    # seconds
 max_file_size = 20_971_520 # bytes
 prefer_mono_for_sfx = false
+
+# Cross-asset PBR set check — group textures by directory + base stem,
+# warn if the trigger channel is present but required ones are missing.
+[pbr_set]
+enabled = true
+trigger = "basecolor"
+required = ["basecolor", "normal"]
+
+# Skip matched assets entirely (per-asset / duplicate / missing-ref all respect this).
+[ignore]
+patterns = [
+    # "ThirdParty/**",
+    # "Library/**",         # Unity generated artifacts
+    # "Intermediate/**",    # Unreal build cache
+]
 ```
 
 Any field can be omitted — missing fields fall back to defaults.
@@ -228,16 +253,19 @@ tidycraft/
 │   ├── types/              # TypeScript types
 │   ├── hooks/              # React hooks
 │   ├── i18n/locales/       # en.json + zh.json
-│   └── lib/                # Utilities
+│   └── lib/                # Utilities (pathUtils, platform detect, …)
 ├── src-tauri/              # Rust backend
 │   └── src/
 │       ├── scanner.rs      # Asset scanning
 │       ├── watcher.rs      # FS watcher → fs-change events
-│       ├── analyzer/       # Rule engine
+│       ├── analyzer/       # Rule engine + PBR set + tag suggester
 │       ├── thumbnail.rs    # Thumbnail generation
 │       ├── tags.rs         # Tag management
 │       └── lib.rs          # Tauri commands
-└── REDESIGN.md             # Visual redesign phase tracker
+├── docs/                   # Auxiliary docs (analyzer-rules.md, screenshots/)
+├── examples/               # Starter `tidycraft.example.toml`
+├── DEVELOPMENT.md          # Developer guide (architecture, contributing)
+└── README.md               # User-facing docs (this file)
 ```
 
 ---
@@ -254,19 +282,21 @@ Shipped:
 - [x] Export reports (JSON, CSV, HTML)
 - [x] Live filesystem watcher (auto-refresh on file changes)
 - [x] Multi-project workspace + cross-session restore
-- [x] Tag system with multi-select filtering
-- [x] Safe delete / move / copy / duplicate (OS trash)
-
-In progress:
-
-- [ ] **Visual redesign** — Forge Dark theme migration (see `REDESIGN.md`).
-  Phase 0 (tokens), 1 (visual refresh), 2 (ProjectSwitcher) shipped;
-  Phase 3 (Command Palette ⌘K) in progress; Phase 4 (Gallery / grid view) and
-  Phase 5 (AI tag suggestions) queued.
+- [x] Tag system with multi-select filtering + heuristic AI suggestions
+- [x] Safe delete / move / copy / duplicate (OS trash) with automatic tag sync
+- [x] Forge Dark visual redesign (full migration)
+- [x] Command Palette (⌘K), List / Gallery views
+- [x] Settings → Analysis Rules editor + per-project `tidycraft.toml`
+- [x] PBR set completeness analyzer (per-folder texture group)
+- [x] External editor mappings (Settings → External Editors, per-extension)
+- [x] Cross-platform polish (macOS ⌘ glyphs, Windows file-manager reveal fix, path utils)
 
 Backlog:
 
-- [ ] Custom rule scripting (`tidycraft.toml` is parsed but not yet wired through the UI)
+- [ ] LLM-backed semantic tag clustering (`ExternalLLMSuggester` interface reserved in `tag_suggest.rs`)
+- [ ] VRAM budget estimates (per texture, per directory)
+- [ ] DCC source-file linking (`.blend` / `.spp` → exported `.fbx` / `.glb` "source newer than export" warnings)
+- [ ] Cross-engine reverse-reference graph (extend Unity GUID graph to UE / Godot)
 
 ---
 
