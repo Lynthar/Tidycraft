@@ -27,7 +27,9 @@ pub struct AudioConfig {
 }
 
 fn default_enabled() -> bool {
-    true
+    // Out-of-box OFF: sample-rate / duration limits are pipeline-
+    // specific. Users opt in via tidycraft.toml.
+    false
 }
 
 fn default_sample_rates() -> Vec<u32> {
@@ -45,7 +47,7 @@ fn default_max_file_size() -> u64 {
 impl Default for AudioConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             allowed_sample_rates: vec![44100, 48000],
             max_sfx_duration: 30.0,
             max_file_size: 20 * 1024 * 1024,

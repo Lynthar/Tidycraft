@@ -93,13 +93,16 @@ impl Analyzer {
             )));
         }
 
-        // Add texture rules
+        // Add texture rules. Note: `texture.color_space` is now gated
+        // independently — enabling stricter size/PoT checks via
+        // `[texture]` shouldn't be the only way to keep the
+        // color-space safety net.
         if config.texture.enabled {
             analyzer.add_rule(Box::new(rules::texture::TextureRule::new(
                 config.texture.clone(),
             )));
-            // Color-space mismatch check piggybacks on the same enabled flag —
-            // it's always on by default and doesn't carry its own config.
+        }
+        if config.texture.color_space.enabled {
             analyzer.add_rule(Box::new(rules::texture_colorspace::TextureColorSpaceRule));
         }
 

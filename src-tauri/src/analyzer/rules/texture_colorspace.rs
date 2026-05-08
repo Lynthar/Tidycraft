@@ -12,10 +12,34 @@
 
 use std::path::Path;
 
+use serde::{Deserialize, Serialize};
+
 use crate::analyzer::{Issue, Severity};
 use crate::scanner::{AssetInfo, AssetType};
 
 use super::Rule;
+
+/// Color-space rule lives under `[texture.color_space]` in the TOML —
+/// it used to share `[texture]`'s enabled flag, but disabling the size
+/// / PoT / file-size checks shouldn't also turn off this safety net,
+/// so the flag is split. Default ON because this catches a real
+/// corruption bug (engine de-gammas sRGB-flagged data textures), not
+/// a stylistic convention.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TextureColorSpaceConfig {
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+}
+
+fn default_enabled() -> bool {
+    true
+}
+
+impl Default for TextureColorSpaceConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
 
 /// Stem suffixes (case-insensitive, `ends_with` match after lowercasing)
 /// that imply the texture is data, not sRGB color.

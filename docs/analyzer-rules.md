@@ -13,6 +13,24 @@ Clicking **Run Analysis** (or `⌘⇧R`) runs four phases on the cached scan res
 
 All four phases share the same `tidycraft.toml` configuration, read from your project root each time you click Run Analysis. **No rescan is needed after editing the file** — just save and re-run.
 
+## Out-of-box defaults
+
+Most rule families ship `enabled = false` so a fresh project produces almost no false positives. **Default on**:
+
+- `naming` — but only the `forbidden_chars` sub-rule meaningfully fires (shell-unsafe characters; thresholds elsewhere are loose)
+- `texture.color_space` — its own section now; catches a real corruption bug, not a stylistic convention
+- `duplicate` — always on, no config
+- `missing_reference` — always on for Unity projects, no config
+
+**Default off** (opt in via `tidycraft.toml`):
+
+- `texture` (PoT / size / file-size)
+- `model` (vertex / face / material limits)
+- `audio` (sample-rate / duration / mono-for-SFX)
+- `pbr_set` (per-folder texture group completeness)
+
+Out-of-box `Run Analysis` therefore flags only **real bugs** — illegal characters, duplicates, broken Unity references, sRGB-tagged data textures. Stricter conventions are opt-in.
+
 ## Rules at a glance
 
 | Rule family | Applies to | Default severity range |
@@ -32,17 +50,17 @@ All four phases share the same `tidycraft.toml` configuration, read from your pr
 
 | Sub-rule | Default | TOML key | When to relax |
 |---|---|---|---|
-| Max name length | 64 chars | `max_length` | Long descriptive names in research / academic projects |
+| Max name length | 512 chars (loose) | `max_length = 64` | Strict pipelines (UE, deep nesting) |
 | Forbidden characters | space, `! @ # $ % ^ & * ( ) + =` | `forbidden_chars` | Inheriting Unity Asset Store packages or third-party samples |
-| Forbid Chinese characters | true | `forbid_chinese = false` | Teams that ship Chinese asset names (localized content, learning material) |
-| Required prefix per type | textures `T_`; model/audio off | `texture_prefix` / `model_prefix` / `audio_prefix` | Existing project where you can't bulk-rename |
+| Forbid Chinese characters | false | `forbid_chinese = true` | Strict ASCII-only pipelines |
+| Required prefix per type | none | `texture_prefix = "T_"` / `model_prefix` / `audio_prefix` | Teams enforcing a naming convention |
 | Case style | any | `case_style` ∈ `"any" \| "PascalCase" \| "snake_case" \| "camelCase"` | Mixed-case codebases |
 
 > **First-issue mode**: a single asset that violates several naming sub-rules will only show the first match in the order above. Fix it, re-run, the next one surfaces.
 
 ---
 
-## Texture Standards (`[texture]`)
+## Texture Standards (`[texture]`) — *disabled by default*
 
 | Sub-rule | Default | TOML key | When to relax |
 |---|---|---|---|
@@ -55,9 +73,11 @@ All four phases share the same `tidycraft.toml` configuration, read from your pr
 
 ---
 
-## Texture Color Space (`[texture]` — same enabled flag)
+## Texture Color Space (`[texture.color_space]`) — *enabled by default*
 
 Detects PNGs flagged as **sRGB** whose filename suggests they're a data channel (normal map, roughness, metallic, AO, etc.). The engine would otherwise de-gamma those pixels at import and silently corrupt the data.
+
+This used to share `[texture]`'s enabled flag, but lives in its own section now — disabling the size / PoT / file-size checks shouldn't also turn off this safety net. Default on because the underlying bug is real corruption, not a stylistic convention.
 
 A warning fires only when **both** signals match:
 
@@ -68,7 +88,7 @@ To suppress: rename the file (drop the suffix), re-export with Linear color spac
 
 ---
 
-## Model Standards (`[model]`)
+## Model Standards (`[model]`) — *disabled by default*
 
 | Sub-rule | Default | TOML key | When to relax |
 |---|---|---|---|
@@ -78,7 +98,7 @@ To suppress: rename the file (drop the suffix), re-export with Linear color spac
 
 ---
 
-## Audio Standards (`[audio]`)
+## Audio Standards (`[audio]`) — *disabled by default*
 
 | Sub-rule | Default | TOML key | When to relax |
 |---|---|---|---|
@@ -111,7 +131,7 @@ Skips:
 
 ---
 
-## PBR Set Completeness (`[pbr_set]`)
+## PBR Set Completeness (`[pbr_set]`) — *disabled by default*
 
 Cross-asset check: textures sharing the same directory and base stem are grouped into a "set", and a set is flagged when its expected channels aren't all present. A set forms only when the **trigger channel** (default `basecolor`) is in the group, so directories of UI / particle / non-PBR textures don't produce spurious warnings.
 

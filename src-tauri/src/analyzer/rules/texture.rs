@@ -2,6 +2,7 @@ use crate::analyzer::{Issue, Severity};
 use crate::scanner::{AssetInfo, AssetType};
 use serde::{Deserialize, Serialize};
 
+use super::texture_colorspace::TextureColorSpaceConfig;
 use super::Rule;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,10 +29,21 @@ pub struct TextureConfig {
     /// Maximum file size in bytes
     #[serde(default = "default_max_file_size")]
     pub max_file_size: u64,
+
+    /// Color-space mismatch detection. Lives under `[texture.color_space]`
+    /// in the TOML; gated independently from this section's `enabled`
+    /// flag so users can turn off PoT / size / file-size checks without
+    /// also losing the sRGB-data-texture safety net.
+    #[serde(default)]
+    pub color_space: TextureColorSpaceConfig,
 }
 
 fn default_enabled() -> bool {
-    true
+    // Out-of-box OFF: texture standards are stylistic conventions
+    // (PoT, max-size, file-size). Users opt in via tidycraft.toml.
+    // The independent `[texture.color_space]` rule stays on because
+    // it's a real bug check, not a convention.
+    false
 }
 
 fn default_require_pot() -> bool {
@@ -53,12 +65,13 @@ fn default_max_file_size() -> u64 {
 impl Default for TextureConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             require_pot: true,
             max_size: 4096,
             min_size: 4,
             warn_non_square: false,
             max_file_size: 10 * 1024 * 1024,
+            color_space: TextureColorSpaceConfig::default(),
         }
     }
 }

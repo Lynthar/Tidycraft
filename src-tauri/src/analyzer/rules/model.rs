@@ -23,7 +23,9 @@ pub struct ModelConfig {
 }
 
 fn default_enabled() -> bool {
-    true
+    // Out-of-box OFF: vertex / face / material limits are pipeline-
+    // specific budgets. Users opt in via tidycraft.toml.
+    false
 }
 
 fn default_max_vertices() -> u32 {
@@ -41,7 +43,7 @@ fn default_max_materials() -> u32 {
 impl Default for ModelConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             max_vertices: 100_000,
             max_faces: 100_000,
             max_materials: 10,

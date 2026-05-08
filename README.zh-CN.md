@@ -188,53 +188,55 @@ pnpm tauri build
 
 把 `tidycraft.toml` 放到项目根目录，下次 Run Analysis 会自动加载。侧边栏的 **运行分析** 按钮上会出现一个小圆点提示当前使用了自定义规则。
 
-可用的样例文件：[`examples/tidycraft.example.toml`](examples/tidycraft.example.toml) —— 复制到你的项目根目录、改名为 `tidycraft.toml`，按需调整即可。每条规则的含义和调参建议见 [`docs/analyzer-rules.md`](docs/analyzer-rules.md)。字段速查：
+**Out-of-box 默认规则非常宽松**：仅 `naming.forbidden_chars`（shell-unsafe / Windows 非法字符）、`[texture.color_space]`、`duplicate`、`missing_reference`（Unity）默认开启。更严格的检查 —— `[texture]` 尺寸 / PoT、`[model]` 预算、`[audio]` 采样率、`[pbr_set]` —— 都是**按需启用**：把对应段的 `enabled = true` 即可。
+
+可用的样例文件：[`examples/tidycraft.example.toml`](examples/tidycraft.example.toml) —— 复制到你的项目根目录、改名为 `tidycraft.toml`，按需调整即可。每条规则的含义和调参建议见 [`docs/analyzer-rules.md`](docs/analyzer-rules.md)。字段速查（下方值是实际内置默认）：
 
 ```toml
 [naming]
 enabled = true
 forbidden_chars = [' ', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '+', '=']
-forbid_chinese = true
-max_length = 64
-texture_prefix = "T_"      # 可选
-model_prefix = "SM_"       # 可选
-audio_prefix = "A_"        # 可选
-case_style = "snake_case"  # any | snake_case | kebab-case | PascalCase | camelCase
+forbid_chinese = false
+max_length = 512                       # 宽松；严格 pipeline 可调到 64-96
+# texture_prefix = "T_"                # 取消注释强制纹理用此前缀
+# model_prefix = "SM_"
+# audio_prefix = "A_"
+case_style = "any"                     # any | snake_case | kebab-case | PascalCase | camelCase
 
-[texture]
-enabled = true
+[texture]                              # 默认 disabled —— 需要严格图像规则时再开
+enabled = false
 require_pot = true
-max_size = 4096            # 像素
-min_size = 4               # 像素
+max_size = 4096
+min_size = 4
 warn_non_square = false
-max_file_size = 10_485_760 # 字节
+max_file_size = 10_485_760
 
-[model]
+[texture.color_space]                  # 默认 enabled；捕获 sRGB-标记数据贴图陷阱
 enabled = true
+
+[model]                                # 默认 disabled
+enabled = false
 max_vertices = 100_000
 max_faces = 100_000
 max_materials = 10
 
-[audio]
-enabled = true
+[audio]                                # 默认 disabled
+enabled = false
 allowed_sample_rates = [44_100, 48_000]
-max_sfx_duration = 30.0    # 秒
-max_file_size = 20_971_520 # 字节
+max_sfx_duration = 30.0
+max_file_size = 20_971_520
 prefer_mono_for_sfx = false
 
-# 跨资源 PBR set 完整性检查 —— 按目录 + 基名分组纹理，
-# trigger 通道存在但 required 通道缺失时报警。
-[pbr_set]
-enabled = true
+[pbr_set]                              # 默认 disabled；按目录的 PBR 完整性
+enabled = false
 trigger = "basecolor"
 required = ["basecolor", "normal"]
 
-# 完全跳过匹配的资源（per-asset / 重复 / 缺失引用 全部生效）。
 [ignore]
 patterns = [
     # "ThirdParty/**",
-    # "Library/**",         # Unity 生成产物
-    # "Intermediate/**",    # Unreal 构建缓存
+    # "Library/**",                    # Unity 生成产物
+    # "Intermediate/**",               # Unreal 构建缓存
 ]
 ```
 

@@ -47,11 +47,17 @@ fn default_forbidden_chars() -> Vec<char> {
 }
 
 fn default_forbid_chinese() -> bool {
-    true
+    // Out-of-box: don't flag Chinese characters. Many teams legitimately
+    // ship non-ASCII names (localized content, learning material). Users
+    // who want strict ASCII can set this to true.
+    false
 }
 
 fn default_max_length() -> usize {
-    64
+    // Generous out-of-box; 512 means only pathologically long names trip
+    // it. Strict pipelines (UE asset references, deep nesting) can lower
+    // to 64 / 96 in tidycraft.toml.
+    512
 }
 
 fn default_case_style() -> String {
@@ -61,11 +67,16 @@ fn default_case_style() -> String {
 impl Default for NamingConfig {
     fn default() -> Self {
         Self {
+            // Stays enabled — `forbidden_chars` catches genuinely
+            // shell-unsafe / Windows-illegal characters and is a real
+            // bug check, not a stylistic convention. Other sub-rules
+            // are loosened so default behavior produces almost no
+            // issues unless a real problem exists.
             enabled: true,
             forbidden_chars: default_forbidden_chars(),
-            forbid_chinese: true,
-            max_length: 64,
-            texture_prefix: Some("T_".to_string()),
+            forbid_chinese: false,
+            max_length: 512,
+            texture_prefix: None, // strict pipelines re-enable e.g. "T_"
             model_prefix: None,
             audio_prefix: None,
             case_style: "any".to_string(),

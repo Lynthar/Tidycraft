@@ -14,55 +14,95 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r##"# Tidycraft analysis rules.
 # Edit and save — Run Analysis re-reads this file on each click; no rescan needed.
 # Delete this file to fall back to built-in defaults.
 # See docs/analyzer-rules.md for what each rule does and when to relax it.
+#
+# OUT-OF-BOX DEFAULTS ARE DELIBERATELY MINIMAL.
+# Only naming.forbidden_chars + texture.color_space + duplicate (always-on) +
+# missing_reference (Unity-only, always-on) fire by default. Every other
+# section below ships with `enabled = false`; flip them to `true` to opt in.
 
 # ─── Naming Convention ─── (applies to all assets)
+# DEFAULT: enabled. The `forbidden_chars` check below catches shell-unsafe /
+# Windows-illegal characters — that's a real bug, not a stylistic convention,
+# so it stays on. The other sub-rules are loosened so default behavior
+# produces almost no false positives.
 [naming]
 enabled = true
-forbid_chinese = true            # set false if your team writes Chinese asset names
-max_length = 64
-case_style = "any"               # "any" | "PascalCase" | "snake_case" | "camelCase"
-texture_prefix = "T_"            # required prefix for textures; remove this line to disable
-# model_prefix = "SM_"           # uncomment to require a prefix on models
-# audio_prefix = "SFX_"          # uncomment to require a prefix on audio
-# Default forbidden_chars covers shell-unsafe punctuation. Override if needed:
-# forbidden_chars = [" ", "!", "@", "#", "$", "%", "^", "&", "*", "(", ")", "+", "="]
+# Forbidden characters in filenames. Default catches shell-unsafe punctuation;
+# add `<`, `>`, `:`, `"`, `|`, `?`, `*`, `/`, `\` if you also want every
+# Windows-illegal character flagged.
+# forbidden_chars = [' ', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '+', '=']
+# Set true to forbid CJK characters in filenames. Default false (many teams
+# legitimately ship localized content).
+forbid_chinese = false
+# Generous default. Tighten to 64–96 for strict pipelines (UE, deep nesting).
+max_length = 512
+# Optional per-type prefix. Uncomment + set to e.g. "T_" to force textures
+# to be named "T_*". Default: no prefix required.
+# texture_prefix = "T_"
+# model_prefix = "SM_"
+# audio_prefix = "A_"
+# Case style: "any" / "PascalCase" / "snake_case" / "camelCase".
+case_style = "any"
 
 # ─── Texture Standards ─── (applies to image assets)
+# DEFAULT: disabled. PoT / max-size / file-size are pipeline-specific
+# budgets — opt in by flipping `enabled` to true.
 [texture]
-enabled = true
-require_pot = true               # power-of-two dimensions; disable for UI/LUT textures
-max_size = 4096                  # px (warn if exceeded)
+enabled = false
+# Power-of-two dimensions. UI / icon textures and HDRIs often need this off.
+require_pot = true
+# Maximum width or height in pixels. Hero assets / cinematic textures
+# may justify raising to 8192.
+max_size = 4096
+# Minimum width or height. Below this triggers an info-severity issue.
 min_size = 4
+# Warn when not square. Most texture pipelines accept rectangular.
 warn_non_square = false
-max_file_size = 10485760         # 10 MB
+# Maximum file size in bytes. 10 MB default; raise for cutscene / hero
+# assets, lower for mobile-targeted projects.
+max_file_size = 10485760
+
+# ─── Texture Color Space ─── (applies to image assets)
+# DEFAULT: enabled. Catches a real corruption bug — engine de-gammas
+# sRGB-flagged data textures (normal / roughness / metallic / AO).
+# Lives under its own section now so disabling the [texture] checks
+# above doesn't also turn off this safety net.
+[texture.color_space]
+enabled = true
 
 # ─── Model Standards ─── (applies to 3D model assets)
+# DEFAULT: disabled. Vertex / face / material limits are per-project
+# budgets — opt in by flipping `enabled` to true.
 [model]
-enabled = true
+enabled = false
 max_vertices = 100000
 max_faces = 100000
 max_materials = 10
 
 # ─── Audio Standards ─── (applies to audio assets)
+# DEFAULT: disabled. Sample rate / duration / mono limits are
+# pipeline-specific — opt in by flipping `enabled` to true.
 [audio]
-enabled = true
+enabled = false
 allowed_sample_rates = [44100, 48000]
-max_sfx_duration = 30.0          # seconds; only enforced on files whose name suggests SFX
+# Seconds; only enforced on files whose name suggests SFX
+# (sfx / sound / effect / hit / click / ui). Music / VO are exempt.
+max_sfx_duration = 30.0
 max_file_size = 20971520         # 20 MB
 prefer_mono_for_sfx = false
 
-# ─── PBR Set Completeness ─── (cross-asset: groups textures by base name)
-# A "set" is the group of textures sharing the same base stem in the same
-# directory, e.g. T_Wood_BaseColor.png + T_Wood_Normal.png. The check fires
-# only when the trigger channel (default: basecolor) is present, so projects
-# without PBR-style naming produce no warnings even with this rule on.
+# ─── PBR Set Completeness ─── (cross-asset: groups textures by directory + base name)
+# DEFAULT: disabled. Opinionated about which channels make a "complete"
+# PBR material; off out-of-box because not every project uses PBR
+# naming. Opt in by flipping `enabled` to true. The check fires only
+# when the trigger channel is present in a directory's texture group,
+# so directories of UI / particle textures stay quiet.
 [pbr_set]
-enabled = true
-trigger = "basecolor"            # set must contain this channel to be checked
-required = ["basecolor", "normal"]   # any role missing here → Warning
+enabled = false
+trigger = "basecolor"
+required = ["basecolor", "normal"]
 
-# Channel role → suffix list (case-insensitive). Suffix matches the part
-# after the LAST `_` in the file stem; T_brand_new isn't a "Normal" map.
+# Channel role → suffix list (case-insensitive, strict last-`_`-segment match).
 [pbr_set.channels]
 basecolor = ["BaseColor", "Albedo", "Diffuse", "Color"]
 normal    = ["Normal", "Norm"]
@@ -72,17 +112,17 @@ ao        = ["AO", "AmbientOcclusion"]
 emissive  = ["Emissive", "Emission"]
 height    = ["Height", "Disp"]
 
-# Packed-channel suffixes that satisfy multiple roles at once. A file
-# ending in `_ORM` counts as if AO + Roughness + Metallic were all present.
+# Packed-channel suffixes that satisfy multiple roles at once. _ORM
+# satisfies AO + Roughness + Metallic in one image.
 [pbr_set.packed]
 ORM = ["ao", "roughness", "metallic"]
 MRA = ["metallic", "roughness", "ao"]
 RMA = ["roughness", "metallic", "ao"]
 
 # ─── Ignore Patterns ─── (skip matched assets entirely)
-[ignore]
 # Globs matched against asset paths RELATIVE to project root.
 # Useful for vendored packages, legacy folders, or generated artifacts.
+[ignore]
 patterns = [
     # "ThirdParty/**",
     # "Plugins/**",
