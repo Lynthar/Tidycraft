@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question / discussion
+    url: https://github.com/Lynthar/Tidycraft/discussions
+    about: Open-ended questions, ideas, or "is this a bug?" go to Discussions, not Issues.

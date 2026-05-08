@@ -1,0 +1,57 @@
+name: Feature request
+description: Suggest something Tidycraft should do
+title: "[Feature] "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Tidycraft tries to stay focused (asset QA, not a general-purpose file manager). Before filing, please skim the [Roadmap](https://github.com/Lynthar/Tidycraft#-roadmap) and existing feature requests.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem you're trying to solve
+      description: What pain are you hitting today? "I'd love feature X" alone isn't enough — explain why X helps.
+      placeholder: |
+        I'm reviewing 200 textures from a third-party pack and need to identify which are unused.
+        Currently I have to grep through .prefab files manually.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed approach (optional)
+      description: If you have a concrete idea for how it should work, describe it. UI mockups / sketches welcome.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any workarounds you've tried, or other tools that solve this differently.
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Engine / pipeline scope
+      description: Is this Unity-only? Engine-agnostic?
+      multiple: true
+      options:
+        - Unity
+        - Unreal
+        - Godot
+        - Generic / engine-agnostic
+        - Other (describe in proposal)
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirms
+    attributes:
+      label: Sanity checks
+      options:
+        - label: I searched existing issues before filing this one
+          required: true
+        - label: This is a clearly defined feature, not a vague "make it better" wish
+          required: true

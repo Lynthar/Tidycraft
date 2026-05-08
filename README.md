@@ -21,7 +21,7 @@
 
 <div align="center">
 
-**Grid view** — virtualized cards with on-demand thumbnails, 3D preview pane, and the AI-suggested tag applied to matching assets.
+**Grid view** — virtualized cards with on-demand thumbnails, 3D preview pane, and auto-grouped tag suggestions applied to matching assets.
 
 <img src="docs/screenshots/grid-view.png" alt="Tidycraft grid view" width="85%">
 
@@ -32,6 +32,19 @@
 <img src="docs/screenshots/list-view.png" alt="Tidycraft list view" width="85%">
 
 </div>
+
+---
+
+## ✨ Why Tidycraft?
+
+- **Fast scanning** — 10k+ assets in seconds via parallel walk + incremental cache.
+- **Real bug detection out of the box** — duplicates (SHA256), broken Unity GUID references, sRGB-flagged data textures, incomplete PBR sets. Stylistic conventions (PoT, prefix, vertex budgets) are opt-in via `tidycraft.toml`.
+- **Multi-engine** — Unity / Unreal / Godot / generic; engine-specific parsers for GUID graphs, `.uproject`, `project.godot`.
+- **Multi-project workspace** — open several projects simultaneously, switch between them, cross-session restore.
+- **Stays out of your way** — minimal default rules; live filesystem watcher (no manual rescan); editable rules via `Settings → Analysis Rules → Edit`.
+- **Local-first** — all state on your disk; no telemetry, no network calls.
+
+> **Status: Alpha — actively developed.** Core features (scanning, analysis, tags, 3D preview, Git, watcher) are stable. LLM-backed semantic tagging is in design ([`docs/ai-tagging-plan.md`](docs/ai-tagging-plan.md)); the current "tag suggestions" panel is **heuristic** (filename / dimension / path), not an LLM.
 
 ---
 
@@ -157,8 +170,8 @@ See [`docs/analyzer-rules.md`](docs/analyzer-rules.md) for per-rule defaults and
 
 ```bash
 # Clone repository
-git clone https://github.com/AquaStarfish/Tidycraft.git
-cd tidycraft
+git clone https://github.com/Lynthar/Tidycraft.git
+cd Tidycraft
 
 # Install dependencies
 pnpm install
@@ -269,6 +282,17 @@ tidycraft/
 ├── DEVELOPMENT.md          # Developer guide (architecture, contributing)
 └── README.md               # User-facing docs (this file)
 ```
+
+---
+
+## 🔒 Privacy & Data
+
+Tidycraft is **local-first by design**:
+
+- **No telemetry, no analytics, no network calls** in the current build (v0.x).
+- **All state lives on your disk**: scan cache (`~/.cache/tidycraft/` or the platform equivalent), tag bindings (`.tidycraft-tags.json` per project), undo history, thumbnail cache, settings.
+- **No account, no sign-in.** Open the app and use it.
+- **The planned LLM tag suggester** ([design doc](docs/ai-tagging-plan.md)) is **opt-in only** — disabled by default, with an explicit consent dialog the first time per provider before any thumbnails or filenames leave your machine. Local-only providers (Ollama) are first-class alongside cloud APIs.
 
 ---
 
