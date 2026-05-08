@@ -18,7 +18,9 @@ import {
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
 import { useTagsStore } from "../stores/tagsStore";
+import { useSettingsStore } from "../stores/settingsStore";
 import { formatFileSize, formatDuration } from "../lib/utils";
+import { getExtension, getEditorDisplayName } from "../lib/pathUtils";
 import { VideoPlayer } from "./VideoPlayer";
 import { AudioPlayer } from "./AudioPlayer";
 import { ImageLightbox } from "./ImageLightbox";
@@ -43,6 +45,7 @@ export function AssetPreview() {
   const { t } = useTranslation();
   const { selectedAsset, setSelectedAsset, scanResult } = useProjectStore();
   const { tags, assetTags, addTagToAsset, removeTagFromAsset } = useTagsStore();
+  const externalEditors = useSettingsStore((s) => s.externalEditors);
   const [thumbnail, setThumbnail] = useState<string | null>(null);
   const [loadingThumbnail, setLoadingThumbnail] = useState(false);
   const [copiedPath, setCopiedPath] = useState(false);
@@ -50,6 +53,24 @@ export function AssetPreview() {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [modelLightboxOpen, setModelLightboxOpen] = useState(false);
   const [showTagPicker, setShowTagPicker] = useState(false);
+  // Inline error for failed open/show actions. Auto-clears after 3s so
+  // it stays out of the way without needing a global toast system.
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!errorMsg) return;
+    const handle = setTimeout(() => setErrorMsg(null), 3000);
+    return () => clearTimeout(handle);
+  }, [errorMsg]);
+
+  // Look up an editor mapping for the selected asset's extension. The
+  // header ⤴ button's behavior switches between "open in <editor>" and
+  // "open with default app" based on whether this is set.
+  const selectedExt = selectedAsset ? getExtension(selectedAsset.path) : "";
+  const mappedEditorPath = selectedExt ? externalEditors[selectedExt] : undefined;
+  const mappedEditorName = mappedEditorPath
+    ? getEditorDisplayName(mappedEditorPath)
+    : undefined;
 
   const currentAssetTags = selectedAsset ? (assetTags[selectedAsset.path] || []) : [];
 
@@ -98,21 +119,37 @@ export function AssetPreview() {
     }
   };
 
-  const openWithDefaultApp = async () => {
+  // The header ⤴ button: fall back through the editor mapping → default
+  // app chain so a configured editor wins, but missing editors don't
+  // become a dead end.
+  const handleOpen = async () => {
     if (!selectedAsset) return;
     try {
-      await invoke("open_with_default_app", { path: selectedAsset.path });
+      if (mappedEditorPath) {
+        await invoke("open_in_editor", {
+          path: selectedAsset.path,
+          editor: mappedEditorPath,
+        });
+      } else {
+        await invoke("open_with_default_app", { path: selectedAsset.path });
+      }
     } catch (err) {
-      console.error("Failed to open with default app:", err);
+      console.error("Failed to open:", err);
+      setErrorMsg(
+        t("assetPreview.openFailed", { reason: String(err) })
+      );
     }
   };
 
-  const revealInFinder = async () => {
+  const revealInFileManager = async () => {
     if (!selectedAsset) return;
     try {
-      await invoke("reveal_in_finder", { path: selectedAsset.path });
+      await invoke("show_in_file_manager", { path: selectedAsset.path });
     } catch (err) {
-      console.error("Failed to reveal in finder:", err);
+      console.error("Failed to show in file manager:", err);
+      setErrorMsg(
+        t("assetPreview.openFailed", { reason: String(err) })
+      );
     }
   };
 
@@ -275,18 +312,22 @@ export function AssetPreview() {
         </div>
         <div className="tc-preview-actions">
           <button
-            onClick={revealInFinder}
+            onClick={revealInFileManager}
             className="tc-icon-btn"
             style={{ width: 26, height: 26 }}
-            title={t("contextMenu.revealInFinder")}
+            title={t("contextMenu.revealInFileManager")}
           >
             <FolderOpen size={13} />
           </button>
           <button
-            onClick={openWithDefaultApp}
+            onClick={handleOpen}
             className="tc-icon-btn"
             style={{ width: 26, height: 26 }}
-            title={t("assetPreview.openWithDefaultApp")}
+            title={
+              mappedEditorName
+                ? t("assetPreview.openInEditor", { name: mappedEditorName })
+                : t("assetPreview.openWithDefaultApp")
+            }
           >
             <ExternalLink size={13} />
           </button>
@@ -300,6 +341,20 @@ export function AssetPreview() {
           </button>
         </div>
       </div>
+
+      {errorMsg && (
+        <div
+          className="px-4 py-1.5 text-xs"
+          style={{
+            color: "var(--err)",
+            borderBottom: "1px solid var(--line)",
+            background:
+              "color-mix(in oklch, var(--err) 8%, transparent)",
+          }}
+        >
+          {errorMsg}
+        </div>
+      )}
 
       <div className="tc-preview-body">
         {/* Preview canvas */}

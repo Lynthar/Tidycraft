@@ -9,6 +9,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { X, RotateCcw, Box, Grid3X3, Sun, Moon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { buildTextureUrlResolver } from "../lib/modelUrlResolver";
+import { dirname } from "../lib/pathUtils";
 
 const SUPPORTED_FORMATS = ["gltf", "glb", "fbx", "obj", "dae"];
 
@@ -322,7 +323,8 @@ export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose 
     // Load model
     const modelUrl = convertFileSrc(filePath);
     const ext = extension.toLowerCase();
-    const modelDir = filePath.substring(0, filePath.lastIndexOf('/') + 1);
+    const dir = dirname(filePath);
+    const modelDir = dir ? `${dir}/` : "";
     const resourcePath = convertFileSrc(modelDir);
 
     const onLoad = (object: THREE.Object3D) => {

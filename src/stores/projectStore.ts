@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
+import { basename, dirname } from "../lib/pathUtils";
 import type { ScanResult, AssetInfo, ScanProgress, AssetType, ProjectType, AnalysisResult, UndoResult, HistoryEntry, GitInfo, GitStatusMap, GitFileStatus, FsChangeEvent } from "../types/asset";
 
 // Per-project filesystem-watcher unlisten handles. Kept outside the zustand
@@ -633,10 +634,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const { projects, activeProjectId } = get();
     return Array.from(projects.values()).map((p) => ({
       id: p.id,
-      name:
-        p.projectPath.split("/").pop() ||
-        p.projectPath.split("\\").pop() ||
-        "Project",
+      name: basename(p.projectPath) || "Project",
       path: p.projectPath,
       isActive: p.id === activeProjectId,
       assetCount: p.scanResult?.total_count ?? null,
@@ -757,7 +755,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     const asset = scanResult.assets.find((a) => a.path === path);
     if (asset) {
-      const dir = path.substring(0, path.lastIndexOf("/"));
+      const dir = dirname(path);
       set(updateActiveProject(get(), {
         viewMode: "assets",
         selectedDirectory: dir,
@@ -925,7 +923,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // Filter by selected directory
     if (selectedDirectory) {
       assets = assets.filter((asset) => {
-        const assetDir = asset.path.substring(0, asset.path.lastIndexOf("/"));
+        const assetDir = dirname(asset.path);
         return assetDir === selectedDirectory || asset.path.startsWith(selectedDirectory + "/");
       });
     }

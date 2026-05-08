@@ -3,6 +3,7 @@ import { Trash2, AlertCircle, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { cn } from "../lib/utils";
+import { basename } from "../lib/pathUtils";
 import type { DeleteResult } from "../types/asset";
 
 interface DeleteConfirmDialogProps {
@@ -18,11 +19,6 @@ interface DeleteConfirmDialogProps {
 }
 
 const PREVIEW_LIMIT = 5;
-
-function basename(path: string): string {
-  const i = path.lastIndexOf("/");
-  return i >= 0 ? path.slice(i + 1) : path;
-}
 
 export function DeleteConfirmDialog({
   isOpen,

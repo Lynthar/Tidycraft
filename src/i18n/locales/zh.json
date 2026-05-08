@@ -124,7 +124,9 @@
     "copyGuid": "复制 GUID",
     "path": "路径",
     "copyPath": "复制路径",
-    "openWithDefaultApp": "用默认应用打开"
+    "openWithDefaultApp": "用默认应用打开",
+    "openInEditor": "用 {{name}} 打开",
+    "openFailed": "打开失败：{{reason}}"
   },
   "statusBar": {
     "ready": "就绪",
@@ -194,6 +196,14 @@
     "analysisRulesDefault": "正在使用内置默认规则——点击编辑可以自定义",
     "analysisRulesNoProject": "需要先打开项目才能编辑规则",
     "opening": "打开中...",
+    "externalEditorsSection": "外部编辑器",
+    "externalEditorsHint": "为不同扩展名指定专门的编辑器，预览面板的 ⤴ 按钮会直接用对应的编辑器打开；未配置时回退到系统默认应用。",
+    "addEditor": "添加映射",
+    "editorExtensionPlaceholder": ".png",
+    "editorPathPlaceholder": "编辑器可执行文件或 .app 包路径",
+    "editorBrowse": "浏览…",
+    "editorRemove": "删除",
+    "noExternalEditors": "尚未配置任何映射。",
     "maintenanceSection": "维护",
     "thumbnailCache": "缩略图缓存",
     "cacheSize": "占用磁盘 {{size}}",
@@ -262,9 +272,11 @@
     "confirmDelete": "确定要删除此标签吗？"
   },
   "contextMenu": {
+    "openInEditor": "用 {{name}} 打开",
+    "configureEditor": "配置 {{ext}} 的编辑器…",
     "openWithDefaultApp": "用默认应用打开",
     "copyPath": "复制路径",
-    "revealInFinder": "在 Finder 中显示",
+    "revealInFileManager": "在文件管理器中显示",
     "rename": "重命名",
     "duplicate": "创建副本",
     "moveTo": "移动到…",

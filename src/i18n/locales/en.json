@@ -124,7 +124,9 @@
     "copyGuid": "Copy GUID",
     "path": "Path",
     "copyPath": "Copy path",
-    "openWithDefaultApp": "Open with Default App"
+    "openWithDefaultApp": "Open with Default App",
+    "openInEditor": "Open in {{name}}",
+    "openFailed": "Open failed: {{reason}}"
   },
   "statusBar": {
     "ready": "Ready",
@@ -194,6 +196,14 @@
     "analysisRulesDefault": "Using built-in defaults — click Edit to customize",
     "analysisRulesNoProject": "Open a project to edit its rules",
     "opening": "Opening...",
+    "externalEditorsSection": "External Editors",
+    "externalEditorsHint": "Map file extensions to specific editors so the ⤴ button on a file opens that editor directly. No mapping → fall back to the OS default app.",
+    "addEditor": "Add Mapping",
+    "editorExtensionPlaceholder": ".png",
+    "editorPathPlaceholder": "Path to editor binary or .app bundle",
+    "editorBrowse": "Browse…",
+    "editorRemove": "Remove",
+    "noExternalEditors": "No mappings configured.",
     "maintenanceSection": "Maintenance",
     "thumbnailCache": "Thumbnail cache",
     "cacheSize": "{{size}} on disk",
@@ -262,9 +272,11 @@
     "confirmDelete": "Are you sure you want to delete this tag?"
   },
   "contextMenu": {
+    "openInEditor": "Open in {{name}}",
+    "configureEditor": "Configure editor for {{ext}}…",
     "openWithDefaultApp": "Open with Default App",
     "copyPath": "Copy Path",
-    "revealInFinder": "Reveal in Finder",
+    "revealInFileManager": "Show in File Manager",
     "rename": "Rename",
     "duplicate": "Duplicate",
     "moveTo": "Move to…",

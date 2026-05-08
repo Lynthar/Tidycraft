@@ -29,6 +29,7 @@ import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
 import { useThemeStore } from "../stores/themeStore";
 import { useUiStore } from "../stores/uiStore";
+import { basename } from "../lib/pathUtils";
 import type { AssetType } from "../types/asset";
 
 /// Maximum number of asset quick-jump matches surfaced in one query.
@@ -206,10 +207,7 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
     if (projects.size >= 2) {
       for (const p of projects.values()) {
         if (p.id === activeProjectId) continue;
-        const name =
-          p.projectPath.split("/").pop() ||
-          p.projectPath.split("\\").pop() ||
-          "Project";
+        const name = basename(p.projectPath) || "Project";
         list.push({
           id: `switch-${p.id}`,
           section: t("commandPalette.section.navigate"),

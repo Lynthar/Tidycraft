@@ -2,6 +2,7 @@ import { useEffect, useCallback } from "react";
 import { useProjectStore } from "../stores/projectStore";
 import { useUiStore } from "../stores/uiStore";
 import { open } from "@tauri-apps/plugin-dialog";
+import { getPlatform } from "../lib/platform";
 
 interface KeyboardShortcuts {
   onOpenFolder?: () => void;
@@ -170,9 +171,26 @@ export const SHORTCUTS = {
   viewStats: { key: "3", modifier: "Ctrl" },
 } as const;
 
+/// macOS Aqua HIG glyphs for modifier keys. On macOS we render shortcuts
+/// glued (no `+`) per HIG; on Windows / Linux we keep the readable
+/// "Ctrl+Shift+R" form. CommandPalette already hard-codes ⌘/⇧ glyphs;
+/// this helper fixes the Header / Sidebar tooltips that previously
+/// always printed "Ctrl+R" regardless of platform.
+const MAC_MODIFIER_GLYPHS: Record<string, string> = {
+  Ctrl: "⌘",
+  Shift: "⇧",
+  Alt: "⌥",
+  Meta: "⌘",
+};
+
 export function formatShortcut(shortcut: { key: string; modifier: string }): string {
-  if (shortcut.modifier) {
-    return `${shortcut.modifier}+${shortcut.key}`;
+  if (!shortcut.modifier) return shortcut.key;
+  if (getPlatform() === "macos") {
+    const glyphs = shortcut.modifier
+      .split("+")
+      .map((part) => MAC_MODIFIER_GLYPHS[part] ?? part)
+      .join("");
+    return `${glyphs}${shortcut.key}`;
   }
-  return shortcut.key;
+  return `${shortcut.modifier}+${shortcut.key}`;
 }

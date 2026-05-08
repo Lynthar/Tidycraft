@@ -4,6 +4,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
+import { basename } from "../lib/pathUtils";
 import type { Issue, Severity, AnalysisResult } from "../types/asset";
 
 const SEV_TO_TONE: Record<Severity, "err" | "warn" | "info"> = {
@@ -54,7 +55,7 @@ interface IssueRowProps {
 /// `expanded` lives on the parent so virtualization (which unmounts rows
 /// outside the overscan window) doesn't lose user state on scroll.
 function IssueRow({ issue, expanded, onToggle, onLocate, suggestionLabel, locateLabel }: IssueRowProps) {
-  const fileName = issue.asset_path.split("/").pop() || issue.asset_path;
+  const fileName = basename(issue.asset_path);
   const tone = SEV_TO_TONE[issue.severity];
 
   return (

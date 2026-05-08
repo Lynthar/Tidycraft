@@ -17,6 +17,7 @@ import { useProjectStore } from "./stores/projectStore";
 import { useUiStore } from "./stores/uiStore";
 import { restoreSession } from "./stores/sessionStore";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { isMacOS } from "./lib/platform";
 
 function App() {
   const {
@@ -47,7 +48,7 @@ function App() {
   // window's `titleBarStyle: Overlay` only takes effect on macOS — on other
   // platforms native chrome handles things and our titlebar stays hidden.
   useEffect(() => {
-    if (typeof navigator !== "undefined" && navigator.userAgent.includes("Mac")) {
+    if (isMacOS()) {
       document.body.classList.add("tc-platform-macos");
     }
   }, []);
