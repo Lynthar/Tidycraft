@@ -1,0 +1,78 @@
+name: Bug report
+description: Something is wrong with Tidycraft
+title: "[Bug] "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. A few notes before you file:
+        - **Reproducible recipes are gold.** A 10-line description of "what I did → what I expected → what happened" is more useful than a screenshot of a stack trace.
+        - **Check the existing issues** before submitting — search before opening new.
+        - **Crashes** that produce a stack trace: please paste the trace verbatim.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug. Include exact steps to reproduce if possible.
+      placeholder: |
+        1. Open project at `~/games/myproject`
+        2. Click Run Analysis
+        3. Expected: issue list populated
+        4. Actual: app freezes for 10s then shows blank panel
+    validations:
+      required: true
+
+  - type: input
+    id: tidycraft-version
+    attributes:
+      label: Tidycraft version
+      description: From the title bar / About menu, or the git commit if you built from source.
+      placeholder: "v0.1.0 (or commit abc1234)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows 10
+        - Windows 11
+        - macOS (Intel)
+        - macOS (Apple Silicon)
+        - Linux (specify distro below)
+    validations:
+      required: true
+
+  - type: input
+    id: os-detail
+    attributes:
+      label: OS detail
+      description: Specific version / distro / desktop environment if relevant.
+      placeholder: "Ubuntu 22.04 / GNOME 42 / Wayland"
+
+  - type: textarea
+    id: project-context
+    attributes:
+      label: Project being scanned
+      description: Engine + rough size helps. No need to share the project itself.
+      placeholder: "Unity 2022 LTS, ~8000 assets, ~3 GB total"
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console / log output
+      description: Open DevTools (Ctrl+Shift+I / Cmd+Option+I) and paste anything red. For Rust panics, the terminal where you launched dev mode usually shows the trace.
+      render: shell
+
+  - type: checkboxes
+    id: confirms
+    attributes:
+      label: Sanity checks
+      options:
+        - label: I searched existing issues before filing this one
+          required: true
+        - label: This is reproducible (not a one-off glitch I can't reproduce)
+          required: false
