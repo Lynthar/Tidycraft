@@ -8,6 +8,7 @@
 [![Rust](https://img.shields.io/badge/Rust-1.75+-orange?logo=rust)](https://www.rust-lang.org/)
 [![React](https://img.shields.io/badge/React-18-61dafb?logo=react)](https://react.dev/)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+[![CI](https://github.com/Lynthar/Tidycraft/actions/workflows/ci.yml/badge.svg)](https://github.com/Lynthar/Tidycraft/actions/workflows/ci.yml)
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -44,7 +45,7 @@
 - **不打扰你** — 默认规则极简;文件系统 watcher 实时同步(无需手动重扫);通过 `Settings → Analysis Rules → Edit` 直接编辑规则。
 - **本地优先** — 所有状态都在你硬盘上;无遥测、无网络调用。
 
-> **状态:Alpha — 持续开发中。** 核心功能(扫描、分析、标签、3D 预览、Git、Watcher)已稳定。基于 LLM 的语义标签还在设计阶段([`docs/ai-tagging-plan.md`](docs/ai-tagging-plan.md));当前的"标签建议"面板是**启发式**(基于文件名 / 尺寸 / 路径),不是 LLM。
+> **状态:Alpha — 持续开发中。** 核心功能(扫描、分析、标签、3D 预览、Git、Watcher)已稳定。基于 LLM 的语义标签还在设计阶段;当前的"标签建议"面板是**启发式**(基于文件名 / 尺寸 / 路径),不是 LLM。
 
 ---
 
@@ -292,7 +293,7 @@ Tidycraft **本地优先**:
 - **无遥测、无 analytics、无网络调用**(v0.x 构建)。
 - **所有状态在你的磁盘上**:扫描缓存(`~/.cache/tidycraft/` 或平台等价目录)、标签绑定(每项目 `.tidycraft-tags.json`)、撤销历史、缩略图缓存、设置。
 - **无账户、无登录**,打开就用。
-- **规划中的 LLM 标签建议器**([设计文档](docs/ai-tagging-plan.md))**完全 opt-in** —— 默认关闭,首次使用每个 provider 时弹出明确的同意对话框,确认后才会上传缩略图 / 文件名。本地 provider(Ollama)与云 API 同等支持。
+- **规划中的 LLM 标签建议器** 将**完全 opt-in** —— 默认关闭,首次使用每个 provider 时弹出明确的同意对话框,确认后才会上传缩略图 / 文件名。本地 provider(Ollama)与云 API 同等支持。
 
 ---
 
