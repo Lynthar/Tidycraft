@@ -127,8 +127,14 @@ pub fn start(
 ///
 /// Returns an `FsChangeEvent` describing the net change, or `Err` if nothing
 /// ended up changing or the project had no cached scan yet.
+///
+/// After patching the scan we run a second `with_mut` pass to drop tag
+/// bindings on `removed` paths (best-effort orphan cleanup). We can't do
+/// it inside the same closure because borrowing `state.cached_scan` as
+/// `&mut` already takes the lock and a sibling `&mut state.tags_data`
+/// would need a destructure — the two-pass version is plainer.
 fn apply_changes(project_id: &str, candidates: &[PathBuf]) -> Result<FsChangeEvent, String> {
-    project::with_mut(project_id, |state| {
+    let event = project::with_mut(project_id, |state| {
         let scan_result = state
             .cached_scan
             .as_mut()
@@ -208,7 +214,29 @@ fn apply_changes(project_id: &str, candidates: &[PathBuf]) -> Result<FsChangeEve
             total_size: scan_result.total_size,
             type_counts,
         })
-    })
+    })?;
+
+    // Best-effort tag-orphan cleanup. If the user deletes a file from
+    // outside the app (or via Tidycraft's `delete_assets`, which doesn't
+    // touch tags itself), the path stays in the tags file forever
+    // unless we reap it here. Save errors are logged-and-ignored — the
+    // scan already moved on, and a stale orphan beats a hard failure.
+    if !event.removed.is_empty() {
+        let _ = project::with_mut(project_id, |state| {
+            if state.tags_data.is_some() {
+                let tags = state.ensure_tags();
+                for path in &event.removed {
+                    tags.remove_path(path);
+                }
+                if let Err(e) = state.save_tags() {
+                    eprintln!("[watcher] failed to save tags after orphan cleanup: {}", e);
+                }
+            }
+            Ok(())
+        });
+    }
+
+    Ok(event)
 }
 
 /// Mirrors the scanner's discovery filters: skip hidden path components (e.g.

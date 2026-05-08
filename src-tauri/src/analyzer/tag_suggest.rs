@@ -72,6 +72,39 @@ const PATH_STOPLIST: &[&str] = &[
     "data", "files", "project", "projects", "import", "imports",
 ];
 
+/// PBR channel-role recognition for the dimension+channel tag source.
+/// Strict suffix matches — the segment after the LAST `_` in the stem
+/// must equal one of these aliases (case-insensitively). Single-letter
+/// suffixes (`_n`, `_r`, `_m`) are deliberately omitted because they
+/// collide too readily with non-PBR tokens (`item_n` for "item N",
+/// `arrow_r` for "right", …); users on a strict pipeline can extend
+/// this constant if their team's convention uses them.
+///
+/// Tuple is `(canonical_role, alias)`. Multiple aliases map to the same
+/// canonical role so `_BaseColor`, `_Albedo`, and `_Diffuse` all land
+/// in the same group.
+const KNOWN_CHANNEL_SUFFIXES: &[(&str, &str)] = &[
+    ("BaseColor", "BaseColor"),
+    ("BaseColor", "Albedo"),
+    ("BaseColor", "Diffuse"),
+    ("BaseColor", "Color"),
+    ("Normal", "Normal"),
+    ("Normal", "Norm"),
+    ("Roughness", "Roughness"),
+    ("Roughness", "Rough"),
+    ("Metallic", "Metallic"),
+    ("Metallic", "Metal"),
+    ("AO", "AO"),
+    ("AO", "AmbientOcclusion"),
+    ("Emissive", "Emissive"),
+    ("Emissive", "Emission"),
+    ("Height", "Height"),
+    ("Height", "Disp"),
+    ("ORM", "ORM"),
+    ("MRA", "MRA"),
+    ("RMA", "RMA"),
+];
+
 /// Palette for suggested tag colors. Picked to look good in Forge Dark and
 /// stay distinguishable in clusters of 4-8 dots. Index by a stable hash of
 /// the group name so the same suggestion lands on the same color across runs.
@@ -172,6 +205,26 @@ fn dimension_bucket(w: u32, h: u32) -> Option<u32> {
     Some(p)
 }
 
+/// Detect a PBR channel role from a texture's filename stem. Strict
+/// `_<suffix>` matching: the substring after the LAST `_` must equal
+/// one of `KNOWN_CHANNEL_SUFFIXES`'s aliases (case-insensitive).
+/// Returns the canonical role label (already capitalized for direct
+/// tag-name display) or None when no PBR suffix is present.
+fn parse_channel(stem: &str) -> Option<&'static str> {
+    let last_underscore = stem.rfind('_')?;
+    let suffix = &stem[last_underscore + 1..];
+    if suffix.is_empty() {
+        return None;
+    }
+    let suffix_lower = suffix.to_lowercase();
+    for (canonical, alias) in KNOWN_CHANNEL_SUFFIXES {
+        if alias.to_lowercase() == suffix_lower {
+            return Some(canonical);
+        }
+    }
+    None
+}
+
 /// Capitalize the first byte (ASCII-safe; non-ASCII pass through unchanged).
 fn capitalize(s: &str) -> String {
     let mut chars = s.chars();
@@ -229,8 +282,14 @@ impl TagSuggester for HeuristicSuggester {
             entry.0.extend(paths);
         }
 
-        // ----- Source 2: texture dimension buckets -----
-        let mut dim_assets: HashMap<u32, HashSet<String>> = HashMap::new();
+        // ----- Source 2: texture dimension + optional channel role -----
+        // Each texture lands in exactly one bucket, keyed by either
+        // `"{bucket}px {channel}"` or fallback `"{bucket}px"` when the
+        // stem doesn't match a known PBR suffix. The channel-aware
+        // variant gives the user actionable groups like "1024px
+        // BaseColor" instead of dumping albedos and normal maps into
+        // a single "1024px" pile.
+        let mut dim_assets: HashMap<String, HashSet<String>> = HashMap::new();
         for asset in &scan.assets {
             if !matches!(asset.asset_type, AssetType::Texture) {
                 continue;
@@ -244,19 +303,23 @@ impl TagSuggester for HeuristicSuggester {
                 None => continue,
             };
             if let Some(bucket) = dimension_bucket(w, h) {
+                let stem_str = stem(&asset.name);
+                let key = match parse_channel(stem_str) {
+                    Some(role) => format!("{}px {}", bucket, role),
+                    None => format!("{}px", bucket),
+                };
                 dim_assets
-                    .entry(bucket)
+                    .entry(key)
                     .or_default()
                     .insert(asset.path.clone());
             }
         }
-        for (bucket, paths) in dim_assets {
+        for (key, paths) in dim_assets {
             if paths.len() < MIN_DIM_HITS {
                 continue;
             }
-            let name = format!("{}px", bucket);
             let entry = groups
-                .entry(name)
+                .entry(key)
                 .or_insert_with(|| (HashSet::new(), HINT_DIMENSION.to_string()));
             entry.0.extend(paths);
         }
@@ -423,6 +486,71 @@ mod tests {
         // "hero" hits 3 → in. "villain" hits 1 → below MIN_TOKEN_HITS.
         assert!(names.contains(&"Hero"));
         assert!(!names.contains(&"Villain"));
+    }
+
+    #[test]
+    fn parse_channel_recognizes_aliases() {
+        assert_eq!(parse_channel("T_Wood_BaseColor"), Some("BaseColor"));
+        assert_eq!(parse_channel("T_Wood_Albedo"), Some("BaseColor"));
+        assert_eq!(parse_channel("T_Wood_normal"), Some("Normal"));
+        assert_eq!(parse_channel("T_Wood_ORM"), Some("ORM"));
+        // Unrecognized suffix → None (so the texture falls back to the
+        // bucket-only "1024px" group rather than getting mis-labeled).
+        assert_eq!(parse_channel("T_brand_new"), None);
+        // No underscore at all → None.
+        assert_eq!(parse_channel("foo"), None);
+        // Trailing underscore → empty suffix → None.
+        assert_eq!(parse_channel("foo_"), None);
+    }
+
+    #[test]
+    fn dim_with_channel_groups_separately() {
+        // 6 BaseColor textures + 6 Normal textures at 1024px should
+        // produce two distinct groups, not one merged "1024px" pile.
+        let mut assets = Vec::new();
+        for i in 0..6 {
+            assets.push(texture(
+                &format!("/proj/T_Stone{}_BaseColor.png", i),
+                &format!("T_Stone{}_BaseColor.png", i),
+                1024,
+                1024,
+            ));
+        }
+        for i in 0..6 {
+            assets.push(texture(
+                &format!("/proj/T_Stone{}_Normal.png", i),
+                &format!("T_Stone{}_Normal.png", i),
+                1024,
+                1024,
+            ));
+        }
+        let scan = fixture_scan(assets);
+        let groups = HeuristicSuggester.suggest(&scan);
+        let names: Vec<&str> = groups.iter().map(|g| g.name.as_str()).collect();
+        assert!(names.contains(&"1024px BaseColor"));
+        assert!(names.contains(&"1024px Normal"));
+        // The catch-all "1024px" group should NOT appear when every
+        // texture had a recognized channel.
+        assert!(!names.contains(&"1024px"));
+    }
+
+    #[test]
+    fn dim_falls_back_when_no_channel() {
+        // Generic filenames without PBR suffixes still group by raw
+        // size so projects without a PBR pipeline aren't left without
+        // any dimension-based suggestion.
+        let mut assets = Vec::new();
+        for i in 0..6 {
+            assets.push(texture(
+                &format!("/proj/icon_{}.png", i),
+                &format!("icon_{}.png", i),
+                512,
+                512,
+            ));
+        }
+        let scan = fixture_scan(assets);
+        let groups = HeuristicSuggester.suggest(&scan);
+        assert!(groups.iter().any(|g| g.name == "512px"));
     }
 
     #[test]
