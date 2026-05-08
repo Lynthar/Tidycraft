@@ -11,8 +11,12 @@ import { useTranslation } from "react-i18next";
 import { buildTextureUrlResolver } from "../lib/modelUrlResolver";
 import { dirname } from "../lib/pathUtils";
 
-// Supported 3D model formats
-const SUPPORTED_FORMATS = ["gltf", "glb", "fbx", "obj", "dae"];
+// Supported 3D model formats. `.blend` is in the list so AssetPreview
+// routes the file into this component (rather than the box-icon
+// fallback) — we then short-circuit to an actionable "export to GLB"
+// message inside the dispatch below. Real loading is impossible: .blend
+// is Blender's private binary format with no web loader.
+const SUPPORTED_FORMATS = ["gltf", "glb", "fbx", "obj", "dae", "3ds", "blend"];
 
 interface ModelViewer3DProps {
   filePath: string;
@@ -319,6 +323,18 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
       // Provide more helpful error messages
       if (message.includes("404") || message.includes("not found")) {
         setError(t("modelViewer.fileNotFound", "File not found"));
+      } else if (
+        // three.js's FBXLoader is a reverse-engineered parser that
+        // doesn't cover every UV/MappingInformationType combination
+        // Autodesk DCC tools emit. The failure mode is a cryptic
+        // `Cannot read properties of undefined (reading 'a')` from
+        // GeometryParser.parseUVs. We can't fix the parser, but we can
+        // tell the user a path forward (re-export as GLB).
+        ext === "fbx" &&
+        (message.includes("Cannot read properties of undefined") ||
+          message.includes("parseUVs"))
+      ) {
+        setError(t("modelViewer.fbxIncompatible"));
       } else if (message.includes("parse") || message.includes("invalid")) {
         setError(t("modelViewer.parseError", "Failed to parse model file"));
       } else {
@@ -389,6 +405,19 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
               undefined,
               onError
             );
+          } else if (ext === "3ds") {
+            const { TDSLoader } = await import("three/addons/loaders/TDSLoader.js");
+            if (!isMountedRef.current) return;
+            const loader = new TDSLoader(loadingManager);
+            loader.setResourcePath(resourcePath);
+            loader.load(modelUrl, onLoad, undefined, onError);
+          } else if (ext === "blend") {
+            // .blend is Blender's private binary format — no web loader
+            // exists. We surface a clear "export to GLB" message rather
+            // than fail mysteriously or fall through to "unsupported".
+            if (!isMountedRef.current) return;
+            setError(t("modelViewer.blendUnsupported"));
+            setIsLoading(false);
           }
         } catch (err) {
           onError(err);

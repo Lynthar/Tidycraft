@@ -353,6 +353,8 @@
     "parseError": "Failed to parse model file",
     "webglError": "WebGL not supported",
     "unsupportedFormat": "Format not supported. Use GLTF, GLB, FBX, or OBJ.",
+    "blendUnsupported": ".blend is Blender's private binary format and can't be rendered in-app. Open the file in Blender and export to GLB or FBX.",
+    "fbxIncompatible": "This FBX file uses a UV layout the loader can't parse. Re-export from your DCC tool as GLB for guaranteed compatibility.",
     "controls": "Drag to rotate • Scroll to zoom",
     "reset": "Reset view"
   },

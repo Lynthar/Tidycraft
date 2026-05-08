@@ -181,7 +181,15 @@ export function AudioPlayer({ filePath }: AudioPlayerProps) {
   return (
     <div className="w-full bg-background rounded overflow-hidden">
       {/* Audio Element (hidden) */}
+      {/* `key={filePath}` forces React to unmount the old <audio> and
+          mount a fresh one on every track switch. Required because
+          `audioContext.createMediaElementSource` permanently binds an
+          HTMLMediaElement to the source node — reusing the element
+          after closing its old context throws InvalidStateError, which
+          also prevents play() from running and looks like "this file
+          can't be played". */}
       <audio
+        key={filePath}
         ref={audioRef}
         src={audioSrc}
         onTimeUpdate={handleTimeUpdate}

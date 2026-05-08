@@ -353,6 +353,8 @@
     "parseError": "解析模型文件失败",
     "webglError": "不支持 WebGL",
     "unsupportedFormat": "不支持此格式，请使用 GLTF、GLB、FBX 或 OBJ",
+    "blendUnsupported": ".blend 是 Blender 私有二进制格式，应用内无法直接加载。请在 Blender 中打开后导出为 GLB 或 FBX。",
+    "fbxIncompatible": "此 FBX 文件的 UV 布局当前 loader 无法解析。建议在 DCC 工具中重新导出为 GLB（兼容性最佳）。",
     "controls": "拖拽旋转 • 滚轮缩放",
     "reset": "重置视角"
   },
