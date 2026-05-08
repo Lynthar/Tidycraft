@@ -360,9 +360,24 @@ fn read_project_config(project_id: String) -> Result<Option<String>, String> {
 
 #[tauri::command]
 fn suggest_tags(project_id: String) -> Result<Vec<TagGroup>, String> {
-    project::with_ref(&project_id, |state| {
+    project::with_mut(&project_id, |state| {
+        // Snapshot the names of tags already created (e.g. from a previous
+        // suggest+apply round). We compare against `<group_name> (suggested)`
+        // because applyGroup in the frontend always appends that suffix —
+        // so a group whose suggested form is already in the tags list
+        // would just create a duplicate-named tag if surfaced again.
+        let already_suggested: std::collections::HashSet<String> = state
+            .ensure_tags()
+            .tags
+            .iter()
+            .map(|t| t.name.clone())
+            .collect();
         let scan = state.require_scan()?;
-        Ok(HeuristicSuggester.suggest(scan))
+        let mut groups = HeuristicSuggester.suggest(scan);
+        groups.retain(|g| {
+            !already_suggested.contains(&format!("{} (suggested)", g.name))
+        });
+        Ok(groups)
     })
 }
 
@@ -1363,6 +1378,17 @@ fn move_assets(
                 format!("Move {} file(s)", ops.len()),
                 ops,
             );
+
+            // Tags follow the file across moves. Skip if tags haven't
+            // been touched in this session (lazy load). Save errors
+            // are swallowed — the move itself already succeeded.
+            if state.tags_data.is_some() {
+                let tags = state.ensure_tags();
+                for s in &successes {
+                    tags.rename_path(&s.original_path, &s.new_path);
+                }
+                let _ = state.save_tags();
+            }
             Ok(())
         });
     }
@@ -1562,6 +1588,15 @@ fn rename_file(project_id: String, old_path: String, new_name: String) -> Result
         state
             .undo_manager
             .record_batch(format!("Rename {} to {}", old_name, new_name), vec![operation]);
+
+        // Carry tags from the old path to the new one. Best-effort —
+        // tag bookkeeping must never block a successful rename, so we
+        // ignore save errors (the file is already renamed on disk).
+        if state.tags_data.is_some() {
+            let new_path_normalized = scanner::path_to_string(&new_path);
+            state.ensure_tags().rename_path(&old_path, &new_path_normalized);
+            let _ = state.save_tags();
+        }
         Ok(())
     });
 

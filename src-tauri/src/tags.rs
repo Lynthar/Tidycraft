@@ -93,6 +93,33 @@ impl TagsData {
         }
     }
 
+    /// Move every tag binding from `old_path` to `new_path`. If `new_path`
+    /// already had bindings they're merged (union of tag IDs). No-op when
+    /// `old_path` had no bindings. Used when a file is renamed or moved
+    /// from inside Tidycraft so its tags follow it to the new location.
+    pub fn rename_path(&mut self, old_path: &str, new_path: &str) {
+        if old_path == new_path {
+            return;
+        }
+        let old_ids = match self.asset_tags.remove(old_path) {
+            Some(ids) => ids,
+            None => return,
+        };
+        let entry = self.asset_tags.entry(new_path.to_string()).or_default();
+        for id in old_ids {
+            if !entry.contains(&id) {
+                entry.push(id);
+            }
+        }
+    }
+
+    /// Drop every tag binding for `path`. Used when a file is deleted
+    /// (via trash or by the watcher noticing it vanished externally) so
+    /// the tags file doesn't accumulate orphan path entries.
+    pub fn remove_path(&mut self, path: &str) {
+        self.asset_tags.remove(path);
+    }
+
     /// Get tags for an asset
     pub fn get_asset_tags(&self, asset_path: &str) -> Vec<Tag> {
         if let Some(tag_ids) = self.asset_tags.get(asset_path) {
@@ -140,5 +167,43 @@ mod tests {
 
         data.remove_tag_from_asset("/path/to/asset.png", &tag.id);
         assert_eq!(data.get_asset_tags("/path/to/asset.png").len(), 0);
+    }
+
+    #[test]
+    fn test_rename_path_carries_tags() {
+        let mut data = TagsData::default();
+        let tag = data.create_tag("Hero".to_string(), "#ff0000".to_string());
+        data.add_tag_to_asset("/old.png", &tag.id);
+
+        data.rename_path("/old.png", "/new.png");
+        assert_eq!(data.get_asset_tags("/old.png").len(), 0);
+        assert_eq!(data.get_asset_tags("/new.png").len(), 1);
+    }
+
+    #[test]
+    fn test_rename_path_merges_into_existing() {
+        let mut data = TagsData::default();
+        let a = data.create_tag("A".to_string(), "#aa0000".to_string());
+        let b = data.create_tag("B".to_string(), "#00aa00".to_string());
+        data.add_tag_to_asset("/old.png", &a.id);
+        data.add_tag_to_asset("/new.png", &b.id);
+
+        data.rename_path("/old.png", "/new.png");
+        // /new.png keeps its own B and gains A; /old.png gone
+        let tags = data.get_asset_tags("/new.png");
+        assert_eq!(tags.len(), 2);
+        assert_eq!(data.get_asset_tags("/old.png").len(), 0);
+    }
+
+    #[test]
+    fn test_remove_path_drops_bindings() {
+        let mut data = TagsData::default();
+        let tag = data.create_tag("X".to_string(), "#ff00ff".to_string());
+        data.add_tag_to_asset("/gone.png", &tag.id);
+
+        data.remove_path("/gone.png");
+        assert_eq!(data.get_asset_tags("/gone.png").len(), 0);
+        // The tag definition itself is untouched
+        assert_eq!(data.tags.len(), 1);
     }
 }
