@@ -188,53 +188,55 @@ pnpm tauri build
 
 Drop a `tidycraft.toml` in your project root and the next analysis will pick it up automatically. The Sidebar's **Run Analysis** button shows a small dot when custom rules are loaded.
 
-A working starter config is at [`examples/tidycraft.example.toml`](examples/tidycraft.example.toml) — copy it to your project root, rename to `tidycraft.toml`, and tweak. For per-rule explanations and tuning advice see [`docs/analyzer-rules.md`](docs/analyzer-rules.md). Quick reference:
+**Out-of-box defaults are minimal**: only `naming.forbidden_chars` (shell-unsafe / Windows-illegal chars), `[texture.color_space]`, `duplicate`, and `missing_reference` (Unity) fire by default. Stricter checks — `[texture]` size / PoT, `[model]` budgets, `[audio]` rates, `[pbr_set]` — are **opt-in**: flip `enabled = true` in the relevant section.
+
+A working starter config is at [`examples/tidycraft.example.toml`](examples/tidycraft.example.toml) — copy to your project root, rename to `tidycraft.toml`, and tweak. For per-rule explanations and tuning advice see [`docs/analyzer-rules.md`](docs/analyzer-rules.md). Quick reference (values below are the actual built-in defaults):
 
 ```toml
 [naming]
 enabled = true
 forbidden_chars = [' ', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '+', '=']
-forbid_chinese = true
-max_length = 64
-texture_prefix = "T_"      # nullable
-model_prefix = "SM_"       # nullable
-audio_prefix = "A_"        # nullable
-case_style = "snake_case"  # any | snake_case | kebab-case | PascalCase | camelCase
+forbid_chinese = false
+max_length = 512                       # loose; tighten to 64-96 for strict pipelines
+# texture_prefix = "T_"                # uncomment to require a per-type prefix
+# model_prefix = "SM_"
+# audio_prefix = "A_"
+case_style = "any"                     # any | snake_case | kebab-case | PascalCase | camelCase
 
-[texture]
-enabled = true
+[texture]                              # disabled by default — enable for stricter image rules
+enabled = false
 require_pot = true
-max_size = 4096            # px
-min_size = 4               # px
+max_size = 4096
+min_size = 4
 warn_non_square = false
-max_file_size = 10_485_760 # bytes
+max_file_size = 10_485_760
 
-[model]
+[texture.color_space]                  # enabled by default; catches sRGB-tagged data textures
 enabled = true
+
+[model]                                # disabled by default
+enabled = false
 max_vertices = 100_000
 max_faces = 100_000
 max_materials = 10
 
-[audio]
-enabled = true
+[audio]                                # disabled by default
+enabled = false
 allowed_sample_rates = [44_100, 48_000]
-max_sfx_duration = 30.0    # seconds
-max_file_size = 20_971_520 # bytes
+max_sfx_duration = 30.0
+max_file_size = 20_971_520
 prefer_mono_for_sfx = false
 
-# Cross-asset PBR set check — group textures by directory + base stem,
-# warn if the trigger channel is present but required ones are missing.
-[pbr_set]
-enabled = true
+[pbr_set]                              # disabled by default; per-folder PBR completeness
+enabled = false
 trigger = "basecolor"
 required = ["basecolor", "normal"]
 
-# Skip matched assets entirely (per-asset / duplicate / missing-ref all respect this).
 [ignore]
 patterns = [
     # "ThirdParty/**",
-    # "Library/**",         # Unity generated artifacts
-    # "Intermediate/**",    # Unreal build cache
+    # "Library/**",                    # Unity generated artifacts
+    # "Intermediate/**",               # Unreal build cache
 ]
 ```
 

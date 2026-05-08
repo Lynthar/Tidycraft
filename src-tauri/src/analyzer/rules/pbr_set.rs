@@ -51,7 +51,10 @@ pub struct PbrSetConfig {
 }
 
 fn default_enabled() -> bool {
-    true
+    // Out-of-box OFF: PBR pipelines are opinionated (which channels,
+    // which suffix names). Projects that follow Tidycraft's convention
+    // out of the box are rare; opt in via tidycraft.toml.
+    false
 }
 
 fn default_trigger() -> String {
@@ -297,7 +300,11 @@ mod tests {
     #[test]
     fn missing_normal_fires() {
         let assets = vec![texture("/proj/T_Wood_BaseColor.png")];
-        let result = find_pbr_set_issues(&assets, &PbrSetConfig::default());
+        // Out-of-box default has `enabled = false` so the rule is opt-in;
+        // every PBR test below explicitly enables it.
+        let mut cfg = PbrSetConfig::default();
+        cfg.enabled = true;
+        let result = find_pbr_set_issues(&assets, &cfg);
         assert_eq!(result.issue_count, 1);
         assert!(result.issues[0].message.to_lowercase().contains("normal"));
     }
@@ -320,7 +327,9 @@ mod tests {
             texture("/proj/A/T_Wood_BaseColor.png"),
             texture("/proj/B/T_Wood_Normal.png"),
         ];
-        let result = find_pbr_set_issues(&assets, &PbrSetConfig::default());
+        let mut cfg = PbrSetConfig::default();
+        cfg.enabled = true;
+        let result = find_pbr_set_issues(&assets, &cfg);
         assert_eq!(result.issue_count, 1);
     }
 

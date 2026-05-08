@@ -1,13 +1,14 @@
-# tidycraft.example.toml — 测试用 / sample config
+# tidycraft.example.toml — strict sample config
 #
 # 把这份文件复制到你想测试的项目根目录并重命名为 `tidycraft.toml`，
 # 下次 Run Analysis 会自动加载（侧边栏运行按钮上会出现一个琥珀色小点
 # 提示 "Using custom rules from tidycraft.toml"）。
 #
-# 这份示例故意把阈值设得比默认更严格，方便对照"加载前/后" issue 数量
-# 的变化。每段都注释了对应的默认值。
+# 注意：out-of-box 的默认规则非常宽松 —— 只有 [naming]（仅 forbidden_chars）
+# + [texture.color_space] + duplicate + missing_reference (Unity) 默认开启。
+# 这份 sample 故意把所有 family 都打开 + 阈值收紧,方便观察"工具能查出哪些"。
 #
-# 任何字段都可省略 —— 缺失的字段会回退到默认值。
+# 任何字段都可省略 —— 缺失的字段会回退到默认值（见 docs/analyzer-rules.md）。
 
 [naming]
 enabled = true
@@ -15,19 +16,21 @@ enabled = true
 # （shell-unsafe 标点 + 空格）。这里替换成 Windows 文件系统真正禁止的字符
 # 列表 + 空格，方便测试 / 演示。
 forbidden_chars = ['<', '>', ':', '"', '|', '?', '*', '/', '\', ' ']
+# Default: false. 这里开启，演示中文命名警告。
 forbid_chinese = true
-# Default: 64. 收紧到 32 让长命名暴露出来。
+# Default: 512. 收紧到 32 让长命名暴露出来。
 max_length = 32
-# Default: Some("T_"). 保留默认。
+# Default: None. 这里强制纹理用 "T_" 前缀。
 texture_prefix = "T_"
-# Default: None. 改为强制要求模型用 "SM_" 前缀（Unreal-style）。
+# Default: None. 强制模型用 "SM_" 前缀（Unreal-style）。
 model_prefix = "SM_"
-# Default: None. 强制 SFX 用 "A_" 前缀。
+# Default: None. 强制音频用 "A_" 前缀。
 audio_prefix = "A_"
 # Default: "any". 可选 "any" / "snake_case" / "kebab-case" / "PascalCase" / "camelCase"。
 case_style = "snake_case"
 
 [texture]
+# Default: false（out-of-box 关闭尺寸 / PoT / file-size 检测）。这里打开。
 enabled = true
 require_pot = true
 # Default: 4096. 收紧到 2048 把 4K 贴图全部点亮。
@@ -38,7 +41,13 @@ warn_non_square = true
 # Default: 10 MB. 收紧到 4 MB。
 max_file_size = 4_194_304
 
+# texture.color_space —— 默认 enabled = true（即使 [texture].enabled = false），
+# 不需要在这里重新声明（除非要关掉它）。
+# [texture.color_space]
+# enabled = true
+
 [model]
+# Default: false. 这里打开，把多边形 / 材质数预算检测起来。
 enabled = true
 # Default: 100_000. 收紧到 10_000 让大网格全部触发"超预算"。
 max_vertices = 10_000
@@ -48,6 +57,7 @@ max_faces = 10_000
 max_materials = 4
 
 [audio]
+# Default: false. 这里打开。
 enabled = true
 # Default: [44100, 48000]. 只允许 48 kHz，44.1 kHz 文件全部触发。
 allowed_sample_rates = [48_000]
@@ -61,6 +71,7 @@ prefer_mono_for_sfx = true
 # 跨资源 PBR set 完整性检查 —— textures 按目录 + 基名分组，
 # 含 trigger 通道但缺 required 通道的组报警。详见 docs/analyzer-rules.md。
 [pbr_set]
+# Default: false. 这里打开，演示 PBR set 缺贴图的告警。
 enabled = true
 trigger = "basecolor"                    # 该 role 必须存在才检查这个 set
 required = ["basecolor", "normal"]       # 缺任意 required role → warning
