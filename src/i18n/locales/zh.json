@@ -20,7 +20,8 @@
     "runAnalysis": "运行分析",
     "analyzing": "分析中...",
     "explorer": "资源管理器",
-    "customConfigLoaded": "已加载 tidycraft.toml 自定义规则"
+    "customConfigLoaded": "已加载 tidycraft.toml 自定义规则",
+    "aiTagSuggestions": "AI 标签建议"
   },
   "assetTypes": {
     "all": "所有类型",
