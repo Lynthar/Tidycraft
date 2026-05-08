@@ -1,8 +1,9 @@
-import { Files, AlertTriangle, Play, BarChart3 } from "lucide-react";
+import { Files, AlertTriangle, Play, BarChart3, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { DirectoryTree } from "./DirectoryTree";
 import { TagFilterPanel } from "./TagFilterPanel";
 import { useProjectStore } from "../stores/projectStore";
+import { useUiStore } from "../stores/uiStore";
 import { formatShortcut, SHORTCUTS } from "../hooks/useKeyboardShortcuts";
 
 export function Sidebar() {
@@ -16,6 +17,8 @@ export function Sidebar() {
     runAnalysis,
     hasCustomConfig,
   } = useProjectStore();
+
+  const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
 
   const issueCount = analysisResult?.issue_count ?? 0;
   const errCount = analysisResult?.error_count ?? 0;
@@ -103,6 +106,18 @@ export function Sidebar() {
             {!isAnalyzing && (
               <span className="mono">{formatShortcut(SHORTCUTS.analyze)}</span>
             )}
+          </button>
+
+          {/* Secondary action: open the heuristic AI Tag panel. Outlined
+              styling keeps Run Analysis the visual primary; this is an
+              entry point to a *view*, not a batch operation. */}
+          <button
+            onClick={() => setAiPanelOpen(true)}
+            className="tc-aitag-btn"
+            title={t("sidebar.aiTagSuggestions")}
+          >
+            <Sparkles size={12} />
+            {t("sidebar.aiTagSuggestions")}
           </button>
         </div>
       )}

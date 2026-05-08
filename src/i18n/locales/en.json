@@ -20,7 +20,8 @@
     "runAnalysis": "Run Analysis",
     "analyzing": "Analyzing...",
     "explorer": "Explorer",
-    "customConfigLoaded": "Using custom rules from tidycraft.toml"
+    "customConfigLoaded": "Using custom rules from tidycraft.toml",
+    "aiTagSuggestions": "AI Tag suggestions"
   },
   "assetTypes": {
     "all": "All Types",

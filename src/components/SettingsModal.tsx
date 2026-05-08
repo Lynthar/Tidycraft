@@ -357,10 +357,15 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-card-bg border border-border rounded-lg shadow-xl w-full max-w-md">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      {/* `max-h-[90vh]` + flex column lets the body scroll when content
+          exceeds viewport height. Header + footer stay pinned. Without
+          this, opening Settings on a non-fullscreen window (or after we
+          add more sections) clips the bottom (Maintenance / Done button
+          becomes unreachable). */}
+      <div className="bg-card-bg border border-border rounded-lg shadow-xl w-full max-w-md flex flex-col max-h-[90vh]">
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
           <h2 className="text-lg font-semibold">{t("settings.title")}</h2>
           <button
             onClick={onClose}
@@ -370,8 +375,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           </button>
         </div>
 
-        {/* Content */}
-        <div className="p-4 space-y-6">
+        {/* Content — scrolls when overflowing the viewport-bound modal. */}
+        <div className="p-4 space-y-6 overflow-y-auto flex-1 min-h-0">
           {/* Appearance Section */}
           <div>
             <div className="flex items-center gap-2 mb-3">
@@ -570,7 +575,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end px-4 py-3 border-t border-border">
+        <div className="flex justify-end px-4 py-3 border-t border-border shrink-0">
           <button
             onClick={onClose}
             className="px-4 py-2 text-sm font-medium bg-primary text-white rounded hover:bg-primary/90 transition-colors"

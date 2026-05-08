@@ -544,6 +544,43 @@
   filter: none;
 }
 
+/* Outlined secondary button stacked under tc-run-btn — opens the AI
+   Tag suggestion panel. Visual hierarchy: tc-run-btn is the filled
+   primary CTA (a batch operation), tc-aitag-btn is an outlined entry
+   point to a view. Sparkles icon picks up the primary tint to hint
+   "this is the AI/intelligent action" without competing for attention
+   with the filled button above. */
+.tc-aitag-btn {
+  width: 100%;
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  height: 30px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-2);
+  border: 1px solid var(--line);
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 12px;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.tc-aitag-btn:hover {
+  background: var(--panel-2);
+  border-color: color-mix(in oklch, var(--primary) 35%, var(--line));
+  color: var(--text);
+}
+.tc-aitag-btn:active {
+  transform: translateY(1px);
+}
+.tc-aitag-btn svg {
+  color: var(--primary);
+  opacity: 0.85;
+}
+
 .tc-section {
   padding: 12px 12px 4px;
   flex-shrink: 0;
