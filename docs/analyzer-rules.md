@@ -11,7 +11,7 @@ Clicking **Run Analysis** (or `⌘⇧R`) runs four phases on the cached scan res
 3. **Missing-reference detection** (Unity only) — every `.prefab` / `.unity` / `.mat` / `.controller` / `.asset` is parsed for GUID references that don't resolve to any scanned `.meta`.
 4. **PBR set completeness** — textures are grouped by directory + base stem (`T_Wood_BaseColor` + `T_Wood_Normal` are siblings); a set with the trigger channel but missing required channels is flagged.
 
-All three steps share the same `tidycraft.toml` configuration, read from your project root each time you click Run Analysis. **No rescan is needed after editing the file** — just save and re-run.
+All four phases share the same `tidycraft.toml` configuration, read from your project root each time you click Run Analysis. **No rescan is needed after editing the file** — just save and re-run.
 
 ## Rules at a glance
 

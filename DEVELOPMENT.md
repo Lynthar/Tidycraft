@@ -44,9 +44,12 @@ Blender saves).
 | Virtualization | @tanstack/react-virtual | Handles 10k+ row lists smoothly |
 
 Notable Rust crates: `rayon` (parallel scan), `walkdir`, `image`, `gltf`,
-`tobj`, `symphonia` (audio), `git2`, `notify` + `notify-debouncer-full` (FS
-events), `trash` (safe delete), `parking_lot` (non-poisoning mutexes),
-`tauri-plugin-dialog` / `tauri-plugin-fs` / `tauri-plugin-clipboard-manager`.
+`tobj`, `fbxcel-dom` (FBX metadata), `symphonia` (audio), `mp4` +
+`matroska-demuxer` (video), `git2`, `notify` + `notify-debouncer-full` (FS
+events), `trash` (safe delete), `globset` (ignore patterns), `parking_lot`
+(non-poisoning mutexes), `tauri-plugin-dialog` / `tauri-plugin-fs` /
+`tauri-plugin-clipboard-manager` / `tauri-plugin-opener` (the last one
+backs `open_with_default_app` and `open_in_editor`).
 
 ---
 
@@ -66,7 +69,7 @@ pnpm install              # first time
 pnpm tauri dev            # full app; Vite HMR for frontend, cargo rebuild on Rust changes
 pnpm build                # tsc + vite build (frontend typecheck + bundle)
 cd src-tauri
-cargo test --lib          # ~100 unit tests
+cargo test --lib          # ~115 unit tests
 cargo check               # fast Rust typecheck without binary
 ```
 
@@ -85,7 +88,7 @@ trailing commas).
 ┌───────────────────────────┐      invoke(command, args)      ┌─────────────────────────┐
 │  React frontend (src/)    │ ──────────────────────────────► │  Rust backend (lib.rs)  │
 │                           │                                  │                         │
-│  - Zustand stores         │       emit(event, payload)       │  - ~50 tauri commands   │
+│  - Zustand stores         │       emit(event, payload)       │  - ~57 tauri commands   │
 │  - Components / UI        │ ◄────────────────────────────────┤  - Per-project state    │
 │  - i18n (en / zh)         │                                  │  - Scanner + watcher    │
 └───────────────────────────┘                                  └─────────────────────────┘
@@ -124,9 +127,14 @@ The frontend and backend communicate exclusively through two mechanisms:
   `ProjectWatcher` struct is held inside `ProjectState.watcher`; dropping it
   tears down the OS watch and the processing thread exits cleanly.
 - **`analyzer/`** — Rule engine. `Rule` trait has four methods: `id`, `name`,
-  `applies_to`, `check`. Existing rules cover naming, texture, model, audio
-  standards plus duplicate detection. `RuleConfig` is deserialized from
-  `tidycraft.toml`; `Analyzer::with_config` wires enabled rules.
+  `applies_to`, `check` — used by per-asset rules: `naming`, `texture`,
+  `texture_colorspace`, `model`, `audio`. Three more checks are **cross-asset**
+  and live outside the trait: `duplicate` (size-bucket + SHA256),
+  `missing_reference` (Unity GUID lookup), and `pbr_set` (per-folder texture
+  group completeness). `RuleConfig` is deserialized from `tidycraft.toml`;
+  `Analyzer::with_config` wires the enabled per-asset rules, and
+  `lib.rs::analyze_assets` runs the cross-asset phases sequentially after,
+  merging into the same `AnalysisResult`.
 - **`cache.rs`** — Disk-backed scan cache. File at
   `dirs::cache_dir()/tidycraft/scans/<sha256-prefix>.json`, keyed by
   (mtime, size). Incremental scans reuse cached entries for unchanged files.
@@ -188,6 +196,14 @@ The frontend and backend communicate exclusively through two mechanisms:
 - **`lib/modelUrlResolver.ts`** — Builds a Three.js `LoadingManager` URL
   modifier pre-seeded with a sibling-texture map fetched from the backend.
   See §4.5.
+- **`lib/pathUtils.ts`** — Cross-platform path helpers (`basename`,
+  `dirname`, `getExtension`, `basenameWithoutExt`, `getEditorDisplayName`).
+  All accept both `/` and `\` defensively even though backend paths are
+  forward-slash normalized — input can leak from file dialogs / FBX
+  embedded URLs / user-supplied editor binaries.
+- **`lib/platform.ts`** — `getPlatform()` / `isMacOS()` / `isWindows()` /
+  `isLinux()`. Cached UA sniff; used by `formatShortcut` (renders `⌘⇧R`
+  on macOS) and the `tc-platform-macos` body-class CSS hook.
 - **`types/asset.ts`** — TS mirrors of the Rust `serde` structs. **Kept in
   sync manually; no codegen.** If you add a field to a Rust type that crosses
   the boundary, update this file.
@@ -270,7 +286,7 @@ Solved in `buildTextureUrlResolver`:
    `invoke<ReturnType>("your_command", { projectId, someArg })`. Tauri
    converts `snake_case` arg names to `camelCase` automatically.
 
-### A new analyzer rule
+### A new per-asset analyzer rule
 
 1. Create a new file under `src-tauri/src/analyzer/rules/`.
 2. Define a `Config` struct with `#[serde(default)]` fields and a `Default`
@@ -279,6 +295,20 @@ Solved in `buildTextureUrlResolver`:
 4. Add the config to `RuleConfig` in `analyzer/rules/mod.rs`.
 5. Register in `Analyzer::with_config` (in `analyzer/mod.rs`).
 6. Write unit tests in the same file.
+
+### A new cross-asset analyzer pass
+
+If your check needs to compare assets to each other (duplicates,
+references, set completeness), it doesn't fit `Rule::check` — that takes
+one `AssetInfo` at a time. Follow the `pbr_set` / `duplicate` shape:
+
+1. Create the file under `analyzer/rules/` with a free function
+   `pub fn find_<thing>_issues(assets: &[AssetInfo], config: &Config) -> AnalysisResult`.
+2. Add config to `RuleConfig` if tunable.
+3. Expose via a method on `Analyzer` for symmetry with `find_duplicates` /
+   `find_missing_references`.
+4. Call from `lib.rs::analyze_assets` after the per-asset phase and
+   `result.merge(...)` the output.
 
 ### A new asset type or format parser
 
@@ -382,7 +412,7 @@ tidycraft/
 │   │   ├── AssetPreview.tsx          # Right-pane preview (image/3D/audio/video)
 │   │   ├── CommandPalette.tsx        # ⌘K — Suggestions/Navigate/Filter/Resources/Actions
 │   │   ├── AITagPanel.tsx            # Heuristic tag-suggest overlay
-│   │   ├── SettingsModal.tsx         # Appearance / Git / Maintenance sections
+│   │   ├── SettingsModal.tsx         # Appearance / Git / Analysis Rules / External Editors / Maintenance
 │   │   └── …                         # Dialogs, Header, Sidebar, etc.
 │   ├── stores/                       # Zustand state
 │   │   ├── projectStore.ts           # Multi-project hub (mirror fields for active)
@@ -396,7 +426,7 @@ tidycraft/
 │   │   └── searchHistoryStore.ts     # Recent search queries
 │   ├── styles/                       # globals.css + redesign-tokens(/-v2) + redesign-components
 │   ├── types/asset.ts                # TS mirrors of Rust structs
-│   ├── lib/                          # Shared utilities
+│   ├── lib/                          # Shared utilities (pathUtils, platform, modelUrlResolver, utils)
 │   ├── hooks/                        # React hooks (useKeyboardShortcuts)
 │   ├── i18n/locales/                 # en.json + zh.json
 │   ├── main.tsx                      # React entry, imports global CSS
@@ -412,8 +442,12 @@ tidycraft/
 │       ├── cache.rs                  # Disk scan cache
 │       ├── analyzer/
 │       │   ├── mod.rs                # Analyzer / Issue / Severity
-│       │   ├── tag_suggest.rs        # Heuristic tag suggester (filename / dim / path)
+│       │   ├── tag_suggest.rs        # Heuristic tag suggester (filename / dim+channel / path)
 │       │   └── rules/                # Rule implementations
+│       │       ├── naming.rs / texture.rs / texture_colorspace.rs
+│       │       ├── model.rs / audio.rs                       # Per-asset (Rule trait)
+│       │       ├── duplicate.rs / missing_reference.rs       # Cross-asset
+│       │       └── pbr_set.rs                                # Cross-asset, per-folder grouping
 │       ├── unity.rs                  # Unity YAML parsers
 │       ├── unreal.rs                 # .uproject parser (deep-integration stubs)
 │       ├── godot.rs                  # project.godot parser (deep-integration stubs)
@@ -423,8 +457,8 @@ tidycraft/
 │       └── thumbnail.rs              # Image thumbnail generation + cache
 ├── examples/                         # User-copyable starter configs
 │   └── tidycraft.example.toml        # Annotated sample rule config
-├── docs/                             # Non-essential / archival docs
-├── docs/                             # Auxiliary docs + screenshots/
+├── docs/                             # Auxiliary docs
+│   ├── analyzer-rules.md             # Per-rule defaults and tuning advice
 │   └── screenshots/                  # README image assets
 ├── CLAUDE.md                         # Claude Code project instructions
 ├── DEVELOPMENT.md                    # This file

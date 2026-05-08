@@ -11,8 +11,9 @@
 
 [naming]
 enabled = true
-# Default: ['<', '>', ':', '"', '|', '?', '*', '/', '\\', '\0']
-# 加上空格让现实项目里"floor color.png"这种命名也被点出来。
+# Default: [' ', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '+', '=']
+# （shell-unsafe 标点 + 空格）。这里替换成 Windows 文件系统真正禁止的字符
+# 列表 + 空格，方便测试 / 演示。
 forbidden_chars = ['<', '>', ':', '"', '|', '?', '*', '/', '\', ' ']
 forbid_chinese = true
 # Default: 64. 收紧到 32 让长命名暴露出来。
@@ -56,3 +57,37 @@ max_sfx_duration = 5.0
 max_file_size = 10_485_760
 # Default: false. 打开 → SFX 立体声会被警告应改单声道。
 prefer_mono_for_sfx = true
+
+# 跨资源 PBR set 完整性检查 —— textures 按目录 + 基名分组，
+# 含 trigger 通道但缺 required 通道的组报警。详见 docs/analyzer-rules.md。
+[pbr_set]
+enabled = true
+trigger = "basecolor"                    # 该 role 必须存在才检查这个 set
+required = ["basecolor", "normal"]       # 缺任意 required role → warning
+
+# Channel role → 后缀别名（大小写不敏感，严格匹配最后一个 `_` 之后的部分）。
+[pbr_set.channels]
+basecolor = ["BaseColor", "Albedo", "Diffuse", "Color"]
+normal    = ["Normal", "Norm"]
+roughness = ["Roughness", "Rough"]
+metallic  = ["Metallic", "Metal"]
+ao        = ["AO", "AmbientOcclusion"]
+emissive  = ["Emissive", "Emission"]
+height    = ["Height", "Disp"]
+
+# 打包通道：一张 _ORM 同时满足 AO + Roughness + Metallic 三个 role。
+[pbr_set.packed]
+ORM = ["ao", "roughness", "metallic"]
+MRA = ["metallic", "roughness", "ao"]
+RMA = ["roughness", "metallic", "ao"]
+
+# Glob 路径排除 —— 匹配中的资源在所有规则之前 drop（per-asset / 重复 /
+# 缺失引用 / PBR set 全部生效）。相对于项目根。
+[ignore]
+patterns = [
+    # "ThirdParty/**",
+    # "Plugins/**",
+    # "Library/**",          # Unity 自动生成
+    # "Intermediate/**",     # Unreal 构建缓存
+    # "**/_legacy/**",       # 归档目录
+]

@@ -79,7 +79,8 @@
 - 创建自定义 **彩色标签**
 - 支持单个或批量添加标签
 - **按标签筛选资源**（单选或多选）
-- 标签数据跨会话持久保存
+- 标签数据跨会话持久保存；重命名 / 移动会自动同步绑定，删除文件后自动清理孤儿
+- **启发式标签推荐** — 按文件名 token / 尺寸+PBR 通道 / 路径段自动分组
 
 ### 📊 元数据提取
 
@@ -90,21 +91,29 @@
 | **音频** | 时长、采样率、声道数、位深度 |
 
 ### 🖼️ 资源浏览器
+- **列表 + 网格双视图** + 虚拟滚动 — 流畅处理 10,000+ 文件
 - **缩略图预览**，支持磁盘缓存
-- **虚拟滚动** — 流畅处理 10,000+ 文件
+- **命令面板**（⌘K / Ctrl+K）快速导航、筛选与执行操作
 - 按文件名或路径 **搜索**
 - 按资源类型 **筛选**
-- **3D 模型预览**，支持轨道控制
+- **3D 模型预览**，支持轨道控制（glTF / GLB / FBX / OBJ / DAE / 3DS）
+- **外部编辑器映射** — 把扩展名映射到 Photoshop / Blender / Audacity 等
 
 ### 📋 规则分析
 
 | 类别 | 检查项 |
 |------|--------|
 | **命名** | 禁用字符、中文字符、前缀、大小写风格 |
-| **纹理** | 2 的幂次方、最大尺寸 |
-| **模型** | 顶点/面/材质数量限制 |
-| **音频** | 采样率、时长 |
-| **重复文件** | 基于 SHA256 检测 |
+| **纹理** | 2 的幂次方、尺寸限制、文件大小、mipmap (DDS) |
+| **纹理色彩空间** | 被标为 sRGB 的数据贴图（normal / roughness / metallic …）|
+| **模型** | 顶点 / 面 / 材质数量限制 |
+| **音频** | 采样率、时长、SFX 单声道、文件大小 |
+| **重复文件** | 基于 SHA256 的内容比对 |
+| **缺失引用**（Unity） | 在 `.meta` 文件中查找 GUID |
+| **PBR Set 完整性** | 按目录分组的纹理集是否齐全（BaseColor / Normal / Roughness …）|
+| **忽略规则** | 基于 glob 的路径排除（外部资源 / 生成产物）|
+
+详见 [`docs/analyzer-rules.md`](docs/analyzer-rules.md)（每条规则的默认值与调参建议）。
 
 ---
 
@@ -113,7 +122,7 @@
 | 类别 | 格式 |
 |------|------|
 | **纹理** | PNG, JPG/JPEG, TGA, BMP, GIF |
-| **3D 模型** | glTF, GLB, FBX, OBJ (+MTL), DAE |
+| **3D 模型** | glTF, GLB, FBX, OBJ (+MTL), DAE, 3DS, `.blend`（识别但不能直接渲染，请先在 Blender 中导出 GLB）|
 | **音频** | WAV, MP3, OGG |
 | **其他** | 脚本、材质、预制体、场景 |
 
@@ -132,7 +141,7 @@
 | **虚拟化** | @tanstack/react-virtual |
 
 ### Rust 依赖
-`image` · `gltf` · `tobj` · `symphonia` · `sha2` · `walkdir` · `toml` · `git2` · `rayon`
+`image` · `gltf` · `tobj` · `fbxcel-dom` · `symphonia` · `mp4` · `matroska-demuxer` · `sha2` · `walkdir` · `rayon` · `toml` · `globset` · `git2` · `notify` · `trash` · `tauri-plugin-opener`
 
 ---
 
@@ -165,12 +174,13 @@ pnpm tauri build
 
 ## 📖 使用方法
 
-1. **打开项目** — 点击"打开项目"并选择游戏项目文件夹
-2. **浏览资源** — 导航目录树、搜索和筛选
-3. **预览资源** — 点击任意资源查看详情和预览
-4. **标记资源** — 右键点击添加标签进行分类
-5. **运行分析** — 点击"运行分析"检查问题
-6. **查看问题** — 切换到问题选项卡查看检测结果
+1. **打开项目** — 点击"打开项目"（或 `⌘O` / `Ctrl+O`）并选择游戏项目文件夹
+2. **浏览资源** — 导航目录树、列表 / 网格视图切换、搜索、筛选
+3. **预览资源** — 点击任意资源查看详情、缩略图或 3D 视图
+4. **标记资源** — 右键添加标签，或打开 **AI 标签面板** 查看启发式分组建议
+5. **运行分析** — `⌘⇧R` / `Ctrl+Shift+R`；通过 **Settings → Analysis Rules → Edit** 调整规则
+6. **查看问题** — 切换到问题选项卡，按规则分组、按严重度筛选、跳转到文件
+7. **外部编辑器** — 在 **Settings → External Editors** 把扩展名映射到 Photoshop / Blender 等，预览面板的 `⤴` 直接打开
 
 ---
 
@@ -183,7 +193,7 @@ pnpm tauri build
 ```toml
 [naming]
 enabled = true
-forbidden_chars = ['<', '>', ':', '"', '|', '?', '*', '/', '\']
+forbidden_chars = [' ', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '+', '=']
 forbid_chinese = true
 max_length = 64
 texture_prefix = "T_"      # 可选
@@ -211,6 +221,21 @@ allowed_sample_rates = [44_100, 48_000]
 max_sfx_duration = 30.0    # 秒
 max_file_size = 20_971_520 # 字节
 prefer_mono_for_sfx = false
+
+# 跨资源 PBR set 完整性检查 —— 按目录 + 基名分组纹理，
+# trigger 通道存在但 required 通道缺失时报警。
+[pbr_set]
+enabled = true
+trigger = "basecolor"
+required = ["basecolor", "normal"]
+
+# 完全跳过匹配的资源（per-asset / 重复 / 缺失引用 全部生效）。
+[ignore]
+patterns = [
+    # "ThirdParty/**",
+    # "Library/**",         # Unity 生成产物
+    # "Intermediate/**",    # Unreal 构建缓存
+]
 ```
 
 任何字段都可省略，缺失的字段会回退到默认值。
@@ -228,16 +253,19 @@ tidycraft/
 │   ├── types/              # TypeScript 类型
 │   ├── hooks/              # React hooks
 │   ├── i18n/locales/       # en.json + zh.json
-│   └── lib/                # 工具函数
+│   └── lib/                # 工具函数（pathUtils、平台检测等）
 ├── src-tauri/              # Rust 后端
 │   └── src/
 │       ├── scanner.rs      # 资源扫描
 │       ├── watcher.rs      # 文件系统 watcher → fs-change 事件
-│       ├── analyzer/       # 规则引擎
+│       ├── analyzer/       # 规则引擎 + PBR set + 标签推荐
 │       ├── thumbnail.rs    # 缩略图生成
 │       ├── tags.rs         # 标签管理
 │       └── lib.rs          # Tauri 命令
-└── REDESIGN.md             # 视觉重设计阶段进度
+├── docs/                   # 辅助文档（analyzer-rules.md、screenshots/）
+├── examples/               # `tidycraft.example.toml` 起始模板
+├── DEVELOPMENT.md          # 开发者指南（架构、贡献流程）
+└── README.md               # 用户文档（本文件）
 ```
 
 ---
@@ -254,19 +282,21 @@ tidycraft/
 - [x] 导出报告（JSON、CSV、HTML）
 - [x] 文件系统实时 watcher（外部修改自动刷新）
 - [x] 多项目工作区 + 跨会话恢复
-- [x] 标签系统（支持多选筛选）
-- [x] 安全删除 / 移动 / 复制 / 副本（系统回收站）
-
-进行中：
-
-- [ ] **视觉重设计** — Forge Dark 主题迁移（见 `REDESIGN.md`）。
-  Phase 0（tokens）、Phase 1（视觉换肤）、Phase 2（ProjectSwitcher）已完成；
-  Phase 3（Command Palette ⌘K）进行中；
-  Phase 4（Gallery / grid 视图）与 Phase 5（AI 标签建议）排队中。
+- [x] 标签系统（支持多选筛选 + 启发式 AI 建议）
+- [x] 安全删除 / 移动 / 复制 / 副本（系统回收站，自动同步标签）
+- [x] Forge Dark 视觉重设计（全部完成）
+- [x] 命令面板（⌘K）、列表 / 网格双视图
+- [x] Settings → Analysis Rules 编辑器 + per-project `tidycraft.toml`
+- [x] PBR set 完整性分析（按目录的纹理集检查）
+- [x] 外部编辑器映射（Settings → External Editors，按扩展名配置）
+- [x] 跨平台细节打磨（macOS ⌘ 字符、Windows 文件管理器 reveal 修复、path utils）
 
 待办：
 
-- [ ] 自定义规则脚本（`tidycraft.toml` 已解析但 UI 尚未接入）
+- [ ] 基于 LLM 的语义标签聚类（`tag_suggest.rs` 已留 `ExternalLLMSuggester` 接口位）
+- [ ] VRAM 预算估算（每张纹理、按目录聚合）
+- [ ] DCC 源文件关联（`.blend` / `.spp` → 导出的 `.fbx` / `.glb`，源比导出新时报"需重新导出"）
+- [ ] 跨引擎反向引用图（把 Unity GUID 图扩到 UE / Godot）
 
 ---
 
