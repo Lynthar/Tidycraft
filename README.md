@@ -8,6 +8,7 @@
 [![Rust](https://img.shields.io/badge/Rust-1.75+-orange?logo=rust)](https://www.rust-lang.org/)
 [![React](https://img.shields.io/badge/React-18-61dafb?logo=react)](https://react.dev/)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+[![CI](https://github.com/Lynthar/Tidycraft/actions/workflows/ci.yml/badge.svg)](https://github.com/Lynthar/Tidycraft/actions/workflows/ci.yml)
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
@@ -44,7 +45,7 @@
 - **Stays out of your way** — minimal default rules; live filesystem watcher (no manual rescan); editable rules via `Settings → Analysis Rules → Edit`.
 - **Local-first** — all state on your disk; no telemetry, no network calls.
 
-> **Status: Alpha — actively developed.** Core features (scanning, analysis, tags, 3D preview, Git, watcher) are stable. LLM-backed semantic tagging is in design ([`docs/ai-tagging-plan.md`](docs/ai-tagging-plan.md)); the current "tag suggestions" panel is **heuristic** (filename / dimension / path), not an LLM.
+> **Status: Alpha — actively developed.** Core features (scanning, analysis, tags, 3D preview, Git, watcher) are stable. LLM-backed semantic tagging is in design; the current "tag suggestions" panel is **heuristic** (filename / dimension / path), not an LLM.
 
 ---
 
@@ -292,7 +293,7 @@ Tidycraft is **local-first by design**:
 - **No telemetry, no analytics, no network calls** in the current build (v0.x).
 - **All state lives on your disk**: scan cache (`~/.cache/tidycraft/` or the platform equivalent), tag bindings (`.tidycraft-tags.json` per project), undo history, thumbnail cache, settings.
 - **No account, no sign-in.** Open the app and use it.
-- **The planned LLM tag suggester** ([design doc](docs/ai-tagging-plan.md)) is **opt-in only** — disabled by default, with an explicit consent dialog the first time per provider before any thumbnails or filenames leave your machine. Local-only providers (Ollama) are first-class alongside cloud APIs.
+- **The planned LLM tag suggester** is **opt-in only** — disabled by default, with an explicit consent dialog the first time per provider before any thumbnails or filenames leave your machine. Local-only providers (Ollama) are first-class alongside cloud APIs.
 
 ---
 

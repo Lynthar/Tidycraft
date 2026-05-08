@@ -5,6 +5,9 @@ description = "Game asset management tool"
 authors = ["Tidycraft Team"]
 edition = "2021"
 rust-version = "1.75"
+license = "MIT"
+homepage = "https://github.com/Lynthar/Tidycraft"
+repository = "https://github.com/Lynthar/Tidycraft"
 
 [lib]
 name = "tidycraft_lib"
