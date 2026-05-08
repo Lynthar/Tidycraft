@@ -11,7 +11,10 @@ import { useTranslation } from "react-i18next";
 import { buildTextureUrlResolver } from "../lib/modelUrlResolver";
 import { dirname } from "../lib/pathUtils";
 
-const SUPPORTED_FORMATS = ["gltf", "glb", "fbx", "obj", "dae"];
+// Mirrors ModelViewer3D's list — see that file for why `.blend` is in
+// here (it routes the user into a clear error message rather than a
+// silent placeholder).
+const SUPPORTED_FORMATS = ["gltf", "glb", "fbx", "obj", "dae", "3ds", "blend"];
 
 interface ModelLightboxProps {
   isOpen: boolean;
@@ -370,6 +373,12 @@ export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose 
 
       if (message.includes("404") || message.includes("not found")) {
         setError(t("modelViewer.fileNotFound", "File not found"));
+      } else if (
+        ext === "fbx" &&
+        (message.includes("Cannot read properties of undefined") ||
+          message.includes("parseUVs"))
+      ) {
+        setError(t("modelViewer.fbxIncompatible"));
       } else if (message.includes("parse") || message.includes("invalid")) {
         setError(t("modelViewer.parseError", "Failed to parse model file"));
       } else {
@@ -425,6 +434,16 @@ export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose 
             const loader = new ColladaLoader(loadingManager);
             loader.setResourcePath(resourcePath);
             loader.load(modelUrl, (collada) => onLoad(collada.scene), undefined, onError);
+          } else if (ext === "3ds") {
+            const { TDSLoader } = await import("three/addons/loaders/TDSLoader.js");
+            if (!isMountedRef.current) return;
+            const loader = new TDSLoader(loadingManager);
+            loader.setResourcePath(resourcePath);
+            loader.load(modelUrl, onLoad, undefined, onError);
+          } else if (ext === "blend") {
+            if (!isMountedRef.current) return;
+            setError(t("modelViewer.blendUnsupported"));
+            setIsLoading(false);
           }
         } catch (err) {
           onError(err);

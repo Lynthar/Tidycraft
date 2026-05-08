@@ -1105,8 +1105,18 @@ fn show_in_file_manager(path: String) -> Result<(), String> {
     }
     #[cfg(target_os = "windows")]
     {
+        // Two quirks of explorer's `/select,` we kept stepping on:
+        //   1. The flag and path must be a SINGLE cmdline argument
+        //      (`/select,C:\foo`). `Command::args(["/select,", &path])`
+        //      inserts a space between them and explorer interprets that
+        //      as "open the grandparent and select the parent folder",
+        //      which is what users were seeing.
+        //   2. `/select,` only follows backslash-separator paths.
+        //      `path_to_string` normalizes to `/` for cross-platform
+        //      consistency, so undo it here at the boundary.
+        let win_path = path.replace('/', "\\");
         std::process::Command::new("explorer")
-            .args(["/select,", &path])
+            .arg(format!("/select,{}", win_path))
             .spawn()
             .map_err(|e| e.to_string())?;
     }

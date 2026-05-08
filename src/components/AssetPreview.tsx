@@ -29,7 +29,12 @@ import { ModelLightbox } from "./ModelLightbox";
 import type { AssetType } from "../types/asset";
 
 const VIDEO_EXTENSIONS = ["mp4", "webm", "mov", "avi", "mkv", "m4v"];
-const MODEL_3D_EXTENSIONS = ["gltf", "glb", "fbx", "obj", "dae"];
+// `.3ds` and `.blend` are routed into ModelViewer3D too: 3ds renders
+// fine via TDSLoader; blend can't render in the browser at all (Blender
+// private format) but the viewer surfaces a "please export to GLB"
+// message — better than the silent box-icon fallback the user got
+// before.
+const MODEL_3D_EXTENSIONS = ["gltf", "glb", "fbx", "obj", "dae", "3ds", "blend"];
 
 function GlyphIcon({ type, size = 11 }: { type: AssetType; size?: number }) {
   switch (type) {
