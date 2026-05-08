@@ -10,10 +10,15 @@ import {
   Check,
   ChevronRight,
   ExternalLink,
+  Settings as SettingsIcon,
 } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { useTagsStore } from "../stores/tagsStore";
+import { useSettingsStore } from "../stores/settingsStore";
+import { useUiStore } from "../stores/uiStore";
 import { cn } from "../lib/utils";
+import { getExtension, getEditorDisplayName } from "../lib/pathUtils";
 import type { Tag } from "../types/asset";
 
 interface Position {
@@ -28,7 +33,7 @@ interface ContextMenuProps {
   assetPath: string;
   assetTags: Tag[];
   onCopyPath: () => void;
-  onRevealInFinder: () => void;
+  onRevealInFileManager: () => void;
   onOpenWithDefaultApp: () => void;
   onRename: () => void;
   onDuplicate?: () => void;
@@ -45,7 +50,7 @@ export function ContextMenu({
   assetPath,
   assetTags,
   onCopyPath,
-  onRevealInFinder,
+  onRevealInFileManager,
   onOpenWithDefaultApp,
   onRename,
   onDuplicate,
@@ -56,7 +61,17 @@ export function ContextMenu({
 }: ContextMenuProps) {
   const { t } = useTranslation();
   const { tags, addTagToAsset, removeTagFromAsset } = useTagsStore();
+  const externalEditors = useSettingsStore((s) => s.externalEditors);
+  const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Per-asset editor decision: if the user mapped this extension, prefer
+  // that editor; otherwise show the "Configure editor for .ext…" muted
+  // entry so the user knows where to set it up. Files without extensions
+  // (no dot in basename) get neither — the default-app row is enough.
+  const ext = getExtension(assetPath);
+  const editorPath = ext ? externalEditors[ext] : undefined;
+  const editorName = editorPath ? getEditorDisplayName(editorPath) : undefined;
   const [showTagSubmenu, setShowTagSubmenu] = useState(false);
   const [submenuPosition, setSubmenuPosition] = useState<"right" | "left">("right");
 
@@ -138,11 +153,45 @@ export function ContextMenu({
   };
 
   const menuItems = [
+    // Headline action: open in the user's chosen editor for this
+    // extension, falling back to a "Configure…" entry that jumps to
+    // Settings so first-time users know how to set it up.
+    ...(editorPath && editorName
+      ? [
+          {
+            icon: <ExternalLink size={14} />,
+            label: t("contextMenu.openInEditor", { name: editorName }),
+            onClick: async () => {
+              try {
+                await invoke("open_in_editor", {
+                  path: assetPath,
+                  editor: editorPath,
+                });
+              } catch (err) {
+                console.error("Failed to open in editor:", err);
+              }
+              onClose();
+            },
+          },
+        ]
+      : ext
+      ? [
+          {
+            icon: <SettingsIcon size={14} />,
+            label: t("contextMenu.configureEditor", { ext }),
+            onClick: () => {
+              setSettingsOpen(true);
+              onClose();
+            },
+            muted: true,
+          },
+        ]
+      : []),
     {
       icon: <FolderOpen size={14} />,
-      label: t("contextMenu.revealInFinder"),
+      label: t("contextMenu.revealInFileManager"),
       onClick: () => {
-        onRevealInFinder();
+        onRevealInFileManager();
         onClose();
       },
     },
@@ -307,7 +356,8 @@ export function ContextMenu({
             onClick={item.onClick}
             className={cn(
               "flex items-center gap-2 w-full px-3 py-1.5 text-sm text-left hover:bg-background transition-colors",
-              (item as { danger?: boolean }).danger && "text-red-400 hover:text-red-300"
+              (item as { danger?: boolean }).danger && "text-red-400 hover:text-red-300",
+              (item as { muted?: boolean }).muted && "italic text-text-secondary"
             )}
           >
             {item.icon}

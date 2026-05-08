@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { basename, dirname } from "./pathUtils";
 
 /**
  * A synchronous URL modifier for Three.js LoadingManager, built asynchronously
@@ -26,29 +27,28 @@ export async function buildTextureUrlResolver(
     console.warn("[modelUrlResolver] sibling scan failed:", err);
   }
 
-  const lastSlash = Math.max(modelPath.lastIndexOf("/"), modelPath.lastIndexOf("\\"));
-  const modelDir = lastSlash >= 0 ? modelPath.substring(0, lastSlash + 1) : "";
+  const dir = dirname(modelPath);
+  const modelDir = dir ? `${dir}/` : "";
 
   const extractBasename = (url: string): string => {
     // Trim query/fragment if any
     let s = url.split("?")[0].split("#")[0];
     // Already-encoded asset.localhost URLs percent-encode slashes to %2F,
-    // so decode first, then take everything after the last separator.
+    // so decode first, then take the filename component.
     try {
       s = decodeURIComponent(s);
     } catch {
       // keep as-is if malformed
     }
-    const slash = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
-    return slash >= 0 ? s.substring(slash + 1) : s;
+    return basename(s);
   };
 
   return (url: string): string => {
     if (!url) return url;
     if (url.startsWith("data:") || url.startsWith("blob:")) return url;
 
-    const basename = extractBasename(url);
-    const hit = siblings[basename.toLowerCase()];
+    const name = extractBasename(url);
+    const hit = siblings[name.toLowerCase()];
     if (hit) {
       return convertFileSrc(hit);
     }
@@ -60,6 +60,6 @@ export async function buildTextureUrlResolver(
     if (url.startsWith("/")) {
       return convertFileSrc(url);
     }
-    return convertFileSrc(modelDir + basename);
+    return convertFileSrc(modelDir + name);
   };
 }

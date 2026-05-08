@@ -13,6 +13,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { useProjectStore } from "../stores/projectStore";
 import { cn } from "../lib/utils";
+import { basename, dirname } from "../lib/pathUtils";
 import type { DirectoryNode, FileOpResult } from "../types/asset";
 
 interface MoveCopyDialogProps {
@@ -28,16 +29,6 @@ interface MoveCopyDialogProps {
 }
 
 const PREVIEW_LIMIT = 5;
-
-function basename(path: string): string {
-  const i = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-  return i >= 0 ? path.slice(i + 1) : path;
-}
-
-function parentDir(path: string): string {
-  const i = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-  return i >= 0 ? path.slice(0, i) : path;
-}
 
 /**
  * Recursive row for the directory tree. Parent owns the expanded set so that
@@ -153,7 +144,7 @@ export function MoveCopyDialog({
   // the user can read that clearly.
   const disabledDirs = useMemo(() => {
     if (mode !== "move") return new Set<string>();
-    return new Set(paths.map(parentDir));
+    return new Set(paths.map(dirname));
   }, [mode, paths]);
 
   useEffect(() => {

@@ -9,6 +9,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { RotateCcw, Box, Maximize2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { buildTextureUrlResolver } from "../lib/modelUrlResolver";
+import { dirname } from "../lib/pathUtils";
 
 // Supported 3D model formats
 const SUPPORTED_FORMATS = ["gltf", "glb", "fbx", "obj", "dae"];
@@ -262,7 +263,8 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
     const ext = extension.toLowerCase();
 
     // Calculate resource path for textures (model's directory converted to asset:// URL)
-    const modelDir = filePath.substring(0, filePath.lastIndexOf('/') + 1);
+    const dir = dirname(filePath);
+    const modelDir = dir ? `${dir}/` : "";
     const resourcePath = convertFileSrc(modelDir);
 
     const onLoad = (object: THREE.Object3D) => {

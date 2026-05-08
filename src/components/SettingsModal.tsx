@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { X, GitBranch, Palette, Wrench, Trash2, Image as ImageIcon, FileCode, ExternalLink } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
 import { useSettingsStore } from "../stores/settingsStore";
 import { useThemeStore, type ThemePreference } from "../stores/themeStore";
@@ -94,6 +95,166 @@ function SegmentedControl<T extends string>({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+/// Editable list of (extension → editor path) mappings. Reads/writes
+/// `settingsStore.externalEditors`; persisting is immediate (each row
+/// edit calls `setExternalEditor` / `removeExternalEditor`). The "draft"
+/// row holds the in-progress new mapping so the user can pick path via
+/// `Browse…` before the mapping appears in the live list — keeps the
+/// store from churning on incomplete keystrokes.
+function ExternalEditorsSection() {
+  const { t } = useTranslation();
+  const externalEditors = useSettingsStore((s) => s.externalEditors);
+  const setExternalEditor = useSettingsStore((s) => s.setExternalEditor);
+  const removeExternalEditor = useSettingsStore((s) => s.removeExternalEditor);
+
+  const [draft, setDraft] = useState<{ ext: string; path: string } | null>(null);
+
+  // Single-file picker without filters — the user might point at any
+  // launcher shape (.exe, .app bundle, shell script, .desktop entry).
+  // Validation happens at launch time via tauri-plugin-opener.
+  const pickEditorPath = async (): Promise<string | null> => {
+    try {
+      const selected = await open({ multiple: false });
+      return typeof selected === "string" ? selected : null;
+    } catch (err) {
+      console.error("Failed to pick editor:", err);
+      return null;
+    }
+  };
+
+  const entries = Object.entries(externalEditors).sort(([a], [b]) =>
+    a.localeCompare(b)
+  );
+
+  const draftReady =
+    draft !== null &&
+    draft.ext.trim().length > 0 &&
+    draft.path.trim().length > 0;
+
+  return (
+    <div className="space-y-2 pl-6">
+      {entries.length === 0 && !draft && (
+        <p className="text-xs italic" style={{ color: "var(--text-3)" }}>
+          {t("settings.noExternalEditors")}
+        </p>
+      )}
+
+      {entries.map(([ext, editorPath]) => (
+        <div key={ext} className="flex items-center gap-2">
+          <code
+            className="text-xs px-2 py-1 rounded font-mono shrink-0"
+            style={{
+              background: "var(--panel-2)",
+              border: "1px solid var(--line)",
+              minWidth: 60,
+              textAlign: "center",
+            }}
+          >
+            {ext}
+          </code>
+          <span
+            className="text-xs flex-1 truncate"
+            style={{ color: "var(--text-3)" }}
+            title={editorPath}
+          >
+            {editorPath}
+          </span>
+          <button
+            onClick={async () => {
+              const newPath = await pickEditorPath();
+              if (newPath) setExternalEditor(ext, newPath);
+            }}
+            className="px-2 py-1 text-xs rounded border border-border hover:bg-background text-text-secondary hover:text-text-primary transition-colors shrink-0"
+          >
+            {t("settings.editorBrowse")}
+          </button>
+          <button
+            onClick={() => removeExternalEditor(ext)}
+            className="p-1 rounded hover:bg-background transition-colors shrink-0"
+            title={t("settings.editorRemove")}
+            style={{ color: "var(--text-3)" }}
+          >
+            <Trash2 size={12} />
+          </button>
+        </div>
+      ))}
+
+      {draft && (
+        <div
+          className="flex items-center gap-2 p-2 rounded"
+          style={{
+            background: "var(--panel-2)",
+            border: "1px dashed var(--line)",
+          }}
+        >
+          <input
+            type="text"
+            value={draft.ext}
+            onChange={(e) => setDraft({ ...draft, ext: e.target.value })}
+            placeholder={t("settings.editorExtensionPlaceholder")}
+            autoFocus
+            className="text-xs px-2 py-1 rounded font-mono"
+            style={{
+              background: "var(--panel)",
+              border: "1px solid var(--line)",
+              color: "var(--text)",
+              width: 70,
+            }}
+          />
+          <span
+            className="text-xs flex-1 truncate"
+            style={{ color: draft.path ? "var(--text-3)" : "var(--text-4)" }}
+            title={draft.path || ""}
+          >
+            {draft.path || t("settings.editorPathPlaceholder")}
+          </span>
+          <button
+            onClick={async () => {
+              const newPath = await pickEditorPath();
+              if (newPath) setDraft({ ...draft, path: newPath });
+            }}
+            className="px-2 py-1 text-xs rounded border border-border hover:bg-background text-text-secondary hover:text-text-primary transition-colors shrink-0"
+          >
+            {t("settings.editorBrowse")}
+          </button>
+          <button
+            onClick={() => {
+              if (!draftReady || !draft) return;
+              setExternalEditor(draft.ext, draft.path);
+              setDraft(null);
+            }}
+            disabled={!draftReady}
+            className="px-3 py-1 text-xs rounded transition-colors shrink-0"
+            style={{
+              background: draftReady ? "var(--primary)" : "var(--panel-2)",
+              color: draftReady ? "var(--on-primary)" : "var(--text-4)",
+              border: "1px solid var(--line)",
+              cursor: draftReady ? "pointer" : "not-allowed",
+            }}
+          >
+            ✓
+          </button>
+          <button
+            onClick={() => setDraft(null)}
+            className="p-1 rounded hover:bg-background text-text-secondary transition-colors shrink-0"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      )}
+
+      {!draft && (
+        <button
+          onClick={() => setDraft({ ext: "", path: "" })}
+          className="px-3 py-1 text-xs rounded border border-border hover:bg-background text-text-secondary hover:text-text-primary transition-colors inline-flex items-center gap-1"
+        >
+          + {t("settings.addEditor")}
+        </button>
+      )}
     </div>
   );
 }
@@ -309,6 +470,23 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 </button>
               </div>
             </div>
+          </div>
+
+          {/* External Editors Section */}
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <ExternalLink size={16} className="text-primary" />
+              <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wide">
+                {t("settings.externalEditorsSection")}
+              </h3>
+            </div>
+            <p
+              className="text-xs pl-6 mb-3"
+              style={{ color: "var(--text-3)" }}
+            >
+              {t("settings.externalEditorsHint")}
+            </p>
+            <ExternalEditorsSection />
           </div>
 
           {/* Maintenance Section */}

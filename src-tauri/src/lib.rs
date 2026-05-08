@@ -1090,8 +1090,12 @@ fn get_godot_project_info(path: String) -> Result<godot::GodotProjectInfo, Strin
 
 // ============ File System Commands ============
 
+/// Open the OS file manager focused on `path` (Finder reveal / Explorer
+/// `/select,` / xdg-open parent). We keep the per-OS dispatch here because
+/// `tauri-plugin-shell::open` has no "select-this-file" mode — it can only
+/// open a file/url, not highlight it inside a folder view.
 #[tauri::command]
-fn reveal_in_finder(path: String) -> Result<(), String> {
+fn show_in_file_manager(path: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("open")
@@ -1118,30 +1122,29 @@ fn reveal_in_finder(path: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Launch a file with the OS-default application associated to its
+/// extension. Routed through `tauri-plugin-opener` so Windows codepage,
+/// path quoting, and `%` variable expansion are handled by the platform
+/// shell helper — previous hand-rolled `cmd /C start` worked for ASCII
+/// paths but broke on Chinese / `%`-containing paths.
 #[tauri::command]
-fn open_with_default_app(path: String) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(&path)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-    }
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", &path])
-            .spawn()
-            .map_err(|e| e.to_string())?;
-    }
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(&path)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(())
+fn open_with_default_app(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_path(&path, None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+/// Open a file with a specific external application — `editor` is the
+/// absolute path to a binary or .app bundle (`Photoshop.exe`,
+/// `/Applications/Blender.app`, …). Errors bubble up to the caller as a
+/// string for inline UI display.
+#[tauri::command]
+fn open_in_editor(app: tauri::AppHandle, path: String, editor: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_path(&path, Some(editor.as_str()))
+        .map_err(|e| e.to_string())
 }
 
 // ============ Texture resolution for 3D model loaders ============
@@ -1705,6 +1708,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             #[cfg(debug_assertions)]
             {
@@ -1764,8 +1768,9 @@ pub fn run() {
             clear_undo_history,
             get_undo_count,
             // File System
-            reveal_in_finder,
+            show_in_file_manager,
             open_with_default_app,
+            open_in_editor,
             rename_file,
             delete_assets,
             move_assets,

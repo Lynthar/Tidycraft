@@ -332,7 +332,9 @@ Windows and at least one POSIX target.
 
 - **Paths.** Windows uses backslashes natively; we normalize to forward
   slashes on every boundary. Don't write `path.lastIndexOf("/")` on a raw OS
-  path without normalizing first.
+  path without normalizing first — use `basename` / `dirname` /
+  `getExtension` from `lib/pathUtils.ts`, which handle both separators
+  defensively.
 - **Tauri asset protocol.** File paths with spaces or non-ASCII characters
   can fail to resolve on certain OS / format combinations (e.g. FBX with
   embedded texture paths). Known platform limitation — don't try to fix
@@ -346,11 +348,10 @@ Windows and at least one POSIX target.
   notarization. Not set up yet.
 - **Keyboard shortcuts display.** Detection in `useKeyboardShortcuts`
   honors both `ctrlKey` and `metaKey`, so shortcuts work on every OS.
-  Display is split: `CommandPalette` hard-codes `⌘`/`⇧` glyphs (correct on
-  macOS, slightly off on Windows), while `Header` tooltips and `Sidebar`
-  Run Analysis hint use `formatShortcut(SHORTCUTS.x)` which still produces
-  `"Ctrl+X"` form. Low priority — make the helper platform-aware before
-  shipping a Windows beta.
+  `formatShortcut` now reads `getPlatform()` from `lib/platform.ts` and
+  renders `⌘⇧R` on macOS / `Ctrl+Shift+R` elsewhere. `CommandPalette`
+  still hard-codes the glyphs in places — fine on macOS, slightly off on
+  Windows; low-pri cleanup if/when those tooltips become a complaint.
 
 ---
 

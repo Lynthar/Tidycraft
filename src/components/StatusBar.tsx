@@ -3,6 +3,7 @@ import { X, AlertCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
 import { formatFileSize } from "../lib/utils";
+import { basename } from "../lib/pathUtils";
 
 /// How long the watcher "syncing" badge stays visible after the most recent
 /// fs-change event. Coalescing window in `watcher.rs` is 500ms, so this
@@ -98,7 +99,7 @@ export function StatusBar() {
         : 0;
 
     const currentFile = scanProgress.current_file
-      ? scanProgress.current_file.split("/").pop() || scanProgress.current_file
+      ? basename(scanProgress.current_file)
       : "";
 
     return (

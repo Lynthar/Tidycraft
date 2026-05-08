@@ -202,12 +202,12 @@ export function AssetList() {
     }
   }, [contextMenu.asset]);
 
-  const handleRevealInFinder = useCallback(async () => {
+  const handleRevealInFileManager = useCallback(async () => {
     if (contextMenu.asset) {
       try {
-        await invoke("reveal_in_finder", { path: contextMenu.asset.path });
+        await invoke("show_in_file_manager", { path: contextMenu.asset.path });
       } catch (err) {
-        console.error("Failed to reveal in finder:", err);
+        console.error("Failed to show in file manager:", err);
       }
     }
   }, [contextMenu.asset]);
@@ -534,7 +534,7 @@ export function AssetList() {
           assetPath={contextMenu.asset.path}
           assetTags={allAssetTags[contextMenu.asset.path] || []}
           onCopyPath={handleCopyPath}
-          onRevealInFinder={handleRevealInFinder}
+          onRevealInFileManager={handleRevealInFileManager}
           onOpenWithDefaultApp={handleOpenWithDefaultApp}
           onRename={handleRename}
           onDuplicate={handleDuplicate}
