@@ -68,9 +68,23 @@ useProjectStore.subscribe((state) => {
 });
 
 /// Replay the persisted session on app launch. Call once from App.tsx.
-/// openProject is invoked serially — each call runs its scan in the
-/// background via Tauri, but we still want the activeProjectId sequence
-/// predictable so the restored "active" project wins at the end.
+///
+/// Two-phase restore:
+///   1. Register every persisted path as a stub (parallel, O(1) each):
+///      backend gets the project entry, sidebar shows the row, but no
+///      scan runs. This used to be a serial `await openProject` loop
+///      that triggered N full scans on boot — slow with many projects
+///      and wasteful since non-active scans are immediately discarded
+///      by the active-switch step at the end.
+///   2. Fully open the active project (or fall back to the first one
+///      if the previously-active path is gone). `openProject` here will
+///      see the stub in the projects Map (path matches), hit the dedupe
+///      branch, and route through `setActiveProject`, which detects the
+///      stub state and triggers full hydration.
+///
+/// When the user later switches to a different stub, the same
+/// `setActiveProject` lazy-hydration kicks in — they pay the scan cost
+/// once, when they actually need that project.
 export async function restoreSession(): Promise<void> {
   const session = useSessionStore.getState();
   if (session.restored) return;
@@ -81,26 +95,35 @@ export async function restoreSession(): Promise<void> {
 
   const store = useProjectStore.getState();
 
-  for (const path of openProjectPaths) {
-    try {
-      await store.openProject(path);
-    } catch (err) {
-      // openProject already handles its own errors internally; this is a
-      // belt-and-suspenders log in case of an unexpected throw.
-      console.warn(`[sessionStore] failed to restore project ${path}:`, err);
-    }
-  }
+  // Phase 1: stubs for every project except the one we're about to
+  // open fully. Parallel because each call is just a backend HashMap
+  // insert + zustand Map insert; no IO that would benefit from
+  // sequencing.
+  const stubPaths = openProjectPaths.filter((p) => p !== activeProjectPath);
+  await Promise.all(
+    stubPaths.map((path) =>
+      store.registerProjectStub(path).catch((err) => {
+        console.warn(
+          `[sessionStore] stub registration failed for ${path}:`,
+          err
+        );
+      })
+    )
+  );
 
-  // Re-point active to whichever project was active before, if it's still
-  // in the Map (the loop above sets activeProjectId to each project as it
-  // opens, so the last-opened would otherwise win).
-  if (activeProjectPath) {
-    const latest = useProjectStore.getState();
-    const target = Array.from(latest.projects.values()).find(
-      (p) => p.projectPath === activeProjectPath
-    );
-    if (target && latest.activeProjectId !== target.id) {
-      latest.setActiveProject(target.id);
+  // Phase 2: hydrate the previously-active project. If that path is no
+  // longer in the open list (shouldn't happen, but be defensive), fall
+  // back to the first remaining path so the user lands somewhere sane.
+  const target =
+    (activeProjectPath && openProjectPaths.includes(activeProjectPath)
+      ? activeProjectPath
+      : null) ?? openProjectPaths[0] ?? null;
+
+  if (target) {
+    try {
+      await store.openProject(target);
+    } catch (err) {
+      console.warn(`[sessionStore] failed to hydrate active ${target}:`, err);
     }
   }
 }

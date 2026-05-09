@@ -34,7 +34,7 @@ const VIDEO_EXTENSIONS = ["mp4", "webm", "mov", "avi", "mkv", "m4v"];
 // private format) but the viewer surfaces a "please export to GLB"
 // message — better than the silent box-icon fallback the user got
 // before.
-const MODEL_3D_EXTENSIONS = ["gltf", "glb", "fbx", "obj", "dae", "3ds", "blend"];
+const MODEL_3D_EXTENSIONS = ["gltf", "glb", "fbx", "obj", "dae", "3ds", "blend", "vox"];
 
 function GlyphIcon({ type, size = 11 }: { type: AssetType; size?: number }) {
   switch (type) {
@@ -99,7 +99,11 @@ export function AssetPreview() {
         });
         setThumbnail(base64);
       } catch (err) {
-        console.error("Failed to load thumbnail:", err);
+        // Thumbnail failure always falls back to the type-icon placeholder,
+        // so we log at debug regardless of cause — extension-not-whitelisted,
+        // codec gaps (e.g. EXR DWAA / deep EXR), corrupted files, IO errors.
+        // None of these are actionable from a console.error.
+        console.debug("Thumbnail not available:", err);
         setThumbnail(null);
       } finally {
         setLoadingThumbnail(false);

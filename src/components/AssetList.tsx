@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
-import { Image, Edit3, X, List, LayoutGrid, Move, Trash2 } from "lucide-react";
+import { Image, Edit3, X, List, LayoutGrid, Move, Trash2, Sparkles } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
@@ -8,6 +8,7 @@ import { useTagsStore } from "../stores/tagsStore";
 import { useColumnStore } from "../stores/columnStore";
 import { useUiStore } from "../stores/uiStore";
 import { useSelectionStore } from "../stores/selectionStore";
+import { useSettingsStore } from "../stores/settingsStore";
 import { BatchRenameDialog } from "./BatchRenameDialog";
 import { RenameDialog } from "./RenameDialog";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
@@ -62,6 +63,8 @@ export function AssetList() {
   const viewMode = useColumnStore((s) => s.viewMode);
   const setViewMode = useColumnStore((s) => s.setViewMode);
   const setTagManagerOpen = useUiStore((s) => s.setTagManagerOpen);
+  const setAiAnalyzeOpen = useUiStore((s) => s.setAiAnalyzeOpen);
+  const aiActiveProvider = useSettingsStore((s) => s.aiActiveProvider);
 
   const selectedPaths = useSelectionStore((s) => s.selectedPaths);
   const setSelectedPaths = useSelectionStore((s) => s.setSelectedPaths);
@@ -263,6 +266,13 @@ export function AssetList() {
     if (targets) setMoveCopyDialog({ mode: "copy", paths: targets });
   }, [targetPathsFromContext]);
 
+  const handleAITag = useCallback(() => {
+    const targets = targetPathsFromContext();
+    if (targets && targets.length > 0) {
+      setAiAnalyzeOpen(true, targets);
+    }
+  }, [targetPathsFromContext, setAiAnalyzeOpen]);
+
   // Duplicate is same-dir with auto-suffix — no dialog, no target picker. Just
   // fire-and-forget; watcher propagates the new files into the asset list.
   const handleDuplicate = useCallback(async () => {
@@ -374,6 +384,18 @@ export function AssetList() {
               selectedPaths={Array.from(selectedPaths)}
               onOpenManager={() => setTagManagerOpen(true)}
             />
+            {aiActiveProvider && (
+              <button
+                onClick={() =>
+                  setAiAnalyzeOpen(true, Array.from(selectedPaths))
+                }
+                className="tc-batch-action"
+                title={t("aiAnalyze.title")}
+              >
+                <Sparkles size={13} />
+                {t("aiAnalyze.title")}
+              </button>
+            )}
             <button
               onClick={() => setShowBatchRename(true)}
               className="tc-batch-action"
@@ -542,6 +564,7 @@ export function AssetList() {
           onCopyTo={handleCopyTo}
           onDelete={handleDelete}
           onOpenTagManager={() => setTagManagerOpen(true)}
+          onAITag={aiActiveProvider ? handleAITag : undefined}
         />
       )}
 

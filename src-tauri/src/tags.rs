@@ -3,12 +3,23 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-/// A tag that can be assigned to assets
+/// A tag that can be assigned to assets.
+///
+/// `description` is optional context the user can fill in via TagManager.
+/// AI Learning passes it to the LLM as part of the project context bundle
+/// so the model knows what each tag means in this user's vocabulary.
+/// Empty / None descriptions fall back to "show the model 5 sample paths
+/// where this tag is currently applied" — see `lib.rs::llm_suggest_tags`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Tag {
     pub id: String,
     pub name: String,
     pub color: String,
+    /// Skipped on serialize when None so existing `.tidycraft-tags.json`
+    /// files stay byte-clean unless the user actually fills a description.
+    /// `default` lets us load older files without the field present.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub description: Option<String>,
 }
 
 /// Tags storage - persisted to a JSON file in the project root
@@ -46,7 +57,12 @@ impl TagsData {
     /// Create a new tag
     pub fn create_tag(&mut self, name: String, color: String) -> Tag {
         let id = uuid::Uuid::new_v4().to_string();
-        let tag = Tag { id, name, color };
+        let tag = Tag {
+            id,
+            name,
+            color,
+            description: None,
+        };
         self.tags.push(tag.clone());
         tag
     }
@@ -59,14 +75,32 @@ impl TagsData {
         }
     }
 
-    /// Update a tag
-    pub fn update_tag(&mut self, tag_id: &str, name: Option<String>, color: Option<String>) -> Option<Tag> {
+    /// Update a tag. Each field is patched only when its argument is `Some`;
+    /// `None` means "leave unchanged". To explicitly clear a description,
+    /// callers pass `Some(Some(""))` and the empty-string normalization
+    /// happens here.
+    pub fn update_tag(
+        &mut self,
+        tag_id: &str,
+        name: Option<String>,
+        color: Option<String>,
+        description: Option<Option<String>>,
+    ) -> Option<Tag> {
         if let Some(tag) = self.tags.iter_mut().find(|t| t.id == tag_id) {
             if let Some(n) = name {
                 tag.name = n;
             }
             if let Some(c) = color {
                 tag.color = c;
+            }
+            if let Some(d) = description {
+                // Treat empty/whitespace-only strings as "no description"
+                // so we don't ship blank values to the LLM context.
+                tag.description = match d {
+                    Some(s) if s.trim().is_empty() => None,
+                    Some(s) => Some(s),
+                    None => None,
+                };
             }
             return Some(tag.clone());
         }

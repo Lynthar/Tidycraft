@@ -20,6 +20,17 @@ pub const DEFAULT_CONFIG_TEMPLATE: &str = r##"# Tidycraft analysis rules.
 # missing_reference (Unity-only, always-on) fire by default. Every other
 # section below ships with `enabled = false`; flip them to `true` to opt in.
 
+# ─── Project metadata ─── (consumed by AI Learning)
+# Optional. Tidycraft's AI Tagging feature reads `theme` and `goal` here so
+# the model knows what kind of project this is when it suggests tags. Leave
+# blank to skip the project-context block in the prompt — the AI still works,
+# just with less project-specific framing.
+[project]
+# Free-form, e.g. "Cyberpunk top-down RPG" or "Photorealistic FPS military set".
+theme = ""
+# Free-form, e.g. "Asset library for player characters, vehicles, props".
+goal = ""
+
 # ─── Naming Convention ─── (applies to all assets)
 # DEFAULT: enabled. The `forbidden_chars` check below catches shell-unsafe /
 # Windows-illegal characters — that's a real bug, not a stylistic convention,

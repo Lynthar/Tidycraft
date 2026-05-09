@@ -12,6 +12,7 @@ import {
   Settings,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { invoke } from "@tauri-apps/api/core";
 import { useProjectStore } from "../stores/projectStore";
 import { useThemeStore } from "../stores/themeStore";
 import { useSettingsStore } from "../stores/settingsStore";
@@ -66,11 +67,22 @@ export function Header({ searchInputRef }: HeaderProps) {
     setTimeout(() => setRefreshingGit(false), 600);
   };
 
-  const handleRescan = () => {
-    if (projectPath) {
-      // `force: true` bypasses the "already open, just switch" guard.
-      openProject(projectPath, { force: true });
+  const handleRescan = async () => {
+    if (!projectPath) return;
+    // The "rescan" button drops the on-disk scan cache before re-opening
+    // so the next pass classifies every file from scratch. Without this,
+    // `scan_project_incremental` keeps `needs_rescan` cache hits for
+    // unchanged files and any updated classification (e.g. a new format
+    // becoming AssetType::Model) won't surface until the file's mtime
+    // changes. Best-effort: cache delete failures are logged and we still
+    // proceed with the incremental scan so the button is never a dead end.
+    try {
+      await invoke("clear_scan_cache", { path: projectPath });
+    } catch (err) {
+      console.warn("Failed to clear scan cache:", err);
     }
+    // `force: true` bypasses the "already open, just switch" guard.
+    openProject(projectPath, { force: true });
   };
 
   const changeLanguage = (langCode: string) => {

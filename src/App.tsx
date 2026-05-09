@@ -13,6 +13,8 @@ import { CommandPalette } from "./components/CommandPalette";
 import { SettingsModal } from "./components/SettingsModal";
 import { TagManager } from "./components/TagManager";
 import { AITagPanel } from "./components/AITagPanel";
+import { AIAnalyzeModal } from "./components/AIAnalyzeModal";
+import { AIResultPanel } from "./components/AIResultPanel";
 import { useProjectStore } from "./stores/projectStore";
 import { useUiStore } from "./stores/uiStore";
 import { restoreSession } from "./stores/sessionStore";
@@ -216,6 +218,8 @@ function App() {
       <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <TagManager isOpen={tagManagerOpen} onClose={() => setTagManagerOpen(false)} />
       <AITagPanel />
+      <AIAnalyzeModal />
+      <AIResultPanel />
     </div>
   );
 }

@@ -11,6 +11,7 @@ import {
   ChevronRight,
   ExternalLink,
   Settings as SettingsIcon,
+  Sparkles,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
@@ -41,6 +42,9 @@ interface ContextMenuProps {
   onCopyTo?: () => void;
   onDelete?: () => void;
   onOpenTagManager: () => void;
+  /** Open the AIAnalyzeModal for this asset (or the multi-selection
+   *  containing it). Omitted when AI tagging is disabled in Settings. */
+  onAITag?: () => void;
 }
 
 export function ContextMenu({
@@ -58,6 +62,7 @@ export function ContextMenu({
   onCopyTo,
   onDelete,
   onOpenTagManager,
+  onAITag,
 }: ContextMenuProps) {
   const { t } = useTranslation();
   const { tags, addTagToAsset, removeTagFromAsset } = useTagsStore();
@@ -211,6 +216,19 @@ export function ContextMenu({
         onClose();
       },
     },
+    ...(onAITag
+      ? [
+          { type: "separator" as const },
+          {
+            icon: <Sparkles size={14} />,
+            label: t("aiAnalyze.title"),
+            onClick: () => {
+              onAITag();
+              onClose();
+            },
+          },
+        ]
+      : []),
     { type: "separator" as const },
     {
       icon: <Edit3 size={14} />,

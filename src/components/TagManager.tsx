@@ -31,6 +31,7 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
   const [newColor, setNewColor] = useState(PRESET_COLORS[0]);
   const [editName, setEditName] = useState("");
   const [editColor, setEditColor] = useState("");
+  const [editDescription, setEditDescription] = useState("");
 
   if (!isOpen) return null;
 
@@ -46,11 +47,15 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
     setEditingId(tag.id);
     setEditName(tag.name);
     setEditColor(tag.color);
+    setEditDescription(tag.description ?? "");
   };
 
   const handleSaveEdit = async () => {
     if (!editingId || !editName.trim()) return;
-    await updateTag(editingId, editName.trim(), editColor);
+    // Empty/whitespace description → null (clear). Backend trims again.
+    const descPayload =
+      editDescription.trim().length === 0 ? null : editDescription.trim();
+    await updateTag(editingId, editName.trim(), editColor, descPayload);
     setEditingId(null);
   };
 
@@ -81,50 +86,80 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
             {tags.map((tag) => (
               <div
                 key={tag.id}
-                className="flex items-center gap-2 p-2 rounded hover:bg-background group"
+                className={cn(
+                  "rounded hover:bg-background group",
+                  editingId === tag.id ? "p-2 bg-background" : "p-2"
+                )}
               >
                 {editingId === tag.id ? (
-                  <>
-                    <div className="flex gap-1">
-                      {PRESET_COLORS.map((c) => (
-                        <button
-                          key={c}
-                          onClick={() => setEditColor(c)}
-                          className={cn(
-                            "w-5 h-5 rounded-full border-2",
-                            editColor === c ? "border-white" : "border-transparent"
-                          )}
-                          style={{ backgroundColor: c }}
-                        />
-                      ))}
+                  // Editing: name+color row on top, description input below.
+                  // Keeps the compact visual rhythm for non-editing rows
+                  // (which stay one line tall) while giving description
+                  // its own full-width input only when actively editing.
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="flex gap-1">
+                        {PRESET_COLORS.map((c) => (
+                          <button
+                            key={c}
+                            onClick={() => setEditColor(c)}
+                            className={cn(
+                              "w-5 h-5 rounded-full border-2",
+                              editColor === c ? "border-white" : "border-transparent"
+                            )}
+                            style={{ backgroundColor: c }}
+                          />
+                        ))}
+                      </div>
+                      <input
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        className="flex-1 px-2 py-1 text-sm bg-card-bg border border-border rounded"
+                        autoFocus
+                      />
+                      <button
+                        onClick={handleSaveEdit}
+                        className="p-1 rounded hover:bg-primary/20 text-primary"
+                      >
+                        <Check size={16} />
+                      </button>
+                      <button
+                        onClick={() => setEditingId(null)}
+                        className="p-1 rounded hover:bg-background text-text-secondary"
+                      >
+                        <X size={16} />
+                      </button>
                     </div>
                     <input
                       type="text"
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                      className="flex-1 px-2 py-1 text-sm bg-background border border-border rounded"
-                      autoFocus
+                      value={editDescription}
+                      onChange={(e) => setEditDescription(e.target.value)}
+                      placeholder={t("tags.descriptionPlaceholder")}
+                      className="w-full px-2 py-1 text-xs bg-card-bg border border-border rounded"
+                      style={{ color: "var(--text-2)" }}
                     />
-                    <button
-                      onClick={handleSaveEdit}
-                      className="p-1 rounded hover:bg-primary/20 text-primary"
-                    >
-                      <Check size={16} />
-                    </button>
-                    <button
-                      onClick={() => setEditingId(null)}
-                      className="p-1 rounded hover:bg-background text-text-secondary"
-                    >
-                      <X size={16} />
-                    </button>
-                  </>
+                  </div>
                 ) : (
-                  <>
+                  // Compact view: a single row. Description (if set)
+                  // peeks at the end of the row in muted text so users
+                  // remember it exists, truncated to keep the row tight.
+                  <div className="flex items-center gap-2">
                     <span
                       className="w-4 h-4 rounded-full shrink-0"
                       style={{ backgroundColor: tag.color }}
                     />
-                    <span className="flex-1 text-sm">{tag.name}</span>
+                    <span className="text-sm shrink-0">{tag.name}</span>
+                    {tag.description && (
+                      <span
+                        className="text-xs truncate flex-1 min-w-0"
+                        style={{ color: "var(--text-3)" }}
+                        title={tag.description}
+                      >
+                        {tag.description}
+                      </span>
+                    )}
+                    {!tag.description && <span className="flex-1" />}
                     <button
                       onClick={() => handleStartEdit(tag)}
                       className="p-1 rounded hover:bg-background text-text-secondary opacity-0 group-hover:opacity-100 transition-opacity"
@@ -137,7 +172,7 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
                     >
                       <Trash2 size={14} />
                     </button>
-                  </>
+                  </div>
                 )}
               </div>
             ))}

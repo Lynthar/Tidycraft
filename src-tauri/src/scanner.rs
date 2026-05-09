@@ -209,7 +209,7 @@ fn get_asset_type(extension: &str) -> AssetType {
         "png" | "jpg" | "jpeg" | "tga" | "psd" | "tiff" | "tif" | "exr" | "hdr" | "webp"
         | "dds" | "bmp" | "gif" | "svg" => AssetType::Texture,
         // Models
-        "fbx" | "obj" | "gltf" | "glb" | "blend" | "dae" | "3ds" | "max" => AssetType::Model,
+        "fbx" | "obj" | "gltf" | "glb" | "blend" | "dae" | "3ds" | "max" | "vox" => AssetType::Model,
         // Audio
         "wav" | "mp3" | "ogg" | "flac" | "aiff" | "aac" | "wma" => AssetType::Audio,
         // Video
@@ -1382,6 +1382,7 @@ mod tests {
         assert!(matches!(get_asset_type("gltf"), AssetType::Model));
         assert!(matches!(get_asset_type("glb"), AssetType::Model));
         assert!(matches!(get_asset_type("blend"), AssetType::Model));
+        assert!(matches!(get_asset_type("vox"), AssetType::Model));
         assert!(matches!(get_asset_type("FBX"), AssetType::Model));
     }
 
