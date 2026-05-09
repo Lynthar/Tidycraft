@@ -193,6 +193,10 @@ export interface Tag {
   id: string;
   name: string;
   color: string;
+  /** Optional user-written semantic context. Fed to the LLM as part of
+   *  the project context bundle when AI tagging is invoked. Empty string
+   *  is normalized to undefined backend-side. */
+  description?: string;
 }
 
 export type AssetTagsMap = Record<string, Tag[]>;

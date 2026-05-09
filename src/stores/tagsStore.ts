@@ -14,7 +14,15 @@ interface TagsState {
   // Actions
   loadTags: () => Promise<void>;
   createTag: (name: string, color: string) => Promise<Tag | null>;
-  updateTag: (tagId: string, name?: string, color?: string) => Promise<void>;
+  /** Update one or more tag fields. Pass `null` to `description` to
+   *  explicitly clear it; pass `undefined` (omit) to leave unchanged.
+   *  `name` / `color` follow the same omit-to-keep convention. */
+  updateTag: (
+    tagId: string,
+    name?: string,
+    color?: string,
+    description?: string | null
+  ) => Promise<void>;
   deleteTag: (tagId: string) => Promise<void>;
   addTagToAsset: (assetPath: string, tagId: string) => Promise<void>;
   removeTagFromAsset: (assetPath: string, tagId: string) => Promise<void>;
@@ -64,14 +72,37 @@ export const useTagsStore = create<TagsState>((set, get) => ({
     return tag;
   },
 
-  updateTag: async (tagId: string, name?: string, color?: string) => {
+  updateTag: async (
+    tagId: string,
+    name?: string,
+    color?: string,
+    description?: string | null
+  ) => {
     const projectId = activeProjectId();
     if (!projectId) return;
-    await invoke<Tag>("update_tag", { projectId, tagId, name, color });
+    // Backend accepts `Option<Option<String>>` for description, mapping:
+    //   undefined → don't send the field (leave unchanged)
+    //   null      → set to None (clear)
+    //   string    → set to Some(s)
+    // Tauri serializes `null` to JSON null which serde reads as `Some(None)`,
+    // and an absent field maps to `None`. The wrapper below preserves that.
+    const payload: Record<string, unknown> = { projectId, tagId, name, color };
+    if (description !== undefined) {
+      payload.description = description; // null or string
+    }
+    await invoke<Tag>("update_tag", payload);
     set((state) => ({
       tags: state.tags.map((t) =>
         t.id === tagId
-          ? { ...t, name: name ?? t.name, color: color ?? t.color }
+          ? {
+              ...t,
+              name: name ?? t.name,
+              color: color ?? t.color,
+              description:
+                description === undefined
+                  ? t.description
+                  : description ?? undefined,
+            }
           : t
       ),
     }));

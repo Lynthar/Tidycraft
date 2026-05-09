@@ -171,6 +171,12 @@ interface ProjectState {
 
   // Multi-project actions
   openProject: (path: string, options?: { force?: boolean }) => Promise<void>;
+  /// Register a project with the backend and add a stub `ProjectData` to
+  /// the projects Map without triggering a scan. Used by session restore
+  /// so non-active projects appear in the sidebar instantly; their full
+  /// hydration runs lazily when the user switches to them. Idempotent —
+  /// calling this for a path that's already in the Map is a no-op.
+  registerProjectStub: (rawPath: string) => Promise<void>;
   closeProject: (projectId?: string) => void;
   setActiveProject: (projectId: string) => void;
   getProjectList: () => {
@@ -618,16 +624,62 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const { projects, activeProjectId } = get();
     if (projectId === activeProjectId) return;
     const project = projects.get(projectId);
+    if (!project) return;
 
-    if (project) {
-      set({
-        activeProjectId: projectId,
-        ...syncFromActiveProject(project),
-      });
-      // The cached gitInfo/gitStatuses for this project may be stale
-      // (e.g. user did `git checkout` while it was inactive). Re-fetch.
-      get().refreshGitInfo(projectId);
+    // Lazy hydration: if this is a stub (registered but never scanned)
+    // and it isn't already in flight or in an error state, kick off a
+    // full openProject. openProject's force=true path will replace the
+    // stub's ProjectData with isScanning=true, set activeProjectId,
+    // wire scan-progress and fs-change listeners, run the scan, and
+    // start the watcher + refresh git on completion.
+    //
+    // We deliberately do NOT auto-retry when `error` is non-empty —
+    // a permanent failure (path no longer exists, permission denied)
+    // would otherwise loop the user through "switch → error → switch
+    // away → switch back → error" forever. The Header rescan button
+    // remains the manual retry path.
+    if (
+      project.scanResult === null &&
+      !project.isScanning &&
+      !project.error
+    ) {
+      void get().openProject(project.projectPath, { force: true });
+      return;
     }
+
+    set({
+      activeProjectId: projectId,
+      ...syncFromActiveProject(project),
+    });
+    // The cached gitInfo/gitStatuses for this project may be stale
+    // (e.g. user did `git checkout` while it was inactive). Re-fetch.
+    get().refreshGitInfo(projectId);
+  },
+
+  registerProjectStub: async (rawPath: string) => {
+    const path = rawPath.replace(/\\/g, "/");
+    const { projects } = get();
+
+    // Dedupe — a stub may already exist if restoreSession double-ran
+    // (React strict mode) or if the user manually opened this project
+    // before sessionStore got around to restoring it.
+    const existing = Array.from(projects.values()).find(
+      (p) => p.projectPath === path
+    );
+    if (existing) return;
+
+    const projectId = generateProjectId();
+    try {
+      await invoke("register_project", { projectId, path });
+    } catch (err) {
+      console.error("Failed to register project stub:", err);
+      return;
+    }
+
+    const stub = createDefaultProjectData(projectId, path);
+    const newMap = new Map(get().projects);
+    newMap.set(projectId, stub);
+    set({ projects: newMap });
   },
 
   getProjectList: () => {

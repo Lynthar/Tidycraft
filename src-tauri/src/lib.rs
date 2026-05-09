@@ -2,6 +2,7 @@ mod analyzer;
 mod cache;
 mod git;
 mod godot;
+mod llm;
 mod project;
 mod scanner;
 mod tags;
@@ -232,6 +233,276 @@ fn clear_thumbnail_cache() -> Result<u64, String> {
     let before = thumbnail::get_cache_size();
     thumbnail::clear_cache().map_err(|e| e.to_string())?;
     Ok(before)
+}
+
+// ============ LLM Tagging Commands ============
+//
+// Day 1 scope: routing only — `llm_suggest_tags` returns
+// `LLMError::NotImplemented` from every provider until Day 2 wires the
+// actual HTTP calls. The frontend can already read the cost estimate
+// (which is pure math, no network) and can already read/clear the
+// disk cache (which is just a directory).
+
+/// Cost preview for the AIAnalyzeModal. Pure function — no network and
+/// no API key required.
+#[tauri::command]
+fn llm_estimate_cost(
+    provider: String,
+    model: String,
+    asset_count: usize,
+    has_thumbnails: bool,
+) -> Result<llm::CostEstimate, String> {
+    let cfg = llm::ProviderConfig {
+        api_key: None,
+        endpoint: None,
+        model: model.clone(),
+    };
+    let prov = llm::make_provider(&provider, cfg).map_err(String::from)?;
+
+    // Build a dummy request just to feed the cost estimator. The
+    // estimator only reads asset count + thumbnail presence + model id;
+    // the actual paths/filenames don't affect the math.
+    let assets = (0..asset_count)
+        .map(|i| llm::AssetInput {
+            path: format!("dummy/{i}"),
+            filename: format!("{i}"),
+            thumbnail_base64: if has_thumbnails {
+                Some(String::new())
+            } else {
+                None
+            },
+            metadata_hint: None,
+        })
+        .collect();
+
+    let req = llm::TagRequest {
+        assets,
+        prompt_version: llm::prompts::PROMPT_VERSION,
+        model,
+        include_thumbnails: has_thumbnails,
+        // Cost estimate doesn't depend on the actual project framing
+        // (it's a function of asset count + model + thumb presence).
+        // We pass empty context to keep the math simple.
+        project_ctx: None,
+        existing_tags: Vec::new(),
+    };
+    Ok(prov.estimate_cost(&req))
+}
+
+/// Main entry point for AI tagging. Loads thumbnails for the selected
+/// assets, gathers project context (theme/goal from tidycraft.toml +
+/// existing tags with up to 5 sample paths each), then dispatches to
+/// the chosen provider via `make_provider`.
+#[tauri::command]
+async fn llm_suggest_tags(
+    project_id: String,
+    asset_paths: Vec<String>,
+    provider: String,
+    model: String,
+    api_key: Option<String>,
+    endpoint: Option<String>,
+    upload_thumbnails: bool,
+) -> Result<llm::TagResponse, String> {
+    let cfg = llm::ProviderConfig {
+        api_key,
+        endpoint,
+        model: model.clone(),
+    };
+    let prov = llm::make_provider(&provider, cfg).map_err(String::from)?;
+
+    // Snapshot project context inside the project lock, then drop the
+    // lock before any async work. The lock is held only briefly: we
+    // clone tag names, descriptions, and a small list of sample paths.
+    //
+    // SAMPLES_PER_TAG: how many existing-asset paths we ship per tag.
+    // 5 is a sweet spot between giving the LLM enough usage context
+    // to infer the tag's intent and not blowing the prompt budget on
+    // a project with hundreds of tags. Less than the tag count
+    // truncates; the LLM doesn't need exhaustive samples.
+    const SAMPLES_PER_TAG: usize = 5;
+
+    let context_result = project::with_mut(&project_id, |state| {
+        let root = state.root_path.clone();
+        let tags_data = state.ensure_tags();
+        let mut existing: Vec<llm::ExistingTagContext> =
+            Vec::with_capacity(tags_data.tags.len());
+        for tag in &tags_data.tags {
+            let mut samples = tags_data.get_assets_with_tag(&tag.id);
+            samples.truncate(SAMPLES_PER_TAG);
+            existing.push(llm::ExistingTagContext {
+                name: tag.name.clone(),
+                description: tag.description.clone(),
+                sample_paths: samples,
+            });
+        }
+        Ok((root, existing))
+    });
+
+    // If the project somehow isn't registered (UI should always register
+    // before calling, but be defensive), fall through with empty context
+    // — the LLM still works, just without project framing.
+    let (root_path, existing_tags) = context_result.unwrap_or_else(|e| {
+        eprintln!("[llm_suggest_tags] context fetch failed: {e}");
+        (String::new(), Vec::new())
+    });
+
+    // Read [project] from tidycraft.toml. We do this outside the project
+    // lock to avoid holding it through file IO. Missing file / parse
+    // failure / empty meta all collapse to None — no project block.
+    let project_ctx: Option<llm::project_meta::ProjectMeta> = if root_path.is_empty() {
+        None
+    } else {
+        let toml_path = Path::new(&root_path).join("tidycraft.toml");
+        std::fs::read_to_string(&toml_path)
+            .ok()
+            .and_then(|content| llm::project_meta::ProjectMeta::from_toml(&content).ok())
+            .filter(|m| !m.is_empty())
+    };
+
+    // Load thumbnails on the blocking pool — `get_thumbnail_base64`
+    // does PNG decode + resize + base64 encode, which would otherwise
+    // park the tokio runtime for tens of milliseconds per asset. The
+    // thumbnail layer already has its own disk cache so repeat calls
+    // for unchanged files are cheap.
+    //
+    // Per-asset failures (unsupported format, missing file, codec gap
+    // for HDR/EXR) downgrade silently to `thumbnail_base64=None` —
+    // the request still goes through, the LLM just falls back to
+    // filename + path context for those entries.
+    let assets = if upload_thumbnails {
+        let paths = asset_paths;
+        tokio::task::spawn_blocking(move || {
+            paths
+                .into_iter()
+                .map(|p| {
+                    let filename = p
+                        .rsplit(['/', '\\'])
+                        .next()
+                        .unwrap_or(&p)
+                        .to_string();
+                    let thumb = thumbnail::get_thumbnail_base64(&p, 256).ok();
+                    llm::AssetInput {
+                        path: p,
+                        filename,
+                        thumbnail_base64: thumb,
+                        metadata_hint: None,
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
+        .await
+        .map_err(|e| format!("thumbnail load join failed: {e}"))?
+    } else {
+        asset_paths
+            .into_iter()
+            .map(|p| {
+                let filename = p
+                    .rsplit(['/', '\\'])
+                    .next()
+                    .unwrap_or(&p)
+                    .to_string();
+                llm::AssetInput {
+                    path: p,
+                    filename,
+                    thumbnail_base64: None,
+                    metadata_hint: None,
+                }
+            })
+            .collect()
+    };
+
+    let req = llm::TagRequest {
+        assets,
+        prompt_version: llm::prompts::PROMPT_VERSION,
+        model,
+        include_thumbnails: upload_thumbnails,
+        project_ctx,
+        existing_tags,
+    };
+
+    prov.suggest_tags(&req).await.map_err(String::from)
+}
+
+#[tauri::command]
+fn llm_clear_cache() -> Result<u64, String> {
+    let before = llm::cache::size();
+    llm::cache::clear().map_err(|e| e.to_string())?;
+    Ok(before)
+}
+
+#[tauri::command]
+fn llm_cache_size() -> u64 {
+    llm::cache::size()
+}
+
+/// Backend-sourced defaults for the AI Tagging settings panel. The
+/// frontend reads these once at startup so model strings only live in
+/// one place — bumping a default in `claude.rs` / `openai.rs` /
+/// `ollama.rs` propagates to the UI without a parallel TS edit.
+#[tauri::command]
+fn llm_default_models() -> serde_json::Value {
+    serde_json::json!({
+        "claude": llm::claude::DEFAULT_MODEL,
+        "openai": llm::openai::DEFAULT_MODEL,
+        "ollama": llm::ollama::DEFAULT_MODEL,
+        "ollama_endpoint": llm::ollama::DEFAULT_ENDPOINT,
+    })
+}
+
+/// List the models installed on a local Ollama daemon. The endpoint
+/// argument is the user's Settings-configured base URL — we strip any
+/// path suffix and append `/api/tags`. Returns the raw model tag list
+/// (e.g. `["qwen2.5vl:32b", "llama3.2-vision:11b-q4_K_M", "llava:7b"]`).
+///
+/// We do NOT filter for vision-capable models server-side — the API
+/// doesn't expose the capability cleanly, and users may legitimately
+/// want to pick text-only models for filename-based tagging. The UI
+/// shows everything the user has installed and lets them choose.
+#[tauri::command]
+async fn llm_ollama_models(endpoint: String) -> Result<Vec<String>, String> {
+    // Mirror the trim-and-append the provider does for /api/chat so
+    // any endpoint shape the user typed in Settings still works:
+    // `http://host:port` / `http://host:port/` / `http://host:port/api/tags`.
+    let base = endpoint
+        .trim()
+        .trim_end_matches('/')
+        .trim_end_matches("/api/tags")
+        .trim_end_matches("/api/chat");
+    let url = format!("{base}/api/tags");
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let resp = client.get(&url).send().await.map_err(|e| {
+        if e.is_connect() {
+            format!("Could not reach Ollama at {url} ({e})")
+        } else if e.is_timeout() {
+            format!("Ollama timed out at {url}")
+        } else {
+            e.to_string()
+        }
+    })?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Ollama {} when listing models", resp.status()));
+    }
+
+    #[derive(serde::Deserialize)]
+    struct TagsResponse {
+        models: Vec<TagsModel>,
+    }
+    #[derive(serde::Deserialize)]
+    struct TagsModel {
+        name: String,
+    }
+
+    let parsed: TagsResponse = resp
+        .json()
+        .await
+        .map_err(|e| format!("Ollama /api/tags JSON: {e}"))?;
+    Ok(parsed.models.into_iter().map(|m| m.name).collect())
 }
 
 // ============ Analysis Commands ============
@@ -1670,11 +1941,16 @@ fn update_tag(
     tag_id: String,
     name: Option<String>,
     color: Option<String>,
+    // `Option<Option<String>>` lets the frontend send three states:
+    //   omitted        → don't touch description (Option = None outer)
+    //   null           → clear description (Some(None))
+    //   "some text"    → set description (Some(Some(s)))
+    description: Option<Option<String>>,
 ) -> Result<tags::Tag, String> {
     project::with_mut(&project_id, |state| {
         let tag = state
             .ensure_tags()
-            .update_tag(&tag_id, name, color)
+            .update_tag(&tag_id, name, color, description)
             .ok_or("Tag not found")?;
         state.save_tags()?;
         Ok(tag)
@@ -1831,7 +2107,14 @@ pub fn run() {
             add_tag_to_asset,
             remove_tag_from_asset,
             add_tag_to_assets,
-            get_all_asset_tags
+            get_all_asset_tags,
+            // LLM tagging
+            llm_estimate_cost,
+            llm_suggest_tags,
+            llm_clear_cache,
+            llm_cache_size,
+            llm_default_models,
+            llm_ollama_models
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -79,9 +79,15 @@ pub fn get_thumbnail_base64(path: &str, max_size: u32) -> Result<String, Thumbna
         .unwrap_or("")
         .to_lowercase();
 
-    // Only support common image formats
+    // Formats the `image` crate can decode with the features enabled in
+    // Cargo.toml. PSD/DDS/SVG are intentionally excluded: PSD/SVG aren't
+    // supported by `image` at all, and DDS uses our own header-only
+    // parser elsewhere (no full decode path). HDR/EXR will lose dynamic
+    // range when written out as 8-bit PNG, but a slightly compressed
+    // preview is more useful than no preview.
     match extension.as_str() {
-        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "tga" => {}
+        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "tga"
+        | "tiff" | "tif" | "webp" | "hdr" | "exr" => {}
         _ => return Err(ThumbnailError::UnsupportedFormat),
     }
 

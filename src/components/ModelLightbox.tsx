@@ -14,7 +14,7 @@ import { dirname } from "../lib/pathUtils";
 // Mirrors ModelViewer3D's list — see that file for why `.blend` is in
 // here (it routes the user into a clear error message rather than a
 // silent placeholder).
-const SUPPORTED_FORMATS = ["gltf", "glb", "fbx", "obj", "dae", "3ds", "blend"];
+const SUPPORTED_FORMATS = ["gltf", "glb", "fbx", "obj", "dae", "3ds", "blend", "vox"];
 
 interface ModelLightboxProps {
   isOpen: boolean;
@@ -118,12 +118,17 @@ export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose 
             });
           }
 
+          // See ModelViewer3D.fixMaterials for why `vertexColors` is
+          // preserved across these conversions — OBJLoader sets it true
+          // for OBJs with inline `v x y z r g b` lines and we'd
+          // otherwise render those (and unlit GLTFs) flat gray.
           if (mat instanceof THREE.MeshBasicMaterial && !mat.map) {
             return new THREE.MeshStandardMaterial({
               color: mat.color || 0x888888,
               metalness: 0.3,
               roughness: 0.7,
               side: THREE.DoubleSide,
+              vertexColors: mat.vertexColors,
             });
           }
 
@@ -135,6 +140,7 @@ export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose 
               metalness: 0.3,
               roughness: 0.7,
               side: THREE.DoubleSide,
+              vertexColors: mat.vertexColors,
             });
           }
 
@@ -145,6 +151,7 @@ export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose 
               metalness: 0.1,
               roughness: 0.9,
               side: THREE.DoubleSide,
+              vertexColors: mat.vertexColors,
             });
           }
 
@@ -335,19 +342,19 @@ export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose 
 
       const modelStats = fixMaterials(object);
 
-      // Center the model
+      // Center + fit. Order matters: scale BEFORE the position offset —
+      // see the long-form comment in ModelViewer3D for the math. Without
+      // this order, FBX/DAE/OBJ models whose mesh sits far from its
+      // local origin (e.g. voxel exports with verts at y≈57) drift off
+      // the grid by `(scale - 1) * center`.
       const box = new THREE.Box3().setFromObject(object);
       const center = box.getCenter(new THREE.Vector3());
       const size = box.getSize(new THREE.Vector3());
-
-      object.position.sub(center);
-
-      // Scale to fit
       const maxDim = Math.max(size.x, size.y, size.z);
-      if (maxDim > 0) {
-        const scale = 3 / maxDim;
-        object.scale.multiplyScalar(scale);
-      }
+      const scale = maxDim > 0 ? 3 / maxDim : 1;
+
+      object.scale.multiplyScalar(scale);
+      object.position.sub(center.multiplyScalar(scale));
 
       scene.add(object);
 
@@ -405,25 +412,52 @@ export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose 
             loader.setResourcePath(resourcePath);
             loader.load(modelUrl, (gltf) => onLoad(gltf.scene), undefined, onError);
           } else if (ext === "obj") {
-            const mtlPath = filePath.replace(/\.obj$/i, ".mtl");
-            const mtlUrl = convertFileSrc(mtlPath);
+            // See ModelViewer3D for the full rationale — same idea:
+            // pre-fetch the OBJ to honor its actual `mtllib` reference
+            // and to skip MTL entirely (no spurious 500) when none is
+            // declared.
+            let objText: string;
+            try {
+              const resp = await fetch(modelUrl);
+              if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+              objText = await resp.text();
+            } catch (err) {
+              onError(err);
+              return;
+            }
+            if (!isMountedRef.current) return;
 
-            const mtlLoader = new MTLLoader(loadingManager);
-            mtlLoader.setResourcePath(resourcePath);
-            mtlLoader.load(
-              mtlUrl,
-              (materials) => {
-                materials.preload();
-                const objLoader = new OBJLoader(loadingManager);
-                objLoader.setMaterials(materials);
-                objLoader.load(modelUrl, onLoad, undefined, onError);
-              },
-              undefined,
-              () => {
-                const objLoader = new OBJLoader(loadingManager);
-                objLoader.load(modelUrl, onLoad, undefined, onError);
+            const mtllibMatch = objText.match(/^mtllib\s+(.+?)\s*$/m);
+            const objLoader = new OBJLoader(loadingManager);
+
+            const finalize = () => {
+              try {
+                onLoad(objLoader.parse(objText));
+              } catch (parseErr) {
+                onError(parseErr);
               }
-            );
+            };
+
+            if (mtllibMatch) {
+              const mtlName = mtllibMatch[1].trim().replace(/\\/g, "/");
+              const mtlAbs = dir ? `${dir}/${mtlName}` : mtlName;
+              const mtlUrl = convertFileSrc(mtlAbs);
+
+              const mtlLoader = new MTLLoader(loadingManager);
+              mtlLoader.setResourcePath(resourcePath);
+              mtlLoader.load(
+                mtlUrl,
+                (materials) => {
+                  materials.preload();
+                  objLoader.setMaterials(materials);
+                  finalize();
+                },
+                undefined,
+                () => finalize()
+              );
+            } else {
+              finalize();
+            }
           } else if (ext === "fbx") {
             const loader = new FBXLoader(loadingManager);
             loader.setResourcePath(resourcePath);
@@ -440,6 +474,36 @@ export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose 
             const loader = new TDSLoader(loadingManager);
             loader.setResourcePath(resourcePath);
             loader.load(modelUrl, onLoad, undefined, onError);
+          } else if (ext === "vox") {
+            // See ModelViewer3D for the full rationale — r182 VOXLoader
+            // returns `{ chunks, scene }` and v150 files have a null
+            // scene that we must rebuild from chunks via `buildMesh`.
+            const { VOXLoader, buildMesh } = await import(
+              "three/addons/loaders/VOXLoader.js"
+            );
+            if (!isMountedRef.current) return;
+            const loader = new VOXLoader(loadingManager);
+            loader.load(
+              modelUrl,
+              (result) => {
+                if (!isMountedRef.current) return;
+                let root: THREE.Object3D | null = result.scene;
+                if (!root) {
+                  if (!result.chunks || result.chunks.length === 0) {
+                    onError(new Error("Empty VOX file"));
+                    return;
+                  }
+                  const group = new THREE.Group();
+                  for (const chunk of result.chunks) {
+                    group.add(buildMesh(chunk));
+                  }
+                  root = group;
+                }
+                onLoad(root);
+              },
+              undefined,
+              onError
+            );
           } else if (ext === "blend") {
             if (!isMountedRef.current) return;
             setError(t("modelViewer.blendUnsupported"));

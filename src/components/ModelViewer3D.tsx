@@ -16,7 +16,7 @@ import { dirname } from "../lib/pathUtils";
 // fallback) — we then short-circuit to an actionable "export to GLB"
 // message inside the dispatch below. Real loading is impossible: .blend
 // is Blender's private binary format with no web loader.
-const SUPPORTED_FORMATS = ["gltf", "glb", "fbx", "obj", "dae", "3ds", "blend"];
+const SUPPORTED_FORMATS = ["gltf", "glb", "fbx", "obj", "dae", "3ds", "blend", "vox"];
 
 interface ModelViewer3DProps {
   filePath: string;
@@ -119,17 +119,25 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
             });
           }
 
-          // Fix invisible materials - MeshBasicMaterial without texture
+          // Fix invisible materials - MeshBasicMaterial without texture.
+          // Preserve `vertexColors` so OBJ files with inline vertex
+          // colors (and any unlit GLTF using KHR_materials_unlit) keep
+          // their colors after the conversion.
           if (mat instanceof THREE.MeshBasicMaterial && !mat.map) {
             return new THREE.MeshStandardMaterial({
               color: mat.color || 0x888888,
               metalness: 0.3,
               roughness: 0.7,
               side: THREE.DoubleSide,
+              vertexColors: mat.vertexColors,
             });
           }
 
-          // Convert MeshPhongMaterial (common in FBX) to MeshStandardMaterial for better rendering
+          // Convert MeshPhongMaterial (common in FBX, and what OBJLoader
+          // creates for OBJs with no `mtllib`) to MeshStandardMaterial.
+          // `vertexColors` is preserved because OBJLoader sets it true
+          // when the OBJ has 6-value `v x y z r g b` lines — without
+          // this, voxel-style OBJs render flat gray.
           if (mat instanceof THREE.MeshPhongMaterial) {
             const stdMat = new THREE.MeshStandardMaterial({
               color: mat.color || 0x888888,
@@ -138,6 +146,7 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
               metalness: 0.3,
               roughness: 0.7,
               side: THREE.DoubleSide,
+              vertexColors: mat.vertexColors,
             });
             return stdMat;
           }
@@ -150,6 +159,7 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
               metalness: 0.1,
               roughness: 0.9,
               side: THREE.DoubleSide,
+              vertexColors: mat.vertexColors,
             });
           }
 
@@ -370,26 +380,57 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
               onError
             );
           } else if (ext === "obj") {
-            const mtlPath = filePath.replace(/\.obj$/i, ".mtl");
-            const mtlUrl = convertFileSrc(mtlPath);
+            // Pre-fetch the OBJ text so we can (a) honor the actual
+            // `mtllib` filename instead of guessing `<basename>.mtl` —
+            // OBJ allows arbitrary names like `mtllib materials.mtl` —
+            // and (b) skip the MTL request entirely when no `mtllib`
+            // line is present. The previous blind attempt at `.mtl`
+            // produced a console-polluting 500 from the asset protocol
+            // (the silent fallback rendered the OBJ correctly, but the
+            // log noise was confusing). Using `parse(text)` avoids a
+            // second fetch by OBJLoader.
+            let objText: string;
+            try {
+              const resp = await fetch(modelUrl);
+              if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+              objText = await resp.text();
+            } catch (err) {
+              onError(err);
+              return;
+            }
+            if (!isMountedRef.current) return;
 
-            const mtlLoader = new MTLLoader(loadingManager);
-            mtlLoader.setResourcePath(resourcePath);
-            mtlLoader.load(
-              mtlUrl,
-              (materials) => {
-                materials.preload();
-                const objLoader = new OBJLoader(loadingManager);
-                objLoader.setMaterials(materials);
-                objLoader.load(modelUrl, onLoad, undefined, onError);
-              },
-              undefined,
-              () => {
-                // MTL failed, load OBJ without materials
-                const objLoader = new OBJLoader(loadingManager);
-                objLoader.load(modelUrl, onLoad, undefined, onError);
+            const mtllibMatch = objText.match(/^mtllib\s+(.+?)\s*$/m);
+            const objLoader = new OBJLoader(loadingManager);
+
+            const finalize = () => {
+              try {
+                onLoad(objLoader.parse(objText));
+              } catch (parseErr) {
+                onError(parseErr);
               }
-            );
+            };
+
+            if (mtllibMatch) {
+              const mtlName = mtllibMatch[1].trim().replace(/\\/g, "/");
+              const mtlAbs = dir ? `${dir}/${mtlName}` : mtlName;
+              const mtlUrl = convertFileSrc(mtlAbs);
+
+              const mtlLoader = new MTLLoader(loadingManager);
+              mtlLoader.setResourcePath(resourcePath);
+              mtlLoader.load(
+                mtlUrl,
+                (materials) => {
+                  materials.preload();
+                  objLoader.setMaterials(materials);
+                  finalize();
+                },
+                undefined,
+                () => finalize()
+              );
+            } else {
+              finalize();
+            }
           } else if (ext === "fbx") {
             const loader = new FBXLoader(loadingManager);
             loader.setResourcePath(resourcePath);
@@ -411,6 +452,43 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
             const loader = new TDSLoader(loadingManager);
             loader.setResourcePath(resourcePath);
             loader.load(modelUrl, onLoad, undefined, onError);
+          } else if (ext === "vox") {
+            // VOXLoader (r182) returns `{ chunks, scene }`. Modern files
+            // with nTRN/nGRP/nSHP nodes populate `scene` directly; older
+            // v150 single-model exports (e.g. plain MagicaVoxel saves)
+            // only carry SIZE/XYZI/RGBA chunks → `scene` is null at
+            // runtime even though @types/three claims Object3D. Fall
+            // back to manual `buildMesh` per chunk so both shapes load.
+            // VOX is self-contained (palette + voxel data, no external
+            // textures), so no setResourcePath is needed; buildMesh
+            // already centers the geometry and emits a vertex-color
+            // MeshStandardMaterial that survives fixMaterials intact.
+            const { VOXLoader, buildMesh } = await import(
+              "three/addons/loaders/VOXLoader.js"
+            );
+            if (!isMountedRef.current) return;
+            const loader = new VOXLoader(loadingManager);
+            loader.load(
+              modelUrl,
+              (result) => {
+                if (!isMountedRef.current) return;
+                let root: THREE.Object3D | null = result.scene;
+                if (!root) {
+                  if (!result.chunks || result.chunks.length === 0) {
+                    onError(new Error("Empty VOX file"));
+                    return;
+                  }
+                  const group = new THREE.Group();
+                  for (const chunk of result.chunks) {
+                    group.add(buildMesh(chunk));
+                  }
+                  root = group;
+                }
+                onLoad(root);
+              },
+              undefined,
+              onError
+            );
           } else if (ext === "blend") {
             // .blend is Blender's private binary format — no web loader
             // exists. We surface a clear "export to GLB" message rather

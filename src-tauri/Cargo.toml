@@ -27,7 +27,7 @@ serde_json = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "tga", "tiff", "webp", "hdr", "exr"] }
 walkdir = "2"
 thiserror = "2"
-tokio = { version = "1", features = ["sync", "rt"] }
+tokio = { version = "1", features = ["sync", "rt", "macros"] }
 gltf = "1"
 tobj = "4"
 symphonia = { version = "0.5", default-features = false, features = ["mp3", "ogg", "wav", "pcm", "vorbis"] }
@@ -49,6 +49,12 @@ trash = "5"
 fbxcel-dom = "0.0"
 mp4 = "0.14"
 matroska-demuxer = "0.7"
+# LLM tagging: HTTP client for Anthropic / OpenAI / Ollama vision APIs.
+# rustls-tls is intentional (avoids dragging in OpenSSL on Windows builds);
+# json feature gives us .json() / Serialize bodies without manual serde wiring.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+async-trait = "0.1"
+hex = "0.4"
 
 [dev-dependencies]
 tempfile = "3"
