@@ -46,7 +46,10 @@ fn unregister_project(project_id: String) -> Result<(), String> {
 fn scan_project(project_id: String, path: String) -> Result<ScanResult, String> {
     project::register(project_id.clone(), path.clone());
 
-    let result = scanner::scan_directory_with_state(&path, None).map_err(|e| e.to_string())?;
+    // Legacy synchronous command — front-end uses scan_project_incremental
+    // for the user-toggleable setting. Hardcoding `true` here matches the
+    // "respect gitignore by default" semantics of the new flow.
+    let result = scanner::scan_directory_with_state(&path, None, true).map_err(|e| e.to_string())?;
 
     project::with_mut(&project_id, |state| {
         state.cached_scan = Some(result.clone());
@@ -100,7 +103,9 @@ async fn scan_project_async(
     let state_for_scan = state.clone();
     let path_for_scan = path.clone();
     let result = tokio::task::spawn_blocking(move || {
-        scanner::scan_directory_with_state(&path_for_scan, Some(state_for_scan))
+        // Legacy async command — same default as scan_project; the
+        // toggleable variant is scan_project_incremental.
+        scanner::scan_directory_with_state(&path_for_scan, Some(state_for_scan), true)
     })
     .await
     .map_err(|e| e.to_string())?;
@@ -152,6 +157,11 @@ async fn scan_project_incremental(
     app: AppHandle,
     project_id: String,
     path: String,
+    // Frontend-visible: when true (default), the scanner honors
+    // `.gitignore` / `.ignore` files (and skips hidden dot dirs like
+    // `.git/`). Toggle exposed via Settings → Maintenance for users
+    // who need full coverage on a project with gitignored asset folders.
+    respect_gitignore: bool,
 ) -> Result<IncrementalScanResult, String> {
     project::register(project_id.clone(), path.clone());
 
@@ -166,7 +176,7 @@ async fn scan_project_incremental(
     let state_for_scan = state.clone();
     let path_for_scan = path.clone();
     let result = tokio::task::spawn_blocking(move || {
-        scanner::scan_directory_incremental(&path_for_scan, Some(state_for_scan))
+        scanner::scan_directory_incremental(&path_for_scan, Some(state_for_scan), respect_gitignore)
     })
     .await
     .map_err(|e| e.to_string())?;

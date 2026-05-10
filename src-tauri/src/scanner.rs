@@ -1,13 +1,13 @@
+use ignore::WalkBuilder;
 use parking_lot::RwLock;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{self, File};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use thiserror::Error;
-use walkdir::WalkDir;
 
 use crate::cache::{get_modified_time, ScanCache};
 
@@ -886,10 +886,45 @@ fn build_dir_node(path: &Path, stats: &HashMap<String, DirStats>) -> DirectoryNo
     }
 }
 
-/// Scan a directory with optional state for progress tracking and cancellation
+/// Build the directory walker. When `respect_gitignore` is true the
+/// walker honors `.gitignore` (incl. parent dirs and `.git/info/exclude`)
+/// and `.ignore` files; `require_git(false)` makes the gitignore rules
+/// apply even outside a git repo. Hidden files and directories
+/// (`.git/`, `.vscode/`, `.idea/`, etc.) are always skipped — matches
+/// the user-visible behavior of the previous walkdir filter (which
+/// only checked `starts_with('.')` at the file-name level after
+/// recursing wastefully into dot dirs).
+fn build_walker(root: &Path, respect_gitignore: bool) -> ignore::Walk {
+    let mut builder = WalkBuilder::new(root);
+    builder.follow_links(false).hidden(true);
+    if respect_gitignore {
+        builder
+            .git_ignore(true)
+            .git_exclude(true)
+            .git_global(true)
+            .ignore(true)
+            .parents(true)
+            .require_git(false);
+    } else {
+        builder
+            .git_ignore(false)
+            .git_exclude(false)
+            .git_global(false)
+            .ignore(false)
+            .parents(false);
+    }
+    builder.build()
+}
+
+/// Scan a directory with optional state for progress tracking and
+/// cancellation. `respect_gitignore=true` honors the user's
+/// `.gitignore` / `.ignore` files — typical for production scans;
+/// `false` re-enables "scan everything" for callers that need full
+/// coverage (one-off diagnostics, internal tests).
 pub fn scan_directory_with_state(
     path: &str,
     state: Option<Arc<ScanState>>,
+    respect_gitignore: bool,
 ) -> Result<ScanResult, ScanError> {
     let root_path = Path::new(path);
 
@@ -912,46 +947,50 @@ pub fn scan_directory_with_state(
         *s.phase.write() = ScanPhase::Discovering;
     }
 
-    let mut file_paths: Vec<walkdir::DirEntry> = Vec::new();
+    let mut file_paths: Vec<PathBuf> = Vec::new();
 
-    for entry in WalkDir::new(root_path)
-        .follow_links(false)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
+    for result in build_walker(root_path, respect_gitignore) {
+        let entry = match result {
+            Ok(e) => e,
+            // Walk errors (permission denied on a sibling, transient IO
+            // hiccup) shouldn't poison the whole scan — skip and carry on.
+            Err(_) => continue,
+        };
+
         if let Some(ref s) = state {
             if s.is_cancelled() {
                 return Err(ScanError::Cancelled);
             }
         }
 
-        let entry_path = entry.path();
-
-        // Skip directories, hidden files, and .meta files
-        if entry_path.is_dir() {
+        // Hidden files and dot-directories are filtered upstream by
+        // `build_walker(hidden=true)`, so no `starts_with('.')` check
+        // is needed here.
+        if entry.file_type().map_or(false, |ft| ft.is_dir()) {
             continue;
         }
 
+        let entry_path = entry.path();
         let file_name = entry_path
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        if file_name.starts_with('.') || file_name.ends_with(".meta") {
+        // Unity per-asset metadata files — surfaced via the matching
+        // asset's `unity_guid`, not as their own asset entries.
+        if file_name.ends_with(".meta") {
             continue;
         }
 
-        // Get file extension
         let extension = entry_path
             .extension()
             .map(|e| e.to_string_lossy().to_string())
             .unwrap_or_default();
-
         if extension.is_empty() {
             continue;
         }
 
-        file_paths.push(entry);
+        file_paths.push(entry_path.to_path_buf());
     }
 
     let total_files = file_paths.len();
@@ -972,7 +1011,7 @@ pub fn scan_directory_with_state(
 
     let assets: Vec<AssetInfo> = file_paths
         .par_iter()
-        .filter_map(|entry| {
+        .filter_map(|entry_path| {
             // Check for cancellation periodically
             if let Some(ref s) = state_clone {
                 if s.is_cancelled() {
@@ -986,11 +1025,10 @@ pub fn scan_directory_with_state(
                 s.current.store(current, Ordering::Relaxed);
                 // Only update current_file every 100 files to reduce lock contention
                 if current % 100 == 0 {
-                    *s.current_file.write() = path_to_string(entry.path());
+                    *s.current_file.write() = path_to_string(entry_path);
                 }
             }
 
-            let entry_path = entry.path();
             let file_name = entry_path
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
@@ -1136,10 +1174,16 @@ pub fn parse_asset_file(
     })
 }
 
-/// Incremental scan - only re-parse changed files
+/// Incremental scan — only re-parse changed files. Honors the same
+/// `respect_gitignore` semantics as `scan_directory_with_state` (they
+/// share `build_walker`). Toggling gitignore on after a previous "scan
+/// everything" run will cause newly-ignored files to look "deleted"
+/// and get pruned from the cache on the next run — desired but worth
+/// noting for users who flip the setting.
 pub fn scan_directory_incremental(
     path: &str,
     state: Option<Arc<ScanState>>,
+    respect_gitignore: bool,
 ) -> Result<(ScanResult, IncrementalStats), ScanError> {
     let root_path = Path::new(path);
 
@@ -1165,31 +1209,33 @@ pub fn scan_directory_incremental(
         *s.phase.write() = ScanPhase::Discovering;
     }
 
-    let mut file_entries: Vec<(walkdir::DirEntry, u64)> = Vec::new();
+    let mut file_entries: Vec<(PathBuf, u64)> = Vec::new();
 
-    for entry in WalkDir::new(root_path)
-        .follow_links(false)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
+    for result in build_walker(root_path, respect_gitignore) {
+        let entry = match result {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
         if let Some(ref s) = state {
             if s.is_cancelled() {
                 return Err(ScanError::Cancelled);
             }
         }
 
-        let entry_path = entry.path();
-
-        if entry_path.is_dir() {
+        if entry.file_type().map_or(false, |ft| ft.is_dir()) {
             continue;
         }
 
+        let entry_path = entry.path();
         let file_name = entry_path
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        if file_name.starts_with('.') || file_name.ends_with(".meta") {
+        // Hidden files / dirs filtered upstream by build_walker(hidden=true);
+        // .meta is Unity per-asset metadata (surfaced via unity_guid).
+        if file_name.ends_with(".meta") {
             continue;
         }
 
@@ -1203,26 +1249,28 @@ pub fn scan_directory_incremental(
         }
 
         let modified = get_modified_time(entry_path).unwrap_or(0);
-        file_entries.push((entry, modified));
+        file_entries.push((entry_path.to_path_buf(), modified));
     }
 
-    // Collect all current file paths for pruning. Use normalized (forward-slash)
-    // paths so they align with what's stored in AssetInfo.path — the cache keys
-    // off the exact same string.
+    // Collect all current file paths for pruning. Use normalized
+    // (forward-slash) paths so they align with what's stored in
+    // AssetInfo.path — the cache keys off the exact same string.
     let current_paths: Vec<String> = file_entries
         .iter()
-        .map(|(e, _)| path_to_string(e.path()))
+        .map(|(p, _)| path_to_string(p))
         .collect();
 
-    // Prune deleted files from cache
+    // Prune deleted files from cache. Files that just fell out of
+    // scope because of a new `.gitignore` rule also count as
+    // "deleted" here — see the function's doc comment.
     cache.prune(&current_paths);
 
-    // Determine which files need scanning
-    let files_to_scan: Vec<&(walkdir::DirEntry, u64)> = file_entries
+    // Determine which files need scanning.
+    let files_to_scan: Vec<&(PathBuf, u64)> = file_entries
         .iter()
-        .filter(|(entry, modified)| {
-            let path_str = path_to_string(entry.path());
-            let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+        .filter(|(p, modified)| {
+            let path_str = path_to_string(p);
+            let size = p.metadata().map(|m| m.len()).unwrap_or(0);
             cache.needs_rescan(&path_str, *modified, size)
         })
         .collect();
@@ -1248,7 +1296,7 @@ pub fn scan_directory_incremental(
     // Parse files in parallel and collect results
     let parsed_assets: Vec<(AssetInfo, u64)> = files_to_scan
         .par_iter()
-        .filter_map(|(entry, modified)| {
+        .filter_map(|(p, modified)| {
             // Check for cancellation periodically
             if let Some(ref s) = state_clone {
                 if s.is_cancelled() {
@@ -1261,11 +1309,11 @@ pub fn scan_directory_incremental(
             if let Some(ref s) = state_clone {
                 s.current.store(current, Ordering::Relaxed);
                 if current % 100 == 0 {
-                    *s.current_file.write() = path_to_string(entry.path());
+                    *s.current_file.write() = path_to_string(p);
                 }
             }
 
-            parse_asset_file(entry.path(), &project_type_clone)
+            parse_asset_file(p, &project_type_clone)
                 .map(|asset| (asset, *modified))
         })
         .collect();
@@ -1593,7 +1641,7 @@ mod tests {
 
     #[test]
     fn test_scan_nonexistent_path() {
-        let result = scan_directory_with_state("/nonexistent/path/123456", None);
+        let result = scan_directory_with_state("/nonexistent/path/123456", None, false);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), ScanError::PathNotFound(_)));
     }
@@ -1601,7 +1649,7 @@ mod tests {
     #[test]
     fn test_scan_empty_directory() {
         let dir = tempdir().unwrap();
-        let result = scan_directory_with_state(dir.path().to_str().unwrap(), None);
+        let result = scan_directory_with_state(dir.path().to_str().unwrap(), None, false);
 
         assert!(result.is_ok());
         let scan_result = result.unwrap();
@@ -1618,7 +1666,7 @@ mod tests {
         fs::write(dir.path().join("test.mp3"), "fake mp3 data").unwrap();
         fs::write(dir.path().join("test.txt"), "some text").unwrap();
 
-        let result = scan_directory_with_state(dir.path().to_str().unwrap(), None);
+        let result = scan_directory_with_state(dir.path().to_str().unwrap(), None, false);
 
         assert!(result.is_ok());
         let scan_result = result.unwrap();
@@ -1639,7 +1687,7 @@ mod tests {
         fs::write(dir.path().join(".hidden"), "hidden content").unwrap();
         fs::write(dir.path().join("visible.png"), "visible content").unwrap();
 
-        let result = scan_directory_with_state(dir.path().to_str().unwrap(), None);
+        let result = scan_directory_with_state(dir.path().to_str().unwrap(), None, false);
 
         assert!(result.is_ok());
         let scan_result = result.unwrap();
@@ -1654,7 +1702,7 @@ mod tests {
         fs::write(dir.path().join("texture.png"), "texture data").unwrap();
         fs::write(dir.path().join("texture.png.meta"), "meta data").unwrap();
 
-        let result = scan_directory_with_state(dir.path().to_str().unwrap(), None);
+        let result = scan_directory_with_state(dir.path().to_str().unwrap(), None, false);
 
         assert!(result.is_ok());
         let scan_result = result.unwrap();
@@ -1671,7 +1719,7 @@ mod tests {
         fs::write(dir.path().join("textures/bg.png"), "texture").unwrap();
         fs::write(dir.path().join("models/char.fbx"), "model").unwrap();
 
-        let result = scan_directory_with_state(dir.path().to_str().unwrap(), None);
+        let result = scan_directory_with_state(dir.path().to_str().unwrap(), None, false);
 
         assert!(result.is_ok());
         let scan_result = result.unwrap();
