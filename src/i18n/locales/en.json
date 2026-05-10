@@ -467,11 +467,12 @@
     "themeEmpty": "(not set in tidycraft.toml)",
     "goal": "Project goal",
     "goalEmpty": "(not set in tidycraft.toml)",
-    "editHint": "To change theme/goal, edit tidycraft.toml via Settings → Analysis Rules → Edit.",
+    "editHint": "Saved to tidycraft.toml's [project] section on Continue.",
     "depth": "Sampling depth: {{value}} files / directory",
     "costHint": "Approximate — actual cost depends on tag count + sample text size.",
     "running": "Running AI Learning… this can take 30–60s.",
-    "errNoScan": "Scan the project first (the sidebar refresh button)."
+    "errNoScan": "Scan the project first (the sidebar refresh button).",
+    "errWrite": "Couldn't write tidycraft.toml — your theme/goal edits weren't saved."
   },
   "learnReview": {
     "title": "AI Learning Result",
