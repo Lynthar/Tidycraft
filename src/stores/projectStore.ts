@@ -712,16 +712,46 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   runAnalysis: async () => {
     const startState = get();
-    const { activeProjectId } = startState;
-    if (!activeProjectId) return;
+    const startedProjectId = startState.activeProjectId;
+    if (!startedProjectId) return;
+
+    /// Snapshot the project that owns this analysis. All subsequent
+    /// state writes target THIS project's entry in the Map even if the
+    /// user switches active project mid-flight — same pattern as
+    /// openProject's scan handler. Mirror fields only sync when the
+    /// started project is still active at write time.
+    const startedProject = startState.projects.get(startedProjectId);
+    if (!startedProject) return;
+    /// Re-entry guard. UI surfaces this via `disabled={isAnalyzing}` on
+    /// the Sidebar button, but Ctrl+Shift+R and the CommandPalette entry
+    /// don't gate on it — collapse the check here so every entry path
+    /// is safe.
+    if (startedProject.isAnalyzing) return;
 
     /// Snapshot the view the user was on when they kicked off analysis.
     /// If they navigate elsewhere mid-flight, leave them where they went —
     /// silently yanking them back to "issues" feels intrusive. We auto-
-    /// switch only when the active view is unchanged at completion.
+    /// switch only when the started project is still active AND the
+    /// active view is unchanged at completion.
     const viewModeAtStart = startState.viewMode;
 
-    set(updateActiveProject(get(), { isAnalyzing: true }));
+    /// Patch helper: writes to the started project's entry directly,
+    /// only syncing mirror fields when it's still the active project.
+    const patchProject = (updates: Partial<ProjectData>) => {
+      const cur = get();
+      const target = cur.projects.get(startedProjectId);
+      if (!target) return;
+      const updated = { ...target, ...updates };
+      const newMap = new Map(cur.projects);
+      newMap.set(startedProjectId, updated);
+      const patch: Partial<ProjectState> = { projects: newMap };
+      if (cur.activeProjectId === startedProjectId) {
+        Object.assign(patch, syncFromActiveProject(updated));
+      }
+      set(patch);
+    };
+
+    patchProject({ isAnalyzing: true });
 
     // Re-read config at click time (not just at scan-complete) so users
     // can edit `tidycraft.toml` and re-run without rescanning. IO failure
@@ -731,7 +761,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     let hasCustomConfig = false;
     try {
       configToml = await invoke<string | null>("read_project_config", {
-        projectId: activeProjectId,
+        projectId: startedProjectId,
       });
       hasCustomConfig = configToml !== null;
     } catch (err) {
@@ -740,26 +770,29 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     try {
       const result = await invoke<AnalysisResult>("analyze_assets", {
-        projectId: activeProjectId,
+        projectId: startedProjectId,
         configToml,
       });
-      const endState = get();
       const updates: Partial<ProjectData> = {
         analysisResult: result,
         isAnalyzing: false,
         hasCustomConfig,
       };
-      if (endState.viewMode === viewModeAtStart) {
+      const cur = get();
+      if (
+        cur.activeProjectId === startedProjectId &&
+        cur.viewMode === viewModeAtStart
+      ) {
         updates.viewMode = "issues";
       }
-      set(updateActiveProject(endState, updates));
+      patchProject(updates);
     } catch (err) {
       console.error("Failed to analyze:", err);
-      set(updateActiveProject(get(), {
+      patchProject({
         error: String(err),
         isAnalyzing: false,
         hasCustomConfig,
-      }));
+      });
     }
   },
 
