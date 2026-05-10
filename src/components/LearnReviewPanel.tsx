@@ -19,6 +19,22 @@ const CATEGORY_COLORS: Record<AiTagCategory, string> = {
   other: "#6b7280",
 };
 
+/// Validate a regex pattern via JS `RegExp`. Pattern syntax is close
+/// enough between JS and Rust's `regex` crate for the simple anchors /
+/// char classes the LLM emits that this catches the vast majority of
+/// invalid patterns up-front. False positives (JS-valid, Rust-invalid —
+/// e.g. the LLM emits `(?P<name>...)` Python-style group) silent-skip
+/// in the backend; we'd surface them via a "0 matches" indicator in
+/// v2 if it becomes a problem.
+const isValidRegex = (pattern: string): boolean => {
+  try {
+    new RegExp(pattern);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 /// Reviews an LLM learning result.
 ///
 /// Behaviour on mount: tag-gaps are auto-created (per design discussion
@@ -95,6 +111,26 @@ export function LearnReviewPanel() {
   const handleDeleteRule = (idx: number) => {
     setRules((prev) => prev.filter((_, i) => i !== idx));
   };
+
+  /// Update one rule's confidence in-place. The slider clamps to
+  /// [0.5, 1.0] in the markup; we don't double-clamp here to keep
+  /// programmatic callers (none today) honest about the range they pass.
+  const handleEditConfidence = (idx: number, next: number) => {
+    setRules((prev) =>
+      prev.map((r, i) => (i === idx ? { ...r, confidence: next } : r))
+    );
+  };
+
+  /// Per-rule validity flags. Only `filename_regex` rules can be
+  /// invalid; others always pass. Memoized on `rules` so re-renders
+  /// from slider edits don't re-run RegExp constructor for every row.
+  const ruleValidity = useMemo(
+    () =>
+      rules.map((r) =>
+        r.kind === "filename_regex" ? isValidRegex(r.pattern) : true
+      ),
+    [rules]
+  );
 
   const handleSave = async () => {
     if (!activeProjectId || saving) return;
@@ -292,53 +328,74 @@ export function LearnReviewPanel() {
               </p>
             ) : (
               <div className="space-y-1">
-                {rules.map((rule, idx) => (
-                  <div
-                    key={`${rule.kind}-${rule.pattern}-${idx}`}
-                    className="flex items-center gap-2 rounded p-2 font-mono text-xs"
-                    style={{
-                      background: "var(--panel-2)",
-                      border: "1px solid var(--line)",
-                    }}
-                  >
-                    <span
-                      className="px-1.5 py-0.5 rounded shrink-0"
+                {rules.map((rule, idx) => {
+                  const valid = ruleValidity[idx];
+                  return (
+                    <div
+                      key={`${rule.kind}-${rule.pattern}-${idx}`}
+                      className="flex items-center gap-2 rounded p-2 font-mono text-xs"
                       style={{
-                        background: "var(--panel)",
-                        color: "var(--text-3)",
+                        background: "var(--panel-2)",
                         border: "1px solid var(--line)",
                       }}
                     >
-                      {rule.kind}
-                    </span>
-                    <span className="shrink-0" style={{ color: "var(--text-2)" }}>
-                      {rule.pattern}
-                    </span>
-                    <span
-                      style={{ color: "var(--text-3)" }}
-                      className="shrink-0"
-                    >
-                      →
-                    </span>
-                    <span className="flex-1 truncate" title={rule.tags.join(", ")}>
-                      {rule.tags.join(", ")}
-                    </span>
-                    <span
-                      className="shrink-0"
-                      style={{ color: "var(--text-3)" }}
-                    >
-                      {(rule.confidence * 100).toFixed(0)}%
-                    </span>
-                    <button
-                      onClick={() => handleDeleteRule(idx)}
-                      className="p-1 rounded hover:bg-background shrink-0"
-                      style={{ color: "var(--text-3)" }}
-                      title={t("learnReview.ruleDelete")}
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                  </div>
-                ))}
+                      <span
+                        className="px-1.5 py-0.5 rounded shrink-0 flex items-center gap-1"
+                        style={{
+                          background: "var(--panel)",
+                          color: valid ? "var(--text-3)" : "var(--err)",
+                          border: valid
+                            ? "1px solid var(--line)"
+                            : "1px solid color-mix(in oklch, var(--err) 35%, transparent)",
+                        }}
+                        title={valid ? undefined : t("learnReview.ruleInvalidRegex")}
+                      >
+                        {!valid && <AlertTriangle size={10} />}
+                        {rule.kind}
+                      </span>
+                      <span className="shrink-0" style={{ color: "var(--text-2)" }}>
+                        {rule.pattern}
+                      </span>
+                      <span
+                        style={{ color: "var(--text-3)" }}
+                        className="shrink-0"
+                      >
+                        →
+                      </span>
+                      <span className="flex-1 truncate" title={rule.tags.join(", ")}>
+                        {rule.tags.join(", ")}
+                      </span>
+                      <input
+                        type="range"
+                        min={0.5}
+                        max={1}
+                        step={0.05}
+                        value={rule.confidence}
+                        onChange={(e) =>
+                          handleEditConfidence(idx, parseFloat(e.target.value))
+                        }
+                        className="shrink-0"
+                        style={{ width: 64 }}
+                        aria-label={t("learnReview.ruleConfidence")}
+                        title={t("learnReview.ruleConfidence")}
+                      />
+                      <span
+                        className="shrink-0 tabular-nums text-right"
+                        style={{ color: "var(--text-3)", minWidth: "2.5rem" }}
+                      >
+                        {(rule.confidence * 100).toFixed(0)}%
+                      </span>
+                      <button
+                        onClick={() => handleDeleteRule(idx)}
+                        className="p-1 rounded hover:bg-background shrink-0"
+                        style={{ color: "var(--text-3)" }}
+                        title={t("learnReview.ruleDelete")}
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </section>

@@ -488,6 +488,8 @@
     "rules_other": "{{count}} 条规则",
     "rulesEmpty": "未生成任何规则。",
     "ruleDelete": "删除规则",
+    "ruleConfidence": "置信度 — 拖动调整",
+    "ruleInvalidRegex": "正则非法 — 该规则在匹配时会被跳过。",
     "sampleTags_one": "{{count}} 个抽样已标注",
     "sampleTags_other": "{{count}} 个抽样已标注",
     "save": "保存规则",
