@@ -467,11 +467,12 @@
     "themeEmpty": "（未在 tidycraft.toml 中设置）",
     "goal": "项目目标",
     "goalEmpty": "（未在 tidycraft.toml 中设置）",
-    "editHint": "要修改主题/目标,通过 设置 → 分析规则 → 编辑 修改 tidycraft.toml。",
+    "editHint": "点击 Continue 时保存到 tidycraft.toml 的 [project] 段。",
     "depth": "抽样深度：每目录 {{value}} 个文件",
     "costHint": "估算值——实际成本取决于 tag 数量 + 抽样文本大小。",
     "running": "正在运行 AI 学习…需要 30-60 秒。",
-    "errNoScan": "请先扫描项目（侧边栏刷新按钮）。"
+    "errNoScan": "请先扫描项目（侧边栏刷新按钮）。",
+    "errWrite": "写入 tidycraft.toml 失败 — 主题/目标的修改未保存。"
   },
   "learnReview": {
     "title": "AI 学习结果",

@@ -585,6 +585,28 @@ fn read_project_meta(project_id: String) -> Result<llm::project_meta::ProjectMet
     })
 }
 
+/// Persist `theme` + `goal` from the LearnSetupModal into
+/// `tidycraft.toml`'s `[project]` block. Uses `toml_edit` under the
+/// hood so the user's analyzer-rule comments and other sections
+/// survive the round-trip. Empty strings clear the fields
+/// (template-style — keys remain but `from_toml` normalizes them
+/// back to `None` so the prompt builder skips the context block).
+///
+/// Creates the file from `DEFAULT_CONFIG_TEMPLATE` if it doesn't
+/// exist, mirroring `ensure_project_config`'s bootstrap path so
+/// users hitting "Save" before ever opening the rules editor still
+/// get the full annotated template.
+#[tauri::command]
+fn write_project_meta(
+    project_id: String,
+    theme: String,
+    goal: String,
+) -> Result<(), String> {
+    project::with_ref(&project_id, |state| {
+        llm::project_meta::write_back(Path::new(&state.root_path), &theme, &goal)
+    })
+}
+
 #[tauri::command]
 fn llm_cache_size() -> u64 {
     llm::cache::size()
@@ -2295,7 +2317,8 @@ pub fn run() {
             learn_project_conventions,
             read_ai_rules,
             save_ai_rules,
-            read_project_meta
+            read_project_meta,
+            write_project_meta
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

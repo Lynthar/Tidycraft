@@ -99,6 +99,19 @@ export function LearnSetupModal() {
     setRunning(true);
     setError(null);
     try {
+      /// Persist theme/goal first so the learning call reads the same
+      /// tidycraft.toml the user just edited. Always writes — even
+      /// when meta hasn't changed — to keep "Continue = save + run"
+      /// a single mental model. Cost is negligible (toml_edit on a
+      /// small file). Failure here aborts the run rather than
+      /// proceeding with stale config that would mislead the user
+      /// about which framing the model saw.
+      await invoke("write_project_meta", {
+        projectId: activeProjectId,
+        theme: meta.theme ?? "",
+        goal: meta.goal ?? "",
+      });
+
       const result = await invoke<AiLearningResult>("learn_project_conventions", {
         projectId: activeProjectId,
         provider,
@@ -119,6 +132,8 @@ export function LearnSetupModal() {
         setError(t("aiAnalyze.errNetwork"));
       else if (msg.includes("hasn't been scanned"))
         setError(t("learnSetup.errNoScan"));
+      else if (msg.includes("tidycraft.toml"))
+        setError(t("learnSetup.errWrite"));
       else setError(t("aiAnalyze.errGeneric", { reason: msg }));
     } finally {
       setRunning(false);
@@ -192,9 +207,12 @@ export function LearnSetupModal() {
                 <input
                   type="text"
                   value={meta.theme ?? ""}
-                  readOnly
+                  onChange={(e) =>
+                    setMeta((prev) => ({ ...prev, theme: e.target.value }))
+                  }
+                  disabled={running}
                   placeholder={t("learnSetup.themeEmpty")}
-                  className="w-full px-2 py-1 text-sm rounded font-mono"
+                  className="w-full px-2 py-1 text-sm rounded font-mono disabled:opacity-50"
                   style={{
                     background: "var(--panel-2)",
                     border: "1px solid var(--line)",
@@ -212,9 +230,12 @@ export function LearnSetupModal() {
                 <input
                   type="text"
                   value={meta.goal ?? ""}
-                  readOnly
+                  onChange={(e) =>
+                    setMeta((prev) => ({ ...prev, goal: e.target.value }))
+                  }
+                  disabled={running}
                   placeholder={t("learnSetup.goalEmpty")}
-                  className="w-full px-2 py-1 text-sm rounded font-mono"
+                  className="w-full px-2 py-1 text-sm rounded font-mono disabled:opacity-50"
                   style={{
                     background: "var(--panel-2)",
                     border: "1px solid var(--line)",

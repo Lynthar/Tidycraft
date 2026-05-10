@@ -37,6 +37,12 @@ base64 = "0.22"
 parking_lot = "0.12"
 dirs = "5"
 toml = "0.8"
+# Round-trip TOML editing that preserves comments + formatting. Used by
+# `llm::project_meta::write_back` so the LearnSetupModal can persist
+# theme/goal back into tidycraft.toml without clobbering the user's
+# inline comments. The plain `toml` crate above is serde-only and would
+# lose them. cargo itself uses toml_edit for the same reason.
+toml_edit = "0.22"
 git2 = { version = "0.20", features = ["vendored-openssl"] }
 ignore = "0.4"
 globset = "0.4"
