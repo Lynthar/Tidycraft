@@ -227,6 +227,8 @@
     "aiOllamaLoadingModels": "Loading installed models…",
     "aiOllamaUnreachable": "Could not reach Ollama — showing recommended models. Verify the endpoint or run `ollama serve`.",
     "aiOllamaNoModels": "No models installed. Run `ollama pull qwen2.5vl:32b` to get started.",
+    "aiPerAssetMode": "Enable per-asset AI tagging (advanced)",
+    "aiPerAssetModeDesc": "Adds an \"AI Tag (directly)\" entry to multi-select and right-click that sends thumbnails to the LLM for direct tagging. Costs roughly 50× more than Learning mode; use when you need fine-grained per-image suggestions Learning rules can't capture.",
     "maintenanceSection": "Maintenance",
     "thumbnailCache": "Thumbnail cache",
     "llmCache": "AI tag cache",
@@ -453,7 +455,11 @@
     "reviewRules": "Review AI rules",
     "today": "today",
     "daysAgo_one": "{{count}}d ago",
-    "daysAgo_other": "{{count}}d ago"
+    "daysAgo_other": "{{count}}d ago",
+    "ctaTitle": "Upgrade with AI Learning",
+    "ctaBody": "Sample your project's filenames + tag system, infer naming and directory conventions, then generate local heuristic rules that replace the generic matches below. ~$0.05 one-time, then free.",
+    "ctaButton": "Run AI Learning",
+    "heuristicDivider": "Heuristic fallback (filename / dimension / path)"
   },
   "learnSetup": {
     "title": "AI Learning Setup",
@@ -491,6 +497,9 @@
   },
   "aiAnalyze": {
     "title": "AI Tag Analysis",
+    "entryLabel": "AI Tag (directly)",
+    "uploadThumbnails": "Include thumbnails (vision)",
+    "uploadThumbnailsHint": "Off by default — filenames + paths usually carry enough signal for game assets. Turn on only for diffuse/albedo textures or icon-style assets where the visual matters. Adds ~60-80% to cost.",
     "providerLine": "{{name}} · {{model}}",
     "assetsCount_one": "{{count}} asset selected",
     "assetsCount_other": "{{count}} assets selected",

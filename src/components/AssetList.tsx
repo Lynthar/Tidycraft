@@ -65,6 +65,13 @@ export function AssetList() {
   const setTagManagerOpen = useUiStore((s) => s.setTagManagerOpen);
   const setAiAnalyzeOpen = useUiStore((s) => s.setAiAnalyzeOpen);
   const aiActiveProvider = useSettingsStore((s) => s.aiActiveProvider);
+  const aiPerAssetModeEnabled = useSettingsStore(
+    (s) => s.aiPerAssetModeEnabled
+  );
+  // Per-asset entries (multi-select bar button, right-click menu item)
+  // are gated on BOTH a configured provider AND the advanced toggle.
+  // Learning mode is the recommended path; this entry is opt-in.
+  const aiDirectModeAvailable = !!aiActiveProvider && aiPerAssetModeEnabled;
 
   const selectedPaths = useSelectionStore((s) => s.selectedPaths);
   const setSelectedPaths = useSelectionStore((s) => s.setSelectedPaths);
@@ -384,16 +391,16 @@ export function AssetList() {
               selectedPaths={Array.from(selectedPaths)}
               onOpenManager={() => setTagManagerOpen(true)}
             />
-            {aiActiveProvider && (
+            {aiDirectModeAvailable && (
               <button
                 onClick={() =>
                   setAiAnalyzeOpen(true, Array.from(selectedPaths))
                 }
                 className="tc-batch-action"
-                title={t("aiAnalyze.title")}
+                title={t("aiAnalyze.entryLabel")}
               >
                 <Sparkles size={13} />
-                {t("aiAnalyze.title")}
+                {t("aiAnalyze.entryLabel")}
               </button>
             )}
             <button
@@ -564,7 +571,7 @@ export function AssetList() {
           onCopyTo={handleCopyTo}
           onDelete={handleDelete}
           onOpenTagManager={() => setTagManagerOpen(true)}
-          onAITag={aiActiveProvider ? handleAITag : undefined}
+          onAITag={aiDirectModeAvailable ? handleAITag : undefined}
         />
       )}
 

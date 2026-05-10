@@ -221,7 +221,7 @@ export function ContextMenu({
           { type: "separator" as const },
           {
             icon: <Sparkles size={14} />,
-            label: t("aiAnalyze.title"),
+            label: t("aiAnalyze.entryLabel"),
             onClick: () => {
               onAITag();
               onClose();

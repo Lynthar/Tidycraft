@@ -302,6 +302,74 @@ export function AITagPanel() {
         </div>
 
         <div className="tc-aitag-list">
+          {/* "Run AI Learning" CTA — shown only when the rules probe
+              has completed AND no rules exist yet. Sits above the
+              heuristic suggestions (which still render below it as
+              fallback) so users see the upgrade path before they
+              scroll through token/dimension/path groups, which most
+              find too generic to act on. Hidden when AI Learning has
+              run (rulesDoc !== null) — at that point the panel is
+              showing RuleSuggester output, no need for the CTA. */}
+          {!loading && rulesDoc === null && activeProjectId && (
+            <div
+              className="rounded-md p-3 mb-2"
+              style={{
+                background:
+                  "color-mix(in oklch, var(--primary) 6%, transparent)",
+                border:
+                  "1px solid color-mix(in oklch, var(--primary) 28%, transparent)",
+              }}
+            >
+              <div className="flex items-start gap-2">
+                <Sparkles
+                  size={14}
+                  className="shrink-0 mt-0.5"
+                  style={{ color: "var(--primary)" }}
+                />
+                <div className="flex-1 min-w-0">
+                  <div
+                    className="text-sm font-semibold"
+                    style={{ color: "var(--text)" }}
+                  >
+                    {t("aiTagPanel.ctaTitle")}
+                  </div>
+                  <p
+                    className="text-xs mt-1"
+                    style={{ color: "var(--text-2)" }}
+                  >
+                    {t("aiTagPanel.ctaBody")}
+                  </p>
+                  <button
+                    onClick={() => setLearnSetupOpen(true)}
+                    className="mt-2 px-2.5 py-1 text-xs rounded inline-flex items-center gap-1"
+                    style={{
+                      background: "var(--primary)",
+                      color: "var(--on-primary, white)",
+                    }}
+                  >
+                    <Play size={11} />
+                    {t("aiTagPanel.ctaButton")}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          {/* Heuristic-fallback divider — only when CTA above + groups
+              below are both rendering, to make it visually clear that
+              what follows is the lower-quality fallback set the CTA is
+              offering to replace. */}
+          {!loading && rulesDoc === null && groups && groups.length > 0 && (
+            <div
+              className="text-xs flex items-center gap-2 mb-1.5 mt-1"
+              style={{ color: "var(--text-3)" }}
+            >
+              <span>{t("aiTagPanel.heuristicDivider")}</span>
+              <span
+                className="flex-1"
+                style={{ height: 1, background: "var(--line)" }}
+              />
+            </div>
+          )}
           {loading && (
             <div className="tc-aitag-loading">{t("aiTagPanel.loading")}</div>
           )}

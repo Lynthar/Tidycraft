@@ -295,6 +295,10 @@ function AiTaggingSection() {
   const setAiActiveProvider = useSettingsStore((s) => s.setAiActiveProvider);
   const setAiProviderConfig = useSettingsStore((s) => s.setAiProviderConfig);
   const resetAiPrivacyConsent = useSettingsStore((s) => s.resetAiPrivacyConsent);
+  const aiPerAssetModeEnabled = useSettingsStore((s) => s.aiPerAssetModeEnabled);
+  const setAiPerAssetModeEnabled = useSettingsStore(
+    (s) => s.setAiPerAssetModeEnabled
+  );
 
   // password-input toggle and key-stored warning
   const [showApiKey, setShowApiKey] = useState(false);
@@ -550,6 +554,25 @@ function AiTaggingSection() {
             >
               {t("settings.aiResetConsent")}
             </button>
+          </div>
+
+          {/* Per-asset (direct) AI Tag mode — opt-in advanced flow.
+              Off by default because Learning mode is the recommended
+              path; per-asset vision calls are dramatically more
+              expensive (~50× per project). */}
+          <div
+            className="rounded p-2.5 mt-1"
+            style={{
+              background: "var(--panel-2)",
+              border: "1px dashed var(--line)",
+            }}
+          >
+            <ToggleSwitch
+              checked={aiPerAssetModeEnabled}
+              onChange={setAiPerAssetModeEnabled}
+              label={t("settings.aiPerAssetMode")}
+              description={t("settings.aiPerAssetModeDesc")}
+            />
           </div>
         </div>
       )}

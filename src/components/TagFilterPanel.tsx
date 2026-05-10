@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Tag as TagIcon, X, ChevronDown, ChevronRight, Plus, Pencil, Trash2, Check } from "lucide-react";
+import { Tag as TagIcon, X, ChevronDown, ChevronRight, Plus, Pencil, Trash2, Check, Settings2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useTagsStore } from "../stores/tagsStore";
+import { useUiStore } from "../stores/uiStore";
 import { cn } from "../lib/utils";
 
 const TAG_COLORS = [
@@ -13,6 +14,7 @@ const TAG_COLORS = [
 export function TagFilterPanel() {
   const { t } = useTranslation();
   const { tags, tagFilters, toggleTagFilter, clearTagFilters, createTag, updateTag, deleteTag } = useTagsStore();
+  const setTagManagerOpen = useUiStore((s) => s.setTagManagerOpen);
   const [isExpanded, setIsExpanded] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [editingTagId, setEditingTagId] = useState<string | null>(null);
@@ -47,9 +49,16 @@ export function TagFilterPanel() {
 
   return (
     <div className="border-b border-border shrink-0">
-      {/* Header - Collapsible */}
+      {/* Header - Collapsible. Right-click anywhere on the header
+          opens the TagManager modal — quicker than navigating through
+          a per-tag edit pencil for users who want to bulk-edit tags or
+          fill in descriptions for AI Learning context. */}
       <button
         onClick={() => setIsExpanded(!isExpanded)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setTagManagerOpen(true);
+        }}
         className="w-full h-8 px-3 flex items-center justify-between text-xs text-text-secondary font-medium uppercase tracking-wide hover:bg-background transition-colors"
       >
         <div className="flex items-center gap-1.5">
@@ -66,15 +75,27 @@ export function TagFilterPanel() {
           )}
         </div>
         {isExpanded && (
-          <div
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsCreating(true);
-            }}
-            className="p-1 rounded hover:bg-card-bg text-text-secondary hover:text-primary transition-colors"
-            title={t("tags.createTag")}
-          >
-            <Plus size={12} />
+          <div className="flex items-center gap-0.5">
+            <div
+              onClick={(e) => {
+                e.stopPropagation();
+                setTagManagerOpen(true);
+              }}
+              className="p-1 rounded hover:bg-card-bg text-text-secondary hover:text-primary transition-colors"
+              title={t("tags.manageTitle")}
+            >
+              <Settings2 size={12} />
+            </div>
+            <div
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsCreating(true);
+              }}
+              className="p-1 rounded hover:bg-card-bg text-text-secondary hover:text-primary transition-colors"
+              title={t("tags.createTag")}
+            >
+              <Plus size={12} />
+            </div>
           </div>
         )}
       </button>

@@ -78,6 +78,13 @@ interface SettingsState {
    * Settings → "Reset consent" lets the user revoke per provider.
    */
   aiPrivacyConsented: Record<AiProviderId, boolean>;
+  /**
+   * Toggles the "AI Tag (directly)" entry points on AssetList multi-
+   * select bar and right-click menu. Off by default — Learning mode
+   * (sampling + rule generation) is recommended; per-asset vision
+   * calls are ~50× more expensive and should be opt-in.
+   */
+  aiPerAssetModeEnabled: boolean;
 
   // ----- Actions -----
   setShowGitStatusIndicators: (show: boolean) => void;
@@ -91,6 +98,7 @@ interface SettingsState {
   setAiProviderConfig: (id: AiProviderId, patch: Partial<AiProviderConfig>) => void;
   setAiPrivacyConsent: (id: AiProviderId, consented: boolean) => void;
   resetAiPrivacyConsent: (id: AiProviderId) => void;
+  setAiPerAssetModeEnabled: (enabled: boolean) => void;
 }
 
 const STORAGE_KEY = "tidycraft-settings";
@@ -103,6 +111,14 @@ interface StoredSettings {
   aiActiveProvider: AiProviderId | null;
   aiProviders: Record<AiProviderId, AiProviderConfig>;
   aiPrivacyConsented: Record<AiProviderId, boolean>;
+  /**
+   * Toggles the "AI Tag (directly)" entry points on AssetList multi-select
+   * and the right-click menu. Off by default — Learning mode (sampling +
+   * rule generation) is the recommended path; per-asset vision calls are
+   * 50× more expensive and should be opt-in for users who actually need
+   * thumbnail-level analysis.
+   */
+  aiPerAssetModeEnabled: boolean;
 }
 
 const DEFAULT_SETTINGS: StoredSettings = {
@@ -113,6 +129,7 @@ const DEFAULT_SETTINGS: StoredSettings = {
   aiActiveProvider: null,
   aiProviders: DEFAULT_AI_PROVIDERS,
   aiPrivacyConsented: DEFAULT_AI_PRIVACY_CONSENTED,
+  aiPerAssetModeEnabled: false,
 };
 
 /**
@@ -190,6 +207,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
     aiActiveProvider: get().aiActiveProvider,
     aiProviders: get().aiProviders,
     aiPrivacyConsented: get().aiPrivacyConsented,
+    aiPerAssetModeEnabled: get().aiPerAssetModeEnabled,
   });
 
   return {
@@ -200,6 +218,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
     aiActiveProvider: initial.aiActiveProvider,
     aiProviders: initial.aiProviders,
     aiPrivacyConsented: initial.aiPrivacyConsented,
+    aiPerAssetModeEnabled: initial.aiPerAssetModeEnabled,
 
     setShowGitStatusIndicators: (show: boolean) => {
       set({ showGitStatusIndicators: show });
@@ -257,6 +276,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
       set({
         aiPrivacyConsented: { ...get().aiPrivacyConsented, [id]: false },
       });
+      saveSettings(snapshot());
+    },
+
+    setAiPerAssetModeEnabled: (enabled: boolean) => {
+      set({ aiPerAssetModeEnabled: enabled });
       saveSettings(snapshot());
     },
   };
