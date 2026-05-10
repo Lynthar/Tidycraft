@@ -181,6 +181,19 @@ impl Analyzer {
     ) -> AnalysisResult {
         rules::pbr_set::find_pbr_set_issues(&scan_result.assets, config)
     }
+
+    /// Check for DCC source files (`.blend` / `.ma` / `.psd` / etc.)
+    /// whose runtime exports (`.fbx` / `.png` / etc.) are older than
+    /// the source — likely indicating a forgotten re-export. Cross-
+    /// asset; takes the live config so users can tune mappings and
+    /// the lookup directory list without rebuilding the analyzer.
+    pub fn find_dcc_source_issues(
+        &self,
+        scan_result: &ScanResult,
+        config: &rules::dcc_source::DccSourceConfig,
+    ) -> AnalysisResult {
+        rules::dcc_source::find_dcc_source_issues(&scan_result.assets, config)
+    }
 }
 
 impl Default for Analyzer {

@@ -4,14 +4,15 @@ Tidycraft's **Run Analysis** is an asset-quality lint. It reads your scanned pro
 
 ## How it works
 
-Clicking **Run Analysis** (or `⌘⇧R`) runs four phases on the cached scan result:
+Clicking **Run Analysis** (or `⌘⇧R`) runs five phases on the cached scan result:
 
 1. **Per-asset rule checks** — five rule families (`naming`, `texture`, `texture.color_space`, `model`, `audio`) run against every asset. Each family is stateless and returns at most one issue per asset (the first sub-rule that fires).
 2. **Duplicate detection** — files are grouped by size; same-size files are SHA256-hashed and any group with more than one match is reported (the first asset in a group is the "original", the rest are flagged).
 3. **Missing-reference detection** (Unity only) — every `.prefab` / `.unity` / `.mat` / `.controller` / `.asset` is parsed for GUID references that don't resolve to any scanned `.meta`.
 4. **PBR set completeness** — textures are grouped by directory + base stem (`T_Wood_BaseColor` + `T_Wood_Normal` are siblings); a set with the trigger channel but missing required channels is flagged.
+5. **DCC source linking** — authoring source files (`.blend`, `.psd`, `.spp`, `.ma`, etc.) are paired with same-stem runtime exports (`.fbx`, `.png`, …); when the source's mtime is newer than the export's by more than the configured tolerance, an "outdated export" warning fires.
 
-All four phases share the same `tidycraft.toml` configuration, read from your project root each time you click Run Analysis. **No rescan is needed after editing the file** — just save and re-run.
+All five phases share the same `tidycraft.toml` configuration, read from your project root each time you click Run Analysis. **No rescan is needed after editing the file** — just save and re-run.
 
 > **Note on other top-level sections.** `tidycraft.toml` may also contain a `[project]` table (`theme` / `goal`) consumed by AI Tagging. The analyzer ignores it; `llm::project_meta::ProjectMeta::from_toml` reads it via `toml::Value` so the two concerns don't interfere. Future AI-generated rule output will live in a separate `tidycraft.ai.toml` to keep program-written content out of the user-edited file.
 
@@ -30,6 +31,7 @@ Most rule families ship `enabled = false` so a fresh project produces almost no 
 - `model` (vertex / face / material limits)
 - `audio` (sample-rate / duration / mono-for-SFX)
 - `pbr_set` (per-folder texture group completeness)
+- `dcc_source` (source-file ↔ export mtime pairing)
 
 Out-of-box `Run Analysis` therefore flags only **real bugs** — illegal characters, duplicates, broken Unity references, sRGB-tagged data textures. Stricter conventions are opt-in.
 
@@ -45,6 +47,7 @@ Out-of-box `Run Analysis` therefore flags only **real bugs** — illegal charact
 | `duplicate` | All assets | warning |
 | `missing_reference` | Unity prefabs / scenes / materials | error |
 | `pbr_set.incomplete` | Texture groups (cross-asset) | warning |
+| `dcc_source.outdated_export` | DCC source files (cross-asset) | warning |
 
 ---
 
@@ -172,6 +175,62 @@ The issue is anchored on the **trigger** texture (the BaseColor file), so clicki
 
 ---
 
+## DCC Source-File Linking (`[dcc_source]`) — *disabled by default*
+
+Cross-asset check: pairs authoring source files (`.blend`, `.psd`, `.spp`, `.ma`, `.mb`, `.max`, `.ztl`, `.zpr`, `.lxo`, `.hip`, `.c4d`, `.zprj`, `.sbs`, `.psb`) with their runtime exports (`.fbx`, `.glb`, `.png`, etc.) by file-stem matching, then fires a warning when the source's mtime is newer than the export's by more than `mtime_tolerance_secs`.
+
+Catches the **"edited locally, forgot to re-export"** loop reliably. Does NOT catch cross-commit stale pairs because `git checkout` synchronizes mtimes — a documented limitation.
+
+```toml
+[dcc_source]
+enabled = true
+# Tolerance in seconds. `git pull` touches every file's mtime; 60s
+# avoids false positives in the minutes after a sync.
+mtime_tolerance_secs = 60
+
+# Per-tool mappings. Defaults cover Blender / Maya / Max / ZBrush /
+# Modo / Houdini / Cinema4D / Marvelous / Substance Painter+Designer
+# / Photoshop. Override `mappings` to customize — listing ANY mapping
+# replaces the WHOLE default list, so include every entry you want active.
+[[dcc_source.mappings]]
+name = "blender"
+sources = ["blend"]
+exports = ["fbx", "glb", "gltf", "obj", "dae"]
+
+# ... (8 more default mappings — see config_template for the full list)
+
+[dcc_source.lookup]
+same_dir = true
+sibling_dirs = ["sources", "_source", "src"]
+```
+
+**Pairing strategy** (per source asset):
+
+1. Look up which mapping owns the source's extension. Files whose extension isn't in any mapping skip the analysis entirely.
+2. Build candidate export directories:
+   - The source's own directory (if `lookup.same_dir = true`).
+   - Walking up from the source's parent, any ancestor whose name matches an entry in `lookup.sibling_dirs` adds its own grandparent as a candidate. If the user lists multiple sibling names, the OTHER names also expand into sibling subdirs of the grandparent (handles `art/sources/x.blend ↔ art/exports/x.fbx` when `sibling_dirs = ["sources", "exports"]`).
+3. In each candidate directory, look for files with the same lowercase stem and an extension in `mapping.exports`. Pick the **newest** across all candidates.
+4. If `source.mtime > newest_export.mtime + tolerance_secs`, emit `dcc_source.outdated_export` with a humanized time delta and a suggestion to re-export from the named tool.
+
+**1→N pairing (Substance Painter `.spp`)** is approximated as 1→newest-PNG in this phase. Future iteration will use PBR channel suffixes to identify the full set of expected per-channel outputs.
+
+**Layout examples** (with default `sibling_dirs`):
+
+| Source | Candidate export dirs |
+|---|---|
+| `models/character.blend` | `models/` |
+| `models/sources/character.blend` | `models/sources/`, `models/`, `models/_source/`, `models/src/` |
+| `Characters/Hero/sources/Hero.blend` | (the `sources/` parent), `Characters/Hero/`, `Characters/Hero/_source/`, `Characters/Hero/src/` |
+
+**To suppress**:
+- Add the source path to `[ignore].patterns` to drop it before analysis.
+- Or set `enabled = false` to turn the rule off entirely.
+
+The issue is anchored on the **source** file (clicking the issue jumps to the source, not the export) so you can act on it directly in your DCC tool.
+
+---
+
 ## Ignore Patterns (`[ignore]`)
 
 The most powerful escape hatch. Glob patterns matched against asset paths **relative to the project root**; any matching asset is dropped before any rule runs (per-asset, duplicate, and missing-reference all respect it).
@@ -256,7 +315,7 @@ If you hit this enough that pattern-level suppression isn't enough, file an issu
 
 ## Architecture notes (for contributors)
 
-- Rules live in `src-tauri/src/analyzer/rules/{naming,texture,texture_colorspace,model,audio,duplicate,missing_reference}.rs`.
+- Rules live in `src-tauri/src/analyzer/rules/{naming,texture,texture_colorspace,model,audio,duplicate,missing_reference,pbr_set,dcc_source}.rs`.
 - Each rule is `Send + Sync` and stateless; `Rule::check(&self, &AssetInfo) -> Option<Issue>` returns the first matching sub-rule's issue.
 - `AnalysisResult` aggregates issues + counts by severity and by `rule_id`.
 - Configuration: `RuleConfig` in `analyzer/rules/mod.rs`; serialized via `serde` + `toml`. The commented welcome template is `analyzer/rules/config_template::DEFAULT_CONFIG_TEMPLATE`.

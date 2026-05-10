@@ -125,6 +125,7 @@
 | **重复文件** | 基于 SHA256 的内容比对 |
 | **缺失引用**（Unity） | 在 `.meta` 文件中查找 GUID |
 | **PBR Set 完整性** | 按目录分组的纹理集是否齐全（BaseColor / Normal / Roughness …）|
+| **DCC 源文件关联** | 作者源文件（`.blend` / `.psd` / `.spp` 等）比同名导出新 → "需重新导出"提示 |
 | **忽略规则** | 基于 glob 的路径排除（外部资源 / 生成产物）|
 
 详见 [`docs/analyzer-rules.md`](docs/analyzer-rules.md)（每条规则的默认值与调参建议）。
@@ -317,12 +318,11 @@ Tidycraft **本地优先**:
 - [x] PBR set 完整性分析（按目录的纹理集检查）
 - [x] 外部编辑器映射（Settings → External Editors，按扩展名配置）
 - [x] 跨平台细节打磨（macOS ⌘ 字符、Windows 文件管理器 reveal 修复、path utils）
+- [x] DCC 源文件关联（`.blend` / `.psd` / `.spp` / `.ma` / `.ztl` / `.max` / `.lxo` / `.hip` / `.c4d` / `.zprj` / `.sbs` / `.psb` → "源比导出新"警告，opt-in）
 
 待办：
 
-- [ ] 基于 LLM 的语义标签聚类（`tag_suggest.rs` 已留 `ExternalLLMSuggester` 接口位）
 - [ ] VRAM 预算估算（每张纹理、按目录聚合）
-- [ ] DCC 源文件关联（`.blend` / `.spp` → 导出的 `.fbx` / `.glb`，源比导出新时报"需重新导出"）
 - [ ] 跨引擎反向引用图（把 Unity GUID 图扩到 UE / Godot）
 
 ---

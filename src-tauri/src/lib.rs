@@ -760,6 +760,8 @@ fn analyze_assets(project_id: String, config_toml: Option<String>) -> Result<Ana
         result.merge(missing);
         let pbr = analyzer.find_pbr_set_issues(scan_to_analyze, &config.pbr_set);
         result.merge(pbr);
+        let dcc = analyzer.find_dcc_source_issues(scan_to_analyze, &config.dcc_source);
+        result.merge(dcc);
         Ok(result)
     })
 }

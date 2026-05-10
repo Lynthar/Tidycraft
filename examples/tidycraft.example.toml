@@ -92,8 +92,28 @@ ORM = ["ao", "roughness", "metallic"]
 MRA = ["metallic", "roughness", "ao"]
 RMA = ["roughness", "metallic", "ao"]
 
+# 跨资源 DCC source linking —— 把作者源文件（.blend/.ma/.psd/.spp 等）
+# 和其运行时导出（.fbx/.png/...）按文件名 stem 配对，源比导出新时报警告。
+# 默认 mappings 覆盖 Blender / Maya / Max / ZBrush / Modo / Houdini /
+# Cinema4D / Marvelous / Substance Painter+Designer / Photoshop —— 不
+# 写 [[dcc_source.mappings]] 子段就用全套默认。
+[dcc_source]
+# Default: false. 这里打开演示"漏导出"检测。
+enabled = true
+# Default: 60s. 收紧到 5 让小时间差也报；实战 30~120s 之间避免 git pull
+# 后突发警告。
+mtime_tolerance_secs = 5
+
+[dcc_source.lookup]
+# Default: true. 同目录配对（最常见）。
+same_dir = true
+# Default: ["sources", "_source", "src"]。当 source 的某个 ancestor
+# 名字匹配此列表，认定那是"作者区"，把它的 parent 当做 export 候选目录。
+# 团队若用 "art_source/" 之类自定义名加在这里。
+sibling_dirs = ["sources", "_source", "src"]
+
 # Glob 路径排除 —— 匹配中的资源在所有规则之前 drop（per-asset / 重复 /
-# 缺失引用 / PBR set 全部生效）。相对于项目根。
+# 缺失引用 / PBR set / DCC source linking 全部生效）。相对于项目根。
 [ignore]
 patterns = [
     # "ThirdParty/**",
