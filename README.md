@@ -45,7 +45,7 @@
 - **Stays out of your way** — minimal default rules; live filesystem watcher (no manual rescan); editable rules via `Settings → Analysis Rules → Edit`.
 - **Local-first** — all state on your disk; no telemetry, no network calls.
 
-> **Status: Alpha — actively developed.** Core features (scanning, analysis, tags, 3D preview, Git, watcher) are stable. LLM-backed semantic tagging is in design; the current "tag suggestions" panel is **heuristic** (filename / dimension / path), not an LLM.
+> **Status: Alpha — actively developed.** Core features (scanning, analysis, tags, 3D preview, Git, watcher) are stable. **LLM-backed AI tagging** ships in per-asset mode (Claude / OpenAI / Ollama) — see [Features → AI Tagging](#-ai-tagging) below. A smarter "learning mode" that samples the project, derives local heuristic rules, and reuses your existing tag system is in progress; the current AI Tag entry is the advanced "all-AI" path.
 
 ---
 
@@ -90,11 +90,23 @@ Some 3D model formats (FBX, OBJ, DAE) embed texture paths internally. When these
 - **Unity .meta file parsing** — extracts GUIDs for asset tracking
 
 ### 🏷️ Tag System
-- Create custom **color-coded tags**
+- Create custom **color-coded tags** with optional descriptions (used as AI tagging context)
 - Tag single or multiple assets at once
 - **Filter assets by tags** (single or multi-select)
 - Tags persist across sessions; rename / move syncs bindings; deleted files are reaped automatically
 - **Heuristic tag suggestions** — auto-grouped by filename token / dimension + PBR channel / path segment
+
+### ✨ AI Tagging
+
+Multi-provider vision LLM tagging via **Claude** (Sonnet 4.6 / Haiku 4.5 / Opus 4.7), **OpenAI** (GPT-5.4-mini / 4o-mini / 5.4 / 5.4-nano), and **Ollama** (local — qwen2.5-VL / Llama 3.2-Vision / LLaVA / etc.; installed models listed live).
+
+- **Cost preview** before every cloud call (verified pricing math; per-asset cents shown).
+- **Per-provider consent** for thumbnail uploads — first cloud call shows a checkbox; revocable in Settings.
+- **Project-aware prompt** — pulls `[theme]` / `[goal]` from your project's `tidycraft.toml` and your existing tag system (with descriptions + sample paths) so the model **prefers your existing labels** instead of inventing synonyms.
+- **Per-asset disk cache** keyed on `(thumbnail bytes, filename, path, provider, model, prompt version)` — partial-batch hits stay free.
+- **Result review panel** — chips toggle inclusion; existing-tag matches reuse your color, new tags get an `(AI)` suffix.
+- **Trigger points** — multi-select toolbar button + right-click "AI Tag (directly)" entry. Hidden when no provider is configured.
+- **Local + private** — Ollama path uploads nothing off-machine; cloud paths upload only the requested thumbnails + filenames + your tag context.
 
 ### 📊 Metadata Extraction
 
@@ -135,8 +147,8 @@ See [`docs/analyzer-rules.md`](docs/analyzer-rules.md) for per-rule defaults and
 
 | Category | Formats |
 |----------|---------|
-| **Textures** | PNG, JPG/JPEG, TGA, BMP, GIF |
-| **3D Models** | glTF, GLB, FBX, OBJ (+MTL), DAE, 3DS, `.blend` (detected; export to GLB to preview) |
+| **Textures** | PNG, JPG/JPEG, TGA, BMP, GIF, TIFF, WebP, HDR, EXR (decode); PSD/DDS/SVG (recognized, no thumbnail) |
+| **3D Models** | glTF, GLB, FBX, OBJ (+MTL), DAE, 3DS, **VOX** (MagicaVoxel), `.blend` (detected; export to GLB to preview) |
 | **Audio** | WAV, MP3, OGG |
 | **Other** | Scripts, Materials, Prefabs, Scenes |
 

@@ -1,3 +1,4 @@
+pub mod rule_suggest;
 pub mod rules;
 pub mod tag_suggest;
 

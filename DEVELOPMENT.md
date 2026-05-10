@@ -151,6 +151,24 @@ The frontend and backend communicate exclusively through two mechanisms:
   per-file status + ahead/behind counts.
 - **`thumbnail.rs`** — On-demand base64 thumbnails for images, disk-cached by
   (path, mtime, size).
+- **`llm/`** — Multi-provider AI tagging. `mod.rs` declares the `LLMProvider`
+  async trait, the request/response/error schemas (`TagRequest` /
+  `TagResponse` / `SuggestedTag` / `LLMError`), the `make_provider` factory,
+  the shared 3-tier `parse_suggestions(text)` JSON parser, and the
+  `suggest_with_cache(provider_id, request, fetcher)` helper that splits a
+  batch into cache hits and misses, calls the fetcher only for the misses,
+  persists fresh entries, and merges. Concrete providers (`claude.rs` /
+  `openai.rs` / `ollama.rs`) own only their endpoint + auth + request/response
+  shape + error mapping; everything else lives in shared modules. `cost.rs`
+  holds verified per-million pricing in micro-USD (integer arithmetic) plus
+  per-provider vision token rules. `cache.rs` is per-asset disk cache keyed by
+  `SHA256(thumb_hash + filename + path + provider + model + prompt_version)`
+  with `\x00` separators between fields. `prompts.rs` exports the system
+  prompt + `build_user_prompt(assets, project_ctx, existing_tags,
+  include_thumbnails)` — bumping `PROMPT_VERSION` invalidates every cached
+  entry so prompt-meaning changes never serve stale results.
+  `project_meta.rs` parses `tidycraft.toml [project]` via `toml::Value` so
+  the analyzer's strict deserializer doesn't have to know about it.
 
 ### 4.3 Frontend modules (`src/`)
 
@@ -236,6 +254,27 @@ on current multi-selection" by:
 
 This is the `targetPathsFromContext()` helper in `AssetList`. Delete, move,
 copy, and duplicate all follow it.
+
+**Lazy session restore.** `sessionStore.restoreSession` does not run a full
+`openProject` for every persisted path — that used to make cold starts with
+many projects feel slow because non-active scans were thrown away anyway. It
+now runs in two phases: parallel `registerProjectStub(path)` calls (cheap —
+just register the project with the backend and add a stub `ProjectData` to
+the Map) for non-active paths, then a single full `openProject(activePath)`.
+`setActiveProject` detects a stub (`scanResult==null && !isScanning &&
+!error`) and triggers `openProject(path, {force:true})` on first switch. The
+`!error` guard prevents loops when a project's path is permanently broken;
+the user can retry via the Header rescan button.
+
+**LLM context flow.** `llm_suggest_tags` collects project framing inside the
+project lock (clones `root_path`, all `Tag` objects with their description,
+and up to 5 sample paths per tag via `TagsData::get_assets_with_tag`), drops
+the lock, then reads `tidycraft.toml [project]` outside the lock. The
+collected `ProjectMeta` and `Vec<ExistingTagContext>` ride into `TagRequest`
+and the prompt builder emits per-block context only when non-empty (no token
+waste on projects without theme/goal or without tags). When prompt semantics
+change, bump `PROMPT_VERSION` in `prompts.rs` — it's part of the cache key,
+so old entries naturally invalidate.
 
 **Watcher-driven UI refresh.** File operations (delete, move, copy,
 duplicate) don't explicitly tell the frontend what changed. They modify the

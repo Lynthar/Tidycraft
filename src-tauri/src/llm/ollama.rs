@@ -19,8 +19,9 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 use super::{
-    cost, project_meta::ProjectMeta, prompts, suggest_with_cache, AssetInput, CostEstimate,
-    ExistingTagContext, LLMError, LLMProvider, ProviderConfig, TagRequest, TagResponse, Usage,
+    cost, learning, parse_json_lenient, project_meta::ProjectMeta, prompts, suggest_with_cache,
+    AssetInput, CostEstimate, ExistingTagContext, LLMError, LLMProvider, ProviderConfig,
+    TagRequest, TagResponse, Usage,
 };
 
 pub const DEFAULT_MODEL: &str = "qwen2.5vl:32b";
@@ -210,6 +211,90 @@ impl LLMProvider for OllamaProvider {
         })
         .await
     }
+
+    async fn learn_project(
+        &self,
+        request: &learning::LearnRequest,
+    ) -> Result<learning::LearningResult, LLMError> {
+        let endpoint = self
+            .config
+            .endpoint
+            .clone()
+            .unwrap_or_else(|| DEFAULT_ENDPOINT.to_string());
+        let model = self.config.model.clone();
+        let user = prompts::build_learning_prompt(
+            &request.samples,
+            request.project_meta.as_ref(),
+            &request.existing_tags,
+        );
+        let (text, usage) =
+            send_text_chat(&endpoint, &model, prompts::SYSTEM_PROMPT_LEARNING, &user).await?;
+        let mut result: learning::LearningResult = parse_json_lenient(&text)?;
+        result.usage = usage;
+        Ok(result)
+    }
+}
+
+/// Text-only chat for learning mode. Same scaffolding as `call_ollama`
+/// but without the `images` array on the user message.
+async fn send_text_chat(
+    endpoint: &str,
+    model: &str,
+    system: &str,
+    user: &str,
+) -> Result<(String, Usage), LLMError> {
+    let base = endpoint.trim_end_matches('/').trim_end_matches("/api/chat");
+    let url = format!("{base}/api/chat");
+
+    let body = OllamaRequest {
+        model,
+        messages: vec![
+            OllamaMessage {
+                role: "system",
+                content: system.to_string(),
+                images: Vec::new(),
+            },
+            OllamaMessage {
+                role: "user",
+                content: user.to_string(),
+                images: Vec::new(),
+            },
+        ],
+        stream: false,
+        format: "json",
+    };
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| LLMError::Network(e.to_string()))?;
+    let resp = client.post(&url).json(&body).send().await.map_err(|e| {
+        if e.is_timeout() {
+            LLMError::Network(format!("Ollama request timed out after {REQUEST_TIMEOUT_SECS}s"))
+        } else if e.is_connect() {
+            LLMError::Network(format!("Could not reach Ollama at {url} ({e})"))
+        } else {
+            LLMError::Network(e.to_string())
+        }
+    })?;
+    let status = resp.status();
+    if !status.is_success() {
+        let body_preview = resp.text().await.unwrap_or_default();
+        return Err(LLMError::Network(format!(
+            "Ollama {status}: {body_preview}"
+        )));
+    }
+    let parsed: OllamaResponse = resp
+        .json()
+        .await
+        .map_err(|e| LLMError::ParseError(format!("Ollama JSON: {e}")))?;
+    Ok((
+        parsed.message.content,
+        Usage {
+            input_tokens: parsed.prompt_eval_count,
+            output_tokens: parsed.eval_count,
+            cached: false,
+        },
+    ))
 }
 
 #[cfg(test)]

@@ -9,7 +9,9 @@
 
 use std::fmt::Write;
 
-use super::{project_meta::ProjectMeta, AssetInput, ExistingTagContext};
+use super::{
+    learning::DirectorySample, project_meta::ProjectMeta, AssetInput, ExistingTagContext,
+};
 
 /// Cache-busting prompt version — see module-level doc.
 ///
@@ -59,6 +61,74 @@ Rules:
 - Don't invent. If a thumbnail isn't provided, only use filename + path.
 - Don't repeat extension/dimension info ("png", "1024px") — user has those.
 - Output JSON only. No commentary."#;
+
+/// Learning-mode system prompt. Asks the model to study the user's
+/// project (samples + tags + theme/goal) and produce four artifacts:
+/// inferred conventions, per-sample tagging, tag gaps, and local
+/// heuristic rules. The local rules are the actual product — they
+/// drive a deterministic RuleSuggester at runtime so the user doesn't
+/// pay per-asset LLM cost forever.
+pub const SYSTEM_PROMPT_LEARNING: &str = r#"You are an art-asset taxonomy consultant for game development. The user gives you:
+1. Their project's theme and goal (sometimes).
+2. Their existing tag system (names, optional descriptions, sample paths each tag is applied to).
+3. A representative sample of their project's files, grouped by directory.
+
+Your job is to study these inputs and produce a learning result that lets the user's tool tag the rest of their project AUTOMATICALLY using local heuristic rules — not by calling you per-asset. The rules are the most important output.
+
+Output strict JSON in this exact shape:
+{
+  "inferred_conventions": {
+    "naming": "free-form sentence(s) describing the filename convention",
+    "directories": "free-form sentence(s) describing the directory taxonomy",
+    "existing_tag_meanings": {
+      "tag-name": "your one-sentence interpretation of what this tag means in this project"
+    }
+  },
+  "sample_tags": [
+    {
+      "asset_path": "Characters/Hero/T_Hero_BaseColor.png",
+      "matched_existing": ["hero", "diffuse"],
+      "suggested_new": [
+        { "label": "lowpoly", "category": "style", "confidence": 0.78 }
+      ]
+    }
+  ],
+  "tag_gaps": [
+    {
+      "label": "diffuse-map",
+      "category": "type",
+      "reason": "Many *_BaseColor.png lack a channel-level tag distinct from the asset-type tag"
+    }
+  ],
+  "rules": [
+    { "kind": "filename_token", "pattern": "BaseColor", "tags": ["diffuse-map"], "confidence": 0.95 },
+    { "kind": "path_prefix",    "pattern": "Characters/Hero/", "tags": ["hero"], "confidence": 0.99 },
+    { "kind": "path_segment",   "pattern": "weapons", "tags": ["weapon"], "confidence": 0.92 },
+    { "kind": "filename_regex", "pattern": "^SM_.*\\.fbx$", "tags": ["static-mesh", "model"], "confidence": 0.9 }
+  ]
+}
+
+Categories (for `category` and `tag_gaps[].category`): type | style | mood | subject | other
+- type: what the asset depicts (character/vehicle/prop/scene/ui/vfx/weapon/nature)
+- style: visual approach (cartoon/realistic/cyberpunk/pixel-art/lowpoly/...)
+- mood: emotional register (dark/bright/dramatic/playful)
+- subject: free-form noun more specific than `type` (rusty-metal, wolf, ...)
+- other: anything else
+
+Rule kinds:
+- "filename_token": match if filename (basename) contains the literal token, case-insensitive. Most common; prefer this.
+- "path_prefix": match if relative path starts with the literal prefix. Use for "everything under X is Y".
+- "path_segment": match if relative path contains the literal segment as a full path component (so "hero" matches "a/hero/b" but not "a/heroic/b").
+- "filename_regex": free-form regex applied to the full relative path. Use only when the simpler kinds don't fit — regexes are harder to review.
+
+Hard rules:
+- PREFER existing project tags when matching samples (`matched_existing`) and when emitting rules (`rules[].tags`). Only invent NEW tags (`suggested_new`, `tag_gaps`, fresh labels in rules) when no existing tag fits.
+- Tag labels in rules must be either an existing tag name OR a label from `tag_gaps`. Do not introduce labels in rules that you didn't either match or list as a gap.
+- Confidence: 0.9+ = obvious, 0.7-0.9 = likely, below 0.7 = skip the rule entirely.
+- Keep `inferred_conventions.naming` and `directories` short — one or two sentences each.
+- `existing_tag_meanings` should cover every tag the user provided.
+- Don't invent project context the user didn't supply.
+- Output JSON only. No commentary, no markdown fences."#;
 
 /// Build the user-message body. Layout:
 ///
@@ -148,6 +218,102 @@ pub fn build_user_prompt(
             let _ = writeln!(out, "- [thumbnail attached]");
         }
     }
+    out
+}
+
+/// Build the user-message body for a learning request. Layout:
+///
+/// ```text
+/// Project context:
+/// - Theme: ...
+/// - Goal: ...
+///
+/// Existing project tags (prefer these — match by name in your output):
+/// - "hero" — Player chars
+///   used on: a/b.png, c/d.png, ...
+/// ...
+///
+/// Directory samples:
+/// - Characters/Hero (15 files; 5 sampled):
+///   - T_Hero_BaseColor.png [texture]
+///   - SM_Hero_Body.fbx [model]
+///   ...
+/// - Weapons/Sword (4 files; 4 sampled):
+///   ...
+///
+/// Analyze this project per the schema in the system prompt.
+/// ```
+///
+/// Each context block is omitted when its source is empty so simple
+/// projects don't pay for the framing overhead. The "Directory samples"
+/// header is always emitted even with zero samples (prints "No directory
+/// samples — nothing to analyze") so the LLM gets clear guidance instead
+/// of a bare prompt.
+pub fn build_learning_prompt(
+    samples: &[DirectorySample],
+    project_ctx: Option<&ProjectMeta>,
+    existing_tags: &[ExistingTagContext],
+) -> String {
+    let mut out = String::with_capacity(256 + samples.len() * 192);
+
+    // ---- Project context ----
+    if let Some(meta) = project_ctx {
+        if !meta.is_empty() {
+            let _ = writeln!(out, "Project context:");
+            if let Some(theme) = meta.theme.as_deref() {
+                let _ = writeln!(out, "- Theme: {theme}");
+            }
+            if let Some(goal) = meta.goal.as_deref() {
+                let _ = writeln!(out, "- Goal: {goal}");
+            }
+            let _ = writeln!(out);
+        }
+    }
+
+    // ---- Existing tags ----
+    if !existing_tags.is_empty() {
+        let _ = writeln!(
+            out,
+            "Existing project tags (prefer these — match by name in your output):"
+        );
+        for tag in existing_tags {
+            if let Some(desc) = tag.description.as_deref() {
+                let _ = writeln!(out, "- \"{}\" — {desc}", tag.name);
+            } else {
+                let _ = writeln!(out, "- \"{}\"", tag.name);
+            }
+            if !tag.sample_paths.is_empty() {
+                let preview = tag.sample_paths.join(", ");
+                let _ = writeln!(out, "  used on: {preview}");
+            }
+        }
+        let _ = writeln!(out);
+    }
+
+    // ---- Directory samples ----
+    if samples.is_empty() {
+        let _ = writeln!(out, "Directory samples: No directory samples — nothing to analyze.");
+        return out;
+    }
+    let _ = writeln!(out, "Directory samples:");
+    for s in samples {
+        let dir_label = if s.rel_path.is_empty() {
+            "(project root)"
+        } else {
+            s.rel_path.as_str()
+        };
+        let _ = writeln!(
+            out,
+            "- {dir_label} ({} files; {} sampled):",
+            s.total_files,
+            s.files.len()
+        );
+        for f in &s.files {
+            let _ = writeln!(out, "  - {} [{}]", f.filename, f.asset_type);
+        }
+    }
+    let _ = writeln!(out);
+    let _ = writeln!(out, "Analyze this project per the schema in the system prompt.");
     out
 }
 
@@ -276,6 +442,95 @@ mod tests {
     fn existing_tags_block_omitted_when_empty() {
         let p = build_user_prompt(&[asset("a/x.png", true)], None, &[], true);
         assert!(!p.contains("Existing project tags"));
+    }
+
+    fn dir_sample(rel: &str, total: usize, files: &[(&str, &str, &str)]) -> DirectorySample {
+        DirectorySample {
+            rel_path: rel.into(),
+            total_files: total,
+            files: files
+                .iter()
+                .map(|(name, ext, t)| crate::llm::learning::SampleFile {
+                    filename: (*name).into(),
+                    extension: (*ext).into(),
+                    asset_type: (*t).into(),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn learning_prompt_lists_samples_with_total_count() {
+        let samples = vec![
+            dir_sample(
+                "Characters/Hero",
+                15,
+                &[
+                    ("T_Hero_BaseColor.png", "png", "texture"),
+                    ("SM_Hero_Body.fbx", "fbx", "model"),
+                ],
+            ),
+            dir_sample(
+                "Weapons/Sword",
+                4,
+                &[("SM_BroadSword.fbx", "fbx", "model")],
+            ),
+        ];
+        let p = build_learning_prompt(&samples, None, &[]);
+        assert!(p.contains("Characters/Hero"));
+        assert!(p.contains("(15 files; 2 sampled)"));
+        assert!(p.contains("T_Hero_BaseColor.png"));
+        assert!(p.contains("[texture]"));
+        assert!(p.contains("Weapons/Sword"));
+        assert!(p.contains("(4 files; 1 sampled)"));
+    }
+
+    #[test]
+    fn learning_prompt_includes_project_context_when_set() {
+        let meta = ProjectMeta {
+            theme: Some("Cyberpunk RPG".into()),
+            goal: Some("Asset library".into()),
+        };
+        let p = build_learning_prompt(&[], Some(&meta), &[]);
+        assert!(p.contains("Project context:"));
+        assert!(p.contains("Theme: Cyberpunk RPG"));
+        assert!(p.contains("Goal: Asset library"));
+    }
+
+    #[test]
+    fn learning_prompt_omits_blocks_when_empty() {
+        let p = build_learning_prompt(&[], None, &[]);
+        assert!(!p.contains("Project context:"));
+        assert!(!p.contains("Existing project tags"));
+        assert!(p.contains("No directory samples"));
+    }
+
+    #[test]
+    fn learning_prompt_lists_existing_tags_with_descriptions_and_samples() {
+        let tags = vec![ExistingTagContext {
+            name: "hero".into(),
+            description: Some("Player chars".into()),
+            sample_paths: vec!["Characters/Hero/T_Hero.png".into()],
+        }];
+        let p = build_learning_prompt(&[], None, &tags);
+        assert!(p.contains("Existing project tags"));
+        assert!(p.contains("\"hero\" — Player chars"));
+        assert!(p.contains("used on: Characters/Hero/T_Hero.png"));
+    }
+
+    #[test]
+    fn learning_system_prompt_describes_all_rule_kinds() {
+        for kind in [
+            "filename_token",
+            "path_prefix",
+            "path_segment",
+            "filename_regex",
+        ] {
+            assert!(
+                SYSTEM_PROMPT_LEARNING.contains(kind),
+                "system prompt should describe rule kind `{kind}`"
+            );
+        }
     }
 
     #[test]

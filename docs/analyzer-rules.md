@@ -13,6 +13,8 @@ Clicking **Run Analysis** (or `⌘⇧R`) runs four phases on the cached scan res
 
 All four phases share the same `tidycraft.toml` configuration, read from your project root each time you click Run Analysis. **No rescan is needed after editing the file** — just save and re-run.
 
+> **Note on other top-level sections.** `tidycraft.toml` may also contain a `[project]` table (`theme` / `goal`) consumed by AI Tagging. The analyzer ignores it; `llm::project_meta::ProjectMeta::from_toml` reads it via `toml::Value` so the two concerns don't interfere. Future AI-generated rule output will live in a separate `tidycraft.ai.toml` to keep program-written content out of the user-edited file.
+
 ## Out-of-box defaults
 
 Most rule families ship `enabled = false` so a fresh project produces almost no false positives. **Default on**:

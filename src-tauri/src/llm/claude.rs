@@ -14,8 +14,9 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 use super::{
-    cost, project_meta::ProjectMeta, prompts, suggest_with_cache, AssetInput, CostEstimate,
-    ExistingTagContext, LLMError, LLMProvider, ProviderConfig, TagRequest, TagResponse, Usage,
+    cost, learning, parse_json_lenient, project_meta::ProjectMeta, prompts, suggest_with_cache,
+    AssetInput, CostEstimate, ExistingTagContext, LLMError, LLMProvider, ProviderConfig,
+    TagRequest, TagResponse, Usage,
 };
 
 pub const DEFAULT_MODEL: &str = "claude-sonnet-4-6";
@@ -229,6 +230,97 @@ impl LLMProvider for ClaudeProvider {
         })
         .await
     }
+
+    async fn learn_project(
+        &self,
+        request: &learning::LearnRequest,
+    ) -> Result<learning::LearningResult, LLMError> {
+        let api_key = self
+            .config
+            .api_key
+            .clone()
+            .ok_or_else(|| LLMError::NoApiKey("claude".into()))?;
+        let model = self.config.model.clone();
+        let user = prompts::build_learning_prompt(
+            &request.samples,
+            request.project_meta.as_ref(),
+            &request.existing_tags,
+        );
+        let (text, usage) =
+            send_text_chat(&api_key, &model, prompts::SYSTEM_PROMPT_LEARNING, &user).await?;
+        let mut result: learning::LearningResult = parse_json_lenient(&text)?;
+        result.usage = usage;
+        Ok(result)
+    }
+}
+
+/// Text-only chat (no image content blocks). Used by `learn_project`,
+/// where the LLM gets directory samples + tag context as plain text.
+/// Mirrors `call_anthropic`'s scaffolding (client / headers / error
+/// mapping) but with a simpler body.
+async fn send_text_chat(
+    api_key: &str,
+    model: &str,
+    system: &str,
+    user: &str,
+) -> Result<(String, Usage), LLMError> {
+    let body = AnthropicRequest {
+        model,
+        max_tokens: MAX_OUTPUT_TOKENS,
+        system,
+        messages: vec![AnthropicMessage {
+            role: "user",
+            content: vec![ContentBlock::Text {
+                text: user.to_string(),
+            }],
+        }],
+    };
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| LLMError::Network(e.to_string()))?;
+    let resp = client
+        .post(ENDPOINT)
+        .header("x-api-key", api_key)
+        .header("anthropic-version", API_VERSION)
+        .header("content-type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                LLMError::Network("request timed out".into())
+            } else {
+                LLMError::Network(e.to_string())
+            }
+        })?;
+    let status = resp.status();
+    if !status.is_success() {
+        let body_preview = resp.text().await.unwrap_or_default();
+        return Err(match status.as_u16() {
+            401 | 403 => LLMError::NoApiKey("claude".into()),
+            429 => LLMError::RateLimit,
+            500..=599 => LLMError::Network(format!("Anthropic {status}: {body_preview}")),
+            _ => LLMError::Other(format!("Anthropic {status}: {body_preview}")),
+        });
+    }
+    let parsed: AnthropicResponse = resp
+        .json()
+        .await
+        .map_err(|e| LLMError::ParseError(format!("Anthropic JSON: {e}")))?;
+    let text = parsed
+        .content
+        .into_iter()
+        .find_map(|c| c.text)
+        .ok_or_else(|| LLMError::ParseError("Anthropic response had no text block".into()))?;
+    Ok((
+        text,
+        Usage {
+            input_tokens: parsed.usage.input_tokens,
+            output_tokens: parsed.usage.output_tokens,
+            cached: false,
+        },
+    ))
 }
 
 #[cfg(test)]
