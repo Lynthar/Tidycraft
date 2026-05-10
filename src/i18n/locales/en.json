@@ -488,6 +488,8 @@
     "rules_other": "{{count}} rules",
     "rulesEmpty": "No rules emitted.",
     "ruleDelete": "Delete rule",
+    "ruleConfidence": "Confidence — drag to adjust",
+    "ruleInvalidRegex": "Invalid regex — this rule will be skipped at match time.",
     "sampleTags_one": "{{count}} sample tagged",
     "sampleTags_other": "{{count}} samples tagged",
     "save": "Save rules",

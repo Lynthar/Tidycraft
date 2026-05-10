@@ -15,6 +15,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use regex::Regex;
+
 use crate::scanner::ScanResult;
 
 use super::tag_suggest::{TagGroup, TagSuggester};
@@ -64,14 +66,47 @@ pub fn load_or_fallback(
     }
 }
 
+/// A `LearnedRule` paired with its compiled `Regex` (only populated for
+/// `FilenameRegex` kind). Pre-compiling at construction time means the
+/// per-asset hot loop in `suggest()` doesn't pay parse cost N×M times.
+struct CompiledRule {
+    rule: LearnedRule,
+    regex: Option<Regex>,
+}
+
 pub struct RuleSuggester {
-    rules: Vec<LearnedRule>,
+    rules: Vec<CompiledRule>,
 }
 
 impl RuleSuggester {
     pub fn new(rules: Vec<LearnedRule>) -> Self {
-        Self { rules }
+        let compiled = rules.into_iter().map(compile_one).collect();
+        Self { rules: compiled }
     }
+}
+
+/// Compile one rule. For `FilenameRegex`, attempts `Regex::new`; on
+/// failure logs a one-shot warning and stores `None` so the rule
+/// silent-skips at match time. We deliberately do NOT propagate the
+/// error — a single malformed pattern shouldn't poison the whole rule
+/// set when the rest are usable. The LearnReviewPanel surfaces the
+/// same invalid-regex check on the UI side via JS `RegExp` (close
+/// enough to Rust's `regex` engine for the simple patterns the LLM
+/// emits — both reject `[`, `(?P<` legacy syntax, etc.).
+fn compile_one(rule: LearnedRule) -> CompiledRule {
+    let regex = match &rule {
+        LearnedRule::FilenameRegex { pattern, .. } => match Regex::new(pattern) {
+            Ok(r) => Some(r),
+            Err(e) => {
+                eprintln!(
+                    "[rule_suggest] skipping invalid regex pattern {pattern:?}: {e}"
+                );
+                None
+            }
+        },
+        _ => None,
+    };
+    CompiledRule { rule, regex }
 }
 
 struct GroupAcc {
@@ -92,8 +127,8 @@ impl TagSuggester for RuleSuggester {
 
         for asset in &scan.assets {
             let rel = relative_path(root, &asset.path);
-            for rule in &self.rules {
-                if let Some((tags, conf, hint)) = match_rule(rule, &rel, &asset.name) {
+            for cr in &self.rules {
+                if let Some((tags, conf, hint)) = match_rule(cr, &rel, &asset.name) {
                     for tag in tags {
                         let entry = by_label.entry(tag.clone()).or_insert_with(|| GroupAcc {
                             paths: HashSet::new(),
@@ -163,15 +198,15 @@ impl TagSuggester for RuleSuggester {
 /// - path_segment: case-insensitive equality against any `/`-split
 ///   segment of the relative path (so "hero" matches "a/hero/b" but
 ///   not "a/heroic/b")
-/// - filename_regex: regex applied to the relative path (NOT yet
-///   wired — regex isn't a project dep; v1 returns None and emits a
-///   one-shot warning so the rule is visibly skipped)
+/// - filename_regex: pre-compiled regex (linear-time `regex` crate, no
+///   backtracking) applied to the relative path. Patterns that failed
+///   to compile at construction time silent-skip here.
 fn match_rule<'r>(
-    rule: &'r LearnedRule,
+    cr: &'r CompiledRule,
     rel_path: &str,
     filename: &str,
 ) -> Option<(&'r [String], f32, String)> {
-    match rule {
+    match &cr.rule {
         LearnedRule::FilenameToken {
             pattern,
             tags,
@@ -206,15 +241,23 @@ fn match_rule<'r>(
             }
         }
         LearnedRule::FilenameRegex {
-            pattern: _,
-            tags: _,
-            confidence: _,
+            pattern,
+            tags,
+            confidence,
         } => {
-            // Regex rules need the `regex` crate which isn't a project
-            // dep yet. The system prompt asks the model to prefer the
-            // simpler kinds; if a regex rule slips through, we skip it
-            // silently rather than fail the whole suggest_tags call.
-            None
+            // None means the pattern failed to compile in `compile_one`
+            // — we skip it silently rather than poison the whole call.
+            cr.regex.as_ref().and_then(|re| {
+                if re.is_match(rel_path) {
+                    Some((
+                        tags.as_slice(),
+                        *confidence,
+                        format!("ai · regex {pattern}"),
+                    ))
+                } else {
+                    None
+                }
+            })
         }
     }
 }
@@ -333,17 +376,46 @@ mod tests {
     }
 
     #[test]
-    fn regex_rules_are_silently_skipped_v1() {
-        // Until regex is wired, regex rules contribute no groups but
-        // also don't fail the call.
-        let s = scan("/p", &["/p/SM_Sword.fbx"]);
+    fn valid_regex_matches_relative_path() {
+        // Regex applies to the project-relative path. Pattern only
+        // hits the .fbx file, not the .png.
+        let s = scan(
+            "/p",
+            &["/p/SM_Sword.fbx", "/p/T_Hero_BaseColor.png"],
+        );
         let rules = vec![LearnedRule::FilenameRegex {
-            pattern: "^SM_.*\\.fbx$".into(),
-            tags: vec!["mesh".into()],
+            pattern: r"^SM_.*\.fbx$".into(),
+            tags: vec!["static-mesh".into()],
             confidence: 0.95,
         }];
         let groups = RuleSuggester::new(rules).suggest(&s);
-        assert!(groups.is_empty());
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].name, "static-mesh");
+        assert_eq!(groups[0].file_paths.len(), 1);
+        assert!(groups[0].file_paths[0].ends_with("SM_Sword.fbx"));
+        assert!(groups[0].hint.contains("regex"));
+    }
+
+    #[test]
+    fn invalid_regex_silently_skipped_other_rules_still_fire() {
+        // A malformed regex should NOT poison the whole call — it's
+        // skipped at compile time, the remaining rules carry on.
+        let s = scan("/p", &["/p/SM_Sword.fbx", "/p/T_Hero.png"]);
+        let rules = vec![
+            LearnedRule::FilenameRegex {
+                pattern: "[unbalanced(".into(),
+                tags: vec!["broken".into()],
+                confidence: 0.95,
+            },
+            LearnedRule::FilenameToken {
+                pattern: "Hero".into(),
+                tags: vec!["hero".into()],
+                confidence: 0.99,
+            },
+        ];
+        let groups = RuleSuggester::new(rules).suggest(&s);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].name, "hero");
     }
 
     #[test]

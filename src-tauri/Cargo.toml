@@ -40,6 +40,11 @@ toml = "0.8"
 git2 = { version = "0.20", features = ["vendored-openssl"] }
 ignore = "0.4"
 globset = "0.4"
+# `default-features = false` drops the unicode tables we don't need (asset
+# paths are ASCII-dominant; learned-regex rules don't use \p{...} classes).
+# Saves ~1MB binary and a few seconds compile. `std` feature is required —
+# without it the crate is no_std-only and won't expose Regex::new at all.
+regex = { version = "1", default-features = false, features = ["std", "perf"] }
 chrono = "0.4"
 rayon = "1.10"
 uuid = { version = "1", features = ["v4"] }
