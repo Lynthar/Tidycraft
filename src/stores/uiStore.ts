@@ -33,6 +33,59 @@ export interface AiSuggestedTag {
   source?: "existing" | "new";
 }
 
+// --- Learning mode mirrors of Rust llm::learning structs ---
+
+export type AiTagCategory = "type" | "style" | "mood" | "subject" | "other";
+
+export interface AiInferredConventions {
+  naming: string;
+  directories: string;
+  existing_tag_meanings: Record<string, string>;
+}
+
+export interface AiNewTagHint {
+  label: string;
+  category: AiTagCategory;
+  confidence: number;
+}
+
+export interface AiSampleTagSet {
+  asset_path: string;
+  matched_existing: string[];
+  suggested_new: AiNewTagHint[];
+}
+
+export interface AiTagGap {
+  label: string;
+  category: AiTagCategory;
+  reason: string;
+}
+
+/** Tagged union mirroring Rust `LearnedRule` (serde tag = "kind"). */
+export type AiLearnedRule =
+  | { kind: "filename_token"; pattern: string; tags: string[]; confidence: number }
+  | { kind: "path_prefix"; pattern: string; tags: string[]; confidence: number }
+  | { kind: "path_segment"; pattern: string; tags: string[]; confidence: number }
+  | { kind: "filename_regex"; pattern: string; tags: string[]; confidence: number };
+
+export interface AiLearningResult {
+  inferred_conventions: AiInferredConventions;
+  sample_tags: AiSampleTagSet[];
+  tag_gaps: AiTagGap[];
+  rules: AiLearnedRule[];
+  usage: { input_tokens: number; output_tokens: number; cached: boolean };
+}
+
+/** On-disk shape from `tidycraft.ai.toml` — mirrors Rust `AiRulesDoc`. */
+export interface AiRulesDoc {
+  last_learned: string;
+  prompt_version: number;
+  sampling_depth: number;
+  provider_used: string;
+  model_used: string;
+  rules: AiLearnedRule[];
+}
+
 interface UiState {
   cmdkOpen: boolean;
   settingsOpen: boolean;
@@ -52,6 +105,15 @@ interface UiState {
   aiResultData: AiTagResponse | null;
   aiResultPaths: string[];
 
+  /** Learning-setup modal: theme/goal + sampling depth + cost preview. */
+  learnSetupOpen: boolean;
+  /** Review panel for an LLM learning result. `learnReviewData` carries
+   *  either a fresh result (just-finished learning run) or a loaded
+   *  AiRulesDoc rehydrated into a synthetic LearningResult so "Review
+   *  rules" works without re-running the call. */
+  learnReviewOpen: boolean;
+  learnReviewData: AiLearningResult | null;
+
   setCmdkOpen: (open: boolean) => void;
   toggleCmdk: () => void;
   setSettingsOpen: (open: boolean) => void;
@@ -67,6 +129,9 @@ interface UiState {
     data?: AiTagResponse,
     paths?: string[]
   ) => void;
+
+  setLearnSetupOpen: (open: boolean) => void;
+  setLearnReviewOpen: (open: boolean, data?: AiLearningResult) => void;
 }
 
 export const useUiStore = create<UiState>((set, get) => ({
@@ -79,6 +144,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   aiResultOpen: false,
   aiResultData: null,
   aiResultPaths: [],
+  learnSetupOpen: false,
+  learnReviewOpen: false,
+  learnReviewData: null,
   setCmdkOpen: (open) => set({ cmdkOpen: open }),
   toggleCmdk: () => set({ cmdkOpen: !get().cmdkOpen }),
   setSettingsOpen: (open) => set({ settingsOpen: open }),
@@ -94,5 +162,11 @@ export const useUiStore = create<UiState>((set, get) => ({
       aiResultOpen: open,
       aiResultData: open ? data ?? null : null,
       aiResultPaths: open ? paths ?? [] : [],
+    }),
+  setLearnSetupOpen: (open) => set({ learnSetupOpen: open }),
+  setLearnReviewOpen: (open, data) =>
+    set({
+      learnReviewOpen: open,
+      learnReviewData: open ? data ?? null : null,
     }),
 }));

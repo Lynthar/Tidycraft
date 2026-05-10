@@ -17,10 +17,13 @@ use thiserror::Error;
 pub mod cache;
 pub mod claude;
 pub mod cost;
+pub mod learning;
 pub mod ollama;
 pub mod openai;
 pub mod project_meta;
 pub mod prompts;
+pub mod rule_store;
+pub mod sampler;
 
 // ============ Data schemas ============
 //
@@ -218,6 +221,18 @@ pub trait LLMProvider: Send + Sync {
     /// Make the actual API call. Day 1 stubs return
     /// `LLMError::NotImplemented`; Day 2 fills in the HTTP work.
     async fn suggest_tags(&self, request: &TagRequest) -> Result<TagResponse, LLMError>;
+
+    /// Learning-mode call (Day 6). Sends the project samples + tag
+    /// system + project meta to the LLM and parses a `LearningResult`
+    /// (inferred conventions + sample tags + tag gaps + heuristic
+    /// rules). Default returns `NotImplemented` so future providers
+    /// can be added without forcing an immediate learn impl.
+    async fn learn_project(
+        &self,
+        _request: &learning::LearnRequest,
+    ) -> Result<learning::LearningResult, LLMError> {
+        Err(LLMError::NotImplemented)
+    }
 }
 
 // ============ Factory ============
@@ -269,6 +284,28 @@ pub fn parse_suggestions(text: &str) -> Result<Vec<TagSuggestion>, LLMError> {
         }
     }
 
+    Err(LLMError::ParseError(text.to_string()))
+}
+
+/// Generic 2-tier parser for LLM JSON output. Tier 1: parse directly.
+/// Tier 2: strip a ```json``` (or bare ```) markdown fence and retry.
+/// On both failures returns `LLMError::ParseError(original_text)` so
+/// the UI can show "model said …" verbatim.
+///
+/// `parse_suggestions` builds on this by wrapping the parse target in
+/// a `{ suggestions: T }` envelope; `learn_project` passes
+/// `LearningResult` directly.
+pub fn parse_json_lenient<T: serde::de::DeserializeOwned>(
+    text: &str,
+) -> Result<T, LLMError> {
+    if let Ok(v) = serde_json::from_str::<T>(text) {
+        return Ok(v);
+    }
+    if let Some(stripped) = strip_markdown_fence(text) {
+        if let Ok(v) = serde_json::from_str::<T>(stripped) {
+            return Ok(v);
+        }
+    }
     Err(LLMError::ParseError(text.to_string()))
 }
 

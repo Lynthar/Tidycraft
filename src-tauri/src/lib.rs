@@ -430,6 +430,161 @@ fn llm_clear_cache() -> Result<u64, String> {
     Ok(before)
 }
 
+/// Day 6: AI Learning entry point. Samples the project, sends the
+/// samples + tag system + project meta to the LLM, persists the
+/// returned heuristic rules to `<project>/tidycraft.ai.toml`, and
+/// returns the full `LearningResult` for the review panel.
+#[tauri::command]
+async fn learn_project_conventions(
+    project_id: String,
+    provider: String,
+    model: String,
+    api_key: Option<String>,
+    endpoint: Option<String>,
+    sampling_depth: usize,
+) -> Result<llm::learning::LearningResult, String> {
+    // Clamp depth to the documented 3..=30 range so a UI bug or a
+    // direct command call doesn't surprise the user with a 200-file-
+    // per-dir prompt that blows their token budget.
+    let depth = sampling_depth.clamp(3, 30);
+
+    let cfg = llm::ProviderConfig {
+        api_key,
+        endpoint,
+        model: model.clone(),
+    };
+    let prov = llm::make_provider(&provider, cfg).map_err(String::from)?;
+
+    // Snapshot scan + tags + root_path inside the project lock.
+    // Drop the lock before any IO (toml read) or async work
+    // (provider call) — same pattern as `llm_suggest_tags`.
+    const SAMPLES_PER_TAG: usize = 5;
+    let snapshot = project::with_mut(&project_id, |state| {
+        let root = state.root_path.clone();
+        let scan = state.cached_scan.clone().ok_or("Project hasn't been scanned yet")?;
+        let tags_data = state.ensure_tags();
+        let mut existing: Vec<llm::ExistingTagContext> =
+            Vec::with_capacity(tags_data.tags.len());
+        for tag in &tags_data.tags {
+            let mut samples = tags_data.get_assets_with_tag(&tag.id);
+            samples.truncate(SAMPLES_PER_TAG);
+            existing.push(llm::ExistingTagContext {
+                name: tag.name.clone(),
+                description: tag.description.clone(),
+                sample_paths: samples,
+            });
+        }
+        Ok((root, scan, existing))
+    })?;
+    let (root_path, scan, existing_tags) = snapshot;
+
+    // Read [project] meta outside the lock.
+    let project_meta: Option<llm::project_meta::ProjectMeta> = {
+        let toml_path = Path::new(&root_path).join("tidycraft.toml");
+        std::fs::read_to_string(&toml_path)
+            .ok()
+            .and_then(|content| llm::project_meta::ProjectMeta::from_toml(&content).ok())
+            .filter(|m| !m.is_empty())
+    };
+
+    // Deterministic-but-project-specific seed: hash the root path so
+    // re-running on the same project gives the same samples, but two
+    // different projects don't accidentally line up.
+    let seed = {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut h = DefaultHasher::new();
+        root_path.hash(&mut h);
+        h.finish()
+    };
+    let samples = llm::sampler::sample_directories(&scan, depth, seed);
+
+    let request = llm::learning::LearnRequest {
+        samples,
+        project_meta,
+        existing_tags,
+        model: model.clone(),
+        sampling_depth: depth,
+        prompt_version: llm::learning::LEARNING_PROMPT_VERSION,
+    };
+
+    let result = prov.learn_project(&request).await.map_err(String::from)?;
+
+    // Persist rules to <project>/tidycraft.ai.toml. Save errors are
+    // non-fatal — the user already has the result in hand; worst case
+    // they re-learn next time. We log via eprintln (no log crate yet).
+    let doc = llm::rule_store::AiRulesDoc {
+        last_learned: chrono::Utc::now().to_rfc3339(),
+        prompt_version: llm::learning::LEARNING_PROMPT_VERSION,
+        sampling_depth: depth,
+        provider_used: provider,
+        model_used: model,
+        rules: result.rules.clone(),
+    };
+    if let Err(e) = doc.save(Path::new(&root_path)) {
+        eprintln!("[learn_project_conventions] save tidycraft.ai.toml failed: {e}");
+    }
+
+    Ok(result)
+}
+
+/// Read the project's `tidycraft.ai.toml` if it exists. Frontend uses
+/// this to populate the AITagPanel header status badge ("AI · 5d ago,
+/// N rules") and to pre-fill LearnReviewPanel when the user clicks
+/// Review without re-running the call.
+#[tauri::command]
+fn read_ai_rules(project_id: String) -> Result<Option<llm::rule_store::AiRulesDoc>, String> {
+    project::with_ref(&project_id, |state| {
+        llm::rule_store::AiRulesDoc::load(Path::new(&state.root_path))
+    })
+}
+
+/// Persist a hand-edited rule list (e.g. user deleted unwanted rules in
+/// LearnReviewPanel before applying). Preserves the original metadata
+/// (last_learned, provider_used, etc.) loaded from disk; only `rules`
+/// is replaced. If no doc exists yet (shouldn't happen — we only call
+/// save after a successful learn), creates a fresh one with current
+/// timestamp.
+#[tauri::command]
+fn save_ai_rules(
+    project_id: String,
+    rules: Vec<llm::learning::LearnedRule>,
+) -> Result<(), String> {
+    project::with_ref(&project_id, |state| {
+        let root = Path::new(&state.root_path);
+        let mut doc = llm::rule_store::AiRulesDoc::load(root)?.unwrap_or_else(|| {
+            llm::rule_store::AiRulesDoc {
+                last_learned: chrono::Utc::now().to_rfc3339(),
+                prompt_version: llm::learning::LEARNING_PROMPT_VERSION,
+                sampling_depth: 5,
+                provider_used: "unknown".into(),
+                model_used: "unknown".into(),
+                rules: Vec::new(),
+            }
+        });
+        doc.rules = rules;
+        doc.save(root)
+    })
+}
+
+/// Read the `[project]` block from `tidycraft.toml`. Frontend uses this
+/// to pre-fill LearnSetupModal's theme/goal inputs from the project's
+/// existing config. Empty / missing → returns defaults (`None` fields)
+/// so the inputs render as placeholders.
+#[tauri::command]
+fn read_project_meta(project_id: String) -> Result<llm::project_meta::ProjectMeta, String> {
+    project::with_ref(&project_id, |state| {
+        let toml_path = Path::new(&state.root_path).join("tidycraft.toml");
+        if !toml_path.exists() {
+            return Ok(llm::project_meta::ProjectMeta::default());
+        }
+        let content = std::fs::read_to_string(&toml_path)
+            .map_err(|e| format!("Failed to read tidycraft.toml: {e}"))?;
+        llm::project_meta::ProjectMeta::from_toml(&content)
+            .map_err(|e| format!("Failed to parse [project]: {e}"))
+    })
+}
+
 #[tauri::command]
 fn llm_cache_size() -> u64 {
     llm::cache::size()
@@ -644,7 +799,29 @@ fn suggest_tags(project_id: String) -> Result<Vec<TagGroup>, String> {
             .map(|t| t.name.clone())
             .collect();
         let scan = state.require_scan()?;
-        let mut groups = HeuristicSuggester.suggest(scan);
+        let root = Path::new(&state.root_path);
+
+        // Day 7: prefer AI-derived rules when present. RuleSuggester
+        // produces TagGroup[] in the same shape so the frontend treats
+        // both sources identically — only the `hint` string changes
+        // (heuristic groups say "filename token", AI groups say
+        // "ai · prefix Characters/Hero/" etc.).
+        //
+        // Fallback to heuristic suggester when:
+        //   - no `tidycraft.ai.toml` exists yet (user hasn't run learning)
+        //   - the file exists but the rule list is empty
+        //   - the file is corrupt (load error) — we log + fall back
+        //     rather than failing the whole call so AITagPanel still
+        //     shows *something*.
+        let mut groups: Vec<TagGroup> =
+            match analyzer::rule_suggest::load_or_fallback(scan, root) {
+                Ok(g) => g,
+                Err(e) => {
+                    eprintln!("[suggest_tags] AI rule load failed, falling back: {e}");
+                    HeuristicSuggester.suggest(scan)
+                }
+            };
+
         groups.retain(|g| {
             !already_suggested.contains(&format!("{} (suggested)", g.name))
         });
@@ -2114,7 +2291,11 @@ pub fn run() {
             llm_clear_cache,
             llm_cache_size,
             llm_default_models,
-            llm_ollama_models
+            llm_ollama_models,
+            learn_project_conventions,
+            read_ai_rules,
+            save_ai_rules,
+            read_project_meta
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

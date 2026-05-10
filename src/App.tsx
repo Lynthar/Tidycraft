@@ -15,6 +15,8 @@ import { TagManager } from "./components/TagManager";
 import { AITagPanel } from "./components/AITagPanel";
 import { AIAnalyzeModal } from "./components/AIAnalyzeModal";
 import { AIResultPanel } from "./components/AIResultPanel";
+import { LearnSetupModal } from "./components/LearnSetupModal";
+import { LearnReviewPanel } from "./components/LearnReviewPanel";
 import { useProjectStore } from "./stores/projectStore";
 import { useUiStore } from "./stores/uiStore";
 import { restoreSession } from "./stores/sessionStore";
@@ -220,6 +222,8 @@ function App() {
       <AITagPanel />
       <AIAnalyzeModal />
       <AIResultPanel />
+      <LearnSetupModal />
+      <LearnReviewPanel />
     </div>
   );
 }

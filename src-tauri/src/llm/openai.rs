@@ -17,8 +17,9 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 use super::{
-    cost, project_meta::ProjectMeta, prompts, suggest_with_cache, AssetInput, CostEstimate,
-    ExistingTagContext, LLMError, LLMProvider, ProviderConfig, TagRequest, TagResponse, Usage,
+    cost, learning, parse_json_lenient, project_meta::ProjectMeta, prompts, suggest_with_cache,
+    AssetInput, CostEstimate, ExistingTagContext, LLMError, LLMProvider, ProviderConfig,
+    TagRequest, TagResponse, Usage,
 };
 
 pub const DEFAULT_MODEL: &str = "gpt-5.4-mini";
@@ -254,6 +255,107 @@ impl LLMProvider for OpenAIProvider {
         })
         .await
     }
+
+    async fn learn_project(
+        &self,
+        request: &learning::LearnRequest,
+    ) -> Result<learning::LearningResult, LLMError> {
+        let api_key = self
+            .config
+            .api_key
+            .clone()
+            .ok_or_else(|| LLMError::NoApiKey("openai".into()))?;
+        let model = self.config.model.clone();
+        let endpoint = self
+            .config
+            .endpoint
+            .clone()
+            .unwrap_or_else(|| ENDPOINT.to_string());
+        let user = prompts::build_learning_prompt(
+            &request.samples,
+            request.project_meta.as_ref(),
+            &request.existing_tags,
+        );
+        let (text, usage) =
+            send_text_chat(&api_key, &model, &endpoint, prompts::SYSTEM_PROMPT_LEARNING, &user)
+                .await?;
+        let mut result: learning::LearningResult = parse_json_lenient(&text)?;
+        result.usage = usage;
+        Ok(result)
+    }
+}
+
+/// Text-only chat. Same scaffolding as `call_openai` but the user
+/// message is a plain string instead of a content-block array.
+/// `response_format: json_object` keeps the model's output JSON-clean.
+async fn send_text_chat(
+    api_key: &str,
+    model: &str,
+    endpoint: &str,
+    system: &str,
+    user: &str,
+) -> Result<(String, Usage), LLMError> {
+    let body = OpenAIRequest {
+        model,
+        messages: vec![
+            OpenAIMessage {
+                role: "system",
+                content: MessageContent::Text(system.to_string()),
+            },
+            OpenAIMessage {
+                role: "user",
+                content: MessageContent::Text(user.to_string()),
+            },
+        ],
+        response_format: ResponseFormat {
+            kind: "json_object",
+        },
+    };
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| LLMError::Network(e.to_string()))?;
+    let resp = client
+        .post(endpoint)
+        .bearer_auth(api_key)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                LLMError::Network("request timed out".into())
+            } else {
+                LLMError::Network(e.to_string())
+            }
+        })?;
+    let status = resp.status();
+    if !status.is_success() {
+        let body_preview = resp.text().await.unwrap_or_default();
+        return Err(match status.as_u16() {
+            401 | 403 => LLMError::NoApiKey("openai".into()),
+            429 => LLMError::RateLimit,
+            500..=599 => LLMError::Network(format!("OpenAI {status}: {body_preview}")),
+            _ => LLMError::Other(format!("OpenAI {status}: {body_preview}")),
+        });
+    }
+    let parsed: OpenAIResponse = resp
+        .json()
+        .await
+        .map_err(|e| LLMError::ParseError(format!("OpenAI JSON: {e}")))?;
+    let text = parsed
+        .choices
+        .into_iter()
+        .next()
+        .map(|c| c.message.content)
+        .ok_or_else(|| LLMError::ParseError("OpenAI response had no choices".into()))?;
+    Ok((
+        text,
+        Usage {
+            input_tokens: parsed.usage.prompt_tokens,
+            output_tokens: parsed.usage.completion_tokens,
+            cached: false,
+        },
+    ))
 }
 
 #[cfg(test)]

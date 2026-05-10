@@ -79,6 +79,7 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
   const setTagManagerOpen = useUiStore((s) => s.setTagManagerOpen);
   const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
+  const setLearnSetupOpen = useUiStore((s) => s.setLearnSetupOpen);
 
   const projectPath = useProjectStore((s) => s.projectPath);
   const scanResult = useProjectStore((s) => s.scanResult);
@@ -161,6 +162,22 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
         icon: <RefreshCw size={13} />,
         onSelect: () => {
           openProject(projectPath, { force: true });
+          close();
+        },
+      });
+    }
+
+    // AI Learning entries — only meaningful when there's a project
+    // open. Sit alongside Run Analysis since both are project-level
+    // long-running ops.
+    if (hasProject) {
+      list.push({
+        id: "ai-learn",
+        section: t("commandPalette.section.suggestions"),
+        label: t("aiTagPanel.runLearning"),
+        icon: <Sparkles size={13} />,
+        onSelect: () => {
+          setLearnSetupOpen(true);
           close();
         },
       });

@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { Sparkles, X } from "lucide-react";
+import { Sparkles, X, RotateCw, Eye, Play } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
-import { useUiStore } from "../stores/uiStore";
+import { useUiStore, type AiRulesDoc, type AiLearningResult } from "../stores/uiStore";
 import { useProjectStore } from "../stores/projectStore";
 import { useTagsStore } from "../stores/tagsStore";
 import { useSelectionStore } from "../stores/selectionStore";
@@ -28,6 +28,8 @@ export function AITagPanel() {
   const { t } = useTranslation();
   const aiPanelOpen = useUiStore((s) => s.aiPanelOpen);
   const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
+  const setLearnSetupOpen = useUiStore((s) => s.setLearnSetupOpen);
+  const setLearnReviewOpen = useUiStore((s) => s.setLearnReviewOpen);
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const scanResult = useProjectStore((s) => s.scanResult);
   const setViewMode = useProjectStore((s) => s.setViewMode);
@@ -43,6 +45,65 @@ export function AITagPanel() {
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [applyingAll, setApplyingAll] = useState(false);
   const [generatedAt, setGeneratedAt] = useState<Date | null>(null);
+  /// AI rules document loaded from `tidycraft.ai.toml`. `undefined` =
+  /// not yet probed; `null` = probed and absent (not yet learned).
+  const [rulesDoc, setRulesDoc] = useState<AiRulesDoc | null | undefined>(
+    undefined
+  );
+
+  // Probe rule store on open + when active project changes so the
+  // status badge reflects the current state.
+  useEffect(() => {
+    if (!aiPanelOpen || !activeProjectId) {
+      setRulesDoc(undefined);
+      return;
+    }
+    let cancelled = false;
+    invoke<AiRulesDoc | null>("read_ai_rules", { projectId: activeProjectId })
+      .then((d) => {
+        if (!cancelled) setRulesDoc(d);
+      })
+      .catch((e) => {
+        console.warn("[AITagPanel] read_ai_rules failed:", e);
+        if (!cancelled) setRulesDoc(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [aiPanelOpen, activeProjectId]);
+
+  const handleReview = async () => {
+    if (!activeProjectId || !rulesDoc) return;
+    // Synthesize a minimal LearningResult from the saved rules so
+    // LearnReviewPanel can render. We don't have the original
+    // conventions / sample_tags / tag_gaps after persistence — only
+    // rules survived the round-trip — so those sections render empty.
+    const synthesized: AiLearningResult = {
+      inferred_conventions: {
+        naming: "",
+        directories: "",
+        existing_tag_meanings: {},
+      },
+      sample_tags: [],
+      tag_gaps: [],
+      rules: rulesDoc.rules,
+      usage: { input_tokens: 0, output_tokens: 0, cached: true },
+    };
+    setLearnReviewOpen(true, synthesized);
+  };
+
+  // Days-since helper for "5d ago" display. Negative / future
+  // timestamps fall back to "today" rather than rendering nonsense.
+  const daysAgo = (iso: string): string => {
+    const t0 = new Date(iso).getTime();
+    if (!isFinite(t0)) return "?";
+    const diffDays = Math.max(
+      0,
+      Math.floor((Date.now() - t0) / (1000 * 60 * 60 * 24))
+    );
+    if (diffDays === 0) return t("aiTagPanel.today");
+    return t("aiTagPanel.daysAgo", { count: diffDays });
+  };
 
   useEffect(() => {
     if (!aiPanelOpen) return;
@@ -146,8 +207,46 @@ export function AITagPanel() {
           <span className="tc-aitag-spark">
             <Sparkles size={14} />
           </span>
-          <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-            <span className="tc-aitag-title">{t("aiTagPanel.title")}</span>
+          <div style={{ display: "flex", flexDirection: "column", minWidth: 0, flex: 1 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+              <span className="tc-aitag-title">{t("aiTagPanel.title")}</span>
+              {/* Source badge: AI rules / Heuristic. Compact pill that
+                  always tells the user where suggestions came from. */}
+              {rulesDoc ? (
+                <span
+                  style={{
+                    fontSize: 10,
+                    padding: "1px 6px",
+                    borderRadius: 999,
+                    background: "color-mix(in oklch, var(--primary) 12%, transparent)",
+                    color: "var(--primary)",
+                    border: "1px solid color-mix(in oklch, var(--primary) 30%, transparent)",
+                    whiteSpace: "nowrap",
+                  }}
+                  title={t("aiTagPanel.badgeAiTitle", {
+                    when: daysAgo(rulesDoc.last_learned),
+                    count: rulesDoc.rules.length,
+                  })}
+                >
+                  🧠 AI · {daysAgo(rulesDoc.last_learned)}
+                </span>
+              ) : rulesDoc === null ? (
+                <span
+                  style={{
+                    fontSize: 10,
+                    padding: "1px 6px",
+                    borderRadius: 999,
+                    background: "var(--panel-2)",
+                    color: "var(--text-3)",
+                    border: "1px solid var(--line)",
+                    whiteSpace: "nowrap",
+                  }}
+                  title={t("aiTagPanel.badgeHeuristicTitle")}
+                >
+                  {t("aiTagPanel.badgeHeuristic")}
+                </span>
+              ) : null}
+            </div>
             <span className="tc-aitag-sub">
               {generatedAt
                 ? t("aiTagPanel.subtitle", {
@@ -156,6 +255,42 @@ export function AITagPanel() {
                 : t("aiTagPanel.subtitleLoading")}
             </span>
           </div>
+          {/* Learning controls. Minimal inline buttons (not a dropdown)
+              for now; if it gets crowded we can collapse later. Run is
+              shown when no rules exist; Re-learn + Review when they do. */}
+          {activeProjectId && (
+            <div style={{ display: "flex", gap: 2 }}>
+              {!rulesDoc ? (
+                <button
+                  className="tc-aitag-close"
+                  onClick={() => setLearnSetupOpen(true)}
+                  title={t("aiTagPanel.runLearning")}
+                  aria-label={t("aiTagPanel.runLearning")}
+                >
+                  <Play size={13} />
+                </button>
+              ) : (
+                <>
+                  <button
+                    className="tc-aitag-close"
+                    onClick={handleReview}
+                    title={t("aiTagPanel.reviewRules")}
+                    aria-label={t("aiTagPanel.reviewRules")}
+                  >
+                    <Eye size={13} />
+                  </button>
+                  <button
+                    className="tc-aitag-close"
+                    onClick={() => setLearnSetupOpen(true)}
+                    title={t("aiTagPanel.relearn")}
+                    aria-label={t("aiTagPanel.relearn")}
+                  >
+                    <RotateCw size={13} />
+                  </button>
+                </>
+              )}
+            </div>
+          )}
           <button
             className="tc-aitag-close"
             onClick={close}
