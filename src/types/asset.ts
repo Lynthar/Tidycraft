@@ -33,6 +33,13 @@ export interface AssetMetadata {
   // Texture extras
   color_space?: string;
   mipmap_count?: number;
+  /** When set, identifies this file as an authoring/source file from
+   *  a DCC tool ("blender" / "maya_ascii" / "maya_binary" / "max" /
+   *  "zbrush" / "substance_painter" / "substance_designer" / "marvelous"
+   *  / "photoshop" / "modo" / "houdini" / "cinema4d"). The dcc_source
+   *  analyzer pairs sources with their exports and warns when the
+   *  source's mtime is newer. Mirror of Rust `AssetMetadata.dcc_source_kind`. */
+  dcc_source_kind?: string;
 }
 
 export interface AssetInfo {

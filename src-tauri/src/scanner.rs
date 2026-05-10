@@ -73,6 +73,13 @@ pub struct AssetMetadata {
     pub color_space: Option<String>,
     // Mipmap level count (DDS). 1 = base only, no mipmaps.
     pub mipmap_count: Option<u32>,
+    // DCC tool identifier when the file is an authoring/source format
+    // (`.blend` / `.ma` / `.psd` / `.spp` / etc). Values are the stable
+    // strings returned by `dcc_source_kind_for` — see that function for
+    // the canonical list. None for runtime exports (`.fbx` / `.png` / ...)
+    // and non-asset files. Consumed by the dcc_source analyzer to pair
+    // sources with exports and warn when sources are newer.
+    pub dcc_source_kind: Option<String>,
 }
 
 impl Default for AssetMetadata {
@@ -92,6 +99,7 @@ impl Default for AssetMetadata {
             video_codec: None,
             color_space: None,
             mipmap_count: None,
+            dcc_source_kind: None,
         }
     }
 }
@@ -205,11 +213,20 @@ pub(crate) fn path_to_string(path: &Path) -> String {
 /// Get asset type from file extension
 fn get_asset_type(extension: &str) -> AssetType {
     match extension.to_lowercase().as_str() {
-        // Textures
-        "png" | "jpg" | "jpeg" | "tga" | "psd" | "tiff" | "tif" | "exr" | "hdr" | "webp"
-        | "dds" | "bmp" | "gif" | "svg" => AssetType::Texture,
-        // Models
-        "fbx" | "obj" | "gltf" | "glb" | "blend" | "dae" | "3ds" | "max" | "vox" => AssetType::Model,
+        // Textures + texture-source DCC formats. .psb is Photoshop's
+        // big-document variant; .spp is Substance Painter's project
+        // file (1→N, paired against generated PBR textures); .sbs is
+        // Substance Designer's source graph (typically produces .sbsar
+        // or PNG output).
+        "png" | "jpg" | "jpeg" | "tga" | "psd" | "psb" | "tiff" | "tif" | "exr" | "hdr" | "webp"
+        | "dds" | "bmp" | "gif" | "svg" | "spp" | "sbs" => AssetType::Texture,
+        // Models + 3D-source DCC formats. ZBrush (ztl/zpr), Maya
+        // (ma/mb), 3ds Max (max), Modo (lxo), Houdini (hip/hipnc/hiplc),
+        // Cinema 4D (c4d), Marvelous Designer (zprj — garment, exports
+        // to obj/fbx). Blender (blend) was already in this list.
+        "fbx" | "obj" | "gltf" | "glb" | "blend" | "dae" | "3ds" | "max" | "vox"
+        | "ma" | "mb" | "ztl" | "zpr" | "lxo" | "hip" | "hipnc" | "hiplc" | "c4d"
+        | "zprj" => AssetType::Model,
         // Audio
         "wav" | "mp3" | "ogg" | "flac" | "aiff" | "aac" | "wma" => AssetType::Audio,
         // Video
@@ -226,19 +243,59 @@ fn get_asset_type(extension: &str) -> AssetType {
     }
 }
 
+/// Map an extension to a DCC tool identifier when the file is an
+/// authoring/source format. Returns `None` for runtime exports
+/// (`.fbx` / `.png` / ...) and non-asset files. The string returned is
+/// the stable wire-format value persisted into `AssetMetadata.dcc_source_kind`
+/// — bumping a value here is a breaking change for the dcc_source
+/// analyzer's config matching.
+///
+/// Why a separate function (not just `get_asset_type` returning a
+/// richer enum): asset_type is the user-visible category (Texture /
+/// Model / etc.); dcc_source_kind is an orthogonal "source vs
+/// runtime" axis. A `.blend` is both a Model AND a Blender source —
+/// folding the two into one enum would force `.blend` to pick one
+/// and break the AssetList type filter for users who expect to see
+/// `.blend` under "Models".
+pub fn dcc_source_kind_for(extension: &str) -> Option<&'static str> {
+    match extension.to_lowercase().as_str() {
+        "blend" => Some("blender"),
+        "ma" => Some("maya_ascii"),
+        "mb" => Some("maya_binary"),
+        "max" => Some("max"),
+        "ztl" | "zpr" => Some("zbrush"),
+        "spp" => Some("substance_painter"),
+        "sbs" => Some("substance_designer"),
+        "zprj" => Some("marvelous"),
+        "psd" | "psb" => Some("photoshop"),
+        "lxo" => Some("modo"),
+        "hip" | "hipnc" | "hiplc" => Some("houdini"),
+        "c4d" => Some("cinema4d"),
+        _ => None,
+    }
+}
+
 /// Dispatch metadata parsing for a single asset based on its type + extension.
 /// Used by both the full scan and the incremental per-file reparse so the set
 /// of supported formats lives in one place.
+///
+/// After per-format parsing, files identified as a DCC source by
+/// `dcc_source_kind_for` get their `dcc_source_kind` field tagged —
+/// this happens even when format-specific parsing returned None (e.g.
+/// `.blend` has no metadata extractor, but we still want the kind
+/// label so the dcc_source analyzer can find it). For files that are
+/// both DCC sources AND parseable (`.psd` parsed via `image` would
+/// be such a case if we enabled the feature), the parsed metadata is
+/// preserved and the kind field is overlaid.
 fn parse_metadata_for(path: &Path, extension: &str, asset_type: &AssetType) -> Option<AssetMetadata> {
     let ext = extension.to_lowercase();
-    match asset_type {
+    let parsed: Option<AssetMetadata> = match asset_type {
         AssetType::Texture => match ext.as_str() {
             // PNG gets the color-space chunk scan on top of the image::open pass.
-            "png" => {
-                let mut m = parse_image_metadata(path)?;
+            "png" => parse_image_metadata(path).map(|mut m| {
                 m.color_space = parse_png_color_space(path);
-                Some(m)
-            }
+                m
+            }),
             // Other formats the `image` crate fully decodes (enabled via Cargo features).
             "jpg" | "jpeg" | "bmp" | "gif" | "tga"
             | "tif" | "tiff" | "webp" | "hdr" | "exr" => parse_image_metadata(path),
@@ -265,7 +322,18 @@ fn parse_metadata_for(path: &Path, extension: &str, asset_type: &AssetType) -> O
             _ => None, // AVI: no pure-Rust parser we ship with yet
         },
         _ => None,
+    };
+
+    // Tag DCC source kind. Even when format-specific parsing failed
+    // (most authoring formats — .blend, .ma, .psd — have no Rust
+    // parser), we still produce a metadata entry carrying the kind
+    // so the dcc_source analyzer can reason about source/export pairs.
+    if let Some(kind) = dcc_source_kind_for(&ext) {
+        let mut m = parsed.unwrap_or_default();
+        m.dcc_source_kind = Some(kind.to_string());
+        return Some(m);
     }
+    parsed
 }
 
 /// Parse image metadata (dimensions, alpha)
@@ -1432,6 +1500,88 @@ mod tests {
         assert!(matches!(get_asset_type("blend"), AssetType::Model));
         assert!(matches!(get_asset_type("vox"), AssetType::Model));
         assert!(matches!(get_asset_type("FBX"), AssetType::Model));
+    }
+
+    #[test]
+    fn test_get_asset_type_dcc_source_models() {
+        // Newly-recognized 3D-source DCC formats. They land under
+        // AssetType::Model (orthogonal axis from dcc_source_kind).
+        for ext in ["ma", "mb", "ztl", "zpr", "lxo", "hip", "hipnc", "hiplc", "c4d", "zprj"] {
+            assert!(
+                matches!(get_asset_type(ext), AssetType::Model),
+                "{ext} should classify as Model"
+            );
+        }
+    }
+
+    #[test]
+    fn test_get_asset_type_dcc_source_textures() {
+        // Texture-source DCC formats. .psb is Photoshop big-doc;
+        // .spp / .sbs are Substance project / graph sources.
+        for ext in ["psb", "spp", "sbs"] {
+            assert!(
+                matches!(get_asset_type(ext), AssetType::Texture),
+                "{ext} should classify as Texture"
+            );
+        }
+    }
+
+    #[test]
+    fn test_dcc_source_kind_recognizes_authoring_formats() {
+        assert_eq!(dcc_source_kind_for("blend"), Some("blender"));
+        assert_eq!(dcc_source_kind_for("BLEND"), Some("blender"));
+        assert_eq!(dcc_source_kind_for("ma"), Some("maya_ascii"));
+        assert_eq!(dcc_source_kind_for("mb"), Some("maya_binary"));
+        assert_eq!(dcc_source_kind_for("max"), Some("max"));
+        assert_eq!(dcc_source_kind_for("ztl"), Some("zbrush"));
+        assert_eq!(dcc_source_kind_for("zpr"), Some("zbrush"));
+        assert_eq!(dcc_source_kind_for("spp"), Some("substance_painter"));
+        assert_eq!(dcc_source_kind_for("sbs"), Some("substance_designer"));
+        assert_eq!(dcc_source_kind_for("zprj"), Some("marvelous"));
+        assert_eq!(dcc_source_kind_for("psd"), Some("photoshop"));
+        assert_eq!(dcc_source_kind_for("psb"), Some("photoshop"));
+        assert_eq!(dcc_source_kind_for("lxo"), Some("modo"));
+        assert_eq!(dcc_source_kind_for("hip"), Some("houdini"));
+        assert_eq!(dcc_source_kind_for("c4d"), Some("cinema4d"));
+    }
+
+    #[test]
+    fn test_dcc_source_kind_none_for_runtime_formats() {
+        // Runtime exports / regular assets are not labelled — they're
+        // identified by being on the "after" side of a source/export pair.
+        for ext in ["fbx", "glb", "gltf", "obj", "png", "jpg", "wav", "mp3", "json"] {
+            assert_eq!(
+                dcc_source_kind_for(ext),
+                None,
+                "{ext} should not be tagged as a DCC source"
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_metadata_tags_dcc_kind_when_no_parser() {
+        // .blend has no Rust metadata parser, but parse_metadata_for
+        // should still return Some(metadata) with dcc_source_kind set
+        // — the analyzer relies on this.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("character.blend");
+        fs::write(&path, b"FAKE BLEND HEADER").unwrap();
+        let m = parse_metadata_for(&path, "blend", &AssetType::Model).unwrap();
+        assert_eq!(m.dcc_source_kind.as_deref(), Some("blender"));
+        // Format-specific fields stay None — we have no parser.
+        assert!(m.vertex_count.is_none());
+    }
+
+    #[test]
+    fn test_parse_metadata_no_kind_for_runtime_export() {
+        // Sanity check: parsing a runtime format (here, missing
+        // file so parser returns None too) doesn't accidentally tag
+        // dcc_source_kind.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("ghost.fbx");
+        // Don't actually write — just confirm a None parse stays None.
+        let m = parse_metadata_for(&path, "fbx", &AssetType::Model);
+        assert!(m.is_none());
     }
 
     #[test]
