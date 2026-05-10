@@ -86,6 +86,16 @@ interface SettingsState {
    */
   aiPerAssetModeEnabled: boolean;
 
+  /**
+   * When true (default), the scanner honors `.gitignore` / `.ignore`
+   * files and skips hidden directories like `.git/` / `.vscode/`. Set
+   * false to scan everything — useful for projects whose actual
+   * assets live under gitignored paths (e.g. a vendored `Library/`).
+   * Toggling this on a project triggers a full rescan on the next
+   * `openProject` so the cache prunes the now-out-of-scope files.
+   */
+  respectGitignore: boolean;
+
   // ----- Actions -----
   setShowGitStatusIndicators: (show: boolean) => void;
   setShowBranchInfo: (show: boolean) => void;
@@ -99,6 +109,7 @@ interface SettingsState {
   setAiPrivacyConsent: (id: AiProviderId, consented: boolean) => void;
   resetAiPrivacyConsent: (id: AiProviderId) => void;
   setAiPerAssetModeEnabled: (enabled: boolean) => void;
+  setRespectGitignore: (respect: boolean) => void;
 }
 
 const STORAGE_KEY = "tidycraft-settings";
@@ -119,6 +130,12 @@ interface StoredSettings {
    * thumbnail-level analysis.
    */
   aiPerAssetModeEnabled: boolean;
+  /**
+   * Per-machine setting. See `SettingsState.respectGitignore` for
+   * full docs. Defaults to `true` for new installs; older shapes
+   * (pre-feature) merge to the default cleanly.
+   */
+  respectGitignore: boolean;
 }
 
 const DEFAULT_SETTINGS: StoredSettings = {
@@ -130,6 +147,7 @@ const DEFAULT_SETTINGS: StoredSettings = {
   aiProviders: DEFAULT_AI_PROVIDERS,
   aiPrivacyConsented: DEFAULT_AI_PRIVACY_CONSENTED,
   aiPerAssetModeEnabled: false,
+  respectGitignore: true,
 };
 
 /**
@@ -208,6 +226,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
     aiProviders: get().aiProviders,
     aiPrivacyConsented: get().aiPrivacyConsented,
     aiPerAssetModeEnabled: get().aiPerAssetModeEnabled,
+    respectGitignore: get().respectGitignore,
   });
 
   return {
@@ -219,6 +238,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
     aiProviders: initial.aiProviders,
     aiPrivacyConsented: initial.aiPrivacyConsented,
     aiPerAssetModeEnabled: initial.aiPerAssetModeEnabled,
+    respectGitignore: initial.respectGitignore,
 
     setShowGitStatusIndicators: (show: boolean) => {
       set({ showGitStatusIndicators: show });
@@ -281,6 +301,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
 
     setAiPerAssetModeEnabled: (enabled: boolean) => {
       set({ aiPerAssetModeEnabled: enabled });
+      saveSettings(snapshot());
+    },
+
+    setRespectGitignore: (respect: boolean) => {
+      set({ respectGitignore: respect });
       saveSettings(snapshot());
     },
   };

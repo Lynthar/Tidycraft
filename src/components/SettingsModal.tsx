@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { X, GitBranch, Palette, Wrench, Trash2, Image as ImageIcon, FileCode, ExternalLink, Sparkles, AlertTriangle } from "lucide-react";
+import { X, GitBranch, Palette, Wrench, Trash2, Image as ImageIcon, FileCode, ExternalLink, Sparkles, AlertTriangle, Filter } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
@@ -589,6 +589,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     setShowGitStatusIndicators,
     setShowBranchInfo,
     setShowAheadBehind,
+    respectGitignore,
+    setRespectGitignore,
   } = useSettingsStore();
   const preference = useThemeStore((s) => s.preference);
   const setPreference = useThemeStore((s) => s.setPreference);
@@ -845,6 +847,26 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               </h3>
             </div>
             <AiTaggingSection />
+          </div>
+
+          {/* Scanning Section — controls scanner behavior, not the
+              user's per-project tidycraft.toml [ignore] patterns
+              (those still come from the rules editor). */}
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <Filter size={16} className="text-primary" />
+              <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wide">
+                {t("settings.scanningSection")}
+              </h3>
+            </div>
+            <div className="pl-6">
+              <ToggleSwitch
+                checked={respectGitignore}
+                onChange={setRespectGitignore}
+                label={t("settings.respectGitignore")}
+                description={t("settings.respectGitignoreDesc")}
+              />
+            </div>
           </div>
 
           {/* Maintenance Section */}

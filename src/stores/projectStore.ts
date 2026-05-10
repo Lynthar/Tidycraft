@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { basename, dirname } from "../lib/pathUtils";
 import type { ScanResult, AssetInfo, ScanProgress, AssetType, ProjectType, AnalysisResult, UndoResult, HistoryEntry, GitInfo, GitStatusMap, GitFileStatus, FsChangeEvent } from "../types/asset";
+import { useSettingsStore } from "./settingsStore";
 
 // Per-project filesystem-watcher unlisten handles. Kept outside the zustand
 // store because function references don't belong in serialized state, and
@@ -487,10 +488,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         set(patch);
       });
 
+      // Read the user's "Respect .gitignore" setting at scan kickoff time.
+      // Toggling this setting after a scan kicks off has no effect on the
+      // in-flight scan — the next openProject call picks it up.
+      const respectGitignore = useSettingsStore.getState().respectGitignore;
+
       // Use incremental scan command
       const { result } = await invoke<{ result: ScanResult; stats: { cached_files: number; rescanned_files: number } }>(
         "scan_project_incremental",
-        { projectId, path }
+        { projectId, path, respectGitignore }
       );
 
       // Probe for a project-local `tidycraft.toml` so the UI can flag
