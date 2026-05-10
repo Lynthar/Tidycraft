@@ -130,6 +130,100 @@ ORM = ["ao", "roughness", "metallic"]
 MRA = ["metallic", "roughness", "ao"]
 RMA = ["roughness", "metallic", "ao"]
 
+# ─── DCC Source-File Linking ─── (cross-asset: pairs sources with exports)
+# DEFAULT: disabled. Pairs authoring source files (.blend / .ma / .psd /
+# .spp / .ztl / ...) with their runtime exports (.fbx / .png / .obj / ...)
+# by stem matching, then warns when the source's mtime is newer than the
+# export's — typically meaning the user edited the source but forgot to
+# re-export. Catches the "tweaked the mesh but forgot to bake new normals"
+# class of mistake before it ships.
+#
+# Limitations:
+# - mtime-based: `git checkout` / `git pull` synchronizes file mtimes,
+#   so cross-commit stale pairs escape detection. Catches LOCAL "edit +
+#   forgot to re-export" reliably.
+# - Phase 1 is 1→1 stem matching. Substance Painter `.spp` → multi-
+#   channel PNG output is approximated as 1→newest-PNG; future phase
+#   adds true 1→N pairing using PBR channel suffixes.
+[dcc_source]
+enabled = false
+# Tolerance for "source newer than export". `git pull` / `clone` touches
+# every file's mtime to current time, and some filesystems have > 1s
+# granularity. 60s avoids spurious bursts after a sync; tighten if you
+# trust your filesystem and want stricter detection.
+mtime_tolerance_secs = 60
+
+# Per-tool mappings. The defaults below cover the common stack. To
+# customize: copy and edit (overriding ANY [[dcc_source.mappings]]
+# entry replaces the WHOLE default list — list every mapping you want
+# active). Each mapping is `name` (display label) + `sources` + `exports`.
+[[dcc_source.mappings]]
+name = "blender"
+sources = ["blend"]
+exports = ["fbx", "glb", "gltf", "obj", "dae"]
+
+[[dcc_source.mappings]]
+name = "maya"
+sources = ["ma", "mb"]
+exports = ["fbx", "obj"]
+
+[[dcc_source.mappings]]
+name = "max"
+sources = ["max"]
+exports = ["fbx", "obj"]
+
+[[dcc_source.mappings]]
+name = "zbrush"
+sources = ["ztl", "zpr"]
+exports = ["obj", "fbx"]
+
+[[dcc_source.mappings]]
+name = "modo"
+sources = ["lxo"]
+exports = ["fbx", "obj"]
+
+[[dcc_source.mappings]]
+name = "houdini"
+sources = ["hip", "hipnc", "hiplc"]
+exports = ["fbx", "obj", "abc", "usd"]
+
+[[dcc_source.mappings]]
+name = "cinema4d"
+sources = ["c4d"]
+exports = ["fbx", "obj"]
+
+[[dcc_source.mappings]]
+name = "marvelous"
+sources = ["zprj"]
+exports = ["obj", "fbx"]
+
+[[dcc_source.mappings]]
+name = "substance_painter"
+sources = ["spp"]
+exports = ["png", "tga", "jpg", "tif", "tiff", "exr"]
+
+[[dcc_source.mappings]]
+name = "substance_designer"
+sources = ["sbs"]
+exports = ["sbsar", "png", "tga"]
+
+[[dcc_source.mappings]]
+name = "photoshop"
+sources = ["psd", "psb"]
+exports = ["png", "jpg", "tga", "webp"]
+
+# Where to find export candidates. `same_dir` is the common case
+# (`models/character.blend` next to `models/character.fbx`).
+# `sibling_dirs` lists folder names that signal "this is a sources
+# area"; when the source's parent (or any ancestor) matches, the
+# grandparent is added as a candidate (handles `art/sources/x.blend
+# ↔ art/x.fbx`). If your team uses named folders for both source AND
+# export sides (e.g. `art/sources/` ↔ `art/exports/`), list both —
+# the OTHER named folders under the same grandparent are also added.
+[dcc_source.lookup]
+same_dir = true
+sibling_dirs = ["sources", "_source", "src"]
+
 # ─── Ignore Patterns ─── (skip matched assets entirely)
 # Globs matched against asset paths RELATIVE to project root.
 # Useful for vendored packages, legacy folders, or generated artifacts.

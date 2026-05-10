@@ -15,6 +15,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **TagFilterPanel** sidebar header: right-click opens TagManager directly + new gear icon for click access (previously only reachable via per-file right-click).
 - **`.vox` model preview** (MagicaVoxel) with both nTRN scene-graph (v200+) and chunk-only (v150) handling.
 - **Session restore is now lazy**: only the previously-active project gets a full scan + watcher + git refresh on launch; non-active projects register as stubs and hydrate on first switch. Cold start with many projects is significantly faster.
+- **DCC source-file linking** (cross-asset analyzer, opt-in via `[dcc_source]` in `tidycraft.toml`). Pairs authoring source files (`.blend` / `.ma` / `.mb` / `.max` / `.ztl` / `.zpr` / `.lxo` / `.hip` / `.c4d` / `.zprj` / `.psd` / `.psb` / `.spp` / `.sbs`) with their runtime exports (`.fbx` / `.glb` / `.png` / etc.) by stem matching, and warns when the source's mtime is newer than its export's — catching the "tweaked the model but forgot to re-export" class of mistake. Configurable per-tool mappings + sibling-dir lookup (handles `art/sources/x.blend ↔ art/x.fbx` layouts) + `mtime_tolerance_secs` for git-checkout robustness. `AssetMetadata.dcc_source_kind` field labels recognized authoring formats so future UI can show source/runtime distinctions inline.
 
 ### Fixed
 - **ModelLightbox center math** (was offsetting models by `(scale − 1) × center` on enlarge — voxel exports especially).
@@ -33,8 +34,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Planned
 - VRAM budget estimates per texture / per directory.
-- DCC source-file linking (`.blend` / `.spp` → exported `.fbx` / `.glb`).
 - Cross-engine reverse-reference graph (Unreal / Godot beyond Unity).
+- DCC source-file linking phase 2: 1→N pairing for Substance Painter `.spp` (per-channel PNG outputs); git-status-aware severity bump when the source is dirty in the working tree.
 - AI Tagging polish: regex rule kind activation; `tidycraft.toml [project]` write-back from LearnSetupModal (currently read-only — user edits toml directly to avoid clobbering comments); confidence-slider editing in LearnReviewPanel.
 
 ---

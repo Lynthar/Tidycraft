@@ -140,6 +140,7 @@ Common to both:
 | **Duplicates** | SHA256-based content detection |
 | **Missing References** (Unity) | GUID lookups against `.meta` files |
 | **PBR Set Completeness** | Per-folder texture group missing channels (BaseColor / Normal / Roughness …) |
+| **DCC Source Linking** | Authoring file (`.blend` / `.psd` / `.spp` / etc.) newer than its same-stem export → "needs re-export" warning |
 | **Ignore Patterns** | Glob-based exclusion of vendored / generated paths |
 
 See [`docs/analyzer-rules.md`](docs/analyzer-rules.md) for per-rule defaults and tuning advice.
@@ -332,12 +333,11 @@ Shipped:
 - [x] PBR set completeness analyzer (per-folder texture group)
 - [x] External editor mappings (Settings → External Editors, per-extension)
 - [x] Cross-platform polish (macOS ⌘ glyphs, Windows file-manager reveal fix, path utils)
+- [x] DCC source-file linking (`.blend` / `.psd` / `.spp` / `.ma` / `.ztl` / `.max` / `.lxo` / `.hip` / `.c4d` / `.zprj` / `.sbs` / `.psb` → "source newer than export" warnings, opt-in)
 
 Backlog:
 
-- [ ] LLM-backed semantic tag clustering (`ExternalLLMSuggester` interface reserved in `tag_suggest.rs`)
 - [ ] VRAM budget estimates (per texture, per directory)
-- [ ] DCC source-file linking (`.blend` / `.spp` → exported `.fbx` / `.glb` "source newer than export" warnings)
 - [ ] Cross-engine reverse-reference graph (extend Unity GUID graph to UE / Godot)
 
 ---

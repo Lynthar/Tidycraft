@@ -5133,6 +5133,7 @@ dependencies = [
  "chrono",
  "dirs 5.0.1",
  "fbxcel-dom",
+ "filetime",
  "git2",
  "globset",
  "gltf",

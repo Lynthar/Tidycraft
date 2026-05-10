@@ -1,5 +1,6 @@
 pub mod audio;
 pub mod config_template;
+pub mod dcc_source;
 pub mod duplicate;
 pub mod missing_reference;
 pub mod model;
@@ -54,6 +55,8 @@ pub struct RuleConfig {
     #[serde(default)]
     pub pbr_set: pbr_set::PbrSetConfig,
     #[serde(default)]
+    pub dcc_source: dcc_source::DccSourceConfig,
+    #[serde(default)]
     pub ignore: IgnoreConfig,
 }
 
@@ -65,6 +68,7 @@ impl Default for RuleConfig {
             model: model::ModelConfig::default(),
             audio: audio::AudioConfig::default(),
             pbr_set: pbr_set::PbrSetConfig::default(),
+            dcc_source: dcc_source::DccSourceConfig::default(),
             ignore: IgnoreConfig::default(),
         }
     }
