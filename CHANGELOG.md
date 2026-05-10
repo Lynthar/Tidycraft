@@ -7,11 +7,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ## [Unreleased]
 
 ### Added
-- **AI Tagging — per-asset mode**. Multi-provider LLM tagging via Claude / OpenAI / Ollama, with shared `LLMProvider` trait, per-asset disk cache (SHA256-keyed; partial-batch hits stay free), and a verified-pricing cost estimator. Cost-preview modal with per-provider consent and an API-key plaintext-localStorage warning. Result panel groups suggestions by `(label, category, source)` and routes `existing` chips to the user's already-defined tag (no duplicate creation), `new` chips to a fresh tag with an `(AI)` suffix.
+- **AI Tagging — Learning mode** (default recommended path). The user runs a one-time learning pass: backend samples files per directory by-asset-type-ratio (round-robin so a 100-PNG/1-FBX dir still surfaces the FBX), feeds samples + the user's existing tag system + project `[theme]`/`[goal]` to the LLM as text-only context, parses inferred conventions + tag gaps + heuristic rules, and persists rules to `<project>/tidycraft.ai.toml`. Once learned, `suggest_tags` runs the local `RuleSuggester` (filename-token / path-prefix / path-segment matching) instead of the heuristic suggester — zero per-asset LLM cost from then on. AITagPanel header shows "🧠 AI · 5d ago · N rules" status badge with inline Run / Re-learn / Review controls; first-time users see a prominent CTA banner above demoted heuristic groups.
+- **AI Tagging — per-asset mode** (advanced, opt-in via Settings → AI Tagging → "Enable per-asset AI tagging"). Multi-provider LLM tagging via Claude / OpenAI / Ollama, with shared `LLMProvider` trait, per-asset disk cache (SHA256-keyed; partial-batch hits stay free), and a verified-pricing cost estimator. Cost-preview modal with per-provider consent, an API-key plaintext-localStorage warning, and a thumbnail-upload checkbox **defaulting to OFF** (filename + path usually carry the signal for game assets; vision adds 60-80% to cost). Result panel groups suggestions by `(label, category, source)` and routes `existing` chips to the user's already-defined tag (no duplicate creation), `new` chips to a fresh tag with an `(AI)` suffix.
 - **Project-aware prompt**. The LLM receives `[theme]` / `[goal]` from `tidycraft.toml`, the user's existing tag system (with optional descriptions and up to 5 sample paths per tag), and is instructed to mark each suggestion as `existing` or `new`.
-- **Tag.description** optional field, edited from TagManager (collapsed by default).
-- **Settings → AI Tagging** section: provider radio + model dropdown (cloud lists are static; Ollama lists installed models live via `/api/tags`) + endpoint override + privacy reset. Maintenance section gains an "AI tag cache" row with size + clear button.
-- **AI Tag entry points**: multi-select bar button + right-click "AI Tag (directly)" + AssetList wiring through `targetPathsFromContext` (selection-aware: right-clicking inside a multi-select operates on the whole selection).
+- **Tag.description** optional field, edited from TagManager (collapsed by default) and shipped to the LLM as semantic context.
+- **Settings → AI Tagging** section: provider radio + model dropdown (cloud lists are static; Ollama lists installed models live via `/api/tags`) + endpoint override + privacy reset + advanced "Enable per-asset AI tagging" toggle. Maintenance section gains an "AI tag cache" row with size + clear button.
+- **TagFilterPanel** sidebar header: right-click opens TagManager directly + new gear icon for click access (previously only reachable via per-file right-click).
 - **`.vox` model preview** (MagicaVoxel) with both nTRN scene-graph (v200+) and chunk-only (v150) handling.
 - **Session restore is now lazy**: only the previously-active project gets a full scan + watcher + git refresh on launch; non-active projects register as stubs and hydrate on first switch. Cold start with many projects is significantly faster.
 
@@ -24,15 +25,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **Header rescan button now actually clears the disk cache** before re-opening (button name finally matches behavior; replaces a `CACHE_VERSION` bump path).
 
 ### Changed
-- `ModelViewer3D` / `ModelLightbox` now share a `(label, category, source)` apply path that batches `addTagToAssets` per group rather than per-asset (50 assets × 3 tags is now 3 IPC calls, not 150).
+- `AIResultPanel` now share a `(label, category, source)` apply path that batches `addTagToAssets` per group rather than per-asset (50 assets × 3 tags is now 3 IPC calls, not 150).
 - `tidycraft.toml` template gains a top-level `[project]` block (theme / goal). Analyzer happily ignores it; AI Tagging reads it.
-- `PROMPT_VERSION = 2` — invalidates v1 LLM cache entries (intentional, prompt semantics changed).
+- `PROMPT_VERSION = 2` (per-asset prompt) and `LEARNING_PROMPT_VERSION = 1` (learning prompt) are independently bumpable — version sits in each cache key so prompt-meaning changes never serve stale results.
+- `suggest_tags` command auto-routes through `rule_suggest::load_or_fallback`: AI rules from `tidycraft.ai.toml` if present, heuristic suggester otherwise. Both produce the same `TagGroup[]` shape.
+- `RuleSuggester` regex rule kind currently silent-skips (the `regex` crate isn't a project dep yet) — `filename_token` / `path_prefix` / `path_segment` cover the common patterns the LLM is steered toward. Regex rules will activate in v2 without prompt changes.
 
 ### Planned
-- AI Tagging — **learning mode**: sample per directory, summarize naming conventions + tag system + project goal, generate local heuristic rules + tag gaps. The current per-asset path is the "all-AI" advanced mode; learning is the default-recommended path once shipped.
 - VRAM budget estimates per texture / per directory.
 - DCC source-file linking (`.blend` / `.spp` → exported `.fbx` / `.glb`).
 - Cross-engine reverse-reference graph (Unreal / Godot beyond Unity).
+- AI Tagging polish: regex rule kind activation; `tidycraft.toml [project]` write-back from LearnSetupModal (currently read-only — user edits toml directly to avoid clobbering comments); confidence-slider editing in LearnReviewPanel.
 
 ---
 

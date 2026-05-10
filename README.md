@@ -45,7 +45,7 @@
 - **Stays out of your way** — minimal default rules; live filesystem watcher (no manual rescan); editable rules via `Settings → Analysis Rules → Edit`.
 - **Local-first** — all state on your disk; no telemetry, no network calls.
 
-> **Status: Alpha — actively developed.** Core features (scanning, analysis, tags, 3D preview, Git, watcher) are stable. **LLM-backed AI tagging** ships in per-asset mode (Claude / OpenAI / Ollama) — see [Features → AI Tagging](#-ai-tagging) below. A smarter "learning mode" that samples the project, derives local heuristic rules, and reuses your existing tag system is in progress; the current AI Tag entry is the advanced "all-AI" path.
+> **Status: Alpha — actively developed.** Core features (scanning, analysis, tags, 3D preview, Git, watcher) are stable. **LLM-backed AI tagging** ships in two modes: a **Learning mode** (default — samples the project, derives local heuristic rules, reuses your existing tag system; one-time LLM call, then free) and an **advanced per-asset mode** (off by default — sends thumbnails to Claude / OpenAI / Ollama for direct tagging). See [Features → AI Tagging](#-ai-tagging) below.
 
 ---
 
@@ -98,15 +98,18 @@ Some 3D model formats (FBX, OBJ, DAE) embed texture paths internally. When these
 
 ### ✨ AI Tagging
 
-Multi-provider vision LLM tagging via **Claude** (Sonnet 4.6 / Haiku 4.5 / Opus 4.7), **OpenAI** (GPT-5.4-mini / 4o-mini / 5.4 / 5.4-nano), and **Ollama** (local — qwen2.5-VL / Llama 3.2-Vision / LLaVA / etc.; installed models listed live).
+Multi-provider LLM tagging via **Claude** (Sonnet 4.6 / Haiku 4.5 / Opus 4.7), **OpenAI** (GPT-5.4-mini / 4o-mini / 5.4 / 5.4-nano), and **Ollama** (local — qwen2.5-VL / Llama 3.2-Vision / LLaVA / etc.; installed models listed live).
 
+**Learning mode (default, recommended).** One-time LLM call samples your project's filenames + paths + existing tag system, infers naming/directory conventions, and emits **local heuristic rules** (filename-token / path-prefix / path-segment matching) persisted to `tidycraft.ai.toml`. The Sidebar's "Suggest Tags" panel then runs those rules locally — zero per-asset LLM cost from then on. Auto-creates tags the model thinks your vocabulary is missing (revocable from the review panel). ~$0.05 per learning run on cloud providers; free on Ollama.
+
+**Advanced per-asset mode** (opt-in via Settings → AI Tagging → "Enable per-asset AI tagging"). Sends individual asset metadata (filename + path; thumbnails optional and OFF by default) to the LLM for direct tagging. Adds a multi-select toolbar button and right-click entry. Costs ~50× more than Learning mode — use when you need image-level analysis Learning rules can't capture.
+
+Common to both:
 - **Cost preview** before every cloud call (verified pricing math; per-asset cents shown).
-- **Per-provider consent** for thumbnail uploads — first cloud call shows a checkbox; revocable in Settings.
+- **Per-provider consent** for thumbnail uploads — first call with thumbnails on shows a checkbox; revocable in Settings.
 - **Project-aware prompt** — pulls `[theme]` / `[goal]` from your project's `tidycraft.toml` and your existing tag system (with descriptions + sample paths) so the model **prefers your existing labels** instead of inventing synonyms.
 - **Per-asset disk cache** keyed on `(thumbnail bytes, filename, path, provider, model, prompt version)` — partial-batch hits stay free.
-- **Result review panel** — chips toggle inclusion; existing-tag matches reuse your color, new tags get an `(AI)` suffix.
-- **Trigger points** — multi-select toolbar button + right-click "AI Tag (directly)" entry. Hidden when no provider is configured.
-- **Local + private** — Ollama path uploads nothing off-machine; cloud paths upload only the requested thumbnails + filenames + your tag context.
+- **Local + private** — Ollama path uploads nothing off-machine; cloud paths upload filenames + tag context (and thumbnails only if you opt in).
 
 ### 📊 Metadata Extraction
 

@@ -227,6 +227,8 @@
     "aiOllamaLoadingModels": "正在加载已安装的模型…",
     "aiOllamaUnreachable": "无法连接到 Ollama——已显示推荐模型。请检查接入点或运行 `ollama serve`。",
     "aiOllamaNoModels": "未安装任何模型。运行 `ollama pull qwen2.5vl:32b` 开始使用。",
+    "aiPerAssetMode": "启用单资产 AI 标签（高级）",
+    "aiPerAssetModeDesc": "在多选栏和右键菜单中添加 \"AI 标签（直接）\" 入口,将缩略图发送给 LLM 直接打标。成本比学习模式高约 50×;适合需要图像级精细建议、学习规则覆盖不到的场景。",
     "maintenanceSection": "维护",
     "thumbnailCache": "缩略图缓存",
     "llmCache": "AI 标签缓存",
@@ -453,7 +455,11 @@
     "reviewRules": "审查 AI 规则",
     "today": "今天",
     "daysAgo_one": "{{count}} 天前",
-    "daysAgo_other": "{{count}} 天前"
+    "daysAgo_other": "{{count}} 天前",
+    "ctaTitle": "升级到 AI 学习模式",
+    "ctaBody": "抽样项目文件名和 tag 体系,推断命名与目录约定,生成本地启发式规则取代下方的通用匹配。一次性约 $0.05,之后免费。",
+    "ctaButton": "运行 AI 学习",
+    "heuristicDivider": "启发式回退（文件名 / 尺寸 / 路径）"
   },
   "learnSetup": {
     "title": "AI 学习设置",
@@ -491,6 +497,9 @@
   },
   "aiAnalyze": {
     "title": "AI 标签分析",
+    "entryLabel": "AI 标签（直接）",
+    "uploadThumbnails": "上传缩略图（视觉）",
+    "uploadThumbnailsHint": "默认关闭——游戏资产的文件名和路径通常已带足够信号。仅在需要 diffuse/albedo 贴图或图标这类视觉重要的资产时才开启。开启后成本增加约 60-80%。",
     "providerLine": "{{name}} · {{model}}",
     "assetsCount_one": "已选 {{count}} 个资产",
     "assetsCount_other": "已选 {{count}} 个资产",

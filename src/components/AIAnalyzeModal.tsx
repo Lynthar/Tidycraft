@@ -52,13 +52,26 @@ export function AIAnalyzeModal() {
   // we promote it to persisted `aiPrivacyConsented[provider]` so future
   // calls skip the checkbox altogether.
   const [consentLocal, setConsentLocal] = useState(false);
+  // Whether to upload thumbnails as part of the prompt. Default OFF
+  // because for game assets, filenames + paths usually carry the
+  // semantic signal — normal/roughness/AO maps and 3D models don't
+  // gain anything from a thumbnail (and 3D models have no thumbnail
+  // anyway). Only flip on for diffuse/albedo textures or icon-style
+  // flat assets where the visual matters. Vision tokens are 60-80%
+  // of the total prompt cost, so OFF is also the cheap default.
+  const [uploadThumbnails, setUploadThumbnails] = useState(false);
 
   const provider = aiActiveProvider;
   const config = provider ? aiProviders[provider] : null;
   const consented = provider ? aiPrivacyConsented[provider] : false;
   // Cloud providers (claude/openai) need explicit consent before
   // thumbnails leave the machine. Ollama is local — skip the gate.
-  const needsConsentGate = provider !== null && provider !== "ollama";
+  // Also skip when uploadThumbnails is off: text-only filenames don't
+  // raise the same privacy concern (filenames + paths are still sent,
+  // but the user agreed to that by configuring a cloud provider at all;
+  // thumbnails are the meaningful "leaves the machine" delta).
+  const needsConsentGate =
+    provider !== null && provider !== "ollama" && uploadThumbnails;
   const canContinue =
     !!provider &&
     !!config &&
@@ -89,7 +102,9 @@ export function AIAnalyzeModal() {
       provider,
       model: config.model,
       assetCount: paths.length,
-      hasThumbnails: true,
+      // Recompute when thumbnail toggle flips so the cost preview
+      // reflects what Continue will actually cost.
+      hasThumbnails: uploadThumbnails,
     })
       .then((c) => {
         if (cancelled) return;
@@ -105,7 +120,7 @@ export function AIAnalyzeModal() {
     return () => {
       cancelled = true;
     };
-  }, [aiAnalyzeOpen, provider, config?.model, paths.length]);
+  }, [aiAnalyzeOpen, provider, config?.model, paths.length, uploadThumbnails]);
 
   const handleContinue = async () => {
     if (!provider || !config || running) return;
@@ -127,7 +142,7 @@ export function AIAnalyzeModal() {
         model: config.model,
         apiKey: config.apiKey ?? null,
         endpoint: config.endpoint ?? null,
-        uploadThumbnails: true,
+        uploadThumbnails,
       });
       setAiResultOpen(true, response, paths);
       setAiAnalyzeOpen(false);
@@ -270,7 +285,29 @@ export function AIAnalyzeModal() {
                 ) : null}
               </div>
 
-              {needsConsentGate && !consented && (
+              {/* Thumbnail upload toggle. Default off — see useState
+                  comment for the rationale. The cost preview above
+                  reactively recomputes when this flips. */}
+              <label className="flex items-start gap-2 text-xs cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={uploadThumbnails}
+                  onChange={(e) => setUploadThumbnails(e.target.checked)}
+                  className="mt-0.5"
+                  disabled={running}
+                />
+                <span style={{ color: "var(--text-2)" }}>
+                  {t("aiAnalyze.uploadThumbnails")}
+                  <span
+                    className="block mt-0.5"
+                    style={{ color: "var(--text-3)", fontSize: 10 }}
+                  >
+                    {t("aiAnalyze.uploadThumbnailsHint")}
+                  </span>
+                </span>
+              </label>
+
+              {needsConsentGate && !consented && uploadThumbnails && (
                 <label className="flex items-start gap-2 text-xs cursor-pointer">
                   <input
                     type="checkbox"
