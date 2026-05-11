@@ -18,6 +18,6 @@ In short:
 
 ## Enforcement
 
-If something feels wrong, contact the maintainer (file a private GitHub Security Advisory or open a Discussion if appropriate). The maintainer reserves the right to remove comments, lock threads, or block contributors who repeatedly violate these standards.
+If something feels wrong, contact the maintainer directly via their GitHub profile ([@Lynthar](https://github.com/Lynthar)) — don't escalate in public threads. The maintainer reserves the right to remove comments, lock threads, or block contributors who repeatedly violate these standards.
 
 This is intentionally lightweight while the project is small. As Tidycraft grows we may adopt the full [Contributor Covenant v2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/) — feel free to suggest the upgrade via an issue.
