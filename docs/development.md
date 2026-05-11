@@ -43,11 +43,15 @@ Blender saves).
 | 3D Preview | Three.js | Industry standard for web 3D |
 | Virtualization | @tanstack/react-virtual | Handles 10k+ row lists smoothly |
 
-Notable Rust crates: `rayon` (parallel scan), `walkdir`, `image`, `gltf`,
-`tobj`, `fbxcel-dom` (FBX metadata), `symphonia` (audio), `mp4` +
+Notable Rust crates: `rayon` (parallel scan), `ignore` (gitignore-aware
+walker; replaced `walkdir` in scanner), `image`, `gltf`, `tobj`,
+`fbxcel-dom` (FBX metadata), `symphonia` (audio), `mp4` +
 `matroska-demuxer` (video), `git2`, `notify` + `notify-debouncer-full` (FS
-events), `trash` (safe delete), `globset` (ignore patterns), `parking_lot`
-(non-poisoning mutexes), `tauri-plugin-dialog` / `tauri-plugin-fs` /
+events), `trash` (safe delete), `globset` (ignore patterns at analyze
+phase), `regex` (AI-Learning `filename_regex` rules), `toml` + `toml_edit`
+(read-only parse + comment-preserving write-back for `[project]`),
+`reqwest` + `async-trait` (LLM HTTP clients), `parking_lot` (non-poisoning
+mutexes), `tauri-plugin-dialog` / `tauri-plugin-fs` /
 `tauri-plugin-clipboard-manager` / `tauri-plugin-opener` (the last one
 backs `open_with_default_app` and `open_in_editor`).
 
@@ -69,7 +73,7 @@ pnpm install              # first time
 pnpm tauri dev            # full app; Vite HMR for frontend, cargo rebuild on Rust changes
 pnpm build                # tsc + vite build (frontend typecheck + bundle)
 cd src-tauri
-cargo test --lib          # ~115 unit tests
+cargo test --lib          # backend unit tests (scanner / analyzer / llm / …)
 cargo check               # fast Rust typecheck without binary
 ```
 
@@ -88,7 +92,7 @@ trailing commas).
 ┌───────────────────────────┐      invoke(command, args)      ┌─────────────────────────┐
 │  React frontend (src/)    │ ──────────────────────────────► │  Rust backend (lib.rs)  │
 │                           │                                  │                         │
-│  - Zustand stores         │       emit(event, payload)       │  - ~57 tauri commands   │
+│  - Zustand stores         │       emit(event, payload)       │  - 60+ tauri commands   │
 │  - Components / UI        │ ◄────────────────────────────────┤  - Per-project state    │
 │  - i18n (en / zh)         │                                  │  - Scanner + watcher    │
 └───────────────────────────┘                                  └─────────────────────────┘
@@ -116,11 +120,17 @@ The frontend and backend communicate exclusively through two mechanisms:
   as the standard accessors — they grab the registry lock briefly, clone the
   per-project `Arc`, drop the registry lock, then lock the project itself.
   This pattern keeps registry contention minimal.
-- **`scanner.rs`** — Directory walk (`walkdir` + `rayon` parallel filter_map),
-  asset-type detection, metadata extraction dispatch. Single entry point for
-  per-file parsing is `parse_metadata_for(path, ext, asset_type)` — add new
-  format parsers there. Paths crossing to the frontend go through
-  `path_to_string()` which normalizes to forward slashes.
+- **`scanner.rs`** — Directory walk (`ignore::WalkBuilder` + `rayon`
+  parallel filter_map), asset-type detection, metadata extraction
+  dispatch. The walker honors `.gitignore` / `.ignore` / git globals /
+  `.git/info/exclude` by default and skips hidden dot-directories;
+  toggleable per-machine via Settings → Scanning. Single entry point for
+  per-file parsing is `parse_metadata_for(path, ext, asset_type)` — add
+  new format parsers there. DCC source files (`.blend` / `.psd` / `.spp`
+  / etc.) are labelled with `AssetMetadata.dcc_source_kind` via
+  `dcc_source_kind_for(ext)` so the `dcc_source` analyzer can find them
+  without re-deriving classification. Paths crossing to the frontend go
+  through `path_to_string()` which normalizes to forward slashes.
 - **`watcher.rs`** — `notify-debouncer-full` watcher. 500ms debounce, then
   re-parse affected files, patch `ProjectState.cached_scan`, emit
   `fs-change-{projectId}` with delta + rebuilt directory tree. The
@@ -128,13 +138,20 @@ The frontend and backend communicate exclusively through two mechanisms:
   tears down the OS watch and the processing thread exits cleanly.
 - **`analyzer/`** — Rule engine. `Rule` trait has four methods: `id`, `name`,
   `applies_to`, `check` — used by per-asset rules: `naming`, `texture`,
-  `texture_colorspace`, `model`, `audio`. Three more checks are **cross-asset**
-  and live outside the trait: `duplicate` (size-bucket + SHA256),
-  `missing_reference` (Unity GUID lookup), and `pbr_set` (per-folder texture
-  group completeness). `RuleConfig` is deserialized from `tidycraft.toml`;
+  `texture_colorspace`, `model`, `audio`. **Four cross-asset checks** live
+  outside the trait as free functions: `duplicate` (size-bucket + SHA256),
+  `missing_reference` (Unity GUID lookup), `pbr_set` (per-folder texture
+  group completeness), and `dcc_source` (source ↔ runtime-export mtime
+  pairing). `RuleConfig` is deserialized from `tidycraft.toml`;
   `Analyzer::with_config` wires the enabled per-asset rules, and
-  `lib.rs::analyze_assets` runs the cross-asset phases sequentially after,
-  merging into the same `AnalysisResult`.
+  `lib.rs::analyze_assets` runs the four cross-asset phases sequentially
+  after, merging into the same `AnalysisResult`. The `[ignore].patterns`
+  glob set is applied at the start of `analyze_assets` so all phases
+  see the same filtered scan. Outside `rules/`, `analyzer/rule_suggest.rs`
+  is the AI-Learning-driven `TagSuggester` (executes `LearnedRule` lists
+  from `tidycraft.ai.toml`); `analyzer/tag_suggest.rs` is the heuristic
+  fallback. The `suggest_tags` command auto-routes between the two via
+  `rule_suggest::load_or_fallback`.
 - **`cache.rs`** — Disk-backed scan cache. File at
   `dirs::cache_dir()/tidycraft/scans/<sha256-prefix>.json`, keyed by
   (mtime, size). Incremental scans reuse cached entries for unchanged files.
@@ -151,24 +168,42 @@ The frontend and backend communicate exclusively through two mechanisms:
   per-file status + ahead/behind counts.
 - **`thumbnail.rs`** — On-demand base64 thumbnails for images, disk-cached by
   (path, mtime, size).
-- **`llm/`** — Multi-provider AI tagging. `mod.rs` declares the `LLMProvider`
-  async trait, the request/response/error schemas (`TagRequest` /
-  `TagResponse` / `SuggestedTag` / `LLMError`), the `make_provider` factory,
-  the shared 3-tier `parse_suggestions(text)` JSON parser, and the
-  `suggest_with_cache(provider_id, request, fetcher)` helper that splits a
-  batch into cache hits and misses, calls the fetcher only for the misses,
-  persists fresh entries, and merges. Concrete providers (`claude.rs` /
-  `openai.rs` / `ollama.rs`) own only their endpoint + auth + request/response
-  shape + error mapping; everything else lives in shared modules. `cost.rs`
-  holds verified per-million pricing in micro-USD (integer arithmetic) plus
-  per-provider vision token rules. `cache.rs` is per-asset disk cache keyed by
+- **`llm/`** — Multi-provider AI tagging, plus the AI-Learning subsystem.
+  Two distinct flows share infrastructure:
+  - **Per-asset tagging** (`suggest_tags`-equivalent flow). `mod.rs`
+    declares the `LLMProvider` async trait, schemas (`TagRequest` /
+    `TagResponse` / `SuggestedTag` / `LLMError`), the `make_provider`
+    factory, the shared 3-tier `parse_suggestions(text)` JSON parser,
+    and the `suggest_with_cache(provider_id, request, fetcher)` helper
+    that splits a batch into cache hits and misses, calls the fetcher
+    only for the misses, persists fresh entries, and merges. Concrete
+    providers (`claude.rs` / `openai.rs` / `ollama.rs`) own only their
+    endpoint + auth + request/response shape + error mapping;
+    everything else lives in shared modules.
+  - **Learning mode** (`learn_project_conventions` command). `sampler.rs`
+    samples files per-directory by asset-type ratio with a seeded RNG
+    (root_path hash → seed for stable re-runs). `learning.rs` defines
+    `LearnRequest` / `LearningResult` / `InferredConventions` /
+    `LearnedRule` (four kinds: `filename_token` / `path_prefix` /
+    `path_segment` / `filename_regex`). `rule_store.rs` persists
+    `AiRulesDoc` to `<project>/tidycraft.ai.toml`. Each provider's
+    `LLMProvider::learn_project` impl shares a text-only
+    `send_text_chat` helper, parses via shared `parse_json_lenient<T>`.
+
+  Shared infrastructure: `cost.rs` holds verified per-million pricing
+  in micro-USD (integer arithmetic) plus per-provider vision token
+  rules. `cache.rs` is per-asset disk cache keyed by
   `SHA256(thumb_hash + filename + path + provider + model + prompt_version)`
-  with `\x00` separators between fields. `prompts.rs` exports the system
-  prompt + `build_user_prompt(assets, project_ctx, existing_tags,
-  include_thumbnails)` — bumping `PROMPT_VERSION` invalidates every cached
-  entry so prompt-meaning changes never serve stale results.
-  `project_meta.rs` parses `tidycraft.toml [project]` via `toml::Value` so
-  the analyzer's strict deserializer doesn't have to know about it.
+  with `\x00` separators between fields. `prompts.rs` exports
+  `SYSTEM_PROMPT` (per-asset) + `SYSTEM_PROMPT_LEARNING` and two prompt
+  builders. **Two independent version counters**: `PROMPT_VERSION`
+  (per-asset cache key) and `LEARNING_PROMPT_VERSION` (learning result
+  freshness signal). Bumping either invalidates the corresponding cached
+  entries so prompt-meaning changes never serve stale results.
+  `project_meta.rs` parses `tidycraft.toml [project]` via `toml::Value`
+  (read path) and offers `write_back(root, theme, goal)` (write path,
+  uses `toml_edit` to preserve comments) — the analyzer's strict
+  deserializer doesn't have to know about either.
 
 ### 4.3 Frontend modules (`src/`)
 
@@ -198,7 +233,17 @@ The frontend and backend communicate exclusively through two mechanisms:
 - **`stores/columnStore.ts`** — Persistent list-view column visibility +
   widths + `viewMode: 'list' | 'grid'`. Versioned (currently v4) with a
   migrate function so layout changes don't lose user customization.
-- Other global stores: `settingsStore`, `themeStore`, `searchHistoryStore`.
+- **`stores/settingsStore.ts`** — Persistent user prefs in
+  `localStorage["tidycraft-settings"]`. Holds: git display toggles
+  (status indicators, branch info, ahead/behind); per-extension
+  external-editor mappings (extension → binary path); `respectGitignore`
+  (scanner toggle, default true); AI Tagging config — `aiActiveProvider`,
+  per-provider `apiKey` / `endpoint` / `model`, `aiPrivacyConsented` per
+  provider, `aiPerAssetModeEnabled` (advanced opt-in for the direct
+  per-asset path). API keys are plaintext localStorage; first-save shows
+  a warning toast. See `SECURITY.md` for the disclosure scope.
+- Other global stores: `themeStore` (dark / light / system + matchMedia
+  listener), `searchHistoryStore` (recent search queries).
 - **`components/`** — Flat layout, one component per file, no barrel exports.
   `AssetList` is the parent shell that owns selection / dialogs and
   dispatches between `AssetListView` (virtualized list) and
@@ -206,8 +251,19 @@ The frontend and backend communicate exclusively through two mechanisms:
   `ContextMenu` + dialogs (`RenameDialog`, `BatchRenameDialog`,
   `DeleteConfirmDialog`, `MoveCopyDialog`) handle operations.
   `CommandPalette` is a hand-rolled four-section ⌘K (Suggestions / Navigate /
-  Filter / Resources / Actions). `AITagPanel` is the heuristic tag-suggest
-  overlay anchored top-left. `ModelViewer3D` / `ModelLightbox` do 3D
+  Filter / Resources / Actions). `AITagPanel` is the tag-suggest overlay;
+  it runs AI-Learning rules when `tidycraft.ai.toml` is present (via
+  `analyzer::rule_suggest::load_or_fallback`) and falls back to the
+  heuristic suggester otherwise. The header carries a status badge and
+  inline Run / Re-learn / Review controls. AI Learning flows go through
+  `LearnSetupModal` (kickoff: theme/goal write-back + sampling depth +
+  cost preview) and `LearnReviewPanel` (review inferred conventions,
+  auto-created tag gaps, editable rule list with confidence slider and
+  invalid-regex marker; persists to `tidycraft.ai.toml`). Per-asset AI
+  tagging (advanced opt-in) goes through `AIAnalyzeModal` (cost preview
+  + consent gate + thumbnail-upload toggle, defaults off) and
+  `AIResultPanel` (chip-toggle review, batched apply by
+  `(label, category, source)`). `ModelViewer3D` / `ModelLightbox` do 3D
   preview via Three.js. Dialog pattern: the parent owns a nullable state
   object (`{ mode, paths }` or `paths | null`), renders the dialog
   conditionally, passes `onClose` and `onDone` callbacks.
@@ -265,6 +321,34 @@ the Map) for non-active paths, then a single full `openProject(activePath)`.
 !error`) and triggers `openProject(path, {force:true})` on first switch. The
 `!error` guard prevents loops when a project's path is permanently broken;
 the user can retry via the Header rescan button.
+
+**Scanner ignore semantics — two layers.** Two ignore systems operate
+at different phases:
+
+- **Scan-time** (`scanner.rs` via `ignore::WalkBuilder`): `.gitignore`,
+  `.ignore`, git globals, `.git/info/exclude`, hidden dot-directories.
+  Honored by default; toggle per-machine via Settings → Scanning
+  (`respectGitignore`). Effect is on IO — the walker never enters
+  ignored paths.
+- **Analyze-time** (`lib.rs::analyze_assets` via `globset`): user-defined
+  `[ignore].patterns` from `tidycraft.toml`. Filters the cached scan
+  result before per-asset / cross-asset rules run. Lets users mute
+  rule output on vendored / generated paths without forcing a rescan.
+
+The two layers compose: a path ignored at scan time isn't visible to
+analyze-time patterns. Toggling `respectGitignore` triggers a fresh
+scan on the next `openProject`; out-of-scope entries are pruned from
+the cache during the next incremental scan.
+
+**Race-safe project-scoped writes.** Long-running operations
+(`runAnalysis`, scan completion handlers, `refreshGitInfo`) snapshot
+the target `projectId` at kickoff and write into the projects Map
+directly, syncing mirror fields only when the target equals
+`activeProjectId` at write time. Mid-flight project switches never
+pollute another project's state. The canonical examples are
+`openProject`'s scan-completion handler and `runAnalysis` — new
+background work that targets a specific project should follow the
+same pattern.
 
 **LLM context flow.** `llm_suggest_tags` collects project framing inside the
 project lock (clones `root_path`, all `Tag` objects with their description,
@@ -338,8 +422,11 @@ Solved in `buildTextureUrlResolver`:
 ### A new cross-asset analyzer pass
 
 If your check needs to compare assets to each other (duplicates,
-references, set completeness), it doesn't fit `Rule::check` — that takes
-one `AssetInfo` at a time. Follow the `pbr_set` / `duplicate` shape:
+references, set completeness, source ↔ export pairing), it doesn't fit
+`Rule::check` — that takes one `AssetInfo` at a time. Follow the
+`pbr_set` / `duplicate` / `dcc_source` shape (the last is the most
+recent example and demonstrates HashMap-indexed cross-directory lookup
+with a configurable per-tool mapping table):
 
 1. Create the file under `analyzer/rules/` with a free function
    `pub fn find_<thing>_issues(assets: &[AssetInfo], config: &Config) -> AnalysisResult`.
@@ -381,11 +468,16 @@ pass values via the second arg to `t()`:
 
 ## 6. Testing
 
-**Rust side:** `cargo test --lib` from `src-tauri/`. Currently ~100 tests
-across `scanner`, `analyzer` (incl. `tag_suggest`), `watcher`, `undo`,
-`tags`, `unity`, `unreal`, `godot`, `cache`. Aim to add tests for new
-parsers and pure functions. Skip integration tests that spawn the full
-Tauri runtime — the payoff isn't worth the complexity.
+**Rust side:** `cargo test --lib` from `src-tauri/`. Tests live next to
+the modules they cover — `scanner`, `analyzer` (incl. `tag_suggest`,
+`rule_suggest`, and each rule under `rules/` such as `dcc_source` which
+uses the `filetime` dev-dep for precise mtime fixtures), `watcher`,
+`undo`, `tags`, `unity`, `unreal`, `godot`, `cache`, and `llm`
+(JSON parsers, cache-key generation, per-provider response handling,
+prompt builders, `project_meta` round-trips via `toml_edit`). Aim to
+add tests for new parsers and pure functions. Skip integration tests
+that spawn the full Tauri runtime — the payoff isn't worth the
+complexity.
 
 **Frontend side:** no test runner currently. `pnpm build` runs `tsc`, which
 is the only TS gate. If you introduce non-trivial component logic, consider
@@ -450,8 +542,12 @@ tidycraft/
 │   │   ├── AssetGalleryView.tsx      # Virtualized card grid view
 │   │   ├── AssetPreview.tsx          # Right-pane preview (image/3D/audio/video)
 │   │   ├── CommandPalette.tsx        # ⌘K — Suggestions/Navigate/Filter/Resources/Actions
-│   │   ├── AITagPanel.tsx            # Heuristic tag-suggest overlay
-│   │   ├── SettingsModal.tsx         # Appearance / Git / Analysis Rules / External Editors / Maintenance
+│   │   ├── AITagPanel.tsx            # Tag-suggest overlay (AI-Learning rules or heuristic fallback)
+│   │   ├── LearnSetupModal.tsx       # AI Learning kickoff (theme/goal + sampling depth + cost preview)
+│   │   ├── LearnReviewPanel.tsx      # AI Learning result review (conventions / gaps / rules)
+│   │   ├── AIAnalyzeModal.tsx        # Per-asset AI tagging kickoff (cost preview + consent + thumbnail toggle)
+│   │   ├── AIResultPanel.tsx         # Per-asset AI tagging result review (chip-toggle apply)
+│   │   ├── SettingsModal.tsx         # Appearance / Git / Rules / Editors / Scanning / AI Tagging / Maintenance
 │   │   └── …                         # Dialogs, Header, Sidebar, etc.
 │   ├── stores/                       # Zustand state
 │   │   ├── projectStore.ts           # Multi-project hub (mirror fields for active)
@@ -460,7 +556,7 @@ tidycraft/
 │   │   ├── sessionStore.ts           # Cross-session restore (paths only)
 │   │   ├── uiStore.ts                # Transient modal flags (cmdkOpen, aiPanelOpen, …)
 │   │   ├── columnStore.ts            # Persistent list cols + viewMode (versioned)
-│   │   ├── settingsStore.ts          # Persistent user prefs (Git display toggles)
+│   │   ├── settingsStore.ts          # Persistent user prefs (git display / external editors / AI providers / respectGitignore)
 │   │   ├── themeStore.ts             # dark / light / system + matchMedia listener
 │   │   └── searchHistoryStore.ts     # Recent search queries
 │   ├── styles/                       # globals.css + redesign-tokens(/-v2) + redesign-components
@@ -482,11 +578,23 @@ tidycraft/
 │       ├── analyzer/
 │       │   ├── mod.rs                # Analyzer / Issue / Severity
 │       │   ├── tag_suggest.rs        # Heuristic tag suggester (filename / dim+channel / path)
+│       │   ├── rule_suggest.rs       # AI-Learning-driven tag suggester (runs LearnedRule list)
 │       │   └── rules/                # Rule implementations
 │       │       ├── naming.rs / texture.rs / texture_colorspace.rs
 │       │       ├── model.rs / audio.rs                       # Per-asset (Rule trait)
 │       │       ├── duplicate.rs / missing_reference.rs       # Cross-asset
-│       │       └── pbr_set.rs                                # Cross-asset, per-folder grouping
+│       │       ├── pbr_set.rs                                # Cross-asset, per-folder grouping
+│       │       └── dcc_source.rs                             # Cross-asset, source ↔ export mtime pairing
+│       ├── llm/                      # AI Tagging (Learning + per-asset)
+│       │   ├── mod.rs                # LLMProvider trait, schemas, factory, shared cache helper
+│       │   ├── claude.rs / openai.rs / ollama.rs             # Provider impls (per-asset + learn_project)
+│       │   ├── prompts.rs            # System prompts + builders (both flows)
+│       │   ├── cost.rs               # Per-provider pricing + vision token math
+│       │   ├── cache.rs              # Per-asset SHA256 response cache
+│       │   ├── sampler.rs            # Project sampler (Learning mode kickoff)
+│       │   ├── learning.rs           # LearnRequest / LearningResult / LearnedRule schemas
+│       │   ├── rule_store.rs         # AiRulesDoc persistence (tidycraft.ai.toml)
+│       │   └── project_meta.rs      # [project] read (toml::Value) + write_back (toml_edit)
 │       ├── unity.rs                  # Unity YAML parsers
 │       ├── unreal.rs                 # .uproject parser (deep-integration stubs)
 │       ├── godot.rs                  # project.godot parser (deep-integration stubs)
