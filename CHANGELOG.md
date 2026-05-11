@@ -7,36 +7,39 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ## [Unreleased]
 
 ### Added
-- **AI Tagging — Learning mode** (default recommended path). The user runs a one-time learning pass: backend samples files per directory by-asset-type-ratio (round-robin so a 100-PNG/1-FBX dir still surfaces the FBX), feeds samples + the user's existing tag system + project `[theme]`/`[goal]` to the LLM as text-only context, parses inferred conventions + tag gaps + heuristic rules, and persists rules to `<project>/tidycraft.ai.toml`. Once learned, `suggest_tags` runs the local `RuleSuggester` (filename-token / path-prefix / path-segment matching) instead of the heuristic suggester — zero per-asset LLM cost from then on. AITagPanel header shows "🧠 AI · 5d ago · N rules" status badge with inline Run / Re-learn / Review controls; first-time users see a prominent CTA banner above demoted heuristic groups.
-- **AI Tagging — per-asset mode** (advanced, opt-in via Settings → AI Tagging → "Enable per-asset AI tagging"). Multi-provider LLM tagging via Claude / OpenAI / Ollama, with shared `LLMProvider` trait, per-asset disk cache (SHA256-keyed; partial-batch hits stay free), and a verified-pricing cost estimator. Cost-preview modal with per-provider consent, an API-key plaintext-localStorage warning, and a thumbnail-upload checkbox **defaulting to OFF** (filename + path usually carry the signal for game assets; vision adds 60-80% to cost). Result panel groups suggestions by `(label, category, source)` and routes `existing` chips to the user's already-defined tag (no duplicate creation), `new` chips to a fresh tag with an `(AI)` suffix.
-- **Project-aware prompt**. The LLM receives `[theme]` / `[goal]` from `tidycraft.toml`, the user's existing tag system (with optional descriptions and up to 5 sample paths per tag), and is instructed to mark each suggestion as `existing` or `new`.
-- **Tag.description** optional field, edited from TagManager (collapsed by default) and shipped to the LLM as semantic context.
-- **Settings → AI Tagging** section: provider radio + model dropdown (cloud lists are static; Ollama lists installed models live via `/api/tags`) + endpoint override + privacy reset + advanced "Enable per-asset AI tagging" toggle. Maintenance section gains an "AI tag cache" row with size + clear button.
-- **TagFilterPanel** sidebar header: right-click opens TagManager directly + new gear icon for click access (previously only reachable via per-file right-click).
-- **`.vox` model preview** (MagicaVoxel) with both nTRN scene-graph (v200+) and chunk-only (v150) handling.
-- **Session restore is now lazy**: only the previously-active project gets a full scan + watcher + git refresh on launch; non-active projects register as stubs and hydrate on first switch. Cold start with many projects is significantly faster.
-- **DCC source-file linking** (cross-asset analyzer, opt-in via `[dcc_source]` in `tidycraft.toml`). Pairs authoring source files (`.blend` / `.ma` / `.mb` / `.max` / `.ztl` / `.zpr` / `.lxo` / `.hip` / `.c4d` / `.zprj` / `.psd` / `.psb` / `.spp` / `.sbs`) with their runtime exports (`.fbx` / `.glb` / `.png` / etc.) by stem matching, and warns when the source's mtime is newer than its export's — catching the "tweaked the model but forgot to re-export" class of mistake. Configurable per-tool mappings + sibling-dir lookup (handles `art/sources/x.blend ↔ art/x.fbx` layouts) + `mtime_tolerance_secs` for git-checkout robustness. `AssetMetadata.dcc_source_kind` field labels recognized authoring formats so future UI can show source/runtime distinctions inline.
+- **AI Tagging — Learning mode** (recommended default). One LLM call samples the project, derives local heuristic rules, persists them to `<project>/tidycraft.ai.toml`. After that, `suggest_tags` matches locally with zero per-asset LLM cost. AITagPanel header gets a status badge with Run / Re-learn / Review controls.
+- **AI Tagging — per-asset mode** (opt-in via Settings → AI Tagging). Multi-provider LLM tagging (Claude / OpenAI / Ollama) behind a shared `LLMProvider` trait, with a per-asset SHA256 disk cache so partial-batch re-runs stay free. Cost-preview modal gates every call. Thumbnail upload defaults off; filename + path carry most of the signal for game assets.
+- **Project-aware prompt**. The LLM receives `[project]` theme / goal from `tidycraft.toml` plus the user's existing tag list (descriptions + up to 5 sample paths per tag), and marks each suggestion as `existing` or `new`.
+- **`Tag.description`** optional field. Edited from TagManager, shipped to the LLM as semantic context.
+- **Settings → AI Tagging** section. Provider radio, model dropdown, endpoint override, privacy reset, per-asset-mode toggle. Ollama lists installed models live via `/api/tags`. Maintenance gains an AI-tag cache row.
+- **TagFilterPanel sidebar header**. Right-click opens TagManager; new gear icon for click access.
+- **`.vox` model preview** (MagicaVoxel). Handles nTRN scene-graph (v200+) and chunk-only (v150).
+- **Lazy session restore**. Only the previously-active project scans + watches + refreshes git on launch; others hydrate as stubs and run on first switch.
+- **DCC source-file linking** (opt-in via `[dcc_source]`). Pairs authoring sources (`.blend` / `.ma` / `.psd` / `.spp` / `.ztl` / `.max` etc.) with same-stem runtime exports (`.fbx` / `.png` / etc.) and warns when the source is newer. Configurable per-tool mappings, sibling-dir lookup, and `mtime_tolerance_secs` to absorb git-checkout sync.
+- **AI Learning review polish**. Rule confidence is now an editable 0.5–1.0 slider; invalid `filename_regex` patterns get a ⚠ red chip flagged via JS `RegExp` validation.
+- **Theme/goal write-back from LearnSetupModal**. Inputs are editable; Continue writes to `tidycraft.toml [project]` via `toml_edit`, preserving user comments and other sections on round-trip.
 
 ### Fixed
-- **ModelLightbox center math** (was offsetting models by `(scale − 1) × center` on enlarge — voxel exports especially).
-- **Vertex colors preserved** across material conversions in ModelViewer3D / ModelLightbox (`MeshPhongMaterial → MeshStandardMaterial` now carries `vertexColors`); fixes voxel OBJ files rendering flat gray.
-- **OBJ loader honors the actual `mtllib` filename** instead of guessing `<basename>.mtl`; skips MTL fetch entirely when no `mtllib` line is declared (no more spurious 500s in the console).
-- **Thumbnail whitelist** now matches the `image` crate's enabled features — `tiff` / `tif` / `webp` / `hdr` / `exr` were decoder-supported but blocked at the entry check.
-- **Thumbnail failures log at debug**, not error (clean console for PSD / DDS / SVG / deep EXR; fallback box-icon UX unchanged).
-- **Header rescan button now actually clears the disk cache** before re-opening (button name finally matches behavior; replaces a `CACHE_VERSION` bump path).
+- **`runAnalysis` race-safe across project switches**. The analyze call snapshots `projectId` at click time. Mid-flight switches (sidebar button, `Ctrl+Shift+R`, Command Palette) no longer pollute another project's analysis state. The `isAnalyzing` guard now lives in the store, gating every entry path.
+- **ModelLightbox center math**. Was offsetting models by `(scale − 1) × center` on enlarge; voxel exports especially.
+- **Vertex colors preserved** across material conversions in 3D viewers. Fixes voxel OBJ files rendering flat gray.
+- **OBJ loader honors the actual `mtllib` filename**. Skips MTL fetch when no `mtllib` line is declared, ending spurious 500s in the console.
+- **Thumbnail whitelist** now matches the `image` crate's enabled features. `tiff` / `webp` / `hdr` / `exr` were decoder-supported but blocked at the entry check.
+- **Thumbnail failures log at `debug`**, not error. Cleaner console for PSD / DDS / SVG / deep EXR.
+- **Header rescan button now clears the disk cache** before re-opening. Button label finally matches behavior; replaces a `CACHE_VERSION` bump path.
 
 ### Changed
-- `AIResultPanel` now share a `(label, category, source)` apply path that batches `addTagToAssets` per group rather than per-asset (50 assets × 3 tags is now 3 IPC calls, not 150).
-- `tidycraft.toml` template gains a top-level `[project]` block (theme / goal). Analyzer happily ignores it; AI Tagging reads it.
-- `PROMPT_VERSION = 2` (per-asset prompt) and `LEARNING_PROMPT_VERSION = 1` (learning prompt) are independently bumpable — version sits in each cache key so prompt-meaning changes never serve stale results.
-- `suggest_tags` command auto-routes through `rule_suggest::load_or_fallback`: AI rules from `tidycraft.ai.toml` if present, heuristic suggester otherwise. Both produce the same `TagGroup[]` shape.
-- `RuleSuggester` regex rule kind currently silent-skips (the `regex` crate isn't a project dep yet) — `filename_token` / `path_prefix` / `path_segment` cover the common patterns the LLM is steered toward. Regex rules will activate in v2 without prompt changes.
+- `AIResultPanel` batches `addTagToAssets` per `(label, category, source)` group. 50 assets × 3 tags is 3 IPC calls instead of 150.
+- `tidycraft.toml` template gains a top-level `[project]` block (theme / goal). The analyzer ignores it; AI Tagging reads it.
+- `PROMPT_VERSION = 2` (per-asset) and `LEARNING_PROMPT_VERSION = 1` (learning) are independently bumpable. Version sits in each cache key so prompt-meaning changes never serve stale results.
+- `suggest_tags` auto-routes through `rule_suggest::load_or_fallback`. AI rules from `tidycraft.ai.toml` if present; heuristic suggester otherwise. Output shape is identical either way.
+- `RuleSuggester` now executes `filename_regex` rules. The `regex` crate is a proper dep with linear-time matching. Patterns that fail to compile silent-skip with a stderr warning.
+- Scanner respects `.gitignore` by default via `ignore::WalkBuilder`. Also honors `.ignore`, git globals, `.git/info/exclude`, and skips hidden dot directories. **Behavior change**: Unity / Unreal projects no longer scan `Library/` / `Intermediate/` / `Saved/` by default. Toggle off via Settings → Scanning to restore "scan everything".
 
 ### Planned
 - VRAM budget estimates per texture / per directory.
 - Cross-engine reverse-reference graph (Unreal / Godot beyond Unity).
 - DCC source-file linking phase 2: 1→N pairing for Substance Painter `.spp` (per-channel PNG outputs); git-status-aware severity bump when the source is dirty in the working tree.
-- AI Tagging polish: regex rule kind activation; `tidycraft.toml [project]` write-back from LearnSetupModal (currently read-only — user edits toml directly to avoid clobbering comments); confidence-slider editing in LearnReviewPanel.
 
 ---
 
