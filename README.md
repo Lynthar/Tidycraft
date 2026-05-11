@@ -7,7 +7,7 @@
 [![Tauri](https://img.shields.io/badge/Tauri-2.0-blue?logo=tauri)](https://tauri.app/)
 [![Rust](https://img.shields.io/badge/Rust-1.75+-orange?logo=rust)](https://www.rust-lang.org/)
 [![React](https://img.shields.io/badge/React-18-61dafb?logo=react)](https://react.dev/)
-[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue)](LICENSE)
 [![CI](https://github.com/Lynthar/Tidycraft/actions/workflows/ci.yml/badge.svg)](https://github.com/Lynthar/Tidycraft/actions/workflows/ci.yml)
 
 [English](README.md) | [简体中文](README.zh-CN.md)
@@ -39,13 +39,13 @@
 ## ✨ Why Tidycraft?
 
 - **Fast scanning** — 10k+ assets in seconds via parallel walk + incremental cache.
-- **Real bug detection out of the box** — duplicates (SHA256), broken Unity GUID references, sRGB-flagged data textures, incomplete PBR sets. Stylistic conventions (PoT, prefix, vertex budgets) are opt-in via `tidycraft.toml`.
+- **Real bug detection out of the box** — duplicates (SHA256), broken Unity GUID references, sRGB-flagged data textures. Stylistic conventions (PoT, prefix, vertex budgets), PBR set completeness, and DCC source ↔ export pairing are opt-in via `tidycraft.toml`.
 - **Multi-engine** — Unity / Unreal / Godot / generic; engine-specific parsers for GUID graphs, `.uproject`, `project.godot`.
 - **Multi-project workspace** — open several projects simultaneously, switch between them, cross-session restore.
-- **Stays out of your way** — minimal default rules; live filesystem watcher (no manual rescan); editable rules via `Settings → Analysis Rules → Edit`.
+- **Stays out of your way** — minimal default rules; scanner respects `.gitignore` so generated artefacts stay out of view; live filesystem watcher (no manual rescan); editable rules via `Settings → Analysis Rules → Edit`.
 - **Local-first** — all state on your disk; no telemetry, no network calls.
 
-> **Status: Alpha — actively developed.** Core features (scanning, analysis, tags, 3D preview, Git, watcher) are stable. **LLM-backed AI tagging** ships in two modes: a **Learning mode** (default — samples the project, derives local heuristic rules, reuses your existing tag system; one-time LLM call, then free) and an **advanced per-asset mode** (off by default — sends thumbnails to Claude / OpenAI / Ollama for direct tagging). See [Features → AI Tagging](#-ai-tagging) below.
+> **Status: Alpha — actively developed.** Core features (scanning, analysis, tags, 3D preview, Git, watcher) are stable. **LLM-backed AI tagging** ships in two modes: a **Learning mode** (recommended — one-time LLM call samples the project, derives local heuristic rules, reuses your existing tag system; free thereafter) and an **advanced per-asset mode** (opt-in — sends thumbnails to Claude / OpenAI / Ollama for direct tagging). Both are off until you configure a provider. See [Features → AI Tagging](#-ai-tagging) below.
 
 ---
 
@@ -125,7 +125,7 @@ Common to both:
 - **Command Palette** (⌘K / Ctrl+K) for quick navigation, filters, and actions
 - **Search** by filename or path
 - **Filter** by asset type
-- **3D model preview** with orbit controls (glTF / GLB / FBX / OBJ / DAE / 3DS)
+- **3D model preview** with orbit controls (glTF / GLB / FBX / OBJ / DAE / 3DS / VOX)
 - **External editor mappings** — map extensions to Photoshop / Blender / Audacity / etc.
 
 ### 📋 Rule-Based Analysis
@@ -171,7 +171,7 @@ See [`docs/analyzer-rules.md`](docs/analyzer-rules.md) for per-rule defaults and
 | **Virtualization** | @tanstack/react-virtual |
 
 ### Rust Crates
-`image` · `gltf` · `tobj` · `fbxcel-dom` · `symphonia` · `mp4` · `matroska-demuxer` · `sha2` · `walkdir` · `rayon` · `toml` · `globset` · `git2` · `notify` · `trash` · `tauri-plugin-opener`
+`image` · `gltf` · `tobj` · `fbxcel-dom` · `symphonia` · `mp4` · `matroska-demuxer` · `sha2` · `ignore` (gitignore-aware walker) · `rayon` · `toml` + `toml_edit` · `globset` · `regex` · `git2` · `notify` · `trash` · `reqwest` + `async-trait` (LLM HTTP) · `tauri-plugin-opener`
 
 ---
 
@@ -179,8 +179,8 @@ See [`docs/analyzer-rules.md`](docs/analyzer-rules.md) for per-rule defaults and
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) 18+
-- [pnpm](https://pnpm.io/) 8+
+- [Node.js](https://nodejs.org/) 18+ (CI uses 20)
+- [pnpm](https://pnpm.io/) 8+ (CI uses 9)
 - [Rust](https://rustup.rs/) 1.75+
 
 ### Installation
@@ -207,7 +207,7 @@ pnpm tauri build
 1. **Open Project** — Click "Open Project" (or `⌘O` / `Ctrl+O`) and select your game project folder
 2. **Browse Assets** — Navigate the directory tree, switch list ↔ grid view, search, and filter
 3. **Preview Assets** — Click any asset to view details, thumbnail, or 3D viewer
-4. **Tag Assets** — Right-click to tag manually, or open the **AI Tag panel** for heuristic-grouped suggestions
+4. **Tag Assets** — Right-click to tag manually, or open the **AI Tag panel** for grouped suggestions (AI-derived rules if you've run Learning, heuristic fallback otherwise; Run / Re-learn / Review controls in the panel header)
 5. **Run Analysis** — `⌘⇧R` / `Ctrl+Shift+R`; tweak rules via **Settings → Analysis Rules → Edit**
 6. **Review Issues** — Switch to Issues tab; group by rule, filter by severity, jump to file
 7. **External Editors** — Map extensions to Photoshop / Blender / etc. in **Settings → External Editors**, then the `⤴` button opens directly
@@ -218,7 +218,7 @@ pnpm tauri build
 
 Drop a `tidycraft.toml` in your project root and the next analysis will pick it up automatically. The Sidebar's **Run Analysis** button shows a small dot when custom rules are loaded.
 
-**Out-of-box defaults are minimal**: only `naming.forbidden_chars` (shell-unsafe / Windows-illegal chars), `[texture.color_space]`, `duplicate`, and `missing_reference` (Unity) fire by default. Stricter checks — `[texture]` size / PoT, `[model]` budgets, `[audio]` rates, `[pbr_set]` — are **opt-in**: flip `enabled = true` in the relevant section.
+**Out-of-box defaults are minimal**: only `naming.forbidden_chars` (shell-unsafe / Windows-illegal chars), `[texture.color_space]`, `duplicate`, and `missing_reference` (Unity) fire by default. Stricter checks — `[texture]` size / PoT, `[model]` budgets, `[audio]` rates, `[pbr_set]`, `[dcc_source]` — are **opt-in**: flip `enabled = true` in the relevant section.
 
 A working starter config is at [`examples/tidycraft.example.toml`](examples/tidycraft.example.toml) — copy to your project root, rename to `tidycraft.toml`, and tweak. For per-rule explanations and tuning advice see [`docs/analyzer-rules.md`](docs/analyzer-rules.md). Quick reference (values below are the actual built-in defaults):
 
@@ -262,11 +262,23 @@ enabled = false
 trigger = "basecolor"
 required = ["basecolor", "normal"]
 
+[dcc_source]                           # disabled by default; pairs DCC sources with exports
+enabled = false
+mtime_tolerance_secs = 60              # absorbs git-checkout mtime sync
+# Default mappings cover Blender / Maya / Max / ZBrush / Modo / Houdini /
+# Cinema 4D / Marvelous / Substance Painter+Designer / Photoshop.
+# See docs/analyzer-rules.md or examples/tidycraft.example.toml for the
+# full mapping list and lookup options.
+
+# Scanner already respects .gitignore by default (Settings → Scanning),
+# so Library/ / Intermediate/ etc. are typically skipped at scan time.
+# These [ignore] patterns apply at analyze time — useful for muting rule
+# output on vendored / third-party content that IS scanned.
 [ignore]
 patterns = [
     # "ThirdParty/**",
-    # "Library/**",                    # Unity generated artifacts
-    # "Intermediate/**",               # Unreal build cache
+    # "Plugins/**",
+    # "**/_legacy/**",
 ]
 ```
 
@@ -288,9 +300,10 @@ tidycraft/
 │   └── lib/                # Utilities (pathUtils, platform detect, …)
 ├── src-tauri/              # Rust backend
 │   └── src/
-│       ├── scanner.rs      # Asset scanning
+│       ├── scanner.rs      # Asset scanning (gitignore-aware walker)
 │       ├── watcher.rs      # FS watcher → fs-change events
-│       ├── analyzer/       # Rule engine + PBR set + tag suggester
+│       ├── analyzer/       # Rule engine (naming / texture / model / audio / duplicate / missing_reference / pbr_set / dcc_source) + tag suggesters
+│       ├── llm/            # Multi-provider AI tagging (Claude / OpenAI / Ollama) + Learning mode
 │       ├── thumbnail.rs    # Thumbnail generation
 │       ├── tags.rs         # Tag management
 │       └── lib.rs          # Tauri commands
@@ -311,7 +324,7 @@ Tidycraft is **local-first by design**:
 - **No telemetry, no analytics, no network calls** in the current build (v0.x).
 - **All state lives on your disk**: scan cache (`~/.cache/tidycraft/` or the platform equivalent), tag bindings (`.tidycraft-tags.json` per project), undo history, thumbnail cache, settings.
 - **No account, no sign-in.** Open the app and use it.
-- **The planned LLM tag suggester** is **opt-in only** — disabled by default, with an explicit consent dialog the first time per provider before any thumbnails or filenames leave your machine. Local-only providers (Ollama) are first-class alongside cloud APIs.
+- **AI tag suggestions** are **opt-in only** — no calls happen until you configure a provider in Settings → AI Tagging. First call per cloud provider with thumbnails on shows an explicit consent dialog (revocable). Local provider (Ollama) uploads nothing off-machine; cloud paths (Claude / OpenAI) upload filenames + tag context, and thumbnails only if you opt in. See [`SECURITY.md`](SECURITY.md) for the full upload-payload disclosure.
 
 ---
 
@@ -336,6 +349,8 @@ Shipped:
 - [x] External editor mappings (Settings → External Editors, per-extension)
 - [x] Cross-platform polish (macOS ⌘ glyphs, Windows file-manager reveal fix, path utils)
 - [x] DCC source-file linking (`.blend` / `.psd` / `.spp` / `.ma` / `.ztl` / `.max` / `.lxo` / `.hip` / `.c4d` / `.zprj` / `.sbs` / `.psb` → "source newer than export" warnings, opt-in)
+- [x] AI Tagging — Learning mode (project sampling → local rules persisted to `tidycraft.ai.toml`; zero per-asset LLM cost after the one-time run) + advanced per-asset mode (multi-provider LLM with cost preview + per-provider consent; opt-in)
+- [x] Scanner respects `.gitignore` / `.ignore` by default via `ignore::WalkBuilder` (toggleable in Settings → Scanning)
 
 Backlog:
 
@@ -346,7 +361,7 @@ Backlog:
 
 ## 📄 License
 
-[MIT](LICENSE)
+[Apache 2.0](LICENSE)
 
 ---
 

@@ -8,7 +8,7 @@
     "url": "https://github.com/Lynthar/Tidycraft.git"
   },
   "bugs": "https://github.com/Lynthar/Tidycraft/issues",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -14,7 +14,7 @@ Tidycraft is **alpha-stage** and **single-maintainer**. PRs are welcome but expe
 
 - **Slow review.** Days to weeks, not hours.
 - **Scope discipline.** PRs that change the architecture, add new dependencies, or rewrite existing modules will likely be asked to first surface as an issue / discussion.
-- **No CLA.** Just MIT-license your contribution by submitting it.
+- **No CLA.** Your contribution is licensed under Apache 2.0 by submitting it (same as the rest of the project).
 
 ## Setup
 
@@ -78,4 +78,4 @@ For security-sensitive issues (LLM API key handling, path traversal, anything th
 
 ## License
 
-By contributing, you agree your contribution will be licensed under the [MIT License](LICENSE), the same as the rest of the project.
+By contributing, you agree your contribution will be licensed under the [Apache License 2.0](LICENSE), the same as the rest of the project.
