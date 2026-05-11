@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Planned
+- VRAM budget estimates per texture / per directory.
+- Cross-engine reverse-reference graph (Unreal / Godot beyond Unity).
+- DCC source-file linking phase 2: 1→N pairing for Substance Painter `.spp` (per-channel PNG outputs); git-status-aware severity bump when the source is dirty in the working tree.
+
+## [0.2.0] — 2026-05-11
+
 ### Added
 - **AI Tagging — Learning mode** (recommended default). One LLM call samples the project, derives local heuristic rules, persists them to `<project>/tidycraft.ai.toml`. After that, `suggest_tags` matches locally with zero per-asset LLM cost. AITagPanel header gets a status badge with Run / Re-learn / Review controls.
 - **AI Tagging — per-asset mode** (opt-in via Settings → AI Tagging). Multi-provider LLM tagging (Claude / OpenAI / Ollama) behind a shared `LLMProvider` trait, with a per-asset SHA256 disk cache so partial-batch re-runs stay free. Cost-preview modal gates every call. Thumbnail upload defaults off; filename + path carry most of the signal for game assets.
@@ -35,11 +42,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - `suggest_tags` auto-routes through `rule_suggest::load_or_fallback`. AI rules from `tidycraft.ai.toml` if present; heuristic suggester otherwise. Output shape is identical either way.
 - `RuleSuggester` now executes `filename_regex` rules. The `regex` crate is a proper dep with linear-time matching. Patterns that fail to compile silent-skip with a stderr warning.
 - Scanner respects `.gitignore` by default via `ignore::WalkBuilder`. Also honors `.ignore`, git globals, `.git/info/exclude`, and skips hidden dot directories. **Behavior change**: Unity / Unreal projects no longer scan `Library/` / `Intermediate/` / `Saved/` by default. Toggle off via Settings → Scanning to restore "scan everything".
-
-### Planned
-- VRAM budget estimates per texture / per directory.
-- Cross-engine reverse-reference graph (Unreal / Godot beyond Unity).
-- DCC source-file linking phase 2: 1→N pairing for Substance Painter `.spp` (per-channel PNG outputs); git-status-aware severity bump when the source is dirty in the working tree.
 
 ---
 

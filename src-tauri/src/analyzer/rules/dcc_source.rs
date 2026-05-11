@@ -209,7 +209,7 @@ fn candidate_dirs(source_parent: &str, lookup: &DccLookup) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let parent_norm = source_parent.trim_end_matches('/');
 
-    let mut push = |s: String, out: &mut Vec<String>, seen: &mut HashSet<String>| {
+    let push = |s: String, out: &mut Vec<String>, seen: &mut HashSet<String>| {
         if !s.is_empty() && seen.insert(s.clone()) {
             out.push(s);
         }

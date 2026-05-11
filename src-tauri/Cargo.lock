@@ -5126,7 +5126,7 @@ dependencies = [
 
 [[package]]
 name = "tidycraft"
-version = "0.0.1"
+version = "0.2.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
