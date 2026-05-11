@@ -175,15 +175,45 @@ See [`docs/analyzer-rules.md`](docs/analyzer-rules.md) for per-rule defaults and
 
 ---
 
-## 🚀 Getting Started
+## 📥 Install
 
-### Prerequisites
+### From a release (recommended)
+
+Grab the latest binary from [Releases](https://github.com/Lynthar/Tidycraft/releases) and follow your platform's first-launch step.
+
+**Linux**
+
+- `.deb`: `sudo dpkg -i tidycraft_*.deb`
+- `.AppImage`: `chmod +x tidycraft_*.AppImage && ./tidycraft_*.AppImage`
+
+No further steps — the app runs directly.
+
+**Windows**
+
+1. Run the `.msi` installer.
+2. On first launch, Windows SmartScreen may flag the app as "unrecognized" — the binary isn't code-signed yet (planned, see [`SECURITY.md`](SECURITY.md)). Click **More info** → **Run anyway**.
+
+**macOS**
+
+1. Mount the matching `.dmg`:
+   - Apple Silicon (M1 / M2 / M3 / M4): `Tidycraft_*_aarch64.dmg`
+   - Intel: `Tidycraft_*_x64.dmg`
+2. Drag `Tidycraft.app` into `/Applications`.
+3. The app isn't notarized yet, so Gatekeeper will block it on first launch. Open **Terminal** and run:
+   ```bash
+   xattr -d com.apple.quarantine /Applications/Tidycraft.app
+   ```
+   Then open the app normally. (Alternative: right-click the app → **Open** → confirm in the prompt; or System Settings → **Privacy & Security** → **Open Anyway**.)
+
+These first-launch hoops will go away once code signing lands (post-alpha; see [`SECURITY.md`](SECURITY.md)).
+
+### From source (for development)
+
+Prerequisites:
 
 - [Node.js](https://nodejs.org/) 18+ (CI uses 20)
 - [pnpm](https://pnpm.io/) 8+ (CI uses 9)
 - [Rust](https://rustup.rs/) 1.75+
-
-### Installation
 
 ```bash
 # Clone repository

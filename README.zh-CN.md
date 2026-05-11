@@ -175,15 +175,45 @@
 
 ---
 
-## 🚀 快速开始
+## 📥 安装
 
-### 环境要求
+### 从 release 下载(推荐)
+
+从 [Releases 页面](https://github.com/Lynthar/Tidycraft/releases) 下载对应平台的二进制,按下面的首次启动步骤操作。
+
+**Linux**
+
+- `.deb`：`sudo dpkg -i tidycraft_*.deb`
+- `.AppImage`：`chmod +x tidycraft_*.AppImage && ./tidycraft_*.AppImage`
+
+无需额外操作,可直接运行。
+
+**Windows**
+
+1. 运行 `.msi` 安装器。
+2. 首次启动时,Windows SmartScreen 可能提示"未识别的应用" —— 因为二进制尚未做代码签名(规划中,详见 [`SECURITY.md`](SECURITY.md))。点击 **更多信息** → **仍要运行**。
+
+**macOS**
+
+1. 挂载对应的 `.dmg`:
+   - Apple Silicon(M1 / M2 / M3 / M4):`Tidycraft_*_aarch64.dmg`
+   - Intel:`Tidycraft_*_x64.dmg`
+2. 把 `Tidycraft.app` 拖到 `/Applications`。
+3. 因为 App 尚未公证,Gatekeeper 会在首次启动时阻止。打开 **终端** 运行:
+   ```bash
+   xattr -d com.apple.quarantine /Applications/Tidycraft.app
+   ```
+   然后正常打开 App。(其他方式:右键 App → **打开** → 在弹出框点击确认;或者 系统设置 → **隐私与安全性** → **仍要打开**。)
+
+这些首次启动的额外步骤等代码签名落地后会自动消失(post-alpha 计划,详见 [`SECURITY.md`](SECURITY.md))。
+
+### 从源码构建(开发用)
+
+环境要求:
 
 - [Node.js](https://nodejs.org/) 18+（CI 用 20）
 - [pnpm](https://pnpm.io/) 8+（CI 用 9）
 - [Rust](https://rustup.rs/) 1.75+
-
-### 安装步骤
 
 ```bash
 # 克隆仓库
