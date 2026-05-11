@@ -11,7 +11,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Cross-engine reverse-reference graph (Unreal / Godot beyond Unity).
 - DCC source-file linking phase 2: 1→N pairing for Substance Painter `.spp` (per-channel PNG outputs); git-status-aware severity bump when the source is dirty in the working tree.
 
-## [0.2.0] — 2026-05-11
+## [0.6.0] — 2026-05-11
 
 ### Added
 - **AI Tagging — Learning mode** (recommended default). One LLM call samples the project, derives local heuristic rules, persists them to `<project>/tidycraft.ai.toml`. After that, `suggest_tags` matches locally with zero per-asset LLM cost. AITagPanel header gets a status badge with Run / Re-learn / Review controls.
