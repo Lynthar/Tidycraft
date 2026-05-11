@@ -498,8 +498,8 @@ tidycraft/
 │   └── tidycraft.example.toml        # Annotated sample rule config
 ├── docs/                             # Auxiliary docs
 │   ├── analyzer-rules.md             # Per-rule defaults and tuning advice
+│   ├── development.md                # This file
 │   └── screenshots/                  # README image assets
 ├── CLAUDE.md                         # Claude Code project instructions
-├── DEVELOPMENT.md                    # This file
 └── README.md / README.zh-CN.md       # User-facing docs
 ```

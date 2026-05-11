@@ -279,9 +279,11 @@ tidycraft/
 │       ├── thumbnail.rs    # 缩略图生成
 │       ├── tags.rs         # 标签管理
 │       └── lib.rs          # Tauri 命令
-├── docs/                   # 辅助文档（analyzer-rules.md、screenshots/）
+├── docs/                   # 辅助文档
+│   ├── analyzer-rules.md   # 各规则默认值与调优说明
+│   ├── development.md      # 开发者指南（架构、贡献流程）
+│   └── screenshots/        # README 截图
 ├── examples/               # `tidycraft.example.toml` 起始模板
-├── DEVELOPMENT.md          # 开发者指南（架构、贡献流程）
 └── README.md               # 用户文档（本文件）
 ```
 

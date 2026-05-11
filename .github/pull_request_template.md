@@ -30,7 +30,7 @@
 ## Checklist
 
 - [ ] My commits are focused (one purpose each, not mixed bug/feature/refactor)
-- [ ] I updated relevant docs (README / DEVELOPMENT / docs/analyzer-rules / i18n keys in en + zh)
+- [ ] I updated relevant docs (README / docs/development / docs/analyzer-rules / i18n keys in en + zh)
 - [ ] If I added a new dependency, I justified the choice in the PR description
 - [ ] If this is a non-trivial change, I opened an issue / discussion first
 - [ ] No `console.log` / `dbg!` / `eprintln!` debug noise left behind

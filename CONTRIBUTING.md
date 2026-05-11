@@ -1,6 +1,6 @@
 # Contributing to Tidycraft
 
-Thanks for taking a look. This file is the short version; the full developer guide (architecture, file layout, how to add a Tauri command / analyzer rule / asset parser) lives in [`DEVELOPMENT.md`](DEVELOPMENT.md).
+Thanks for taking a look. This file is the short version; the full developer guide (architecture, file layout, how to add a Tauri command / analyzer rule / asset parser) lives in [`docs/development.md`](docs/development.md).
 
 ## TL;DR
 
@@ -39,8 +39,8 @@ System prerequisites:
 ## What changes are easy to land
 
 - **Bug fixes** with a clear repro and minimal diff.
-- **New analyzer rules** (per-asset or cross-asset) — see `DEVELOPMENT.md §5`.
-- **Format parsers** for asset types we don't yet handle (e.g. EXR thumbnails, FLAC audio, USD meshes).
+- **New analyzer rules** (per-asset or cross-asset) — see `docs/development.md §5`.
+- **Format parsers** for asset types we don't yet handle (e.g. AVI video metadata, FLAC audio metadata, USD meshes).
 - **i18n** — add a new locale by copying `src/i18n/locales/en.json` and translating.
 
 ## What changes need a discussion first
@@ -60,7 +60,7 @@ Open a GitHub Discussion or Issue first — saves you from writing 500 lines we'
 
 ## Tests
 
-- **Rust:** `cargo test --lib` runs ~115 tests across `scanner`, `analyzer`, `watcher`, `undo`, `tags`, etc. Add tests for any new pure-function logic.
+- **Rust:** `cargo test --lib` runs the backend's unit tests (across `scanner`, `analyzer`, `watcher`, `undo`, `tags`, `llm`, etc.). Add tests for any new pure-function logic.
 - **Frontend:** no test runner configured. `pnpm build` runs `tsc`, which is the only TS gate.
 - **Manual:** if your change touches paths, filesystems, or platform-specific APIs, verify on at least Windows AND a POSIX target before submitting.
 
@@ -74,7 +74,7 @@ Every user-facing string in components goes through `t("key")`. When adding a st
 
 ## Reporting security issues
 
-For security-sensitive issues (LLM API key handling, path traversal, anything that could leak user data), please **email the maintainer privately** rather than opening a public issue. Until a `SECURITY.md` is added, file a private GitHub Security Advisory or DM the maintainer.
+For security-sensitive issues (LLM API key handling, path traversal, anything that could leak user data), see [`SECURITY.md`](SECURITY.md) for the disclosure path. **Don't open a public GitHub Issue** for these.
 
 ## License
 

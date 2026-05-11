@@ -294,9 +294,11 @@ tidycraft/
 │       ├── thumbnail.rs    # Thumbnail generation
 │       ├── tags.rs         # Tag management
 │       └── lib.rs          # Tauri commands
-├── docs/                   # Auxiliary docs (analyzer-rules.md, screenshots/)
+├── docs/                   # Auxiliary docs
+│   ├── analyzer-rules.md   # Per-rule defaults and tuning advice
+│   ├── development.md      # Developer guide (architecture, contributing)
+│   └── screenshots/        # README image assets
 ├── examples/               # Starter `tidycraft.example.toml`
-├── DEVELOPMENT.md          # Developer guide (architecture, contributing)
 └── README.md               # User-facing docs (this file)
 ```
 
