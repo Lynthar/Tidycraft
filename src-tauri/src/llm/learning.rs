@@ -180,6 +180,7 @@ pub struct LearningResult {
     pub tag_gaps: Vec<TagGap>,
     #[serde(default)]
     pub rules: Vec<LearnedRule>,
+    #[serde(default)]
     pub usage: Usage,
 }
 
@@ -231,24 +232,60 @@ mod tests {
 
     #[test]
     fn missing_optional_fields_default_cleanly() {
-        // Older tidycraft.ai.toml entries (pre-v1+) might lack
-        // sample_tags / tag_gaps / rules. Confirm they default to
-        // empty rather than failing the load.
+        // LLM output is instructed NOT to emit `usage` (it's API
+        // metadata, filled in by the provider after parse), and older
+        // tidycraft.ai.toml files may lack sample_tags / tag_gaps /
+        // rules. All four must default rather than fail the load.
         let json = r#"{
             "inferred_conventions": {
                 "naming": "",
                 "directories": "",
                 "existing_tag_meanings": {}
-            },
-            "usage": {
-                "input_tokens": 0,
-                "output_tokens": 0,
-                "cached": false
             }
         }"#;
         let result: LearningResult = serde_json::from_str(json).unwrap();
         assert!(result.sample_tags.is_empty());
         assert!(result.tag_gaps.is_empty());
         assert!(result.rules.is_empty());
+        assert_eq!(result.usage.input_tokens, 0);
+        assert_eq!(result.usage.output_tokens, 0);
+        assert!(!result.usage.cached);
+    }
+
+    #[test]
+    fn parses_llm_response_shape_without_usage_field() {
+        // Regression for the learn_project parse path:
+        // SYSTEM_PROMPT_LEARNING tells the model to emit exactly
+        // {inferred_conventions, sample_tags, tag_gaps, rules} with no
+        // `usage`. Deserialization must accept that shape across every
+        // LearnedRule kind.
+        let json = r#"{
+            "inferred_conventions": {
+                "naming": "PascalCase with type prefix",
+                "directories": "Organized by subject",
+                "existing_tag_meanings": { "hero": "main character assets" }
+            },
+            "sample_tags": [{
+                "asset_path": "Cactus/cactus.png",
+                "matched_existing": ["hero"],
+                "suggested_new": [
+                    { "label": "cactus", "category": "subject", "confidence": 0.98 }
+                ]
+            }],
+            "tag_gaps": [
+                { "label": "flower", "category": "subject", "reason": "no flower tag yet" }
+            ],
+            "rules": [
+                { "kind": "filename_token", "pattern": "BaseColor",  "tags": ["texture"], "confidence": 0.95 },
+                { "kind": "path_prefix",    "pattern": "Characters/","tags": ["hero"],    "confidence": 0.99 },
+                { "kind": "path_segment",   "pattern": "Cactus",     "tags": ["cactus"],  "confidence": 0.99 },
+                { "kind": "filename_regex", "pattern": "^model\\.obj$","tags": ["model"], "confidence": 0.99 }
+            ]
+        }"#;
+        let result: LearningResult = serde_json::from_str(json).unwrap();
+        assert_eq!(result.sample_tags.len(), 1);
+        assert_eq!(result.tag_gaps.len(), 1);
+        assert_eq!(result.rules.len(), 4);
+        assert_eq!(result.usage.input_tokens, 0);
     }
 }

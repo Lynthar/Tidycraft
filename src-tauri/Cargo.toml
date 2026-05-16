@@ -1,6 +1,6 @@
 [package]
 name = "tidycraft"
-version = "0.6.0"
+version = "0.6.1"
 description = "Game asset management tool"
 authors = ["Tidycraft Team"]
 edition = "2021"
