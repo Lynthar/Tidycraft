@@ -22,6 +22,7 @@ import { useUiStore } from "./stores/uiStore";
 import { restoreSession } from "./stores/sessionStore";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { isMacOS } from "./lib/platform";
+import { version as appVersion } from "../package.json";
 
 function App() {
   const {
@@ -163,7 +164,7 @@ function App() {
           Tidycraft
         </span>
         <span className="tc-title-text mono" data-tauri-drag-region>
-          v0.0.1
+          v{appVersion}
         </span>
       </div>
       <Header searchInputRef={searchInputRef} />
