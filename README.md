@@ -18,7 +18,7 @@
 
 ---
 
-## 📸 Screenshots
+## Screenshots
 
 <div align="center">
 
@@ -36,14 +36,14 @@
 
 ---
 
-## ✨ Why Tidycraft?
+## Why Tidycraft?
 
 - **Fast scanning** — 10k+ assets in seconds via parallel walk + incremental cache.
 - **Real bug detection out of the box** — duplicates (SHA256), broken Unity GUID references, sRGB-flagged data textures. Stylistic conventions (PoT, prefix, vertex budgets), PBR set completeness, and DCC source ↔ export pairing are opt-in via `tidycraft.toml`.
-- **Multi-engine** — Unity / Unreal / Godot / generic; engine-specific parsers for GUID graphs, `.uproject`, `project.godot`.
-- **Multi-project workspace** — open several projects simultaneously, switch between them, cross-session restore.
-- **Stays out of your way** — minimal default rules; scanner respects `.gitignore` so generated artefacts stay out of view; live filesystem watcher (no manual rescan); editable rules via `Settings → Analysis Rules → Edit`.
-- **Local-first** — all state on your disk; no telemetry, no network calls.
+- Multi-engine: Unity, Unreal, Godot, or generic projects, with dedicated parsers for Unity GUID graphs, `.uproject`, and `project.godot`.
+- Multiple projects can stay open at once; switch between them freely, and the workspace is restored across sessions.
+- Default rules are kept minimal to keep noise down. The scanner respects `.gitignore` (so generated artefacts stay out of view), the filesystem watcher syncs external changes automatically, and rules are editable from `Settings → Analysis Rules → Edit`.
+- Local-first: all state lives on your disk, with no telemetry and no network calls.
 
 > **Status: Alpha — actively developed.** Core features (scanning, analysis, tags, 3D preview, Git, watcher) are stable. **LLM-backed AI tagging** ships in two modes: a **Learning mode** (recommended — one-time LLM call samples the project, derives local heuristic rules, reuses your existing tag system; free thereafter) and an **advanced per-asset mode** (opt-in — sends thumbnails to Claude / OpenAI / Ollama for direct tagging). Both are off until you configure a provider. See [Features → AI Tagging](#-ai-tagging) below.
 
@@ -83,20 +83,20 @@ Some 3D model formats (FBX, OBJ, DAE) embed texture paths internally. When these
 
 ## ✨ Features
 
-### 🔍 Asset Scanning
+### Asset Scanning
 - **Fast async scanning** with real-time progress and cancellation
 - **Project type detection** — Unity, Unreal, Godot, or generic
 - **Directory tree visualization** with file counts and sizes
 - **Unity .meta file parsing** — extracts GUIDs for asset tracking
 
-### 🏷️ Tag System
+### Tag System
 - Create custom **color-coded tags** with optional descriptions (used as AI tagging context)
 - Tag single or multiple assets at once
 - **Filter assets by tags** (single or multi-select)
 - Tags persist across sessions; rename / move syncs bindings; deleted files are reaped automatically
 - **Heuristic tag suggestions** — auto-grouped by filename token / dimension + PBR channel / path segment
 
-### ✨ AI Tagging
+### AI Tagging
 
 Multi-provider LLM tagging via **Claude** (Sonnet 4.6 / Haiku 4.5 / Opus 4.7), **OpenAI** (GPT-5.4-mini / 4o-mini / 5.4 / 5.4-nano), and **Ollama** (local — qwen2.5-VL / Llama 3.2-Vision / LLaVA / etc.; installed models listed live).
 
@@ -111,7 +111,7 @@ Common to both:
 - **Per-asset disk cache** keyed on `(thumbnail bytes, filename, path, provider, model, prompt version)` — partial-batch hits stay free.
 - **Local + private** — Ollama path uploads nothing off-machine; cloud paths upload filenames + tag context (and thumbnails only if you opt in).
 
-### 📊 Metadata Extraction
+### Metadata Extraction
 
 | Asset Type | Extracted Info |
 |------------|----------------|
@@ -119,7 +119,7 @@ Common to both:
 | **3D Models** | Vertices, faces, materials |
 | **Audio** | Duration, sample rate, channels, bit depth |
 
-### 🖼️ Asset Browser
+### Asset Browser
 - **List + Grid views** with virtual scrolling — handles 10,000+ files smoothly
 - **Thumbnail preview** with disk caching
 - **Command Palette** (⌘K / Ctrl+K) for quick navigation, filters, and actions
@@ -128,7 +128,7 @@ Common to both:
 - **3D model preview** with orbit controls (glTF / GLB / FBX / OBJ / DAE / 3DS / VOX)
 - **External editor mappings** — map extensions to Photoshop / Blender / Audacity / etc.
 
-### 📋 Rule-Based Analysis
+### Rule-Based Analysis
 
 | Category | Checks |
 |----------|--------|
@@ -147,7 +147,7 @@ See [`docs/analyzer-rules.md`](docs/analyzer-rules.md) for per-rule defaults and
 
 ---
 
-## 📦 Supported Formats
+## Supported Formats
 
 | Category | Formats |
 |----------|---------|
@@ -158,7 +158,7 @@ See [`docs/analyzer-rules.md`](docs/analyzer-rules.md) for per-rule defaults and
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 | Layer | Technology |
 |-------|------------|
@@ -175,7 +175,7 @@ See [`docs/analyzer-rules.md`](docs/analyzer-rules.md) for per-rule defaults and
 
 ---
 
-## 📥 Install
+## Install
 
 ### From a release (recommended)
 
@@ -232,7 +232,7 @@ pnpm tauri build
 
 ---
 
-## 📖 Usage
+## Usage
 
 1. **Open Project** — Click "Open Project" (or `⌘O` / `Ctrl+O`) and select your game project folder
 2. **Browse Assets** — Navigate the directory tree, switch list ↔ grid view, search, and filter
@@ -244,7 +244,7 @@ pnpm tauri build
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
 Drop a `tidycraft.toml` in your project root and the next analysis will pick it up automatically. The Sidebar's **Run Analysis** button shows a small dot when custom rules are loaded.
 
@@ -316,7 +316,7 @@ Any field can be omitted — missing fields fall back to defaults.
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 tidycraft/
@@ -347,7 +347,7 @@ tidycraft/
 
 ---
 
-## 🔒 Privacy & Data
+## Privacy & Data
 
 Tidycraft is **local-first by design**:
 
@@ -358,7 +358,7 @@ Tidycraft is **local-first by design**:
 
 ---
 
-## 🗺️ Roadmap
+## Roadmap
 
 Shipped:
 
@@ -389,14 +389,6 @@ Backlog:
 
 ---
 
-## 📄 License
+## License
 
 [Apache 2.0](LICENSE)
-
----
-
-<div align="center">
-
-Made with ❤️ for game developers
-
-</div>
