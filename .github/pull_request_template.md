@@ -1,6 +1,6 @@
-## What this PR does
+## Summary
 
-<!-- 1-3 sentences. The "why" is more useful than the "what" — the diff already shows what. -->
+<!-- What changed, and why? A couple sentences is enough. -->
 
 ## Type of change
 
@@ -12,25 +12,36 @@
 - [ ] Docs only
 - [ ] Other (specify)
 
-## Testing done
+## Testing
 
-- [ ] `cargo test --lib` passes
-- [ ] `pnpm build` passes (TypeScript type-check)
-- [ ] Manually exercised the affected feature in `pnpm tauri dev`
-- [ ] Tested on (check what applies): [ ] Windows [ ] macOS [ ] Linux
+- [ ] `cargo test --lib`
+- [ ] `pnpm build`
+- [ ] Manual check in `pnpm tauri dev`
+- [ ] Not run / not applicable
 
-## Related issues
+Testing notes:
+
+<!-- Commands run, platform checked, or why testing was not applicable. -->
+
+## Platforms Checked
+
+- [ ] Windows
+- [ ] macOS
+- [ ] Linux
+- [ ] Not platform-specific
+
+## Related Issues
 
 <!-- "Fixes #123" / "Refs #456" / "Discussion #789". Leave blank if standalone. -->
 
-## Screenshots / GIFs (UI changes only)
+## Screenshots / Recordings
 
-<!-- Drag and drop here. -->
+<!-- UI changes only. Drag and drop images or recordings here. -->
 
 ## Checklist
 
-- [ ] My commits are focused (one purpose each, not mixed bug/feature/refactor)
-- [ ] I updated relevant docs (README / docs/development / docs/analyzer-rules / i18n keys in en + zh)
-- [ ] If I added a new dependency, I justified the choice in the PR description
-- [ ] If this is a non-trivial change, I opened an issue / discussion first
-- [ ] No `console.log` / `dbg!` / `eprintln!` debug noise left behind
+- [ ] I kept this PR focused on one change
+- [ ] I updated docs and i18n strings where relevant
+- [ ] I explained any new dependency in the summary
+- [ ] For a larger change, I opened or linked an issue / discussion first
+- [ ] I removed temporary `console.log`, `dbg!`, and `eprintln!` output
