@@ -241,7 +241,7 @@ The frontend and backend communicate exclusively through two mechanisms:
   per-provider `apiKey` / `endpoint` / `model`, `aiPrivacyConsented` per
   provider, `aiPerAssetModeEnabled` (advanced opt-in for the direct
   per-asset path). API keys are plaintext localStorage; first-save shows
-  a warning toast. See `SECURITY.md` for the disclosure scope.
+  a warning toast reminding the user not to share their `tidycraft-settings`.
 - Other global stores: `themeStore` (dark / light / system + matchMedia
   listener), `searchHistoryStore` (recent search queries).
 - **`components/`** — Flat layout, one component per file, no barrel exports.

@@ -4,6 +4,7 @@ import { Sparkles, AlertTriangle, Loader2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useUiStore, type AiTagResponse } from "../stores/uiStore";
 import { useSettingsStore, type AiProviderId } from "../stores/settingsStore";
+import { useProjectStore } from "../stores/projectStore";
 
 /// Mirrors the backend `llm::CostEstimate` struct.
 interface CostEstimate {
@@ -43,6 +44,8 @@ export function AIAnalyzeModal() {
   const aiProviders = useSettingsStore((s) => s.aiProviders);
   const aiPrivacyConsented = useSettingsStore((s) => s.aiPrivacyConsented);
   const setAiPrivacyConsent = useSettingsStore((s) => s.setAiPrivacyConsent);
+
+  const activeProjectId = useProjectStore((s) => s.activeProjectId);
 
   const [cost, setCost] = useState<CostEstimate | null>(null);
   const [loadingCost, setLoadingCost] = useState(false);
@@ -134,9 +137,11 @@ export function AIAnalyzeModal() {
     setError(null);
     try {
       const response = await invoke<AiTagResponse>("llm_suggest_tags", {
-        // projectId is currently unused by the backend command; reserved
-        // for future per-project rate limiting / scoping.
-        projectId: "",
+        // Pass the active project's id so the backend can load this
+        // project's tag system + tidycraft.toml [project] theme/goal as
+        // prompt context (existing-tag reuse + project-aware suggestions).
+        // Empty string makes the backend silently fall back to no context.
+        projectId: activeProjectId ?? "",
         assetPaths: paths,
         provider,
         model: config.model,

@@ -6,9 +6,10 @@
 //! once the user accepts. Each provider (Claude / OpenAI / Ollama) implements
 //! the same trait so swapping is a config change, not a code branch.
 //!
-//! Day 1 scope (this commit): trait + schemas + cache + cost + prompts +
-//! placeholder providers that return `LLMError::NotImplemented`. Day 2 wires
-//! the actual HTTP calls.
+//! Each provider implements `suggest_tags` (per-asset) and `learn_project`
+//! (Learning mode) over real HTTP. `LLMError::NotImplemented` survives only
+//! as the default trait fallback for an optional method a provider doesn't
+//! implement.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -218,8 +219,7 @@ pub trait LLMProvider: Send + Sync {
     /// function — no network. Drives the per-call confirm modal.
     fn estimate_cost(&self, request: &TagRequest) -> CostEstimate;
 
-    /// Make the actual API call. Day 1 stubs return
-    /// `LLMError::NotImplemented`; Day 2 fills in the HTTP work.
+    /// Make the actual API call to the provider's tagging endpoint.
     async fn suggest_tags(&self, request: &TagRequest) -> Result<TagResponse, LLMError>;
 
     /// Learning-mode call (Day 6). Sends the project samples + tag
@@ -362,6 +362,14 @@ where
     let mut miss_assets: Vec<AssetInput> = Vec::new();
     let mut miss_keys: Vec<String> = Vec::new();
 
+    // The project framing + existing-tag context is identical for every
+    // asset in the batch, so hash it once and fold it into each key. Because
+    // that context is part of the prompt, editing a tag's description,
+    // adding/removing tags, changing sample bindings, or updating [project]
+    // theme/goal now invalidates stale entries instead of returning advice
+    // generated under the old context.
+    let context_hash = cache::hash_context(request.project_ctx.as_ref(), &request.existing_tags);
+
     for a in &request.assets {
         let thumb_hash = a
             .thumbnail_base64
@@ -374,6 +382,7 @@ where
             provider_id,
             &request.model,
             request.prompt_version,
+            &context_hash,
         );
         if let Some(hit) = cache::get(&key) {
             hits.push(hit);

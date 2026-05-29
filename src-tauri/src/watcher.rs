@@ -50,11 +50,19 @@ pub fn start(
     app: AppHandle,
     project_id: String,
     root_path: String,
+    respect_gitignore: bool,
 ) -> Result<ProjectWatcher, String> {
     let root_buf = PathBuf::from(&root_path);
     if !root_buf.exists() {
         return Err(format!("Path does not exist: {}", root_path));
     }
+
+    // Built once at watcher start so FS events apply the same `.gitignore`
+    // exclusions the scan used — otherwise a scan-excluded file (e.g. inside
+    // Unity's gitignored `Library/`, which Unity rewrites constantly) would
+    // get re-added to the cached scan on every modification. `None` when the
+    // project scanned with gitignore off.
+    let ignore_matcher = scanner::build_gitignore_matcher(&root_buf, respect_gitignore);
 
     let (tx, rx) = mpsc::channel::<DebounceEventResult>();
 
@@ -99,7 +107,10 @@ pub fn start(
 
             let filtered: Vec<PathBuf> = candidates
                 .into_iter()
-                .filter(|p| is_trackable_path(p, &thread_root))
+                .filter(|p| {
+                    is_trackable_path(p, &thread_root)
+                        && !is_gitignored(p, &thread_root, ignore_matcher.as_ref())
+                })
                 .collect();
 
             if filtered.is_empty() {
@@ -263,6 +274,21 @@ fn is_trackable_path(path: &Path, root: &Path) -> bool {
     }
 
     path.extension().is_some()
+}
+
+/// Whether `path` is excluded by the project's `.gitignore` rules, using the
+/// matcher built at watcher start. A `None` matcher (gitignore disabled for
+/// this project) is never ignored. Matching is lexical, so it also correctly
+/// rejects deletions of paths that were never tracked.
+fn is_gitignored(path: &Path, root: &Path, matcher: Option<&scanner::IgnoreMatcher>) -> bool {
+    let Some(matcher) = matcher else {
+        return false;
+    };
+    let Ok(rel) = path.strip_prefix(root) else {
+        // Outside root — is_trackable_path already rejects these.
+        return false;
+    };
+    matcher.is_ignored(rel, path.is_dir())
 }
 
 fn asset_type_key(t: &AssetType) -> String {

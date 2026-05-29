@@ -20,6 +20,7 @@ export function getAssetTypeColor(type: string): string {
     texture: "text-green-400",
     model: "text-blue-400",
     audio: "text-yellow-400",
+    video: "text-rose-400",
     animation: "text-purple-400",
     material: "text-pink-400",
     prefab: "text-cyan-400",

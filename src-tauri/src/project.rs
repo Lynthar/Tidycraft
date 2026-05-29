@@ -27,6 +27,12 @@ pub struct ProjectState {
     pub git_manager: Option<GitManager>,
     pub undo_manager: UndoManager,
     pub tags_data: Option<TagsData>,
+    /// Whether the most recent scan honored `.gitignore` / `.ignore` (the
+    /// per-machine "Respect .gitignore" setting). Recorded on each scan so
+    /// the filesystem watcher applies the same exclusions and doesn't re-add
+    /// scan-excluded files on FS events. Defaults to true (matches the
+    /// frontend default) until the first scan overwrites it.
+    pub respect_gitignore: bool,
     /// Live filesystem watcher. Dropping this stops the background watch.
     pub watcher: Option<ProjectWatcher>,
 }
@@ -43,6 +49,7 @@ impl ProjectState {
             git_manager: None,
             undo_manager,
             tags_data: None,
+            respect_gitignore: true,
             watcher: None,
         }
     }

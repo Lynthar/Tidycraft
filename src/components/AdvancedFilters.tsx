@@ -5,7 +5,7 @@ import { useProjectStore } from "../stores/projectStore";
 import type { AssetType, GitFileStatus } from "../types/asset";
 
 const ASSET_TYPES: AssetType[] = [
-  "texture", "model", "audio", "animation", "material",
+  "texture", "model", "audio", "video", "animation", "material",
   "prefab", "scene", "script", "data", "other"
 ];
 
