@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Question / discussion
+  - name: Security report
+    url: https://github.com/Lynthar/Tidycraft/security/advisories/new
+    about: Please report vulnerabilities privately so they can be fixed before disclosure.
+  - name: Questions and discussions
     url: https://github.com/Lynthar/Tidycraft/discussions
-    about: Open-ended questions, ideas, or "is this a bug?" go to Discussions, not Issues.
+    about: Open-ended questions, early ideas, or "is this a bug?" are better suited for Discussions.

@@ -1,21 +1,20 @@
 name: Bug report
-description: Something is wrong with Tidycraft
+description: Something in Tidycraft is broken or behaves unexpectedly
 title: "[Bug] "
 labels: ["bug", "needs-triage"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for reporting. A few notes before you file:
-        - **Reproducible recipes are gold.** A 10-line description of "what I did → what I expected → what happened" is more useful than a screenshot of a stack trace.
-        - **Check the existing issues** before submitting — search before opening new.
-        - **Crashes** that produce a stack trace: please paste the trace verbatim.
+        Thanks for taking the time to report this.
+
+        A clear repro saves a lot of back-and-forth: what you did, what you expected, and what happened instead. If Tidycraft crashed, logs or a stack trace are usually more useful than a screenshot.
 
   - type: textarea
     id: what-happened
     attributes:
       label: What happened?
-      description: A clear description of the bug. Include exact steps to reproduce if possible.
+      description: Steps to reproduce, expected result, and actual result. Short is fine if it is specific.
       placeholder: |
         1. Open project at `~/games/myproject`
         2. Click Run Analysis
@@ -29,7 +28,7 @@ body:
     attributes:
       label: Tidycraft version
       description: From the title bar / About menu, or the git commit if you built from source.
-      placeholder: "v0.1.0 (or commit abc1234)"
+      placeholder: "v0.6.1 (or commit abc1234)"
     validations:
       required: true
 
@@ -64,15 +63,15 @@ body:
     id: logs
     attributes:
       label: Console / log output
-      description: Open DevTools (Ctrl+Shift+I / Cmd+Option+I) and paste anything red. For Rust panics, the terminal where you launched dev mode usually shows the trace.
+      description: Paste relevant errors from DevTools or the terminal. Please remove API keys, tokens, and private paths before posting.
       render: shell
 
   - type: checkboxes
     id: confirms
     attributes:
-      label: Sanity checks
+      label: Before submitting
       options:
-        - label: I searched existing issues before filing this one
+        - label: I checked existing issues for a matching report
           required: true
-        - label: This is reproducible (not a one-off glitch I can't reproduce)
+        - label: I can reproduce this more than once
           required: false
