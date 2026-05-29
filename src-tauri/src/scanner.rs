@@ -984,6 +984,67 @@ fn build_walker(root: &Path, respect_gitignore: bool) -> ignore::Walk {
     builder.build()
 }
 
+/// A single-path `.gitignore` matcher mirroring `build_walker`'s root-level
+/// exclusion sources, for callers that test individual paths instead of
+/// walking the tree (the filesystem watcher). Checks both the project-local
+/// ignore files and the user's global gitignore.
+///
+/// NOTE: this loads only the project-root `.gitignore` / `.ignore` /
+/// `.git/info/exclude` (+ global) — it does NOT descend into per-directory
+/// nested `.gitignore` files the way `WalkBuilder` does. That covers the
+/// common case (root-level rules like `Library/`, `Temp/`, `*.tmp`); nested
+/// ignore files are a documented gap.
+pub struct IgnoreMatcher {
+    local: ignore::gitignore::Gitignore,
+    global: ignore::gitignore::Gitignore,
+}
+
+impl IgnoreMatcher {
+    /// True if `rel_path` (relative to the project root) is excluded by either
+    /// the local or global ignore rules. `is_dir` lets directory-only patterns
+    /// (`Library/`) match correctly, and matching is purely lexical so it
+    /// works for paths that no longer exist (deletions).
+    pub fn is_ignored(&self, rel_path: &Path, is_dir: bool) -> bool {
+        self.local
+            .matched_path_or_any_parents(rel_path, is_dir)
+            .is_ignore()
+            || self
+                .global
+                .matched_path_or_any_parents(rel_path, is_dir)
+                .is_ignore()
+    }
+}
+
+/// Build an [`IgnoreMatcher`] for `root`, or `None` when `respect_gitignore`
+/// is false (the watcher then tracks everything `is_trackable_path` allows).
+pub fn build_gitignore_matcher(root: &Path, respect_gitignore: bool) -> Option<IgnoreMatcher> {
+    if !respect_gitignore {
+        return None;
+    }
+    let mut builder = ignore::gitignore::GitignoreBuilder::new(root);
+    // Mirror build_walker's root-level sources. `add` returns Some(err) for a
+    // missing/unreadable file; a missing `.ignore` or git exclude is the common
+    // case, so we ignore those and let only genuine pattern errors surface in
+    // `build()` below.
+    let _ = builder.add(root.join(".gitignore"));
+    let _ = builder.add(root.join(".ignore"));
+    let _ = builder.add(root.join(".git").join("info").join("exclude"));
+    let local = match builder.build() {
+        Ok(gi) => gi,
+        Err(e) => {
+            eprintln!(
+                "[scanner] gitignore matcher build failed for {}: {}",
+                root.display(),
+                e
+            );
+            return None;
+        }
+    };
+    // `git_global(true)` equivalent — an empty matcher when none is configured.
+    let (global, _) = ignore::gitignore::Gitignore::global();
+    Some(IgnoreMatcher { local, global })
+}
+
 /// Scan a directory with optional state for progress tracking and
 /// cancellation. `respect_gitignore=true` honors the user's
 /// `.gitignore` / `.ignore` files — typical for production scans;

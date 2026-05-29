@@ -34,6 +34,11 @@ fn cache_dir() -> Option<PathBuf> {
 ///   different responses; cache them separately
 /// - `prompt_version`: bump in `prompts.rs` when the system prompt
 ///   changes meaning, to invalidate every prior entry without manual rm
+/// - `context_hash`: digest of the project framing + existing-tag context
+///   (see [`hash_context`]). That context is part of the user prompt, so
+///   folding it in means editing tags / descriptions / sample bindings /
+///   `[project]` theme/goal invalidates suggestions generated under the
+///   old context instead of returning a stale hit.
 pub fn cache_key(
     thumbnail_hash: Option<&str>,
     filename: &str,
@@ -41,6 +46,7 @@ pub fn cache_key(
     provider_id: &str,
     model: &str,
     prompt_version: u32,
+    context_hash: &str,
 ) -> String {
     let mut h = Sha256::new();
     h.update(thumbnail_hash.unwrap_or("no-thumb").as_bytes());
@@ -54,6 +60,8 @@ pub fn cache_key(
     h.update(model.as_bytes());
     h.update(b"\x00");
     h.update(prompt_version.to_le_bytes());
+    h.update(b"\x00");
+    h.update(context_hash.as_bytes());
     hex::encode(h.finalize())
 }
 
@@ -64,6 +72,33 @@ pub fn hash_bytes(bytes: &[u8]) -> String {
     let mut h = Sha256::new();
     h.update(bytes);
     hex::encode(h.finalize())
+}
+
+/// Stable digest of the project framing + existing-tag context the prompt is
+/// built from. Folded into every per-asset cache key (see [`cache_key`]) so
+/// editing a tag's description, adding/removing tags, changing a tag's sample
+/// bindings, or updating `[project]` theme/goal invalidates stale suggestions
+/// instead of returning advice generated under the old context.
+///
+/// `serde_json` gives a deterministic encoding here — struct field order is
+/// fixed and `Vec` order is preserved. The empty-context case hashes to a
+/// stable value, so no-context requests share a single cache namespace.
+pub fn hash_context(
+    project_ctx: Option<&super::project_meta::ProjectMeta>,
+    existing_tags: &[super::ExistingTagContext],
+) -> String {
+    #[derive(serde::Serialize)]
+    struct Ctx<'a> {
+        project: Option<&'a super::project_meta::ProjectMeta>,
+        tags: &'a [super::ExistingTagContext],
+    }
+    let payload = Ctx {
+        project: project_ctx,
+        tags: existing_tags,
+    };
+    serde_json::to_vec(&payload)
+        .map(|bytes| hash_bytes(&bytes))
+        .unwrap_or_else(|_| "ctx-serialize-error".to_string())
 }
 
 /// Read a previously saved suggestion. Returns `None` on miss, malformed
@@ -147,23 +182,25 @@ mod tests {
 
     #[test]
     fn key_is_deterministic() {
-        let k1 = cache_key(Some("abcd"), "x.png", "a/x.png", "claude", "sonnet", 1);
-        let k2 = cache_key(Some("abcd"), "x.png", "a/x.png", "claude", "sonnet", 1);
+        let k1 = cache_key(Some("abcd"), "x.png", "a/x.png", "claude", "sonnet", 1, "ctx");
+        let k2 = cache_key(Some("abcd"), "x.png", "a/x.png", "claude", "sonnet", 1, "ctx");
         assert_eq!(k1, k2);
         assert_eq!(k1.len(), 64); // SHA256 hex
     }
 
     #[test]
     fn key_changes_when_any_component_changes() {
-        let base = cache_key(Some("abcd"), "x.png", "a/x.png", "claude", "sonnet", 1);
+        let base = cache_key(Some("abcd"), "x.png", "a/x.png", "claude", "sonnet", 1, "ctx");
         // Each change must move the key.
-        assert_ne!(base, cache_key(Some("ABCD"), "x.png", "a/x.png", "claude", "sonnet", 1));
-        assert_ne!(base, cache_key(Some("abcd"), "y.png", "a/x.png", "claude", "sonnet", 1));
-        assert_ne!(base, cache_key(Some("abcd"), "x.png", "b/x.png", "claude", "sonnet", 1));
-        assert_ne!(base, cache_key(Some("abcd"), "x.png", "a/x.png", "openai", "sonnet", 1));
-        assert_ne!(base, cache_key(Some("abcd"), "x.png", "a/x.png", "claude", "haiku", 1));
-        assert_ne!(base, cache_key(Some("abcd"), "x.png", "a/x.png", "claude", "sonnet", 2));
-        assert_ne!(base, cache_key(None,         "x.png", "a/x.png", "claude", "sonnet", 1));
+        assert_ne!(base, cache_key(Some("ABCD"), "x.png", "a/x.png", "claude", "sonnet", 1, "ctx"));
+        assert_ne!(base, cache_key(Some("abcd"), "y.png", "a/x.png", "claude", "sonnet", 1, "ctx"));
+        assert_ne!(base, cache_key(Some("abcd"), "x.png", "b/x.png", "claude", "sonnet", 1, "ctx"));
+        assert_ne!(base, cache_key(Some("abcd"), "x.png", "a/x.png", "openai", "sonnet", 1, "ctx"));
+        assert_ne!(base, cache_key(Some("abcd"), "x.png", "a/x.png", "claude", "haiku", 1, "ctx"));
+        assert_ne!(base, cache_key(Some("abcd"), "x.png", "a/x.png", "claude", "sonnet", 2, "ctx"));
+        assert_ne!(base, cache_key(None,         "x.png", "a/x.png", "claude", "sonnet", 1, "ctx"));
+        // Project/tag context is part of the key too.
+        assert_ne!(base, cache_key(Some("abcd"), "x.png", "a/x.png", "claude", "sonnet", 1, "ctx2"));
     }
 
     #[test]
@@ -171,8 +208,8 @@ mod tests {
         // Without the \x00 separators between fields, "ab"+"cd" and
         // "abcd"+"" would hash to the same key. The separators prevent
         // that.
-        let a = cache_key(Some("ab"), "cd", "", "p", "m", 1);
-        let b = cache_key(Some("abcd"), "", "", "p", "m", 1);
+        let a = cache_key(Some("ab"), "cd", "", "p", "m", 1, "ctx");
+        let b = cache_key(Some("abcd"), "", "", "p", "m", 1, "ctx");
         assert_ne!(a, b);
     }
 

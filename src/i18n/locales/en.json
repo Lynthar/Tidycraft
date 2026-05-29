@@ -484,10 +484,10 @@
     "directories": "Directories",
     "tagMeanings_one": "{{count}} existing-tag interpretation",
     "tagMeanings_other": "{{count}} existing-tag interpretations",
-    "tagGaps_one": "{{count}} new tag added",
-    "tagGaps_other": "{{count}} new tags added",
-    "gapCreated": "created",
-    "gapRevoke": "Revoke (delete tag)",
+    "tagGaps_one": "{{count}} new tag to add",
+    "tagGaps_other": "{{count}} new tags to add",
+    "gapExists": "already exists",
+    "gapCreateHint": "Checked tags are created when you Save — opening this panel changes nothing on its own.",
     "rules_one": "{{count}} rule",
     "rules_other": "{{count}} rules",
     "rulesEmpty": "No rules emitted.",
@@ -499,6 +499,8 @@
     "save": "Save rules",
     "close": "Close",
     "savedNotice": "Rules saved to tidycraft.ai.toml.",
+    "savedNoticeWithTags_one": "Saved rules and created {{count}} tag.",
+    "savedNoticeWithTags_other": "Saved rules and created {{count}} tags.",
     "saveError": "Failed to save rules."
   },
   "aiAnalyze": {

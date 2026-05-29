@@ -48,65 +48,58 @@ export function LearnReviewPanel() {
   const setOpen = useUiStore((s) => s.setLearnReviewOpen);
 
   const createTag = useTagsStore((s) => s.createTag);
-  const deleteTag = useTagsStore((s) => s.deleteTag);
   const userTags = useTagsStore((s) => s.tags);
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
 
   // Local mutable copy of the rules so the user can delete entries
   // before saving without forcing the global store to track edits.
   const [rules, setRules] = useState<AiLearnedRule[]>([]);
-  // Track which gaps we successfully auto-created so the user can
-  // revoke individually. Keyed by gap label for stability.
-  const [createdGapTagIds, setCreatedGapTagIds] = useState<
-    Record<string, string>
-  >({});
+  // Which tag-gaps the user has selected to create. Nothing is written to
+  // the project until Save — opening the panel has no side effects. Gaps are
+  // proposals, pre-selected for convenience but fully opt-out.
+  const [selectedGaps, setSelectedGaps] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Reset + initialize on open.
+  // Reset + initialize on open. No side effects: we only pre-select the
+  // gaps that don't already exist as tags. Tags are created on Save, not
+  // here — opening (or closing) the panel never writes to the project.
   useEffect(() => {
     if (!open || !data) return;
     setRules(data.rules);
     setError(null);
     setSavedNotice(null);
-    // Auto-create tags for gaps. Skip names that already exist (case
-    // insensitive) so re-opening a result doesn't duplicate.
-    const lowerExisting = new Set(
-      userTags.map((tt) => tt.name.toLowerCase())
+    const lowerExisting = new Set(userTags.map((tt) => tt.name.toLowerCase()));
+    setSelectedGaps(
+      new Set(
+        data.tag_gaps
+          .map((g) => g.label)
+          .filter((label) => !lowerExisting.has(label.toLowerCase()))
+      )
     );
-    (async () => {
-      const created: Record<string, string> = {};
-      for (const gap of data.tag_gaps) {
-        if (lowerExisting.has(gap.label.toLowerCase())) continue;
-        try {
-          const tag = await createTag(gap.label, CATEGORY_COLORS[gap.category]);
-          if (tag) created[gap.label] = tag.id;
-        } catch (e) {
-          console.warn("[LearnReview] auto-create gap failed:", gap.label, e);
-        }
-      }
-      setCreatedGapTagIds(created);
-    })();
-    // We deliberately omit `userTags` from the dep array — re-running
-    // the auto-create loop on every tag list change would loop forever.
+    // `userTags` is deliberately omitted: the pre-selection is snapshotted
+    // once per open, so toggling tags afterward doesn't reset the user's
+    // checkbox choices.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, data]);
 
-  const handleRevokeGap = async (label: string) => {
-    const id = createdGapTagIds[label];
-    if (!id) return;
-    try {
-      await deleteTag(id);
-      setCreatedGapTagIds((prev) => {
-        const next = { ...prev };
-        delete next[label];
-        return next;
-      });
-    } catch (e) {
-      console.warn("[LearnReview] revoke gap failed:", label, e);
-    }
+  const handleToggleGap = (label: string) => {
+    setSelectedGaps((prev) => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
   };
+
+  // Tag names that already exist (case-insensitive). These gaps can't be
+  // re-created, so the UI shows them as "already exists" and disables their
+  // checkbox. Recomputed as tags change (e.g. right after Save).
+  const existingTagNamesLower = useMemo(
+    () => new Set(userTags.map((tt) => tt.name.toLowerCase())),
+    [userTags]
+  );
 
   const handleDeleteRule = (idx: number) => {
     setRules((prev) => prev.filter((_, i) => i !== idx));
@@ -133,12 +126,30 @@ export function LearnReviewPanel() {
   );
 
   const handleSave = async () => {
-    if (!activeProjectId || saving) return;
+    if (!activeProjectId || saving || !data) return;
     setSaving(true);
     setError(null);
     try {
+      // Explicit commit point: create the gap tags the user kept checked
+      // (skipping any that already exist), then persist the rules. Closing
+      // without Save writes nothing.
+      let createdCount = 0;
+      for (const gap of data.tag_gaps) {
+        if (!selectedGaps.has(gap.label)) continue;
+        if (existingTagNamesLower.has(gap.label.toLowerCase())) continue;
+        try {
+          const tag = await createTag(gap.label, CATEGORY_COLORS[gap.category]);
+          if (tag) createdCount += 1;
+        } catch (e) {
+          console.warn("[LearnReview] create gap failed:", gap.label, e);
+        }
+      }
       await invoke("save_ai_rules", { projectId: activeProjectId, rules });
-      setSavedNotice(t("learnReview.savedNotice"));
+      setSavedNotice(
+        createdCount > 0
+          ? t("learnReview.savedNoticeWithTags", { count: createdCount })
+          : t("learnReview.savedNotice")
+      );
     } catch (e) {
       console.error("[LearnReview] save failed:", e);
       setError(t("learnReview.saveError"));
@@ -235,31 +246,41 @@ export function LearnReviewPanel() {
               </section>
             )}
 
-          {/* --- Tag Gaps (auto-created) --- */}
+          {/* --- Tag Gaps (created on Save; pre-selected, opt-out) --- */}
           {data.tag_gaps.length > 0 && (
             <section>
               <h3
                 className="text-xs font-semibold uppercase tracking-wide mb-2"
                 style={{ color: "var(--text-3)" }}
               >
-                {t("learnReview.tagGaps", {
-                  count: Object.keys(createdGapTagIds).length,
-                })}
+                {t("learnReview.tagGaps", { count: selectedGaps.size })}
               </h3>
               <div className="space-y-1.5">
                 {data.tag_gaps.map((gap: AiTagGap) => {
-                  const wasCreated = !!createdGapTagIds[gap.label];
+                  const exists = existingTagNamesLower.has(
+                    gap.label.toLowerCase()
+                  );
+                  const selected = selectedGaps.has(gap.label);
                   return (
-                    <div
+                    <label
                       key={gap.label}
-                      className="flex items-start gap-2 rounded p-2"
+                      className={`flex items-start gap-2 rounded p-2 ${
+                        exists ? "" : "cursor-pointer"
+                      }`}
                       style={{
                         background: "var(--panel-2)",
                         border: "1px solid var(--line)",
                       }}
                     >
+                      <input
+                        type="checkbox"
+                        className="mt-1 shrink-0"
+                        checked={selected && !exists}
+                        disabled={exists}
+                        onChange={() => handleToggleGap(gap.label)}
+                      />
                       <span
-                        className="rounded-full shrink-0 mt-1"
+                        className="rounded-full shrink-0 mt-1.5"
                         style={{
                           width: 8,
                           height: 8,
@@ -277,13 +298,12 @@ export function LearnReviewPanel() {
                           >
                             ({gap.category})
                           </span>
-                          {wasCreated && (
+                          {exists && (
                             <span
-                              className="text-xs flex items-center gap-0.5"
-                              style={{ color: "var(--ok, var(--primary))" }}
+                              className="text-xs"
+                              style={{ color: "var(--text-3)" }}
                             >
-                              <Check size={11} />
-                              {t("learnReview.gapCreated")}
+                              {t("learnReview.gapExists")}
                             </span>
                           )}
                         </div>
@@ -294,20 +314,13 @@ export function LearnReviewPanel() {
                           {gap.reason}
                         </p>
                       </div>
-                      {wasCreated && (
-                        <button
-                          onClick={() => handleRevokeGap(gap.label)}
-                          className="p-1 rounded hover:bg-background"
-                          style={{ color: "var(--text-3)" }}
-                          title={t("learnReview.gapRevoke")}
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      )}
-                    </div>
+                    </label>
                   );
                 })}
               </div>
+              <p className="text-xs mt-1.5" style={{ color: "var(--text-3)" }}>
+                {t("learnReview.gapCreateHint")}
+              </p>
             </section>
           )}
 

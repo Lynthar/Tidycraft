@@ -121,6 +121,9 @@ async fn scan_project_async(
 
     project::with_mut(&project_id, |s| {
         s.cached_scan = Some(scan_result.clone());
+        // Legacy command always scans with gitignore on (see above) — record
+        // it so the watcher mirrors the same exclusions.
+        s.respect_gitignore = true;
         Ok(())
     })?;
 
@@ -192,6 +195,7 @@ async fn scan_project_incremental(
 
     project::with_mut(&project_id, |s| {
         s.cached_scan = Some(scan_result.clone());
+        s.respect_gitignore = respect_gitignore;
         Ok(())
     })?;
 
@@ -210,8 +214,9 @@ fn clear_scan_cache(path: String) -> Result<(), String> {
 
 #[tauri::command]
 fn start_watching(app: AppHandle, project_id: String) -> Result<(), String> {
-    let root_path = project::with_ref(&project_id, |s| Ok(s.root_path.clone()))?;
-    let w = watcher::start(app, project_id.clone(), root_path)?;
+    let (root_path, respect_gitignore) =
+        project::with_ref(&project_id, |s| Ok((s.root_path.clone(), s.respect_gitignore)))?;
+    let w = watcher::start(app, project_id.clone(), root_path, respect_gitignore)?;
     project::with_mut(&project_id, |s| {
         s.watcher = Some(w);
         Ok(())
@@ -247,11 +252,9 @@ fn clear_thumbnail_cache() -> Result<u64, String> {
 
 // ============ LLM Tagging Commands ============
 //
-// Day 1 scope: routing only — `llm_suggest_tags` returns
-// `LLMError::NotImplemented` from every provider until Day 2 wires the
-// actual HTTP calls. The frontend can already read the cost estimate
-// (which is pure math, no network) and can already read/clear the
-// disk cache (which is just a directory).
+// `llm_suggest_tags` dispatches to the configured provider's real HTTP
+// endpoint. `llm_estimate_cost` is pure math (no network) and the cache
+// commands just read/clear a directory, so both work without a provider.
 
 /// Cost preview for the AIAnalyzeModal. Pure function — no network and
 /// no API key required.
@@ -297,6 +300,23 @@ fn llm_estimate_cost(
         existing_tags: Vec::new(),
     };
     Ok(prov.estimate_cost(&req))
+}
+
+/// Convert an absolute asset path to a project-relative one for the LLM
+/// prompt + cache key, so cloud providers never receive the user's machine
+/// path (drive, username, directory layout). Folder structure under the
+/// project root is preserved — it's useful semantic context for tagging.
+/// Never returns the absolute path: with no project root (unregistered
+/// project) or a path outside the root, it falls back to the bare filename.
+fn project_relative_path(abs: &str, root: &str) -> String {
+    let basename = || abs.rsplit(['/', '\\']).next().unwrap_or(abs).to_string();
+    if root.is_empty() {
+        return basename();
+    }
+    Path::new(abs)
+        .strip_prefix(root)
+        .map(|rel| rel.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_else(|_| basename())
 }
 
 /// Main entry point for AI tagging. Loads thumbnails for the selected
@@ -379,8 +399,17 @@ async fn llm_suggest_tags(
     // for HDR/EXR) downgrade silently to `thumbnail_base64=None` —
     // the request still goes through, the LLM just falls back to
     // filename + path context for those entries.
+    // Map the project-relative path (what we ship to the provider, cache,
+    // and the LLM echoes back) to the absolute path the frontend needs to
+    // bind tags. Built before `asset_paths` is moved into the builders.
+    let abs_by_rel: HashMap<String, String> = asset_paths
+        .iter()
+        .map(|abs| (project_relative_path(abs, &root_path), abs.clone()))
+        .collect();
+
     let assets = if upload_thumbnails {
         let paths = asset_paths;
+        let root_for_thumbs = root_path.clone();
         tokio::task::spawn_blocking(move || {
             paths
                 .into_iter()
@@ -390,9 +419,12 @@ async fn llm_suggest_tags(
                         .next()
                         .unwrap_or(&p)
                         .to_string();
+                    // Thumbnail decode needs the real (absolute) path; the
+                    // path we ship to the provider is project-relative so we
+                    // never leak the user's drive / username / layout.
                     let thumb = thumbnail::get_thumbnail_base64(&p, 256).ok();
                     llm::AssetInput {
-                        path: p,
+                        path: project_relative_path(&p, &root_for_thumbs),
                         filename,
                         thumbnail_base64: thumb,
                         metadata_hint: None,
@@ -412,7 +444,7 @@ async fn llm_suggest_tags(
                     .unwrap_or(&p)
                     .to_string();
                 llm::AssetInput {
-                    path: p,
+                    path: project_relative_path(&p, &root_path),
                     filename,
                     thumbnail_base64: None,
                     metadata_hint: None,
@@ -430,7 +462,18 @@ async fn llm_suggest_tags(
         existing_tags,
     };
 
-    prov.suggest_tags(&req).await.map_err(String::from)
+    // The provider only ever saw project-relative paths, so suggestions come
+    // back keyed by those. Remap each to the absolute path so the frontend
+    // binds tags to the scanned (absolute-path) assets. A miss (LLM mangled
+    // the path) leaves it untouched — the same graceful degradation as the
+    // pre-relativization behavior.
+    let mut response = prov.suggest_tags(&req).await.map_err(String::from)?;
+    for s in &mut response.suggestions {
+        if let Some(abs) = abs_by_rel.get(&s.asset_path) {
+            s.asset_path = abs.clone();
+        }
+    }
+    Ok(response)
 }
 
 #[tauri::command]
@@ -694,6 +737,91 @@ async fn llm_ollama_models(endpoint: String) -> Result<Vec<String>, String> {
 
 // ============ Analysis Commands ============
 
+/// Load the project's `RuleConfig` from `<root>/tidycraft.toml`, falling
+/// back to defaults when the file is absent or unparseable. Used by the
+/// report exporters, which (unlike `analyze_assets`) don't receive a config
+/// string from the frontend — this lets a JSON/HTML report honor the same
+/// `tidycraft.toml` rules the user sees in the Issues view. A malformed
+/// file degrades to defaults rather than aborting the report (the UI path
+/// surfaces parse errors separately via `analyze_assets`).
+fn load_rule_config(root_path: &str) -> RuleConfig {
+    let toml_path = Path::new(root_path).join("tidycraft.toml");
+    std::fs::read_to_string(&toml_path)
+        .ok()
+        .and_then(|content| RuleConfig::from_toml(&content).ok())
+        .unwrap_or_default()
+}
+
+/// Build a `GlobSet` from `[ignore].patterns`, or `None` when the list is
+/// empty. A malformed pattern surfaces as an `Err`; callers build this
+/// before taking the project lock so the error short-circuits early.
+fn build_ignore_set(config: &RuleConfig) -> Result<Option<globset::GlobSet>, String> {
+    if config.ignore.patterns.is_empty() {
+        return Ok(None);
+    }
+    let mut builder = globset::GlobSetBuilder::new();
+    for pattern in &config.ignore.patterns {
+        let glob = globset::Glob::new(pattern)
+            .map_err(|e| format!("Invalid ignore pattern '{}': {}", pattern, e))?;
+        builder.add(glob);
+    }
+    builder
+        .build()
+        .map(Some)
+        .map_err(|e| format!("Failed to build ignore set: {}", e))
+}
+
+/// The single source of truth for the analysis pipeline: apply the
+/// `[ignore].patterns` filter, then run every analyzer phase — per-asset
+/// rules plus the four cross-asset checks (duplicates, missing references,
+/// PBR set, DCC source). `analyze_assets` (UI) and both report exporters
+/// route through this so they always produce the same issue set for a given
+/// project + config.
+fn run_full_analysis(
+    scan_result: &ScanResult,
+    root_path: &str,
+    config: &RuleConfig,
+    ignore_set: Option<&globset::GlobSet>,
+) -> AnalysisResult {
+    // Only clone the scan when there are patterns to apply; most projects
+    // have none and analyze the cached scan reference in place.
+    let owned_filtered: Option<ScanResult> = ignore_set.map(|set| {
+        let root = Path::new(root_path);
+        let kept: Vec<scanner::AssetInfo> = scan_result
+            .assets
+            .iter()
+            .filter(|a| {
+                let path = Path::new(&a.path);
+                let rel = path.strip_prefix(root).unwrap_or(path);
+                !set.is_match(rel)
+            })
+            .cloned()
+            .collect();
+        ScanResult {
+            root_path: scan_result.root_path.clone(),
+            directory_tree: scan_result.directory_tree.clone(),
+            assets: kept,
+            total_count: scan_result.total_count,
+            total_size: scan_result.total_size,
+            type_counts: scan_result.type_counts.clone(),
+            project_type: scan_result.project_type.clone(),
+        }
+    });
+    let scan_to_analyze: &ScanResult = owned_filtered.as_ref().unwrap_or(scan_result);
+
+    let analyzer = Analyzer::with_config(config);
+    let mut result = analyzer.analyze(scan_to_analyze);
+    let duplicates = analyzer.find_duplicates(scan_to_analyze);
+    result.merge(duplicates);
+    let missing = analyzer.find_missing_references(scan_to_analyze);
+    result.merge(missing);
+    let pbr = analyzer.find_pbr_set_issues(scan_to_analyze, &config.pbr_set);
+    result.merge(pbr);
+    let dcc = analyzer.find_dcc_source_issues(scan_to_analyze, &config.dcc_source);
+    result.merge(dcc);
+    result
+}
+
 #[tauri::command]
 fn analyze_assets(project_id: String, config_toml: Option<String>) -> Result<AnalysisResult, String> {
     let config = if let Some(toml_str) = config_toml {
@@ -704,65 +832,16 @@ fn analyze_assets(project_id: String, config_toml: Option<String>) -> Result<Ana
 
     // Build the ignore matcher up-front so a malformed pattern surfaces as
     // an error before we touch the per-project lock.
-    let ignore_set = if config.ignore.patterns.is_empty() {
-        None
-    } else {
-        let mut builder = globset::GlobSetBuilder::new();
-        for pattern in &config.ignore.patterns {
-            let glob = globset::Glob::new(pattern)
-                .map_err(|e| format!("Invalid ignore pattern '{}': {}", pattern, e))?;
-            builder.add(glob);
-        }
-        Some(
-            builder
-                .build()
-                .map_err(|e| format!("Failed to build ignore set: {}", e))?,
-        )
-    };
+    let ignore_set = build_ignore_set(&config)?;
 
     project::with_ref(&project_id, |state| {
         let scan_result = state.require_scan()?;
-
-        // When patterns are present, build a filtered ScanResult that owns
-        // the kept assets. We only clone when needed (most projects have
-        // no ignore patterns and reuse the cached scan reference unchanged).
-        let owned_filtered: Option<ScanResult> = if let Some(set) = ignore_set.as_ref() {
-            let root = Path::new(&state.root_path);
-            let kept: Vec<scanner::AssetInfo> = scan_result
-                .assets
-                .iter()
-                .filter(|a| {
-                    let path = Path::new(&a.path);
-                    let rel = path.strip_prefix(root).unwrap_or(path);
-                    !set.is_match(rel)
-                })
-                .cloned()
-                .collect();
-            Some(ScanResult {
-                root_path: scan_result.root_path.clone(),
-                directory_tree: scan_result.directory_tree.clone(),
-                assets: kept,
-                total_count: scan_result.total_count,
-                total_size: scan_result.total_size,
-                type_counts: scan_result.type_counts.clone(),
-                project_type: scan_result.project_type.clone(),
-            })
-        } else {
-            None
-        };
-        let scan_to_analyze: &ScanResult = owned_filtered.as_ref().unwrap_or(scan_result);
-
-        let analyzer = Analyzer::with_config(&config);
-        let mut result = analyzer.analyze(scan_to_analyze);
-        let duplicates = analyzer.find_duplicates(scan_to_analyze);
-        result.merge(duplicates);
-        let missing = analyzer.find_missing_references(scan_to_analyze);
-        result.merge(missing);
-        let pbr = analyzer.find_pbr_set_issues(scan_to_analyze, &config.pbr_set);
-        result.merge(pbr);
-        let dcc = analyzer.find_dcc_source_issues(scan_to_analyze, &config.dcc_source);
-        result.merge(dcc);
-        Ok(result)
+        Ok(run_full_analysis(
+            scan_result,
+            &state.root_path,
+            &config,
+            ignore_set.as_ref(),
+        ))
     })
 }
 
@@ -1157,13 +1236,14 @@ fn export_issues_to_json(project_id: String) -> Result<String, String> {
     project::with_ref(&project_id, |state| {
         let scan_result = state.require_scan()?;
 
-        let config = RuleConfig::default();
-        let analyzer = Analyzer::with_config(&config);
-        let mut result = analyzer.analyze(scan_result);
-        let duplicates = analyzer.find_duplicates(scan_result);
-        result.merge(duplicates);
-        let missing = analyzer.find_missing_references(scan_result);
-        result.merge(missing);
+        // Mirror the UI's Run Analysis: honor the project's tidycraft.toml
+        // (rule thresholds + [ignore].patterns) and run every phase,
+        // including the PBR-set and DCC-source cross-asset checks. Without
+        // this the exported report would silently diverge from the Issues
+        // view under any custom config.
+        let config = load_rule_config(&state.root_path);
+        let ignore_set = build_ignore_set(&config)?;
+        let result = run_full_analysis(scan_result, &state.root_path, &config, ignore_set.as_ref());
 
         serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
     })
@@ -1174,13 +1254,15 @@ fn export_to_html(project_id: String) -> Result<String, String> {
     project::with_ref(&project_id, |state| {
         let scan_result = state.require_scan()?;
 
-        let config = RuleConfig::default();
-        let analyzer = Analyzer::with_config(&config);
-        let mut analysis_result = analyzer.analyze(scan_result);
-        let duplicates = analyzer.find_duplicates(scan_result);
-        analysis_result.merge(duplicates);
-        let missing = analyzer.find_missing_references(scan_result);
-        analysis_result.merge(missing);
+        // Same analysis pipeline as Run Analysis / the JSON export, so the
+        // HTML report's issue list matches the Issues view (custom config,
+        // [ignore].patterns, PBR/DCC phases all applied). The asset
+        // inventory cards below intentionally stay on the full scan —
+        // [ignore].patterns scope analysis, not the project's file census.
+        let config = load_rule_config(&state.root_path);
+        let ignore_set = build_ignore_set(&config)?;
+        let analysis_result =
+            run_full_analysis(scan_result, &state.root_path, &config, ignore_set.as_ref());
 
         let mut type_counts: HashMap<String, usize> = HashMap::new();
         let mut size_by_type: HashMap<String, u64> = HashMap::new();
@@ -1226,9 +1308,16 @@ fn export_to_html(project_id: String) -> Result<String, String> {
         th {{ background: #1a1a2e; font-weight: 600; }}
         tr:hover {{ background: #2a2a4a; }}
         .type-badge {{ display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 500; }}
-        .texture {{ background: #22c55e20; color: #22c55e; }}
-        .model {{ background: #3b82f620; color: #3b82f6; }}
-        .audio {{ background: #f59e0b20; color: #f59e0b; }}
+        .texture {{ background: #4ade8020; color: #4ade80; }}
+        .model {{ background: #60a5fa20; color: #60a5fa; }}
+        .audio {{ background: #facc1520; color: #facc15; }}
+        .video {{ background: #fb718520; color: #fb7185; }}
+        .animation {{ background: #a78bfa20; color: #a78bfa; }}
+        .material {{ background: #f472b620; color: #f472b6; }}
+        .prefab {{ background: #22d3d120; color: #22d3d1; }}
+        .scene {{ background: #fb923c20; color: #fb923c; }}
+        .script {{ background: #ef444420; color: #ef4444; }}
+        .data {{ background: #94a3b820; color: #94a3b8; }}
         .other {{ background: #6b728020; color: #9ca3af; }}
         .severity-error {{ color: #ef4444; }}
         .severity-warning {{ color: #f59e0b; }}
@@ -1350,7 +1439,14 @@ fn export_to_html(project_id: String) -> Result<String, String> {
                         scanner::AssetType::Texture => "texture",
                         scanner::AssetType::Model => "model",
                         scanner::AssetType::Audio => "audio",
-                        _ => "other",
+                        scanner::AssetType::Video => "video",
+                        scanner::AssetType::Animation => "animation",
+                        scanner::AssetType::Material => "material",
+                        scanner::AssetType::Prefab => "prefab",
+                        scanner::AssetType::Scene => "scene",
+                        scanner::AssetType::Script => "script",
+                        scanner::AssetType::Data => "data",
+                        scanner::AssetType::Other => "other",
                     };
                     let dimensions = asset
                         .metadata
@@ -2238,7 +2334,6 @@ fn get_all_asset_tags(project_id: String) -> Result<HashMap<String, Vec<tags::Ta
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {

@@ -36,6 +36,7 @@ const TYPE_COLORS: Record<string, string> = {
   texture: "#4ade80",
   model: "#60a5fa",
   audio: "#facc15",
+  video: "#fb7185",
   animation: "#a78bfa",
   material: "#f472b6",
   prefab: "#22d3d1",

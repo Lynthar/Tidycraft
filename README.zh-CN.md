@@ -43,7 +43,7 @@
 - 支持 Unity / Unreal / Godot 与通用项目，针对 Unity GUID 图、`.uproject`、`project.godot` 各有专门解析器。
 - 多项目可同时打开，自由切换，工作区跨会话恢复。
 - 默认规则极简，把噪音控制在最低。扫描器默认遵守 `.gitignore` 跳过生成产物，文件系统 watcher 自动同步外部改动（无需手动重扫），规则可在 `Settings → Analysis Rules → Edit` 直接编辑。
-- 本地优先,所有状态都在你硬盘上;无遥测、无网络调用。
+- 本地优先,所有状态都在你硬盘上;无遥测。唯一的离机流量是你自行配置的 opt-in 云 AI 标签(学习模式或单资产模式)。
 
 > **状态:Alpha — 持续开发中。** 核心功能(扫描、分析、标签、3D 预览、Git、Watcher)已稳定。**基于 LLM 的 AI 标签**已 ship,提供两种模式:**学习模式**(推荐 — 一次 LLM 调用采样项目、推断本地启发式规则,复用你已有的标签系统;之后免费)和**高级单资产模式**(opt-in — 把缩略图发给 Claude / OpenAI / Ollama 直接打标)。两种模式都默认关闭,需要先在 Settings → AI Tagging 里配置 provider。详见下方 [功能特性 → AI 标签](#-ai-标签)。
 
@@ -107,9 +107,9 @@
 两种模式共有:
 - **每次云调用前预览成本**(verified pricing 算式;显示单资产美分数)。
 - **每 provider 的缩略图上传同意流程** — 首次带缩略图调用时弹复选框;可在 Settings 撤回。
-- **项目感知 prompt** — 从你项目的 `tidycraft.toml` 拉 `[theme]` / `[goal]` + 你已有标签系统(含描述 + 样例路径),让模型**优先复用你已有的标签**而不是发明同义词。
+- **项目感知 prompt** — 从你项目 `tidycraft.toml` 的 `[project]` 表拉 `theme` / `goal` + 你已有标签系统(含描述 + 样例路径),让模型**优先复用你已有的标签**而不是发明同义词。
 - **单资产磁盘缓存**,键为 `(缩略图字节, 文件名, 路径, provider, model, prompt 版本)` — 部分命中保持免费。
-- **本地 + 私密** — Ollama 路径不上传任何东西离机;云路径上传文件名 + 标签上下文(opt-in 时才上传缩略图)。
+- **本地 + 私密** — Ollama 路径不上传任何东西离机;云路径上传文件名 + 项目内相对路径 + 标签上下文(opt-in 时才上传缩略图)。
 
 ### 元数据提取
 
@@ -191,7 +191,7 @@
 **Windows**
 
 1. 运行 `.msi` 安装器。
-2. 首次启动时,Windows SmartScreen 可能提示"未识别的应用" —— 因为二进制尚未做代码签名(规划中,详见 [`SECURITY.md`](SECURITY.md))。点击 **更多信息** → **仍要运行**。
+2. 首次启动时,Windows SmartScreen 可能提示"未识别的应用" —— 因为二进制尚未做代码签名(规划中)。点击 **更多信息** → **仍要运行**。
 
 **macOS**
 
@@ -205,7 +205,7 @@
    ```
    然后正常打开 App。(其他方式:右键 App → **打开** → 在弹出框点击确认;或者 系统设置 → **隐私与安全性** → **仍要打开**。)
 
-这些首次启动的额外步骤等代码签名落地后会自动消失(post-alpha 计划,详见 [`SECURITY.md`](SECURITY.md))。
+这些首次启动的额外步骤等代码签名落地后会自动消失(post-alpha 计划)。
 
 ### 从源码构建(开发用)
 
@@ -350,10 +350,10 @@ tidycraft/
 
 Tidycraft **本地优先**:
 
-- **无遥测、无 analytics、无网络调用**(v0.x 构建)。
+- **无遥测、无 analytics。** 唯一的网络调用是你自行配置的 opt-in 云 AI 标签(见下文);默认情况下没有任何网络调用(v0.x)。
 - **所有状态在你的磁盘上**:扫描缓存(`~/.cache/tidycraft/` 或平台等价目录)、标签绑定(每项目 `.tidycraft-tags.json`)、撤销历史、缩略图缓存、设置。
 - **无账户、无登录**,打开就用。
-- **AI 标签建议器**(已 ship)**完全 opt-in** —— 在你于 Settings → AI Tagging 配置 provider 之前没有任何调用。首次对云 provider 启用缩略图调用时弹出明确的同意对话框(可撤回)。本地 provider(Ollama)不上传任何东西离机;云路径(Claude / OpenAI)上传文件名 + 标签上下文,只在你 opt in 时才上传缩略图。完整上传 payload 边界见 [`SECURITY.md`](SECURITY.md)。
+- **AI 标签建议器**(已 ship)**完全 opt-in** —— 在你于 Settings → AI Tagging 配置 provider 之前没有任何调用。配置云 provider(Claude / OpenAI)本身即表示同意向其发送文本上下文 —— 文件名、项目内相对路径、你的标签系统 —— 用于你分析的资产。缩略图默认不上传,除非你勾选 per-provider 同意框(默认关闭;首次启用缩略图的云调用会要求勾选)。本地 provider(Ollama)不上传任何东西离机。
 
 ---
 

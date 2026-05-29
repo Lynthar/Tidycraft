@@ -484,10 +484,10 @@
     "directories": "目录",
     "tagMeanings_one": "{{count}} 个已有 tag 的释义",
     "tagMeanings_other": "{{count}} 个已有 tag 的释义",
-    "tagGaps_one": "已添加 {{count}} 个新 tag",
-    "tagGaps_other": "已添加 {{count}} 个新 tag",
-    "gapCreated": "已创建",
-    "gapRevoke": "撤回（删除 tag）",
+    "tagGaps_one": "待添加 {{count}} 个新 tag",
+    "tagGaps_other": "待添加 {{count}} 个新 tag",
+    "gapExists": "已存在",
+    "gapCreateHint": "勾选的 tag 会在你点击保存时创建——仅打开本面板不会写入任何内容。",
     "rules_one": "{{count}} 条规则",
     "rules_other": "{{count}} 条规则",
     "rulesEmpty": "未生成任何规则。",
@@ -499,6 +499,8 @@
     "save": "保存规则",
     "close": "关闭",
     "savedNotice": "规则已保存到 tidycraft.ai.toml。",
+    "savedNoticeWithTags_one": "已保存规则并创建 {{count}} 个 tag。",
+    "savedNoticeWithTags_other": "已保存规则并创建 {{count}} 个 tag。",
     "saveError": "保存规则失败。"
   },
   "aiAnalyze": {

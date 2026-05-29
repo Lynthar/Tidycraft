@@ -43,7 +43,7 @@
 - Multi-engine: Unity, Unreal, Godot, or generic projects, with dedicated parsers for Unity GUID graphs, `.uproject`, and `project.godot`.
 - Multiple projects can stay open at once; switch between them freely, and the workspace is restored across sessions.
 - Default rules are kept minimal to keep noise down. The scanner respects `.gitignore` (so generated artefacts stay out of view), the filesystem watcher syncs external changes automatically, and rules are editable from `Settings → Analysis Rules → Edit`.
-- Local-first: all state lives on your disk, with no telemetry and no network calls.
+- Local-first: all state lives on your disk, with no telemetry. The only off-machine traffic is the opt-in cloud AI tagging you configure yourself (Learning or per-asset mode).
 
 > **Status: Alpha — actively developed.** Core features (scanning, analysis, tags, 3D preview, Git, watcher) are stable. **LLM-backed AI tagging** ships in two modes: a **Learning mode** (recommended — one-time LLM call samples the project, derives local heuristic rules, reuses your existing tag system; free thereafter) and an **advanced per-asset mode** (opt-in — sends thumbnails to Claude / OpenAI / Ollama for direct tagging). Both are off until you configure a provider. See [Features → AI Tagging](#-ai-tagging) below.
 
@@ -107,9 +107,9 @@ Multi-provider LLM tagging via **Claude** (Sonnet 4.6 / Haiku 4.5 / Opus 4.7), *
 Common to both:
 - **Cost preview** before every cloud call (verified pricing math; per-asset cents shown).
 - **Per-provider consent** for thumbnail uploads — first call with thumbnails on shows a checkbox; revocable in Settings.
-- **Project-aware prompt** — pulls `[theme]` / `[goal]` from your project's `tidycraft.toml` and your existing tag system (with descriptions + sample paths) so the model **prefers your existing labels** instead of inventing synonyms.
+- **Project-aware prompt** — pulls `theme` / `goal` from the `[project]` table of your project's `tidycraft.toml` and your existing tag system (with descriptions + sample paths) so the model **prefers your existing labels** instead of inventing synonyms.
 - **Per-asset disk cache** keyed on `(thumbnail bytes, filename, path, provider, model, prompt version)` — partial-batch hits stay free.
-- **Local + private** — Ollama path uploads nothing off-machine; cloud paths upload filenames + tag context (and thumbnails only if you opt in).
+- **Local + private** — Ollama path uploads nothing off-machine; cloud paths upload filenames + project-relative paths + tag context (and thumbnails only if you opt in).
 
 ### Metadata Extraction
 
@@ -191,7 +191,7 @@ No further steps — the app runs directly.
 **Windows**
 
 1. Run the `.msi` installer.
-2. On first launch, Windows SmartScreen may flag the app as "unrecognized" — the binary isn't code-signed yet (planned, see [`SECURITY.md`](SECURITY.md)). Click **More info** → **Run anyway**.
+2. On first launch, Windows SmartScreen may flag the app as "unrecognized" — the binary isn't code-signed yet (planned). Click **More info** → **Run anyway**.
 
 **macOS**
 
@@ -205,7 +205,7 @@ No further steps — the app runs directly.
    ```
    Then open the app normally. (Alternative: right-click the app → **Open** → confirm in the prompt; or System Settings → **Privacy & Security** → **Open Anyway**.)
 
-These first-launch hoops will go away once code signing lands (post-alpha; see [`SECURITY.md`](SECURITY.md)).
+These first-launch hoops will go away once code signing lands (post-alpha).
 
 ### From source (for development)
 
@@ -351,10 +351,10 @@ tidycraft/
 
 Tidycraft is **local-first by design**:
 
-- **No telemetry, no analytics, no network calls** in the current build (v0.x).
+- **No telemetry, no analytics.** The only network calls are the opt-in cloud AI tagging you configure yourself (see below); there are none by default (v0.x).
 - **All state lives on your disk**: scan cache (`~/.cache/tidycraft/` or the platform equivalent), tag bindings (`.tidycraft-tags.json` per project), undo history, thumbnail cache, settings.
 - **No account, no sign-in.** Open the app and use it.
-- **AI tag suggestions** are **opt-in only** — no calls happen until you configure a provider in Settings → AI Tagging. First call per cloud provider with thumbnails on shows an explicit consent dialog (revocable). Local provider (Ollama) uploads nothing off-machine; cloud paths (Claude / OpenAI) upload filenames + tag context, and thumbnails only if you opt in. See [`SECURITY.md`](SECURITY.md) for the full upload-payload disclosure.
+- **AI tag suggestions** are **opt-in only** — no calls happen until you configure a provider in Settings → AI Tagging. Configuring a cloud provider (Claude / OpenAI) is itself consent to send that provider text context — filenames, project-relative paths, and your tag system — for the assets you analyze. Thumbnails are never uploaded unless you tick the per-provider consent box (off by default; the first cloud call with thumbnails enabled requires it). The local provider (Ollama) uploads nothing off-machine.
 
 ---
 
