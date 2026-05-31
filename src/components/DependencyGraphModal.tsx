@@ -78,15 +78,22 @@ export function DependencyGraphModal() {
   // Fetch the full graph when the modal opens; the subgraph is derived locally.
   useEffect(() => {
     if (!open || !activeProjectId) return;
+    // Guard against a stale graph resolving after the user switched projects
+    // while the modal is open — a late response must not overwrite the current
+    // project's graph.
+    let cancelled = false;
     const cmd =
       projectType === "godot" ? "get_godot_dependencies" : "get_unity_dependencies";
     setLoading(true);
     setError(null);
     setGraph(null);
     invoke<DependencyGraph>(cmd, { projectId: activeProjectId })
-      .then(setGraph)
-      .catch((e) => setError(String(e)))
-      .finally(() => setLoading(false));
+      .then((g) => { if (!cancelled) setGraph(g); })
+      .catch((e) => { if (!cancelled) setError(String(e)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => {
+      cancelled = true;
+    };
   }, [open, activeProjectId, projectType]);
 
   const { nodes, edges } = useMemo(() => {

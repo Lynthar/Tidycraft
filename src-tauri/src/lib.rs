@@ -22,6 +22,7 @@ use scanner::{IncrementalStats, ScanProgress, ScanResult, ScanState};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -61,11 +62,17 @@ fn scan_project(project_id: String, path: String) -> Result<ScanResult, String> 
 }
 
 /// Spawn a background thread that emits `scan-progress-{project_id}` events
-/// every 100ms until the scan reaches a terminal phase.
+/// every 100ms until the scan reaches a terminal phase OR the caller flips
+/// `stop`. The `stop` flag matters: the scan function's early `Err` paths
+/// (folder moved/missing, not a directory, cancel during discovery) return
+/// without ever marking the phase `Completed`/`Cancelled`, so a phase-only loop
+/// would spin forever and the caller's `join()` would deadlock — which surfaced
+/// as the app hanging at "discovering files" with no error.
 fn spawn_progress_reporter(
     app: AppHandle,
     project_id: String,
     state: Arc<ScanState>,
+    stop: Arc<AtomicBool>,
 ) -> thread::JoinHandle<()> {
     let event_name = format!("scan-progress-{}", project_id);
     thread::spawn(move || loop {
@@ -77,7 +84,7 @@ fn spawn_progress_reporter(
 
         let _ = app.emit(&event_name, &progress);
 
-        if is_done {
+        if is_done || stop.load(Ordering::SeqCst) {
             break;
         }
 
@@ -99,18 +106,23 @@ async fn scan_project_async(
         Ok(())
     })?;
 
-    let progress_handle = spawn_progress_reporter(app.clone(), project_id.clone(), state.clone());
+    let stop = Arc::new(AtomicBool::new(false));
+    let progress_handle =
+        spawn_progress_reporter(app.clone(), project_id.clone(), state.clone(), stop.clone());
 
     let state_for_scan = state.clone();
     let path_for_scan = path.clone();
-    let result = tokio::task::spawn_blocking(move || {
+    let join_result = tokio::task::spawn_blocking(move || {
         // Legacy async command — same default as scan_project; the
         // toggleable variant is scan_project_incremental.
         scanner::scan_directory_with_state(&path_for_scan, Some(state_for_scan), true)
     })
-    .await
-    .map_err(|e| e.to_string())?;
+    .await;
 
+    // Stop the reporter and join it BEFORE propagating any error: the scan's
+    // early `Err` paths never mark a terminal phase, so otherwise `join()`
+    // would block forever (the "stuck at discovering files" hang).
+    stop.store(true, Ordering::SeqCst);
     let _ = progress_handle.join();
 
     let _ = project::with_mut(&project_id, |s| {
@@ -118,7 +130,9 @@ async fn scan_project_async(
         Ok(())
     });
 
-    let scan_result = result.map_err(|e| e.to_string())?;
+    let scan_result = join_result
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
 
     project::with_mut(&project_id, |s| {
         s.cached_scan = Some(scan_result.clone());
@@ -175,16 +189,22 @@ async fn scan_project_incremental(
         Ok(())
     })?;
 
-    let progress_handle = spawn_progress_reporter(app.clone(), project_id.clone(), state.clone());
+    let stop = Arc::new(AtomicBool::new(false));
+    let progress_handle =
+        spawn_progress_reporter(app.clone(), project_id.clone(), state.clone(), stop.clone());
 
     let state_for_scan = state.clone();
     let path_for_scan = path.clone();
-    let result = tokio::task::spawn_blocking(move || {
+    let join_result = tokio::task::spawn_blocking(move || {
         scanner::scan_directory_incremental(&path_for_scan, Some(state_for_scan), respect_gitignore)
     })
-    .await
-    .map_err(|e| e.to_string())?;
+    .await;
 
+    // Stop the reporter and join it BEFORE propagating any error: the scan's
+    // early `Err` paths (e.g. the project folder was moved/deleted) never mark a
+    // terminal phase, so otherwise `join()` would block forever — the hang that
+    // left the UI stuck at "discovering files" with no error.
+    stop.store(true, Ordering::SeqCst);
     let _ = progress_handle.join();
 
     let _ = project::with_mut(&project_id, |s| {
@@ -192,7 +212,9 @@ async fn scan_project_incremental(
         Ok(())
     });
 
-    let (scan_result, stats) = result.map_err(|e| e.to_string())?;
+    let (scan_result, stats) = join_result
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
 
     project::with_mut(&project_id, |s| {
         s.cached_scan = Some(scan_result.clone());
@@ -320,6 +342,31 @@ fn project_relative_path(abs: &str, root: &str) -> String {
         .unwrap_or_else(|_| basename())
 }
 
+/// Relativize each existing-tag sample path against the project root before it
+/// enters an LLM prompt or the per-asset cache key. Without this, absolute
+/// paths (drive letter, username, full directory layout) ship to the provider
+/// and bake machine-specific data into the cache hash. Paths outside the root
+/// fall back to their basename — same policy as `project_relative_path`.
+fn relativize_samples(samples: Vec<String>, root: &str) -> Vec<String> {
+    samples
+        .into_iter()
+        .map(|p| project_relative_path(&p, root))
+        .collect()
+}
+
+/// Minimal HTML escaping for project-derived strings (asset names, paths, rule
+/// messages) interpolated into the HTML report. Without it, a file named e.g.
+/// `<img src=x onerror=...>.png` injects markup/script that runs when the user
+/// opens the exported report. Escapes the five HTML-significant chars; `&` must
+/// go first so we don't double-escape the entities we just inserted.
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
 /// Main entry point for AI tagging. Loads thumbnails for the selected
 /// assets, gathers project context (theme/goal from tidycraft.toml +
 /// existing tags with up to 5 sample paths each), then dispatches to
@@ -363,7 +410,7 @@ async fn llm_suggest_tags(
             existing.push(llm::ExistingTagContext {
                 name: tag.name.clone(),
                 description: tag.description.clone(),
-                sample_paths: samples,
+                sample_paths: relativize_samples(samples, &root),
             });
         }
         Ok((root, existing))
@@ -525,7 +572,7 @@ async fn learn_project_conventions(
             existing.push(llm::ExistingTagContext {
                 name: tag.name.clone(),
                 description: tag.description.clone(),
-                sample_paths: samples,
+                sample_paths: relativize_samples(samples, &root),
             });
         }
         Ok((root, scan, existing))
@@ -738,19 +785,25 @@ async fn llm_ollama_models(endpoint: String) -> Result<Vec<String>, String> {
 
 // ============ Analysis Commands ============
 
-/// Load the project's `RuleConfig` from `<root>/tidycraft.toml`, falling
-/// back to defaults when the file is absent or unparseable. Used by the
-/// report exporters, which (unlike `analyze_assets`) don't receive a config
-/// string from the frontend — this lets a JSON/HTML report honor the same
-/// `tidycraft.toml` rules the user sees in the Issues view. A malformed
-/// file degrades to defaults rather than aborting the report (the UI path
-/// surfaces parse errors separately via `analyze_assets`).
-fn load_rule_config(root_path: &str) -> RuleConfig {
+/// Load the project's `RuleConfig` from `<root>/tidycraft.toml` for the report
+/// exporters, which (unlike `analyze_assets`) don't receive a config string from
+/// the frontend. Behavior mirrors the UI path so a report can never silently
+/// diverge from the Issues view:
+/// - file absent → defaults (same as the frontend sending no config string)
+/// - file present but unreadable or unparseable → `Err`, which the export
+///   command propagates (the Issues view fails the same way via `analyze_assets`)
+///
+/// Previously a malformed file degraded to defaults here, so a JSON/HTML report
+/// looked fine while quietly using default rules — the divergence this fixes.
+fn load_rule_config(root_path: &str) -> Result<RuleConfig, String> {
     let toml_path = Path::new(root_path).join("tidycraft.toml");
-    std::fs::read_to_string(&toml_path)
-        .ok()
-        .and_then(|content| RuleConfig::from_toml(&content).ok())
-        .unwrap_or_default()
+    match std::fs::read_to_string(&toml_path) {
+        Ok(content) => {
+            RuleConfig::from_toml(&content).map_err(|e| format!("Invalid config: {}", e))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(RuleConfig::default()),
+        Err(e) => Err(format!("Failed to read tidycraft.toml: {}", e)),
+    }
 }
 
 /// Build a `GlobSet` from `[ignore].patterns`, or `None` when the list is
@@ -1299,7 +1352,7 @@ fn export_issues_to_json(project_id: String) -> Result<String, String> {
         // including the PBR-set and DCC-source cross-asset checks. Without
         // this the exported report would silently diverge from the Issues
         // view under any custom config.
-        let config = load_rule_config(&state.root_path);
+        let config = load_rule_config(&state.root_path)?;
         let ignore_set = build_ignore_set(&config)?;
         let result = run_full_analysis(scan_result, &state.root_path, &config, ignore_set.as_ref());
 
@@ -1317,7 +1370,7 @@ fn export_to_html(project_id: String) -> Result<String, String> {
         // [ignore].patterns, PBR/DCC phases all applied). The asset
         // inventory cards below intentionally stay on the full scan —
         // [ignore].patterns scope analysis, not the project's file census.
-        let config = load_rule_config(&state.root_path);
+        let config = load_rule_config(&state.root_path)?;
         let ignore_set = build_ignore_set(&config)?;
         let analysis_result =
             run_full_analysis(scan_result, &state.root_path, &config, ignore_set.as_ref());
@@ -1450,7 +1503,13 @@ fn export_to_html(project_id: String) -> Result<String, String> {
     </div>
 </body>
 </html>"#,
-            project_name = scan_result.root_path.split('/').last().unwrap_or("Project"),
+            project_name = html_escape(
+                scan_result
+                    .root_path
+                    .rsplit(['/', '\\'])
+                    .next()
+                    .unwrap_or("Project")
+            ),
             date = chrono::Local::now().format("%Y-%m-%d %H:%M"),
             total_assets = scan_result.total_count,
             total_size = format_size(scan_result.total_size),
@@ -1480,10 +1539,18 @@ fn export_to_html(project_id: String) -> Result<String, String> {
                         analyzer::Severity::Warning => "severity-warning",
                         analyzer::Severity::Info => "severity-info",
                     };
-                    let file_name = issue.asset_path.split('/').last().unwrap_or(&issue.asset_path);
+                    let file_name = issue
+                        .asset_path
+                        .rsplit(['/', '\\'])
+                        .next()
+                        .unwrap_or(&issue.asset_path);
                     format!(
                         r#"<tr><td class="{}">{:?}</td><td>{}</td><td>{}</td><td>{}</td></tr>"#,
-                        severity_class, issue.severity, issue.rule_name, file_name, issue.message
+                        severity_class,
+                        issue.severity,
+                        html_escape(&issue.rule_name),
+                        html_escape(file_name),
+                        html_escape(&issue.message)
                     )
                 })
                 .collect::<Vec<_>>()
@@ -1514,7 +1581,7 @@ fn export_to_html(project_id: String) -> Result<String, String> {
                         .unwrap_or_else(|| "-".to_string());
                     format!(
                         r#"<tr><td>{}</td><td><span class="type-badge {}">{:?}</span></td><td>{}</td><td>{}</td></tr>"#,
-                        asset.name,
+                        html_escape(&asset.name),
                         type_class,
                         asset.asset_type,
                         format_size(asset.size),
@@ -2515,4 +2582,50 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relativize_samples_strips_absolute_prefix() {
+        // Existing-tag samples are keyed by absolute scan paths. They must be
+        // relativized before they reach an LLM prompt or the cache key, or we
+        // leak the user's drive/username/layout to the provider.
+        let root = "C:/Users/alice/proj";
+        let rel = relativize_samples(
+            vec![
+                "C:/Users/alice/proj/Textures/hero.png".to_string(),
+                "C:/Users/alice/proj/Audio/step.wav".to_string(),
+            ],
+            root,
+        );
+        assert_eq!(rel, vec!["Textures/hero.png", "Audio/step.wav"]);
+        // No absolute markers survive into the prompt context.
+        for p in &rel {
+            assert!(!p.contains("C:"), "leaked drive letter: {p}");
+            assert!(!p.contains("alice"), "leaked username: {p}");
+        }
+    }
+
+    #[test]
+    fn relativize_samples_falls_back_to_basename_outside_root() {
+        // A path that isn't under the project root degrades to its basename
+        // rather than shipping the full absolute path.
+        let rel = relativize_samples(vec!["D:/elsewhere/x.png".to_string()], "C:/proj");
+        assert_eq!(rel, vec!["x.png"]);
+    }
+
+    #[test]
+    fn html_escape_neutralizes_markup() {
+        // An asset named to inject script must not produce live HTML.
+        let escaped = html_escape(r#"<img src=x onerror="alert(1)">.png"#);
+        assert!(!escaped.contains('<'));
+        assert!(!escaped.contains('>'));
+        assert_eq!(
+            escaped,
+            "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;.png"
+        );
+    }
 }
