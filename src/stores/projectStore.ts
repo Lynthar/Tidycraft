@@ -1083,35 +1083,39 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (advancedFilters.maxSize !== null) {
       assets = assets.filter((asset) => asset.size <= advancedFilters.maxSize!);
     }
+    // Metadata range filters: an asset is kept only when the field is actually
+    // present. The old `(value || 0)` coalesced a missing field to 0, so e.g.
+    // "max duration 10s" matched every texture/script/model (0 <= 10) — assets
+    // that have no duration at all. Gate on presence first, then compare.
     if (advancedFilters.minWidth !== null) {
-      assets = assets.filter((asset) => (asset.metadata?.width || 0) >= advancedFilters.minWidth!);
+      assets = assets.filter((asset) => { const v = asset.metadata?.width; return v != null && v >= advancedFilters.minWidth!; });
     }
     if (advancedFilters.maxWidth !== null) {
-      assets = assets.filter((asset) => (asset.metadata?.width || 0) <= advancedFilters.maxWidth!);
+      assets = assets.filter((asset) => { const v = asset.metadata?.width; return v != null && v <= advancedFilters.maxWidth!; });
     }
     if (advancedFilters.minHeight !== null) {
-      assets = assets.filter((asset) => (asset.metadata?.height || 0) >= advancedFilters.minHeight!);
+      assets = assets.filter((asset) => { const v = asset.metadata?.height; return v != null && v >= advancedFilters.minHeight!; });
     }
     if (advancedFilters.maxHeight !== null) {
-      assets = assets.filter((asset) => (asset.metadata?.height || 0) <= advancedFilters.maxHeight!);
+      assets = assets.filter((asset) => { const v = asset.metadata?.height; return v != null && v <= advancedFilters.maxHeight!; });
     }
     if (advancedFilters.minVertices !== null) {
-      assets = assets.filter((asset) => (asset.metadata?.vertex_count || 0) >= advancedFilters.minVertices!);
+      assets = assets.filter((asset) => { const v = asset.metadata?.vertex_count; return v != null && v >= advancedFilters.minVertices!; });
     }
     if (advancedFilters.maxVertices !== null) {
-      assets = assets.filter((asset) => (asset.metadata?.vertex_count || 0) <= advancedFilters.maxVertices!);
+      assets = assets.filter((asset) => { const v = asset.metadata?.vertex_count; return v != null && v <= advancedFilters.maxVertices!; });
     }
     if (advancedFilters.minFaces !== null) {
-      assets = assets.filter((asset) => (asset.metadata?.face_count || 0) >= advancedFilters.minFaces!);
+      assets = assets.filter((asset) => { const v = asset.metadata?.face_count; return v != null && v >= advancedFilters.minFaces!; });
     }
     if (advancedFilters.maxFaces !== null) {
-      assets = assets.filter((asset) => (asset.metadata?.face_count || 0) <= advancedFilters.maxFaces!);
+      assets = assets.filter((asset) => { const v = asset.metadata?.face_count; return v != null && v <= advancedFilters.maxFaces!; });
     }
     if (advancedFilters.minDuration !== null) {
-      assets = assets.filter((asset) => (asset.metadata?.duration_secs || 0) >= advancedFilters.minDuration!);
+      assets = assets.filter((asset) => { const v = asset.metadata?.duration_secs; return v != null && v >= advancedFilters.minDuration!; });
     }
     if (advancedFilters.maxDuration !== null) {
-      assets = assets.filter((asset) => (asset.metadata?.duration_secs || 0) <= advancedFilters.maxDuration!);
+      assets = assets.filter((asset) => { const v = asset.metadata?.duration_secs; return v != null && v <= advancedFilters.maxDuration!; });
     }
     if (advancedFilters.hasAlpha !== null) {
       assets = assets.filter((asset) => asset.metadata?.has_alpha === advancedFilters.hasAlpha);

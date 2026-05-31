@@ -77,15 +77,19 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
 
   const scanUnused = async () => {
     if (!activeProjectId) return;
+    // Snapshot the target project: find_unused_assets is heavy, so the user may
+    // switch projects mid-scan. Ignore the result if they did, so we never write
+    // one project's unused list into another's view.
+    const pid = activeProjectId;
     setUnusedLoading(true);
     setUnusedError(null);
     try {
       const result = await invoke<string[]>("find_unused_assets", {
-        projectId: activeProjectId,
+        projectId: pid,
       });
-      setUnused(result);
+      if (useProjectStore.getState().activeProjectId === pid) setUnused(result);
     } catch (err) {
-      setUnusedError(String(err));
+      if (useProjectStore.getState().activeProjectId === pid) setUnusedError(String(err));
     } finally {
       setUnusedLoading(false);
     }
@@ -101,22 +105,30 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
       setLoading(false);
       return;
     }
+    // Guard against a stale get_project_stats resolving after the user switched
+    // projects: the cleanup flips `cancelled` so a late response can't overwrite
+    // the now-active project's stats.
+    let cancelled = false;
     const loadStats = async () => {
       try {
         setLoading(true);
         const result = await invoke<ProjectStats>("get_project_stats", {
           projectId: activeProjectId,
         });
+        if (cancelled) return;
         setStats(result);
         setError(null);
       } catch (err) {
-        setError(String(err));
+        if (!cancelled) setError(String(err));
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     };
 
     loadStats();
+    return () => {
+      cancelled = true;
+    };
   }, [activeProjectId]);
 
   if (loading) {

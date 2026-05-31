@@ -348,10 +348,14 @@ export function AdvancedFiltersPanel() {
                 {t("filters.colorSpace", "Color Space")}
               </label>
               <div className="flex flex-wrap gap-1.5">
+                {/* Only sRGB/Any are offered: the scanner only ever derives a
+                    color space from PNG sRGB/iCCP chunks (scanner.rs), so it
+                    produces "sRGB" or nothing — a "Linear" option would never
+                    match anything. Re-add it only if the scanner learns to tag
+                    linear-space assets. */}
                 {([
                   [null, t("filters.any", "Any")],
                   ["sRGB", "sRGB"],
-                  ["Linear", "Linear"],
                 ] as const).map(([v, label]) => (
                   <button
                     key={String(v)}
