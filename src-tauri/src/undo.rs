@@ -351,7 +351,17 @@ fn execute_single_undo(operation: &FileOperation) -> Result<(), String> {
                     "Failed to rename '{}' back to '{}': {}",
                     new_path, operation.original_path, e
                 )
-            })
+            })?;
+            // 撤销也要对称连带 Unity .meta —— 否则把主文件名改回去却把
+            // sidecar 留在新名上,反而制造孤儿 + 断引用。Best-effort:
+            // 连带失败只记录,不回滚已成功的主文件还原。
+            if let Err(e) = crate::meta_sidecar::carry_on_rename(src, dst) {
+                eprintln!(
+                    "[undo] .meta sidecar not carried back for {}: {}",
+                    new_path, e
+                );
+            }
+            Ok(())
         }
         OperationType::Move => {
             // 移动操作的撤销与重命名类似
@@ -388,7 +398,15 @@ fn execute_single_undo(operation: &FileOperation) -> Result<(), String> {
                     "Failed to move '{}' back to '{}': {}",
                     new_path, operation.original_path, e
                 )
-            })
+            })?;
+            // 移动撤销同样对称连带 Unity .meta(见 Rename 分支说明)。
+            if let Err(e) = crate::meta_sidecar::carry_on_rename(src, dst) {
+                eprintln!(
+                    "[undo] .meta sidecar not carried back for {}: {}",
+                    new_path, e
+                );
+            }
+            Ok(())
         }
         OperationType::Delete => {
             // 删除操作的撤销需要备份机制，目前不支持
@@ -542,6 +560,44 @@ mod tests {
         // 验证文件已恢复原名
         assert!(Path::new(&original_path).exists());
         assert!(!new_path.exists());
+    }
+
+    #[test]
+    fn test_undo_rename_carries_meta_sidecar() {
+        // Undoing a rename must move the Unity .meta sidecar back too —
+        // otherwise the revert strands the sidecar on the new name and breaks
+        // GUID references, the very thing the forward op was careful to avoid.
+        let dir = tempdir().unwrap();
+        let original = dir.path().join("a.txt");
+        let renamed = dir.path().join("b.txt");
+        fs::write(&original, "asset").unwrap();
+        fs::write(crate::meta_sidecar::sidecar_path(&original), "guid: 1").unwrap();
+        // Simulate the forward rename having already carried the sidecar.
+        fs::rename(&original, &renamed).unwrap();
+        fs::rename(
+            crate::meta_sidecar::sidecar_path(&original),
+            crate::meta_sidecar::sidecar_path(&renamed),
+        )
+        .unwrap();
+
+        let mut manager = UndoManager::new(10);
+        manager.record_batch(
+            "Rename".to_string(),
+            vec![FileOperation {
+                operation_type: OperationType::Rename,
+                original_path: original.to_string_lossy().to_string(),
+                new_path: Some(renamed.to_string_lossy().to_string()),
+                timestamp: current_timestamp(),
+            }],
+        );
+
+        let result = manager.undo_last().unwrap();
+        assert!(result.success);
+        // Both the asset and its sidecar are back at the original name.
+        assert!(original.exists());
+        assert!(crate::meta_sidecar::sidecar_path(&original).exists());
+        assert!(!renamed.exists());
+        assert!(!crate::meta_sidecar::sidecar_path(&renamed).exists());
     }
 
     #[test]
