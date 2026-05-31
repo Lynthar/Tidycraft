@@ -169,11 +169,20 @@ impl TagsData {
     /// Get all assets with a specific tag
     #[allow(dead_code)]
     pub fn get_assets_with_tag(&self, tag_id: &str) -> Vec<String> {
-        self.asset_tags
+        // Sorted for determinism. `asset_tags` is a HashMap, so its iteration
+        // order is randomized per process; these paths feed the per-asset LLM
+        // cache key (via `llm::cache::hash_context`), so an unstable order
+        // would change the key on every app restart and silently invalidate
+        // the whole suggestion cache. Callers only use the result as prompt
+        // context behind a `truncate(5)`, so pinning the order is free.
+        let mut paths: Vec<String> = self
+            .asset_tags
             .iter()
             .filter(|(_, tags)| tags.contains(&tag_id.to_string()))
             .map(|(path, _)| path.clone())
-            .collect()
+            .collect();
+        paths.sort();
+        paths
     }
 }
 
@@ -239,5 +248,24 @@ mod tests {
         assert_eq!(data.get_asset_tags("/gone.png").len(), 0);
         // The tag definition itself is untouched
         assert_eq!(data.tags.len(), 1);
+    }
+
+    #[test]
+    fn get_assets_with_tag_is_sorted() {
+        // `asset_tags` is a HashMap (per-process randomized iteration order),
+        // but the result feeds the LLM cache context hash, so it must be
+        // deterministic. Insert in a deliberately non-sorted order and assert
+        // the output is sorted and excludes other tags' assets.
+        let mut data = TagsData::default();
+        let hero = data.create_tag("Hero".to_string(), "#ff0000".to_string());
+        let other = data.create_tag("Other".to_string(), "#00ff00".to_string());
+        data.add_tag_to_asset("z/last.png", &hero.id);
+        data.add_tag_to_asset("a/first.png", &hero.id);
+        data.add_tag_to_asset("m/mid.png", &hero.id);
+        data.add_tag_to_asset("a/other.png", &other.id);
+        assert_eq!(
+            data.get_assets_with_tag(&hero.id),
+            vec!["a/first.png", "m/mid.png", "z/last.png"]
+        );
     }
 }

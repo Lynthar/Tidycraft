@@ -135,7 +135,16 @@ The frontend and backend communicate exclusively through two mechanisms:
   re-parse affected files, patch `ProjectState.cached_scan`, emit
   `fs-change-{projectId}` with delta + rebuilt directory tree. The
   `ProjectWatcher` struct is held inside `ProjectState.watcher`; dropping it
-  tears down the OS watch and the processing thread exits cleanly.
+  tears down the OS watch and the processing thread exits cleanly. FS events
+  are filtered through the same `.gitignore` rules the scan used (via
+  `scanner::build_gitignore_matcher`, built once at watcher start from the
+  project's recorded `respect_gitignore`), so gitignored churn — e.g. Unity's
+  constantly-rewritten `Library/` — doesn't get re-added to the cache.
+  **Known limitation:** the watcher matcher loads only root-level ignore files
+  (`.gitignore`, `.ignore`, `.git/info/exclude` + git globals), not the
+  per-directory nested `.gitignore` files that `WalkBuilder` descends into at
+  scan time. A file excluded *only* by a nested ignore file can therefore slip
+  back into the live view on change; a manual rescan reconciles it.
 - **`analyzer/`** — Rule engine. `Rule` trait has four methods: `id`, `name`,
   `applies_to`, `check` — used by per-asset rules: `naming`, `texture`,
   `texture_colorspace`, `model`, `audio`. **Four cross-asset checks** live
@@ -339,6 +348,11 @@ The two layers compose: a path ignored at scan time isn't visible to
 analyze-time patterns. Toggling `respectGitignore` triggers a fresh
 scan on the next `openProject`; out-of-scope entries are pruned from
 the cache during the next incremental scan.
+
+The **watcher** reuses the scan-time layer so live FS updates match the scan
+(see `watcher.rs` above), but only for root-level ignore files — nested
+per-directory `.gitignore` files are a documented gap reconciled by a manual
+rescan.
 
 **Race-safe project-scoped writes.** Long-running operations
 (`runAnalysis`, scan completion handlers, `refreshGitInfo`) snapshot

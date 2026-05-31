@@ -221,6 +221,31 @@ mod tests {
     }
 
     #[test]
+    fn hash_context_is_deterministic_and_sensitive() {
+        // Folding project/tag context into the cache key only pays off if the
+        // digest is stable for an unchanged tag system (cache hits survive)
+        // and moves when the context actually changes (stale advice drops).
+        // Determinism relies on the caller handing us a stable sample order —
+        // see `TagsData::get_assets_with_tag`, which sorts for this reason.
+        let tags = vec![crate::llm::ExistingTagContext {
+            name: "hero".into(),
+            description: Some("Player characters".into()),
+            sample_paths: vec!["a/b.png".into(), "c/d.png".into()],
+        }];
+        // Same context in -> same digest out.
+        assert_eq!(hash_context(None, &tags), hash_context(None, &tags));
+        // Empty context is stable and shares one namespace.
+        assert_eq!(hash_context(None, &[]), hash_context(None, &[]));
+        // Editing the tag context moves the digest.
+        let edited = vec![crate::llm::ExistingTagContext {
+            name: "hero".into(),
+            description: Some("CHANGED".into()),
+            sample_paths: vec!["a/b.png".into(), "c/d.png".into()],
+        }];
+        assert_ne!(hash_context(None, &tags), hash_context(None, &edited));
+    }
+
+    #[test]
     fn save_then_get_roundtrip() {
         // Use a unique key so this test doesn't collide with anything
         // a developer happens to have in their real cache dir.

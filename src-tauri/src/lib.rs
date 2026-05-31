@@ -3,6 +3,7 @@ mod cache;
 mod git;
 mod godot;
 mod llm;
+mod meta_sidecar;
 mod project;
 mod scanner;
 mod tags;
@@ -1601,6 +1602,11 @@ fn execute_batch_rename(
 
         match std::fs::rename(&path, &new_path) {
             Ok(_) => {
+                // Carry the Unity .meta sidecar so renamed assets keep their
+                // GUID. Best-effort: no-op without a sidecar, logs on failure.
+                if let Err(e) = meta_sidecar::carry_on_rename(path_obj, &new_path) {
+                    eprintln!("[batch_rename] .meta sidecar not carried for {}: {}", path, e);
+                }
                 success_count += 1;
                 paths_to_record.push((path.clone(), new_path.to_string_lossy().to_string()));
             }
@@ -1929,10 +1935,17 @@ fn move_assets(
         }
 
         match std::fs::rename(src, &dst) {
-            Ok(_) => successes.push(FileOpSuccess {
-                original_path: path,
-                new_path: scanner::path_to_string(&dst),
-            }),
+            Ok(_) => {
+                // Carry the Unity .meta sidecar so moved assets keep their
+                // GUID. Best-effort: no-op without a sidecar, logs on failure.
+                if let Err(e) = meta_sidecar::carry_on_rename(src, &dst) {
+                    eprintln!("[move_assets] .meta sidecar not carried for {}: {}", path, e);
+                }
+                successes.push(FileOpSuccess {
+                    original_path: path,
+                    new_path: scanner::path_to_string(&dst),
+                })
+            }
             Err(e) => errors.push(FileOpError {
                 path,
                 message: e.to_string(),
@@ -2110,7 +2123,15 @@ fn delete_assets(paths: Vec<String>) -> DeleteResult {
 
     for path in paths {
         match trash::delete(&path) {
-            Ok(_) => success_paths.push(path),
+            Ok(_) => {
+                // Also trash the Unity .meta sidecar so deleting an asset
+                // doesn't strand its sidecar. Best-effort: no-op without a
+                // sidecar, logs on failure.
+                if let Err(e) = meta_sidecar::carry_on_delete(Path::new(&path)) {
+                    eprintln!("[delete_assets] .meta sidecar not carried for {}: {}", path, e);
+                }
+                success_paths.push(path);
+            }
             Err(e) => errors.push(DeleteError {
                 path,
                 message: e.to_string(),
@@ -2149,6 +2170,13 @@ fn rename_file(project_id: String, old_path: String, new_name: String) -> Result
     let new_path_str = new_path.to_string_lossy().to_string();
 
     std::fs::rename(old_path_ref, &new_path).map_err(|e| e.to_string())?;
+
+    // Carry the Unity .meta sidecar so the renamed asset keeps its GUID and
+    // references don't break. Best-effort: a missing sidecar (non-Unity) is a
+    // no-op, and a carry failure only logs — the rename already succeeded.
+    if let Err(e) = meta_sidecar::carry_on_rename(old_path_ref, &new_path) {
+        eprintln!("[rename_file] .meta sidecar not carried for {}: {}", old_path, e);
+    }
 
     let _ = project::with_mut(&project_id, |state| {
         let timestamp = SystemTime::now()
