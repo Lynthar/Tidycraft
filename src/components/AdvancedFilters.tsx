@@ -38,6 +38,14 @@ export function AdvancedFiltersPanel() {
     advancedFilters.maxWidth !== null ||
     advancedFilters.minHeight !== null ||
     advancedFilters.maxHeight !== null ||
+    advancedFilters.minVertices !== null ||
+    advancedFilters.maxVertices !== null ||
+    advancedFilters.minFaces !== null ||
+    advancedFilters.maxFaces !== null ||
+    advancedFilters.minDuration !== null ||
+    advancedFilters.maxDuration !== null ||
+    advancedFilters.hasAlpha !== null ||
+    advancedFilters.colorSpace !== null ||
     advancedFilters.extensions.length > 0 ||
     advancedFilters.gitStatusFilter.length > 0;
 
@@ -62,6 +70,17 @@ export function AdvancedFiltersPanel() {
     value: string
   ) => {
     const numValue = value ? parseInt(value, 10) : null;
+    setAdvancedFilters({ [field]: numValue });
+  };
+
+  const handleNumberChange = (
+    field:
+      | "minVertices" | "maxVertices"
+      | "minFaces" | "maxFaces"
+      | "minDuration" | "maxDuration",
+    value: string
+  ) => {
+    const numValue = value ? parseFloat(value) : null;
     setAdvancedFilters({ [field]: numValue });
   };
 
@@ -109,6 +128,15 @@ export function AdvancedFiltersPanel() {
               advancedFilters.maxHeight !== null
                 ? 1
                 : 0,
+              advancedFilters.minVertices !== null ||
+              advancedFilters.maxVertices !== null ||
+              advancedFilters.minFaces !== null ||
+              advancedFilters.maxFaces !== null
+                ? 1
+                : 0,
+              advancedFilters.minDuration !== null || advancedFilters.maxDuration !== null ? 1 : 0,
+              advancedFilters.hasAlpha !== null ? 1 : 0,
+              advancedFilters.colorSpace !== null ? 1 : 0,
               advancedFilters.extensions.length > 0 ? 1 : 0,
               advancedFilters.gitStatusFilter.length > 0 ? 1 : 0,
             ].reduce((a, b) => a + b, 0)}
@@ -240,6 +268,103 @@ export function AdvancedFiltersPanel() {
                     className="flex-1 px-2 py-1.5 text-sm bg-background border border-border rounded text-text-primary focus:outline-none focus:border-primary"
                   />
                 </div>
+              </div>
+            </div>
+
+            {/* Model complexity */}
+            <div>
+              <label className="block text-xs text-text-secondary uppercase mb-2">
+                {t("filters.model", "Model (vertices / faces)")}
+              </label>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-text-secondary w-8">{t("filters.verts", "V")}:</span>
+                  <input type="number" placeholder={t("filters.min", "Min")} value={advancedFilters.minVertices ?? ""}
+                    onChange={(e) => handleNumberChange("minVertices", e.target.value)}
+                    className="flex-1 px-2 py-1.5 text-sm bg-background border border-border rounded text-text-primary focus:outline-none focus:border-primary" />
+                  <span className="text-text-secondary">-</span>
+                  <input type="number" placeholder={t("filters.max", "Max")} value={advancedFilters.maxVertices ?? ""}
+                    onChange={(e) => handleNumberChange("maxVertices", e.target.value)}
+                    className="flex-1 px-2 py-1.5 text-sm bg-background border border-border rounded text-text-primary focus:outline-none focus:border-primary" />
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-text-secondary w-8">{t("filters.faces", "F")}:</span>
+                  <input type="number" placeholder={t("filters.min", "Min")} value={advancedFilters.minFaces ?? ""}
+                    onChange={(e) => handleNumberChange("minFaces", e.target.value)}
+                    className="flex-1 px-2 py-1.5 text-sm bg-background border border-border rounded text-text-primary focus:outline-none focus:border-primary" />
+                  <span className="text-text-secondary">-</span>
+                  <input type="number" placeholder={t("filters.max", "Max")} value={advancedFilters.maxFaces ?? ""}
+                    onChange={(e) => handleNumberChange("maxFaces", e.target.value)}
+                    className="flex-1 px-2 py-1.5 text-sm bg-background border border-border rounded text-text-primary focus:outline-none focus:border-primary" />
+                </div>
+              </div>
+            </div>
+
+            {/* Duration */}
+            <div>
+              <label className="block text-xs text-text-secondary uppercase mb-2">
+                {t("filters.duration", "Duration (sec)")}
+              </label>
+              <div className="flex items-center gap-2">
+                <input type="number" placeholder={t("filters.min", "Min")} value={advancedFilters.minDuration ?? ""}
+                  onChange={(e) => handleNumberChange("minDuration", e.target.value)}
+                  className="flex-1 px-2 py-1.5 text-sm bg-background border border-border rounded text-text-primary focus:outline-none focus:border-primary" />
+                <span className="text-text-secondary">-</span>
+                <input type="number" placeholder={t("filters.max", "Max")} value={advancedFilters.maxDuration ?? ""}
+                  onChange={(e) => handleNumberChange("maxDuration", e.target.value)}
+                  className="flex-1 px-2 py-1.5 text-sm bg-background border border-border rounded text-text-primary focus:outline-none focus:border-primary" />
+              </div>
+            </div>
+
+            {/* Alpha */}
+            <div>
+              <label className="block text-xs text-text-secondary uppercase mb-2">
+                {t("filters.alpha", "Alpha Channel")}
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {([
+                  [null, t("filters.any", "Any")],
+                  [true, t("filters.hasAlpha", "Has alpha")],
+                  [false, t("filters.noAlpha", "No alpha")],
+                ] as const).map(([v, label]) => (
+                  <button
+                    key={String(v)}
+                    onClick={() => setAdvancedFilters({ hasAlpha: v })}
+                    className={`px-2 py-1 text-xs rounded transition-colors ${
+                      advancedFilters.hasAlpha === v
+                        ? "bg-primary text-white"
+                        : "bg-background text-text-secondary hover:text-text-primary"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Color Space */}
+            <div>
+              <label className="block text-xs text-text-secondary uppercase mb-2">
+                {t("filters.colorSpace", "Color Space")}
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                {([
+                  [null, t("filters.any", "Any")],
+                  ["sRGB", "sRGB"],
+                  ["Linear", "Linear"],
+                ] as const).map(([v, label]) => (
+                  <button
+                    key={String(v)}
+                    onClick={() => setAdvancedFilters({ colorSpace: v })}
+                    className={`px-2 py-1 text-xs rounded transition-colors ${
+                      advancedFilters.colorSpace === v
+                        ? "bg-primary text-white"
+                        : "bg-background text-text-secondary hover:text-text-primary"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
             </div>
 

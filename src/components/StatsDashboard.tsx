@@ -305,8 +305,8 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
         </div>
       </div>
 
-      {/* Unused Assets (Unity-only; on-demand scan) */}
-      {projectType === "unity" && (
+      {/* Unused Assets (Unity + Godot; on-demand scan) */}
+      {(projectType === "unity" || projectType === "godot") && (
         <div className="bg-card-bg border border-border rounded-lg p-4">
           <div className="flex items-center justify-between mb-1">
             <h3 className="text-sm font-medium flex items-center gap-2">
@@ -329,7 +329,9 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
             </button>
           </div>
           <p className="text-[11px] text-text-secondary mb-3">
-            {t("stats.unusedAssetsHint")}
+            {projectType === "godot"
+              ? t("stats.unusedAssetsHintGodot")
+              : t("stats.unusedAssetsHint")}
           </p>
           {unusedError ? (
             <p className="text-xs text-warning">{unusedError}</p>

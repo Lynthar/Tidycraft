@@ -9,9 +9,11 @@
 #![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
+
+use crate::scanner::AssetInfo;
 
 /// Godot 项目配置信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -307,6 +309,117 @@ pub fn get_godot_resource_type(path: &Path) -> Option<GodotResourceType> {
     }
 }
 
+// ============ Unused-asset detection ============
+
+/// Whether `extension` is Godot metadata (not a real asset): `.import`
+/// (texture import settings), `.uid` (4.4 script UID sidecar), `.godot`
+/// (project.godot / editor config), `.cfg` (export presets / editor config).
+/// Excluded from unused-asset reporting.
+pub fn is_godot_metadata(extension: &str) -> bool {
+    matches!(
+        extension.to_lowercase().as_str(),
+        "import" | "uid" | "godot" | "cfg"
+    )
+}
+
+/// Convert an absolute asset path to its Godot `res://` form (project root =
+/// `res://`). `None` for paths outside the root (not res://-addressable).
+/// Forward-slashed to match the paths written into scene files.
+pub fn asset_to_res_path(abs: &str, root: &Path) -> Option<String> {
+    let rel = Path::new(abs).strip_prefix(root).ok()?;
+    Some(format!("res://{}", rel.to_string_lossy().replace('\\', "/")))
+}
+
+/// Pull every `res://` reference out of a scene / resource / script's text:
+/// `ext_resource ... path="res://..."`, `preload("res://...")`,
+/// `load("res://...")`. All such refs sit inside double quotes, so one
+/// quoted-`res://` scan catches them. `uid://`-only refs are intentionally
+/// NOT matched — a known gap (see `find_unused_godot_assets`).
+fn extract_res_references(content: &str, re: &regex::Regex) -> Vec<String> {
+    re.captures_iter(content)
+        .filter_map(|c| c.get(1).map(|m| m.as_str().to_string()))
+        .collect()
+}
+
+/// Find assets in a Godot project that no scene / resource / script references,
+/// mirroring the Unity unused-asset check. Heuristic: collects the literal
+/// `res://` paths from `.tscn` / `.tres` / `.gd` files plus the project's entry
+/// points (main scene + autoloads); any asset whose `res://` path is in neither
+/// set is reported. Returns absolute paths (same shape as the Unity command).
+///
+/// Known false-positive sources (the UI warns accordingly): `load(variable)`
+/// dynamic paths, refs carrying only a `uid://` (no path), and hand-written
+/// relative paths the editor never emits.
+pub fn find_unused_godot_assets(root_path: &str, assets: &[AssetInfo]) -> Vec<String> {
+    let root = Path::new(root_path);
+    let mut referenced: HashSet<String> = HashSet::new();
+
+    // 1. Entry points from project.godot — used roots even when nothing else
+    //    references them (otherwise the main scene reports as unused).
+    if let Ok(content) = fs::read_to_string(root.join("project.godot")) {
+        let config = parse_godot_config(&content);
+        if let Some(main_scene) = config
+            .get("application")
+            .and_then(|app| app.get("run/main_scene"))
+        {
+            referenced.insert(unquote(main_scene));
+        }
+        for autoload in extract_autoloads(&config) {
+            referenced.insert(autoload.path);
+        }
+    }
+
+    // 2. Every res:// path referenced by a scene / resource / script. All refs
+    //    sit inside double quotes, so one quoted-res:// regex catches
+    //    ext_resource paths and preload/load literals alike.
+    let re = regex::Regex::new(r#""(res://[^"]*)""#).expect("static regex compiles");
+    for asset in assets {
+        let ext = asset.extension.to_lowercase();
+        if ext == "tscn" || ext == "tres" || ext == "gd" {
+            if let Ok(content) = fs::read_to_string(&asset.path) {
+                for r in extract_res_references(&content, &re) {
+                    referenced.insert(r);
+                }
+            }
+        }
+    }
+
+    // 3. Assets whose res:// path nobody referenced (skipping Godot metadata).
+    assets
+        .iter()
+        .filter(|a| !is_godot_metadata(&a.extension))
+        .filter(|a| match asset_to_res_path(&a.path, root) {
+            Some(res) => !referenced.contains(&res),
+            None => false, // outside the project root — not res://-addressable
+        })
+        .map(|a| a.path.clone())
+        .collect()
+}
+
+/// Build the raw `(from_res, to_res)` dependency edges for a Godot project:
+/// each scene / resource / script (`from`, its own `res://` path) → every
+/// `res://` resource it references (`to`). The caller turns these into a graph
+/// after filtering `to` to known nodes. Same `res://` parsing as
+/// `find_unused_godot_assets`; uid-only refs are likewise not captured.
+pub fn godot_dependency_edges(root: &Path, assets: &[AssetInfo]) -> Vec<(String, String)> {
+    let re = regex::Regex::new(r#""(res://[^"]*)""#).expect("static regex compiles");
+    let mut edges = Vec::new();
+    for asset in assets {
+        let ext = asset.extension.to_lowercase();
+        if ext == "tscn" || ext == "tres" || ext == "gd" {
+            let Some(from) = asset_to_res_path(&asset.path, root) else {
+                continue;
+            };
+            if let Ok(content) = fs::read_to_string(&asset.path) {
+                for to in extract_res_references(&content, &re) {
+                    edges.push((from.clone(), to));
+                }
+            }
+        }
+    }
+    edges
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -500,5 +613,77 @@ config/name="Minimal"
             get_godot_resource_type(Path::new("bgm.ogg")),
             Some(GodotResourceType::AudioStream)
         );
+    }
+
+    #[test]
+    fn test_find_unused_godot_assets() {
+        use crate::scanner::AssetType;
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        fs::write(
+            root.join("project.godot"),
+            "config_version=5\n[application]\nrun/main_scene=\"res://main.tscn\"\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("main.tscn"),
+            "[gd_scene format=3]\n[ext_resource type=\"Texture2D\" path=\"res://hero.png\" id=\"1\"]\n",
+        )
+        .unwrap();
+        fs::write(root.join("hero.png"), "x").unwrap();
+        fs::write(root.join("orphan.png"), "x").unwrap();
+
+        let mk = |name: &str, ext: &str| AssetInfo {
+            path: root.join(name).to_string_lossy().to_string(),
+            name: name.to_string(),
+            extension: ext.to_string(),
+            asset_type: AssetType::Other,
+            size: 1,
+            metadata: None,
+            unity_guid: None,
+        };
+        let assets = vec![
+            mk("main.tscn", "tscn"),
+            mk("hero.png", "png"),
+            mk("orphan.png", "png"),
+        ];
+
+        let unused = find_unused_godot_assets(&root.to_string_lossy(), &assets);
+        // orphan.png is referenced by nobody -> unused.
+        assert!(unused.iter().any(|p| p.ends_with("orphan.png")));
+        // hero.png is referenced by main.tscn -> not unused.
+        assert!(!unused.iter().any(|p| p.ends_with("hero.png")));
+        // main.tscn is the entry point -> not unused.
+        assert!(!unused.iter().any(|p| p.ends_with("main.tscn")));
+    }
+
+    #[test]
+    fn test_godot_dependency_edges() {
+        use crate::scanner::AssetType;
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("main.tscn"),
+            "[ext_resource type=\"Texture2D\" path=\"res://hero.png\" id=\"1\"]\n",
+        )
+        .unwrap();
+
+        let mk = |name: &str, ext: &str| AssetInfo {
+            path: root.join(name).to_string_lossy().to_string(),
+            name: name.to_string(),
+            extension: ext.to_string(),
+            asset_type: AssetType::Other,
+            size: 1,
+            metadata: None,
+            unity_guid: None,
+        };
+        let assets = vec![mk("main.tscn", "tscn"), mk("hero.png", "png")];
+
+        let edges = godot_dependency_edges(root, &assets);
+        // main.tscn references hero.png -> exactly one edge.
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].0, "res://main.tscn");
+        assert_eq!(edges[0].1, "res://hero.png");
     }
 }

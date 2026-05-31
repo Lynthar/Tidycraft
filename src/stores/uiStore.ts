@@ -114,6 +114,11 @@ interface UiState {
   learnReviewOpen: boolean;
   learnReviewData: AiLearningResult | null;
 
+  /** Dependency-graph modal. `depGraphAssetPath` is the asset whose local
+   *  graph to show, snapshotted at trigger time. */
+  depGraphOpen: boolean;
+  depGraphAssetPath: string | null;
+
   setCmdkOpen: (open: boolean) => void;
   toggleCmdk: () => void;
   setSettingsOpen: (open: boolean) => void;
@@ -132,6 +137,7 @@ interface UiState {
 
   setLearnSetupOpen: (open: boolean) => void;
   setLearnReviewOpen: (open: boolean, data?: AiLearningResult) => void;
+  setDepGraphOpen: (open: boolean, assetPath?: string) => void;
 }
 
 export const useUiStore = create<UiState>((set, get) => ({
@@ -147,6 +153,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   learnSetupOpen: false,
   learnReviewOpen: false,
   learnReviewData: null,
+  depGraphOpen: false,
+  depGraphAssetPath: null,
   setCmdkOpen: (open) => set({ cmdkOpen: open }),
   toggleCmdk: () => set({ cmdkOpen: !get().cmdkOpen }),
   setSettingsOpen: (open) => set({ settingsOpen: open }),
@@ -168,5 +176,10 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({
       learnReviewOpen: open,
       learnReviewData: open ? data ?? null : null,
+    }),
+  setDepGraphOpen: (open, assetPath) =>
+    set({
+      depGraphOpen: open,
+      depGraphAssetPath: open ? assetPath ?? null : null,
     }),
 }));
