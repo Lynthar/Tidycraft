@@ -238,6 +238,13 @@ fn get_asset_type(extension: &str) -> AssetType {
         "controller" | "anim" => AssetType::Animation,
         "cs" | "js" => AssetType::Script,
         "asset" | "json" | "xml" | "yaml" | "csv" => AssetType::Data,
+        // Godot specific. `.tscn` is a scene (like Unity's `.unity`); `.gd` is
+        // a script; `.tres` is a serialized resource (material / curve / …) —
+        // there's no dedicated Resource type, so it joins the other serialized
+        // formats under Data.
+        "tscn" => AssetType::Scene,
+        "gd" => AssetType::Script,
+        "tres" => AssetType::Data,
         // Other
         _ => AssetType::Other,
     }

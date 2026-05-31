@@ -14,9 +14,11 @@ import {
   Plus,
   ExternalLink,
   FolderOpen,
+  Network,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
+import { useUiStore } from "../stores/uiStore";
 import { useTagsStore } from "../stores/tagsStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { formatFileSize, formatDuration } from "../lib/utils";
@@ -51,6 +53,7 @@ export function AssetPreview() {
   const { selectedAsset, setSelectedAsset, scanResult } = useProjectStore();
   const { tags, assetTags, addTagToAsset, removeTagFromAsset } = useTagsStore();
   const externalEditors = useSettingsStore((s) => s.externalEditors);
+  const setDepGraphOpen = useUiStore((s) => s.setDepGraphOpen);
   const [thumbnail, setThumbnail] = useState<string | null>(null);
   const [loadingThumbnail, setLoadingThumbnail] = useState(false);
   const [copiedPath, setCopiedPath] = useState(false);
@@ -668,6 +671,33 @@ export function AssetPreview() {
                 {copiedGuid ? <Check size={12} style={{ color: "var(--ok)" }} /> : <Copy size={11} />}
               </button>
             </div>
+          </div>
+        )}
+
+        {/* Dependency graph (Unity / Godot — both reference-based engines) */}
+        {(projectType === "unity" || projectType === "godot") && (
+          <div className="tc-meta-section">
+            <button
+              onClick={() => setDepGraphOpen(true, selectedAsset.path)}
+              title={t("assetPreview.viewDependencies")}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
+                width: "100%",
+                padding: "6px 10px",
+                fontSize: 12,
+                borderRadius: 6,
+                border: "1px solid var(--line)",
+                background: "var(--panel-2)",
+                color: "var(--text-2)",
+                cursor: "pointer",
+              }}
+            >
+              <Network size={13} />
+              {t("assetPreview.viewDependencies")}
+            </button>
           </div>
         )}
 

@@ -127,7 +127,15 @@
     "copyPath": "Copy path",
     "openWithDefaultApp": "Open with Default App",
     "openInEditor": "Open in {{name}}",
-    "openFailed": "Open failed: {{reason}}"
+    "openFailed": "Open failed: {{reason}}",
+    "viewDependencies": "Dependency Graph"
+  },
+  "depGraph": {
+    "title": "Dependencies — {{name}}",
+    "close": "Close",
+    "loading": "Loading dependency graph…",
+    "empty": "No dependency relationships found for this asset.",
+    "hint": "Click a node to jump to that asset. Up to 2 hops; heuristic — some dynamic / code references may be missing."
   },
   "statusBar": {
     "ready": "Ready",
@@ -257,6 +265,7 @@
     "count": "Count",
     "unusedAssets": "Unused Assets",
     "unusedAssetsHint": "Assets not referenced by any scene / prefab / material. Code-loaded assets (Resources.Load, Addressables) aren't counted — confirm before deleting.",
+    "unusedAssetsHintGodot": "Assets not referenced by any scene / resource / script. Dynamic load() paths and uid-only references aren't counted — confirm before deleting.",
     "scanUnused": "Scan",
     "rescanUnused": "Rescan",
     "scanningUnused": "Scanning…",
@@ -376,7 +385,16 @@
     "max": "Max",
     "extensions": "File Extensions",
     "noExtensions": "No files scanned",
-    "gitStatus": "Git Status"
+    "gitStatus": "Git Status",
+    "model": "Model (vertices / faces)",
+    "verts": "V",
+    "faces": "F",
+    "duration": "Duration (sec)",
+    "alpha": "Alpha Channel",
+    "hasAlpha": "Has alpha",
+    "noAlpha": "No alpha",
+    "colorSpace": "Color Space",
+    "any": "Any"
   },
   "search": {
     "recentSearches": "Recent Searches",

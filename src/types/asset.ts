@@ -151,6 +151,28 @@ export interface GodotAutoload {
   singleton: boolean;
 }
 
+// ============ Dependency Graph Types ============
+
+/** Mirrors Rust `DependencyNode` (src-tauri/src/lib.rs). `id` is the
+ *  engine-neutral graph key (Unity GUID / Godot res:// path); `path` is the
+ *  absolute filesystem path used to locate the asset. */
+export interface DependencyNode {
+  id: string;
+  path: string;
+  name: string;
+  file_type: string;
+}
+
+export interface DependencyEdge {
+  from: string;
+  to: string;
+}
+
+export interface DependencyGraph {
+  nodes: DependencyNode[];
+  edges: DependencyEdge[];
+}
+
 // ============ Undo Types ============
 
 export type OperationType = "rename" | "move" | "delete";

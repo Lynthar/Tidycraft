@@ -1004,18 +1004,21 @@ pub struct DependencyGraph {
     pub edges: Vec<DependencyEdge>,
 }
 
+/// One node in a project's dependency graph. `id` is the engine-neutral graph
+/// identifier edges reference — a Unity GUID or a Godot `res://` path — while
+/// `path` is the absolute filesystem path the frontend uses to locate the asset.
 #[derive(Serialize)]
 pub struct DependencyNode {
+    pub id: String,
     pub path: String,
     pub name: String,
-    pub guid: Option<String>,
     pub file_type: String,
 }
 
 #[derive(Serialize)]
 pub struct DependencyEdge {
-    pub from_guid: String,
-    pub to_guid: String,
+    pub from: String,
+    pub to: String,
 }
 
 #[tauri::command]
@@ -1035,9 +1038,9 @@ fn get_unity_dependencies(project_id: String) -> Result<DependencyGraph, String>
             if let Some(ref guid) = asset.unity_guid {
                 guid_to_path.insert(guid.clone(), asset.path.clone());
                 nodes.push(DependencyNode {
+                    id: guid.clone(),
                     path: asset.path.clone(),
                     name: asset.name.clone(),
-                    guid: Some(guid.clone()),
                     file_type: format!("{:?}", asset.asset_type).to_lowercase(),
                 });
             }
@@ -1051,8 +1054,8 @@ fn get_unity_dependencies(project_id: String) -> Result<DependencyGraph, String>
                         for reference in &unity_info.references {
                             if guid_to_path.contains_key(&reference.guid) {
                                 edges.push(DependencyEdge {
-                                    from_guid: from_guid.clone(),
-                                    to_guid: reference.guid.clone(),
+                                    from: from_guid.clone(),
+                                    to: reference.guid.clone(),
                                 });
                             }
                         }
@@ -1070,8 +1073,22 @@ fn find_unused_assets(project_id: String) -> Result<Vec<String>, String> {
     project::with_ref(&project_id, |state| {
         let scan_result = state.require_scan()?;
 
-        if !matches!(scan_result.project_type, Some(scanner::ProjectType::Unity)) {
-            return Err("Not a Unity project".to_string());
+        match scan_result.project_type {
+            // Godot uses res:// path refs, not GUIDs — dispatch to its own
+            // parser and return early.
+            Some(scanner::ProjectType::Godot) => {
+                return Ok(godot::find_unused_godot_assets(
+                    &state.root_path,
+                    &scan_result.assets,
+                ));
+            }
+            // Unity falls through to the GUID-based logic below.
+            Some(scanner::ProjectType::Unity) => {}
+            _ => {
+                return Err(
+                    "Unused-asset detection supports Unity and Godot projects".to_string(),
+                )
+            }
         }
 
         let mut referenced_guids: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -1101,6 +1118,46 @@ fn find_unused_assets(project_id: String) -> Result<Vec<String>, String> {
             .collect();
 
         Ok(unused)
+    })
+}
+
+/// Godot counterpart to `get_unity_dependencies`. Nodes are every non-metadata
+/// asset keyed by its `res://` id; edges come from the `res://` references in
+/// scenes / resources / scripts (target filtered to known nodes). Same parser
+/// and known gaps as the unused-asset check (uid-only / dynamic `load()` missed).
+#[tauri::command]
+fn get_godot_dependencies(project_id: String) -> Result<DependencyGraph, String> {
+    project::with_ref(&project_id, |state| {
+        let scan_result = state.require_scan()?;
+        if !matches!(scan_result.project_type, Some(scanner::ProjectType::Godot)) {
+            return Err("Not a Godot project".to_string());
+        }
+
+        let root = Path::new(&state.root_path);
+        let mut nodes: Vec<DependencyNode> = Vec::new();
+        let mut known: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for asset in &scan_result.assets {
+            if godot::is_godot_metadata(&asset.extension) {
+                continue;
+            }
+            if let Some(id) = godot::asset_to_res_path(&asset.path, root) {
+                known.insert(id.clone());
+                nodes.push(DependencyNode {
+                    id,
+                    path: asset.path.clone(),
+                    name: asset.name.clone(),
+                    file_type: format!("{:?}", asset.asset_type).to_lowercase(),
+                });
+            }
+        }
+
+        let edges: Vec<DependencyEdge> = godot::godot_dependency_edges(root, &scan_result.assets)
+            .into_iter()
+            .filter(|(_from, to)| known.contains(to))
+            .map(|(from, to)| DependencyEdge { from, to })
+            .collect();
+
+        Ok(DependencyGraph { nodes, edges })
     })
 }
 
@@ -2403,6 +2460,7 @@ pub fn run() {
             parse_unity_file,
             get_unity_dependencies,
             find_unused_assets,
+            get_godot_dependencies,
             // Stats / export
             get_project_stats,
             export_to_json,

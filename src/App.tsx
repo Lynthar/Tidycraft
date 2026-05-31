@@ -17,6 +17,7 @@ import { AIAnalyzeModal } from "./components/AIAnalyzeModal";
 import { AIResultPanel } from "./components/AIResultPanel";
 import { LearnSetupModal } from "./components/LearnSetupModal";
 import { LearnReviewPanel } from "./components/LearnReviewPanel";
+import { DependencyGraphModal } from "./components/DependencyGraphModal";
 import { useProjectStore } from "./stores/projectStore";
 import { useUiStore } from "./stores/uiStore";
 import { restoreSession } from "./stores/sessionStore";
@@ -225,6 +226,7 @@ function App() {
       <AIResultPanel />
       <LearnSetupModal />
       <LearnReviewPanel />
+      <DependencyGraphModal />
     </div>
   );
 }

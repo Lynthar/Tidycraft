@@ -127,7 +127,15 @@
     "copyPath": "复制路径",
     "openWithDefaultApp": "用默认应用打开",
     "openInEditor": "用 {{name}} 打开",
-    "openFailed": "打开失败：{{reason}}"
+    "openFailed": "打开失败：{{reason}}",
+    "viewDependencies": "依赖关系图"
+  },
+  "depGraph": {
+    "title": "依赖关系 — {{name}}",
+    "close": "关闭",
+    "loading": "正在加载依赖图…",
+    "empty": "未找到该资源的依赖关系。",
+    "hint": "点击节点跳转到对应资源。最多 2 跳；启发式——部分动态 / 代码引用可能缺失。"
   },
   "statusBar": {
     "ready": "就绪",
@@ -257,6 +265,7 @@
     "count": "数量",
     "unusedAssets": "未使用资源",
     "unusedAssetsHint": "未被任何场景 / prefab / 材质引用的资源。代码动态加载(Resources.Load、Addressables)的不计入——删除前请自行确认。",
+    "unusedAssetsHintGodot": "未被任何场景 / 资源 / 脚本引用的资源。动态 load() 路径和仅用 uid 的引用不计入——删除前请自行确认。",
     "scanUnused": "扫描",
     "rescanUnused": "重新扫描",
     "scanningUnused": "扫描中…",
@@ -376,7 +385,16 @@
     "max": "最大",
     "extensions": "文件扩展名",
     "noExtensions": "暂无扫描文件",
-    "gitStatus": "Git 状态"
+    "gitStatus": "Git 状态",
+    "model": "模型 (顶点 / 面数)",
+    "verts": "顶",
+    "faces": "面",
+    "duration": "时长 (秒)",
+    "alpha": "Alpha 通道",
+    "hasAlpha": "有 Alpha",
+    "noAlpha": "无 Alpha",
+    "colorSpace": "颜色空间",
+    "any": "任意"
   },
   "search": {
     "recentSearches": "最近搜索",

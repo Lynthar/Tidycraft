@@ -71,6 +71,16 @@ export interface AdvancedFilters {
   maxWidth: number | null;
   minHeight: number | null;
   maxHeight: number | null;
+  minVertices: number | null;
+  maxVertices: number | null;
+  minFaces: number | null;
+  maxFaces: number | null;
+  minDuration: number | null;
+  maxDuration: number | null;
+  /** Tri-state alpha filter: null = any, true = has alpha, false = no alpha. */
+  hasAlpha: boolean | null;
+  /** Texture color space, e.g. "sRGB" / "Linear"; null = any. */
+  colorSpace: string | null;
   extensions: string[];
   gitStatusFilter: GitFileStatus[];
 }
@@ -124,6 +134,14 @@ const createDefaultProjectData = (id: string, path: string): ProjectData => ({
     maxWidth: null,
     minHeight: null,
     maxHeight: null,
+    minVertices: null,
+    maxVertices: null,
+    minFaces: null,
+    maxFaces: null,
+    minDuration: null,
+    maxDuration: null,
+    hasAlpha: null,
+    colorSpace: null,
     extensions: [],
     gitStatusFilter: [],
   },
@@ -284,6 +302,14 @@ const syncFromActiveProject = (project: ProjectData | undefined): Partial<Projec
         maxWidth: null,
         minHeight: null,
         maxHeight: null,
+        minVertices: null,
+        maxVertices: null,
+        minFaces: null,
+        maxFaces: null,
+        minDuration: null,
+        maxDuration: null,
+        hasAlpha: null,
+        colorSpace: null,
         extensions: [],
         gitStatusFilter: [],
       },
@@ -405,6 +431,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     maxWidth: null,
     minHeight: null,
     maxHeight: null,
+    minVertices: null,
+    maxVertices: null,
+    minFaces: null,
+    maxFaces: null,
+    minDuration: null,
+    maxDuration: null,
+    hasAlpha: null,
+    colorSpace: null,
     extensions: [],
     gitStatusFilter: [],
   },
@@ -869,6 +903,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         maxWidth: null,
         minHeight: null,
         maxHeight: null,
+        minVertices: null,
+        maxVertices: null,
+        minFaces: null,
+        maxFaces: null,
+        minDuration: null,
+        maxDuration: null,
+        hasAlpha: null,
+        colorSpace: null,
         extensions: [],
         gitStatusFilter: [],
       },
@@ -1052,6 +1094,30 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
     if (advancedFilters.maxHeight !== null) {
       assets = assets.filter((asset) => (asset.metadata?.height || 0) <= advancedFilters.maxHeight!);
+    }
+    if (advancedFilters.minVertices !== null) {
+      assets = assets.filter((asset) => (asset.metadata?.vertex_count || 0) >= advancedFilters.minVertices!);
+    }
+    if (advancedFilters.maxVertices !== null) {
+      assets = assets.filter((asset) => (asset.metadata?.vertex_count || 0) <= advancedFilters.maxVertices!);
+    }
+    if (advancedFilters.minFaces !== null) {
+      assets = assets.filter((asset) => (asset.metadata?.face_count || 0) >= advancedFilters.minFaces!);
+    }
+    if (advancedFilters.maxFaces !== null) {
+      assets = assets.filter((asset) => (asset.metadata?.face_count || 0) <= advancedFilters.maxFaces!);
+    }
+    if (advancedFilters.minDuration !== null) {
+      assets = assets.filter((asset) => (asset.metadata?.duration_secs || 0) >= advancedFilters.minDuration!);
+    }
+    if (advancedFilters.maxDuration !== null) {
+      assets = assets.filter((asset) => (asset.metadata?.duration_secs || 0) <= advancedFilters.maxDuration!);
+    }
+    if (advancedFilters.hasAlpha !== null) {
+      assets = assets.filter((asset) => asset.metadata?.has_alpha === advancedFilters.hasAlpha);
+    }
+    if (advancedFilters.colorSpace !== null) {
+      assets = assets.filter((asset) => asset.metadata?.color_space === advancedFilters.colorSpace);
     }
     if (advancedFilters.extensions.length > 0) {
       assets = assets.filter((asset) =>
