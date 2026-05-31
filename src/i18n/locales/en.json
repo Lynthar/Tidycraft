@@ -254,7 +254,13 @@
     "exportJson": "Export JSON",
     "exportCsv": "Export CSV",
     "exportHtml": "Export HTML Report",
-    "count": "Count"
+    "count": "Count",
+    "unusedAssets": "Unused Assets",
+    "unusedAssetsHint": "Assets not referenced by any scene / prefab / material. Code-loaded assets (Resources.Load, Addressables) aren't counted — confirm before deleting.",
+    "scanUnused": "Scan",
+    "rescanUnused": "Rescan",
+    "scanningUnused": "Scanning…",
+    "noUnusedAssets": "No unused assets found."
   },
   "theme": {
     "switchToLight": "Switch to light mode",

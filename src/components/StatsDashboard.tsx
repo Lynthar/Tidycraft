@@ -14,8 +14,9 @@ import {
   ResponsiveContainer,
   Legend,
 } from "recharts";
-import { FileDown, Files, HardDrive, AlertTriangle, CheckCircle } from "lucide-react";
+import { FileDown, Files, HardDrive, AlertTriangle, CheckCircle, Unlink } from "lucide-react";
 import { formatFileSize } from "../lib/utils";
+import { basename } from "../lib/pathUtils";
 
 interface ProjectStats {
   total_assets: number;
@@ -59,11 +60,42 @@ interface StatsDashboardProps {
 export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, onExportCsv, onExportHtml }: StatsDashboardProps) {
   const { t } = useTranslation();
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
+  const scanResult = useProjectStore((s) => s.scanResult);
+  const locateAsset = useProjectStore((s) => s.locateAsset);
   const [stats, setStats] = useState<ProjectStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Unused-assets panel: lazy, button-triggered. `find_unused_assets` parses
+  // every prefab/scene/material for GUID refs, so it's too heavy to run on
+  // every Stats open — the user scans on demand. Unity-only for now (the
+  // backend rejects non-Unity projects); Godot support is a later step.
+  const projectType = scanResult?.project_type;
+  const [unused, setUnused] = useState<string[] | null>(null);
+  const [unusedLoading, setUnusedLoading] = useState(false);
+  const [unusedError, setUnusedError] = useState<string | null>(null);
+
+  const scanUnused = async () => {
+    if (!activeProjectId) return;
+    setUnusedLoading(true);
+    setUnusedError(null);
+    try {
+      const result = await invoke<string[]>("find_unused_assets", {
+        projectId: activeProjectId,
+      });
+      setUnused(result);
+    } catch (err) {
+      setUnusedError(String(err));
+    } finally {
+      setUnusedLoading(false);
+    }
+  };
+
   useEffect(() => {
+    // Reset the on-demand unused-assets panel when the project changes so we
+    // never show a previous project's result.
+    setUnused(null);
+    setUnusedError(null);
     if (!activeProjectId) {
       setStats(null);
       setLoading(false);
@@ -272,6 +304,59 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
           ))}
         </div>
       </div>
+
+      {/* Unused Assets (Unity-only; on-demand scan) */}
+      {projectType === "unity" && (
+        <div className="bg-card-bg border border-border rounded-lg p-4">
+          <div className="flex items-center justify-between mb-1">
+            <h3 className="text-sm font-medium flex items-center gap-2">
+              <Unlink size={14} />
+              {t("stats.unusedAssets")}
+              {unused !== null && (
+                <span className="text-text-secondary">· {unused.length}</span>
+              )}
+            </h3>
+            <button
+              onClick={scanUnused}
+              disabled={unusedLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-primary/20 text-primary rounded hover:bg-primary/30 transition-colors disabled:opacity-50"
+            >
+              {unusedLoading
+                ? t("stats.scanningUnused")
+                : unused === null
+                ? t("stats.scanUnused")
+                : t("stats.rescanUnused")}
+            </button>
+          </div>
+          <p className="text-[11px] text-text-secondary mb-3">
+            {t("stats.unusedAssetsHint")}
+          </p>
+          {unusedError ? (
+            <p className="text-xs text-warning">{unusedError}</p>
+          ) : unused === null ? null : unused.length === 0 ? (
+            <p className="text-xs text-text-secondary">{t("stats.noUnusedAssets")}</p>
+          ) : (
+            <div className="space-y-1 max-h-64 overflow-auto">
+              {unused.map((path) => (
+                <div
+                  key={path}
+                  className="flex items-center justify-between gap-2 text-sm"
+                >
+                  <span className="truncate" title={path}>
+                    {basename(path)}
+                  </span>
+                  <button
+                    onClick={() => locateAsset(path)}
+                    className="shrink-0 text-xs text-primary hover:underline"
+                  >
+                    {t("issues.locate")}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Export Buttons */}
       <div className="flex gap-2">

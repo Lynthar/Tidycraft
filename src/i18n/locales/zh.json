@@ -254,7 +254,13 @@
     "exportJson": "导出 JSON",
     "exportCsv": "导出 CSV",
     "exportHtml": "导出 HTML 报告",
-    "count": "数量"
+    "count": "数量",
+    "unusedAssets": "未使用资源",
+    "unusedAssetsHint": "未被任何场景 / prefab / 材质引用的资源。代码动态加载(Resources.Load、Addressables)的不计入——删除前请自行确认。",
+    "scanUnused": "扫描",
+    "rescanUnused": "重新扫描",
+    "scanningUnused": "扫描中…",
+    "noUnusedAssets": "未发现未使用资源。"
   },
   "theme": {
     "switchToLight": "切换到浅色模式",
