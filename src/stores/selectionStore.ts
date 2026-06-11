@@ -44,3 +44,19 @@ useProjectStore.subscribe((state, prev) => {
     useSelectionStore.getState().clearSelection();
   }
 });
+
+// Prune selected paths that vanished from the active project's scan — deleted
+// through the app or externally (the watcher rebuilds `scanResult` on FS
+// changes). Without this the batch toolbar keeps counting files that no longer
+// exist and batch ops fail on them one by one. We prune against the FULL scan
+// (not the filtered view) so a search / type filter never drops a still-valid
+// selection. Runs after the activeProjectId-clear above on project switch, by
+// which point the selection is already empty, so the two never conflict.
+useProjectStore.subscribe((state, prev) => {
+  if (state.scanResult === prev.scanResult) return;
+  const sel = useSelectionStore.getState().selectedPaths;
+  if (sel.size === 0) return;
+  const present = new Set(state.scanResult?.assets.map((a) => a.path) ?? []);
+  const stale = Array.from(sel).filter((p) => !present.has(p));
+  if (stale.length > 0) useSelectionStore.getState().removePaths(stale);
+});

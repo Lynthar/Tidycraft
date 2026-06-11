@@ -147,7 +147,12 @@ function App() {
         return (
           <StatsDashboard
             issueCount={analysisResult?.issue_count || 0}
-            passCount={scanResult ? scanResult.total_count - (analysisResult?.issue_count || 0) : 0}
+            passCount={
+              scanResult
+                ? scanResult.total_count -
+                  new Set((analysisResult?.issues ?? []).map((i) => i.asset_path)).size
+                : 0
+            }
             onExportJson={handleExportJson}
             onExportCsv={handleExportCsv}
             onExportHtml={handleExportHtml}

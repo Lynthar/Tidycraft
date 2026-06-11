@@ -1396,6 +1396,19 @@ fn export_to_html(project_id: String) -> Result<String, String> {
             }
         }
 
+        // "Passed" = assets with zero issues. `issue_count` counts ISSUES, not
+        // assets, and one asset can raise several — so `total - issue_count`
+        // under-counts and saturates to 0 on issue-heavy projects. Count the
+        // DISTINCT asset paths that have an issue instead.
+        let pass_count = {
+            let with_issues: std::collections::HashSet<&str> = analysis_result
+                .issues
+                .iter()
+                .map(|i| i.asset_path.as_str())
+                .collect();
+            scan_result.total_count.saturating_sub(with_issues.len())
+        };
+
         let html = format!(
             r#"<!DOCTYPE html>
 <html lang="en">
@@ -1514,7 +1527,7 @@ fn export_to_html(project_id: String) -> Result<String, String> {
             total_assets = scan_result.total_count,
             total_size = format_size(scan_result.total_size),
             issue_count = analysis_result.issue_count,
-            pass_count = scan_result.total_count.saturating_sub(analysis_result.issue_count),
+            pass_count = pass_count,
             type_bars = {
                 let max_count = type_counts.values().max().copied().unwrap_or(1) as f64;
                 type_counts
@@ -1732,7 +1745,11 @@ fn execute_batch_rename(
                     eprintln!("[batch_rename] .meta sidecar not carried for {}: {}", path, e);
                 }
                 success_count += 1;
-                paths_to_record.push((path.clone(), new_path.to_string_lossy().to_string()));
+                // Normalize the new path to forward slashes (scanner::path_to_string)
+                // so the undo record and the tag binding below key off the same
+                // string the next scan will produce — a raw to_string_lossy() keeps
+                // Windows backslashes and the tag key would never match.
+                paths_to_record.push((path.clone(), scanner::path_to_string(&new_path)));
             }
             Err(e) => {
                 errors.push(format!("Failed to rename {}: {}", name, e));
@@ -1741,29 +1758,38 @@ fn execute_batch_rename(
         }
     }
 
-    if success_count > 0 {
+    if success_count > 0 && !paths_to_record.is_empty() {
+        let ts = unix_timestamp();
         let file_ops: Vec<undo::FileOperation> = paths_to_record
-            .into_iter()
+            .iter()
             .map(|(original, new_path)| undo::FileOperation {
                 operation_type: undo::OperationType::Rename,
-                original_path: original,
-                new_path: Some(new_path),
-                timestamp: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0),
+                original_path: original.clone(),
+                new_path: Some(new_path.clone()),
+                timestamp: ts,
             })
             .collect();
 
-        if !file_ops.is_empty() {
-            let _ = project::with_mut(&project_id, |state| {
-                state.undo_manager.record_batch(
-                    format!("Batch rename: {} files", file_ops.len()),
-                    file_ops,
-                );
-                Ok(())
-            });
-        }
+        let _ = project::with_mut(&project_id, |state| {
+            state.undo_manager.record_batch(
+                format!("Batch rename: {} files", file_ops.len()),
+                file_ops,
+            );
+
+            // Tags follow the file across renames — same as move_assets /
+            // rename_file. Without this, the watcher's later orphan cleanup
+            // reaps the old-path bindings and the tags are lost. Paths are
+            // already normalized (scanner::path_to_string) so the new key
+            // matches what the next scan produces for the renamed file.
+            if state.tags_data.is_some() {
+                let tags = state.ensure_tags();
+                for (original, new_path) in &paths_to_record {
+                    tags.rename_path(original, new_path);
+                }
+                let _ = state.save_tags();
+            }
+            Ok(())
+        });
     }
 
     BatchRenameResult {
@@ -2291,7 +2317,10 @@ fn rename_file(project_id: String, old_path: String, new_name: String) -> Result
         .unwrap_or("")
         .to_string();
 
-    let new_path_str = new_path.to_string_lossy().to_string();
+    // Normalize to forward slashes so the returned path, the undo record, and
+    // the tag binding all match what the scanner produces — `to_string_lossy`
+    // would keep Windows backslashes (e.g. `C:/dir\new.png`).
+    let new_path_str = scanner::path_to_string(&new_path);
 
     std::fs::rename(old_path_ref, &new_path).map_err(|e| e.to_string())?;
 
@@ -2323,8 +2352,8 @@ fn rename_file(project_id: String, old_path: String, new_name: String) -> Result
         // tag bookkeeping must never block a successful rename, so we
         // ignore save errors (the file is already renamed on disk).
         if state.tags_data.is_some() {
-            let new_path_normalized = scanner::path_to_string(&new_path);
-            state.ensure_tags().rename_path(&old_path, &new_path_normalized);
+            // new_path_str is already normalized (scanner::path_to_string above).
+            state.ensure_tags().rename_path(&old_path, &new_path_str);
             let _ = state.save_tags();
         }
         Ok(())
@@ -2335,6 +2364,26 @@ fn rename_file(project_id: String, old_path: String, new_name: String) -> Result
 
 // ============ Undo Commands ============
 
+/// After an undo renames files back to their original paths, carry their tag
+/// bindings the same direction (new_path → original_path), mirroring the
+/// forward-direction carry in `move_assets` / `rename_file`. Only carries a
+/// binding when the file actually arrived at `original` — a file whose undo
+/// failed (e.g. its target already existed) stays at `new_path`, so its binding
+/// must stay there too. No-op when tags were never loaded this session (the
+/// same lazy-load guard the forward ops and the watcher cleanup use).
+fn carry_tags_after_undo(state: &mut project::ProjectState, pairs: &[(String, String)]) {
+    if pairs.is_empty() || state.tags_data.is_none() {
+        return;
+    }
+    let tags = state.ensure_tags();
+    for (original, new_path) in pairs {
+        if Path::new(original).exists() {
+            tags.rename_path(new_path, original);
+        }
+    }
+    let _ = state.save_tags();
+}
+
 #[tauri::command]
 fn get_undo_history(project_id: String) -> Vec<undo::HistoryEntry> {
     project::with_ref(&project_id, |state| Ok(state.undo_manager.get_history())).unwrap_or_default()
@@ -2343,20 +2392,29 @@ fn get_undo_history(project_id: String) -> Vec<undo::HistoryEntry> {
 #[tauri::command]
 fn undo_last_operation(project_id: String) -> Result<undo::UndoResult, String> {
     project::with_mut(&project_id, |state| {
-        state
+        // Snapshot the path pairs of the batch about to be reverted BEFORE the
+        // undo runs, so we can carry tag bindings back to the original paths
+        // afterwards (undo.rs has no access to TagsData).
+        let pairs = state.undo_manager.peek_last_undoable_pairs();
+        let result = state
             .undo_manager
             .undo_last()
-            .ok_or_else(|| "No operation to undo".to_string())
+            .ok_or_else(|| "No operation to undo".to_string())?;
+        carry_tags_after_undo(state, &pairs);
+        Ok(result)
     })
 }
 
 #[tauri::command]
 fn undo_operation_by_id(project_id: String, id: String) -> Result<undo::UndoResult, String> {
     project::with_mut(&project_id, |state| {
-        state
+        let pairs = state.undo_manager.peek_pairs_by_id(&id);
+        let result = state
             .undo_manager
             .undo_by_id(&id)
-            .ok_or_else(|| format!("Operation '{}' not found or already undone", id))
+            .ok_or_else(|| format!("Operation '{}' not found or already undone", id))?;
+        carry_tags_after_undo(state, &pairs);
+        Ok(result)
     })
 }
 

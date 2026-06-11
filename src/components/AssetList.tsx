@@ -6,7 +6,7 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useProjectStore } from "../stores/projectStore";
 import { useTagsStore } from "../stores/tagsStore";
 import { useColumnStore } from "../stores/columnStore";
-import { useUiStore } from "../stores/uiStore";
+import { useUiStore, isBlockingOverlayOpen } from "../stores/uiStore";
 import { useSelectionStore } from "../stores/selectionStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { BatchRenameDialog } from "./BatchRenameDialog";
@@ -180,10 +180,14 @@ export function AssetList() {
     clearSelection();
     setShowBatchRename(false);
     await refreshUndoState();
+    // Tags followed the renamed files on the backend; re-sync the store so the
+    // moved bindings show immediately rather than after the watcher's ~500ms
+    // scanResult refresh re-triggers loadTags.
+    await loadTags();
     if (projectPath) {
       openProject(projectPath);
     }
-  }, [projectPath, openProject, refreshUndoState, clearSelection]);
+  }, [projectPath, openProject, refreshUndoState, clearSelection, loadTags]);
 
   // Context menu handlers
   const handleContextMenu = useCallback(
@@ -241,10 +245,12 @@ export function AssetList() {
   const handleSingleRenameComplete = useCallback(async () => {
     setRenameAsset(null);
     await refreshUndoState();
+    // Tag binding followed the file on the backend — re-sync (see batch handler).
+    await loadTags();
     if (projectPath) {
       openProject(projectPath);
     }
-  }, [projectPath, openProject, refreshUndoState]);
+  }, [projectPath, openProject, refreshUndoState, loadTags]);
 
   // Rule shared by delete / move / copy / duplicate: if the right-clicked asset
   // is part of the current multi-selection, operate on the whole selection.
@@ -307,8 +313,19 @@ export function AssetList() {
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA"))
         return;
 
+      // Don't fire destructive list shortcuts (Del / Ctrl+D) while any modal is
+      // open — an app-level overlay (Settings, Tag Manager, AI, …) or one of
+      // this list's own file-op dialogs (rename / batch-rename / delete / move).
+      if (
+        isBlockingOverlayOpen() ||
+        showBatchRename ||
+        renameAsset ||
+        moveCopyDialog ||
+        deleteDialogPaths
+      )
+        return;
+
       if (e.key === "Delete") {
-        if (deleteDialogPaths) return; // already open
         if (selectedPaths.size === 0) return;
         e.preventDefault();
         setDeleteDialogPaths(Array.from(selectedPaths));
@@ -331,7 +348,7 @@ export function AssetList() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selectedPaths, deleteDialogPaths]);
+  }, [selectedPaths, deleteDialogPaths, showBatchRename, renameAsset, moveCopyDialog]);
 
   // After delete finishes: clear selection for any paths that were actually
   // sent to trash. The filesystem watcher will remove them from scanResult
@@ -594,6 +611,9 @@ export function AssetList() {
           // takes care of removing / inserting them in scanResult.assets.
           if (result.successes.length === 0) return;
           removePaths(result.successes.map((s) => s.original_path));
+          // Moved files carried their tag bindings on the backend — re-sync.
+          // (Copy doesn't carry tags; loadTags is a harmless no-change refetch.)
+          loadTags();
         }}
       />
     </>

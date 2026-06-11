@@ -57,10 +57,14 @@ export const useTagsStore = create<TagsState>((set, get) => ({
         invoke<Tag[]>("get_all_tags", { projectId }),
         invoke<AssetTagsMap>("get_all_asset_tags", { projectId }),
       ]);
+      // Drop the result if the user switched projects mid-flight — otherwise a
+      // slow response for project A lands after project B's load and overwrites
+      // B's tags (same snapshot-and-check pattern as StatsDashboard).
+      if (activeProjectId() !== projectId) return;
       set({ tags, assetTags, isLoading: false });
     } catch (err) {
       console.error("Failed to load tags:", err);
-      set({ isLoading: false });
+      if (activeProjectId() === projectId) set({ isLoading: false });
     }
   },
 

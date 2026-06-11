@@ -257,6 +257,25 @@ impl UndoManager {
         self.history.iter().any(|op| !op.undone)
     }
 
+    /// 返回 `undo_last` 接下来会撤销的那一批的 `(原路径, 新路径)` 列表(最近一个
+    /// 未撤销批次),不做任何修改。命令层用它在文件被改回原名后把标签绑定一并迁
+    /// 回——`undo.rs` 本身访问不到项目的 `TagsData`。无可撤销时返回空。
+    pub fn peek_last_undoable_pairs(&self) -> Vec<(String, String)> {
+        match self.history.iter().rposition(|op| !op.undone) {
+            Some(idx) => batch_pairs(&self.history[idx]),
+            None => Vec::new(),
+        }
+    }
+
+    /// 同 [`Self::peek_last_undoable_pairs`],但针对 `undo_by_id` 会命中的批次
+    /// (相同的 `id == id && !undone` 选择逻辑)。
+    pub fn peek_pairs_by_id(&self, id: &str) -> Vec<(String, String)> {
+        match self.history.iter().find(|op| op.id == id && !op.undone) {
+            Some(batch) => batch_pairs(batch),
+            None => Vec::new(),
+        }
+    }
+
     /// 清空历史记录
     pub fn clear_history(&mut self) {
         self.history.clear();
@@ -289,6 +308,20 @@ impl Default for UndoManager {
     fn default() -> Self {
         Self::new(50)
     }
+}
+
+/// 从一个批次中提取 `(原路径, 新路径)` 对,跳过没有记录 `new_path` 的操作
+/// (今天没有——Rename/Move 总会写——但字段是 `Option`,防御性处理)。
+fn batch_pairs(batch: &BatchOperation) -> Vec<(String, String)> {
+    batch
+        .operations
+        .iter()
+        .filter_map(|op| {
+            op.new_path
+                .as_ref()
+                .map(|np| (op.original_path.clone(), np.clone()))
+        })
+        .collect()
 }
 
 /// 执行批量撤销
@@ -415,11 +448,12 @@ fn execute_single_undo(operation: &FileOperation) -> Result<(), String> {
     }
 }
 
-/// 生成唯一的操作 ID
+/// 生成唯一的操作 ID。用 uuid v4 —— 旧实现是 `秒级时间戳 ^ 栈地址`,而同一
+/// 调用点的栈地址通常不变,于是同一秒内记录的两批操作会生成相同 id,
+/// `undo_by_id` / `peek_pairs_by_id` 用 `position`/`find` 命中第一个 → 撤销
+/// 到错误的批次。
 fn generate_operation_id() -> String {
-    let timestamp = current_timestamp();
-    let random: u32 = rand_simple();
-    format!("op_{:x}_{:08x}", timestamp, random)
+    format!("op_{}", uuid::Uuid::new_v4().simple())
 }
 
 /// 获取当前时间戳
@@ -428,13 +462,6 @@ fn current_timestamp() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
-}
-
-/// 简单的伪随机数生成（不依赖外部库）
-fn rand_simple() -> u32 {
-    let t = current_timestamp();
-    let ptr = &t as *const u64 as usize;
-    ((t ^ (ptr as u64)) & 0xFFFFFFFF) as u32
 }
 
 #[cfg(test)]
@@ -715,5 +742,60 @@ mod tests {
 
         let parsed: OperationType = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, OperationType::Rename);
+    }
+
+    #[test]
+    fn peek_last_undoable_pairs_is_read_only_and_empties_after_undone() {
+        // The command layer peeks these pairs to carry tag bindings back after
+        // an undo. Peeking must not mutate, and a fully-undone history yields
+        // nothing (so no stale tag carry happens).
+        let mut manager = UndoManager::new(10);
+        manager.record_batch(
+            "Rename".to_string(),
+            vec![FileOperation {
+                operation_type: OperationType::Rename,
+                original_path: "/a.txt".to_string(),
+                new_path: Some("/b.txt".to_string()),
+                timestamp: current_timestamp(),
+            }],
+        );
+
+        let pairs = manager.peek_last_undoable_pairs();
+        assert_eq!(pairs, vec![("/a.txt".to_string(), "/b.txt".to_string())]);
+        // Read-only: still undoable after peeking.
+        assert!(manager.can_undo());
+
+        manager.history[0].undone = true;
+        assert!(manager.peek_last_undoable_pairs().is_empty());
+    }
+
+    #[test]
+    fn peek_pairs_by_id_matches_the_targeted_batch() {
+        let mut manager = UndoManager::new(10);
+        let id = manager.record_batch(
+            "Move".to_string(),
+            vec![FileOperation {
+                operation_type: OperationType::Move,
+                original_path: "/old/x.png".to_string(),
+                new_path: Some("/new/x.png".to_string()),
+                timestamp: current_timestamp(),
+            }],
+        );
+        assert_eq!(
+            manager.peek_pairs_by_id(&id),
+            vec![("/old/x.png".to_string(), "/new/x.png".to_string())]
+        );
+        assert!(manager.peek_pairs_by_id("nonexistent").is_empty());
+    }
+
+    #[test]
+    fn generated_ids_do_not_collide_within_the_same_second() {
+        // The old id was `timestamp_secs ^ stack_addr`, so two batches recorded
+        // in the same second produced the same id and undo_by_id targeted the
+        // wrong one. uuid v4 ids must differ even back-to-back.
+        let a = generate_operation_id();
+        let b = generate_operation_id();
+        assert_ne!(a, b);
+        assert!(a.starts_with("op_") && b.starts_with("op_"));
     }
 }

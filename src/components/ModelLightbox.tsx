@@ -67,6 +67,12 @@ export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose 
     }
     if (rendererRef.current) {
       rendererRef.current.dispose();
+      // dispose() frees GPU buffers but does NOT release the WebGL context;
+      // browsers cap active contexts (~16/page), so without this, repeatedly
+      // opening/closing the lightbox exhausts them and the browser force-loses
+      // the oldest ("Too many active WebGL contexts") → black preview.
+      // Mirrors ModelViewer3D's cleanup.
+      rendererRef.current.forceContextLoss();
       const domElement = rendererRef.current.domElement;
       if (domElement && domElement.parentNode) {
         domElement.parentNode.removeChild(domElement);

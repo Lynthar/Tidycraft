@@ -210,6 +210,10 @@ interface ProjectState {
 
   // Active project actions
   cancelScan: () => Promise<void>;
+  /// Cache-clearing force rescan, shared by the Header rescan button and the
+  /// Ctrl+R shortcut (the button's tooltip advertises Ctrl+R, so the two must
+  /// behave identically). No-op without an active project or while scanning.
+  rescan: () => Promise<void>;
   clearError: () => void;
   runAnalysis: () => Promise<void>;
   setViewMode: (mode: ViewMode) => void;
@@ -744,6 +748,21 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     } catch (err) {
       console.error("Failed to cancel scan:", err);
     }
+  },
+
+  rescan: async () => {
+    const { projectPath, isScanning } = get();
+    if (!projectPath || isScanning) return;
+    // Drop the on-disk scan cache so even files whose mtime didn't change get
+    // reclassified (e.g. after a format gained a new AssetType), then re-open
+    // with force. Best-effort cache clear — a failure still proceeds to the
+    // force rescan so the button / shortcut is never a dead end.
+    try {
+      await invoke("clear_scan_cache", { path: projectPath });
+    } catch (err) {
+      console.warn("Failed to clear scan cache:", err);
+    }
+    await get().openProject(projectPath, { force: true });
   },
 
   clearError: () => {
