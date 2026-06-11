@@ -34,24 +34,60 @@ pub struct TagsData {
 const TAGS_FILE: &str = ".tidycraft-tags.json";
 
 impl TagsData {
-    /// Load tags from the project directory
+    /// Load tags from the project directory.
+    ///
+    /// A missing file is the normal "no tags yet" state → empty data. But a
+    /// file that EXISTS yet fails to parse (a truncated write from before
+    /// atomic saves, or a bad hand-edit) must NOT silently degrade to empty:
+    /// the very next `save` would then overwrite the (possibly recoverable)
+    /// file with empty data and the user's tags would be gone for good. So we
+    /// back the corrupt file up first, then start fresh.
     pub fn load(project_path: &Path) -> Self {
         let tags_file = project_path.join(TAGS_FILE);
         if tags_file.exists() {
-            if let Ok(content) = fs::read_to_string(&tags_file) {
-                if let Ok(data) = serde_json::from_str(&content) {
-                    return data;
-                }
+            match fs::read_to_string(&tags_file) {
+                Ok(content) => match serde_json::from_str(&content) {
+                    Ok(data) => return data,
+                    Err(e) => {
+                        // Preserve the corrupt file so the user can recover.
+                        // Keep the first backup (most likely the complete one)
+                        // if a `.corrupt` already exists from an earlier run.
+                        let backup = project_path.join(format!("{}.corrupt", TAGS_FILE));
+                        if !backup.exists() {
+                            let _ = fs::rename(&tags_file, &backup);
+                        }
+                        eprintln!(
+                            "[tags] {} failed to parse ({e}); backed up to {}",
+                            TAGS_FILE,
+                            backup.display()
+                        );
+                    }
+                },
+                Err(e) => eprintln!("[tags] failed to read {}: {e}", TAGS_FILE),
             }
         }
         Self::default()
     }
 
-    /// Save tags to the project directory
+    /// Save tags to the project directory.
+    ///
+    /// Atomic write: serialize to a sibling temp file, then rename it over the
+    /// target. `std::fs::rename` uses `MoveFileEx(REPLACE_EXISTING)` on Windows
+    /// and `rename(2)` on Unix, so a crash mid-write can never leave the tags
+    /// file truncated — a reader sees either the old complete file or the new
+    /// one. (The previous direct `fs::write` could truncate, and combined with
+    /// `load`'s empty-fallback that meant losing every tag.) The `.tmp` sibling
+    /// is a dotfile, so the scanner and watcher both skip it.
     pub fn save(&self, project_path: &Path) -> Result<(), String> {
         let tags_file = project_path.join(TAGS_FILE);
         let content = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        fs::write(&tags_file, content).map_err(|e| e.to_string())
+        let tmp_file = project_path.join(format!("{}.tmp", TAGS_FILE));
+        fs::write(&tmp_file, content).map_err(|e| e.to_string())?;
+        fs::rename(&tmp_file, &tags_file).map_err(|e| {
+            // Don't leave the temp file behind on a failed rename.
+            let _ = fs::remove_file(&tmp_file);
+            e.to_string()
+        })
     }
 
     /// Create a new tag
@@ -267,5 +303,35 @@ mod tests {
             data.get_assets_with_tag(&hero.id),
             vec!["a/first.png", "m/mid.png", "z/last.png"]
         );
+    }
+
+    #[test]
+    fn save_then_load_roundtrips_and_leaves_no_temp_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut data = TagsData::default();
+        let tag = data.create_tag("Hero".to_string(), "#ff0000".to_string());
+        data.add_tag_to_asset("a/x.png", &tag.id);
+        data.save(dir.path()).unwrap();
+
+        let loaded = TagsData::load(dir.path());
+        assert_eq!(loaded.tags.len(), 1);
+        assert_eq!(loaded.get_asset_tags("a/x.png").len(), 1);
+        // The atomic-write temp sibling must not survive a successful save.
+        assert!(!dir.path().join(format!("{}.tmp", TAGS_FILE)).exists());
+    }
+
+    #[test]
+    fn load_backs_up_corrupt_file_instead_of_silently_emptying() {
+        let dir = tempfile::tempdir().unwrap();
+        // A file that exists but can't parse (e.g. a truncated pre-atomic write).
+        std::fs::write(dir.path().join(TAGS_FILE), "{ not valid json").unwrap();
+
+        let loaded = TagsData::load(dir.path());
+        // Degrades to empty so the app keeps running...
+        assert!(loaded.tags.is_empty());
+        // ...but the unparseable data is preserved for recovery, and the live
+        // file is renamed away so the next save can't clobber the backup.
+        assert!(dir.path().join(format!("{}.corrupt", TAGS_FILE)).exists());
+        assert!(!dir.path().join(TAGS_FILE).exists());
     }
 }

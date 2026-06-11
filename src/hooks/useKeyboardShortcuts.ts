@@ -1,6 +1,6 @@
 import { useEffect, useCallback } from "react";
 import { useProjectStore } from "../stores/projectStore";
-import { useUiStore } from "../stores/uiStore";
+import { useUiStore, isBlockingOverlayOpen } from "../stores/uiStore";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getPlatform } from "../lib/platform";
 
@@ -14,6 +14,7 @@ export function useKeyboardShortcuts({ onOpenFolder, onFocusSearch }: KeyboardSh
     projectPath,
     isScanning,
     openProject,
+    rescan,
     cancelScan,
     runAnalysis,
     setViewMode,
@@ -53,6 +54,12 @@ export function useKeyboardShortcuts({ onOpenFolder, onFocusSearch }: KeyboardSh
       // out so CommandPalette.tsx can drive navigation cleanly.
       if (useUiStore.getState().cmdkOpen) return;
 
+      // Likewise, don't let global shortcuts (Ctrl+1/2/3, rescan, focus search,
+      // Escape, …) fire underneath any other blocking modal — Settings, Tag
+      // Manager, the AI / learning modals, or the dependency graph. They have
+      // their own controls and the user isn't navigating the list behind them.
+      if (isBlockingOverlayOpen()) return;
+
       // Ignore if user is typing in an input
       const target = event.target as HTMLElement;
       if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") {
@@ -84,11 +91,14 @@ export function useKeyboardShortcuts({ onOpenFolder, onFocusSearch }: KeyboardSh
         return;
       }
 
-      // Ctrl/Cmd + R: Rescan (if project is open)
+      // Ctrl/Cmd + R: Rescan (if project is open). Routes through the shared
+      // `rescan` store action so it's identical to the Header button. The old
+      // `openProject(projectPath)` (no force) was a no-op for the already-open
+      // active project, so Ctrl+R silently did nothing.
       if (modKey && key.toLowerCase() === "r" && !shiftKey) {
         if (projectPath && !isScanning) {
           event.preventDefault();
-          openProject(projectPath);
+          rescan();
         }
         return;
       }
@@ -142,6 +152,7 @@ export function useKeyboardShortcuts({ onOpenFolder, onFocusSearch }: KeyboardSh
       onOpenFolder,
       onFocusSearch,
       openProject,
+      rescan,
       cancelScan,
       runAnalysis,
       setViewMode,

@@ -183,3 +183,26 @@ export const useUiStore = create<UiState>((set, get) => ({
       depGraphAssetPath: open ? assetPath ?? null : null,
     }),
 }));
+
+/// True when a blocking, backdrop-covered overlay is open (command palette,
+/// settings, tag manager, the AI analyze/result modals, the learning modals,
+/// or the dependency graph). Global window-level key handlers (Del, Ctrl+1/2/3,
+/// rescan, …) consult this so they don't fire underneath a modal.
+///
+/// Deliberately EXCLUDES `aiPanelOpen` — the AI Tag panel is a floating side
+/// panel with no backdrop, so the asset list behind it stays interactive.
+/// AssetList's own file-op dialogs (rename / batch / delete / move) are
+/// component-local state and are checked by AssetList separately.
+export function isBlockingOverlayOpen(): boolean {
+  const s = useUiStore.getState();
+  return (
+    s.cmdkOpen ||
+    s.settingsOpen ||
+    s.tagManagerOpen ||
+    s.aiAnalyzeOpen ||
+    s.aiResultOpen ||
+    s.learnSetupOpen ||
+    s.learnReviewOpen ||
+    s.depGraphOpen
+  );
+}

@@ -12,8 +12,8 @@ import {
   Settings,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
 import { useProjectStore } from "../stores/projectStore";
+import { useTagsStore } from "../stores/tagsStore";
 import { useThemeStore } from "../stores/themeStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { useUiStore } from "../stores/uiStore";
@@ -42,6 +42,7 @@ export function Header({ searchInputRef }: HeaderProps) {
     gitInfo,
     canUndo,
     openProject,
+    rescan,
     setSearchQuery,
     undoLastOperation,
     refreshUndoState,
@@ -67,22 +68,11 @@ export function Header({ searchInputRef }: HeaderProps) {
     setTimeout(() => setRefreshingGit(false), 600);
   };
 
-  const handleRescan = async () => {
-    if (!projectPath) return;
-    // The "rescan" button drops the on-disk scan cache before re-opening
-    // so the next pass classifies every file from scratch. Without this,
-    // `scan_project_incremental` keeps `needs_rescan` cache hits for
-    // unchanged files and any updated classification (e.g. a new format
-    // becoming AssetType::Model) won't surface until the file's mtime
-    // changes. Best-effort: cache delete failures are logged and we still
-    // proceed with the incremental scan so the button is never a dead end.
-    try {
-      await invoke("clear_scan_cache", { path: projectPath });
-    } catch (err) {
-      console.warn("Failed to clear scan cache:", err);
-    }
-    // `force: true` bypasses the "already open, just switch" guard.
-    openProject(projectPath, { force: true });
+  // Rescan = clear the scan cache + force re-open, via the shared store action
+  // so the Ctrl+R shortcut (advertised in this button's tooltip) does exactly
+  // the same thing. The action no-ops without a project / while scanning.
+  const handleRescan = () => {
+    rescan();
   };
 
   const changeLanguage = (langCode: string) => {
@@ -110,6 +100,10 @@ export function Header({ searchInputRef }: HeaderProps) {
   const handleUndo = async () => {
     const result = await undoLastOperation();
     if (result && result.success && projectPath) {
+      // Undo carried tag bindings back to the original paths on the backend;
+      // re-sync the tags store so they reappear without waiting for the
+      // watcher's scanResult refresh.
+      await useTagsStore.getState().loadTags();
       openProject(projectPath);
     }
   };
