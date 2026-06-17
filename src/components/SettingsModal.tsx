@@ -987,7 +987,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         <div className="flex justify-end px-4 py-3 border-t border-border shrink-0">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm font-medium bg-primary text-white rounded hover:bg-primary/90 transition-colors"
+            className="px-4 py-2 text-sm font-medium bg-primary text-[var(--on-primary)] rounded hover:bg-primary/90 transition-colors"
           >
             {t("common.done")}
           </button>

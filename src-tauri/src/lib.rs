@@ -101,10 +101,21 @@ async fn scan_project_async(
     project::register(project_id.clone(), path.clone());
 
     let state = Arc::new(ScanState::new());
-    project::with_mut(&project_id, |s| {
+    // In-flight guard: `scan_state` being `Some` means another scan already
+    // owns this project. Reject the second one rather than overwriting the
+    // first's state (which would drop its cancellation, interleave the two
+    // progress reporters, and let an older scan's result clobber a newer one).
+    // The check + set is atomic under the project lock held by `with_mut`.
+    let already = project::with_mut(&project_id, |s| {
+        if s.scan_state.is_some() {
+            return Ok(true);
+        }
         s.scan_state = Some(state.clone());
-        Ok(())
+        Ok(false)
     })?;
+    if already {
+        return Err("A scan is already in progress for this project".to_string());
+    }
 
     let stop = Arc::new(AtomicBool::new(false));
     let progress_handle =
@@ -184,10 +195,21 @@ async fn scan_project_incremental(
     project::register(project_id.clone(), path.clone());
 
     let state = Arc::new(ScanState::new());
-    project::with_mut(&project_id, |s| {
+    // In-flight guard: `scan_state` being `Some` means another scan already
+    // owns this project. Reject the second one rather than overwriting the
+    // first's state (which would drop its cancellation, interleave the two
+    // progress reporters, and let an older scan's result clobber a newer one).
+    // The check + set is atomic under the project lock held by `with_mut`.
+    let already = project::with_mut(&project_id, |s| {
+        if s.scan_state.is_some() {
+            return Ok(true);
+        }
         s.scan_state = Some(state.clone());
-        Ok(())
+        Ok(false)
     })?;
+    if already {
+        return Err("A scan is already in progress for this project".to_string());
+    }
 
     let stop = Arc::new(AtomicBool::new(false));
     let progress_handle =
@@ -256,7 +278,14 @@ fn stop_watching(project_id: String) -> Result<(), String> {
 
 #[tauri::command]
 async fn get_thumbnail(path: String, size: u32) -> Result<String, String> {
-    thumbnail::get_thumbnail_base64(&path, size).map_err(|e| e.to_string())
+    // Decode + resize + PNG-encode is CPU-bound and synchronous; run it on the
+    // blocking pool so fast gallery scrolling doesn't starve the async worker
+    // threads every other IPC call shares.
+    tokio::task::spawn_blocking(move || {
+        thumbnail::get_thumbnail_base64(&path, size).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("thumbnail task failed: {e}"))?
 }
 
 #[tauri::command]
@@ -1327,11 +1356,11 @@ fn export_to_csv(project_id: String) -> Result<String, String> {
                 .unwrap_or_default();
 
             csv.push_str(&format!(
-                "\"{}\",\"{}\",{:?},{},{},{},{}\n",
+                "\"{}\",\"{}\",{:?},\"{}\",{},{},{}\n",
                 asset.name.replace('"', "\"\""),
                 asset.path.replace('"', "\"\""),
                 asset.asset_type,
-                asset.extension,
+                asset.extension.replace('"', "\"\""),
                 asset.size,
                 width,
                 height
@@ -1542,67 +1571,85 @@ fn export_to_html(project_id: String) -> Result<String, String> {
                     .collect::<Vec<_>>()
                     .join("\n")
             },
-            issue_rows = analysis_result
-                .issues
-                .iter()
-                .take(100)
-                .map(|issue| {
-                    let severity_class = match issue.severity {
-                        analyzer::Severity::Error => "severity-error",
-                        analyzer::Severity::Warning => "severity-warning",
-                        analyzer::Severity::Info => "severity-info",
-                    };
-                    let file_name = issue
-                        .asset_path
-                        .rsplit(['/', '\\'])
-                        .next()
-                        .unwrap_or(&issue.asset_path);
-                    format!(
-                        r#"<tr><td class="{}">{:?}</td><td>{}</td><td>{}</td><td>{}</td></tr>"#,
-                        severity_class,
-                        issue.severity,
-                        html_escape(&issue.rule_name),
-                        html_escape(file_name),
-                        html_escape(&issue.message)
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("\n"),
-            asset_rows = scan_result
-                .assets
-                .iter()
-                .take(500)
-                .map(|asset| {
-                    let type_class = match asset.asset_type {
-                        scanner::AssetType::Texture => "texture",
-                        scanner::AssetType::Model => "model",
-                        scanner::AssetType::Audio => "audio",
-                        scanner::AssetType::Video => "video",
-                        scanner::AssetType::Animation => "animation",
-                        scanner::AssetType::Material => "material",
-                        scanner::AssetType::Prefab => "prefab",
-                        scanner::AssetType::Scene => "scene",
-                        scanner::AssetType::Script => "script",
-                        scanner::AssetType::Data => "data",
-                        scanner::AssetType::Other => "other",
-                    };
-                    let dimensions = asset
-                        .metadata
-                        .as_ref()
-                        .and_then(|m| m.width.zip(m.height))
-                        .map(|(w, h)| format!("{}x{}", w, h))
-                        .unwrap_or_else(|| "-".to_string());
-                    format!(
-                        r#"<tr><td>{}</td><td><span class="type-badge {}">{:?}</span></td><td>{}</td><td>{}</td></tr>"#,
-                        html_escape(&asset.name),
-                        type_class,
-                        asset.asset_type,
-                        format_size(asset.size),
-                        dimensions
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
+            issue_rows = {
+                let total = analysis_result.issues.len();
+                let mut rows: Vec<String> = analysis_result
+                    .issues
+                    .iter()
+                    .take(100)
+                    .map(|issue| {
+                        let severity_class = match issue.severity {
+                            analyzer::Severity::Error => "severity-error",
+                            analyzer::Severity::Warning => "severity-warning",
+                            analyzer::Severity::Info => "severity-info",
+                        };
+                        let file_name = issue
+                            .asset_path
+                            .rsplit(['/', '\\'])
+                            .next()
+                            .unwrap_or(&issue.asset_path);
+                        format!(
+                            r#"<tr><td class="{}">{:?}</td><td>{}</td><td>{}</td><td>{}</td></tr>"#,
+                            severity_class,
+                            issue.severity,
+                            html_escape(&issue.rule_name),
+                            html_escape(file_name),
+                            html_escape(&issue.message)
+                        )
+                    })
+                    .collect();
+                if total > 100 {
+                    rows.push(format!(
+                        r#"<tr><td colspan="4" style="text-align:center;color:#9ca3af;font-style:italic;">Showing first 100 of {} issues — export to JSON for the complete list.</td></tr>"#,
+                        total
+                    ));
+                }
+                rows.join("\n")
+            },
+            asset_rows = {
+                let total = scan_result.assets.len();
+                let mut rows: Vec<String> = scan_result
+                    .assets
+                    .iter()
+                    .take(500)
+                    .map(|asset| {
+                        let type_class = match asset.asset_type {
+                            scanner::AssetType::Texture => "texture",
+                            scanner::AssetType::Model => "model",
+                            scanner::AssetType::Audio => "audio",
+                            scanner::AssetType::Video => "video",
+                            scanner::AssetType::Animation => "animation",
+                            scanner::AssetType::Material => "material",
+                            scanner::AssetType::Prefab => "prefab",
+                            scanner::AssetType::Scene => "scene",
+                            scanner::AssetType::Script => "script",
+                            scanner::AssetType::Data => "data",
+                            scanner::AssetType::Other => "other",
+                        };
+                        let dimensions = asset
+                            .metadata
+                            .as_ref()
+                            .and_then(|m| m.width.zip(m.height))
+                            .map(|(w, h)| format!("{}x{}", w, h))
+                            .unwrap_or_else(|| "-".to_string());
+                        format!(
+                            r#"<tr><td>{}</td><td><span class="type-badge {}">{:?}</span></td><td>{}</td><td>{}</td></tr>"#,
+                            html_escape(&asset.name),
+                            type_class,
+                            asset.asset_type,
+                            format_size(asset.size),
+                            dimensions
+                        )
+                    })
+                    .collect();
+                if total > 500 {
+                    rows.push(format!(
+                        r#"<tr><td colspan="4" style="text-align:center;color:#9ca3af;font-style:italic;">Showing first 500 of {} assets — export to CSV or JSON for the complete list.</td></tr>"#,
+                        total
+                    ));
+                }
+                rows.join("\n")
+            }
         );
 
         Ok(html)
@@ -2546,6 +2593,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .setup(|app| {
             #[cfg(debug_assertions)]
             {

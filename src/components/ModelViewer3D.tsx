@@ -557,7 +557,7 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
         {isLoading && (
           <div className="absolute inset-0 flex items-center justify-center bg-[#1a1a1a] z-10">
             <div className="text-center text-text-secondary">
-              <Box size={32} className="mx-auto mb-2 animate-pulse text-blue-400" />
+              <Box size={32} className="mx-auto mb-2 animate-pulse text-[var(--accent)]" />
               <span className="text-sm">{t("modelViewer.loading", "Loading model...")}</span>
             </div>
           </div>

@@ -424,21 +424,21 @@ export function AITagPanel() {
                   )}
                   <div className="tc-aitag-card-actions">
                     <button
-                      className="tc-aitag-btn"
+                      className="tc-aitag-card-btn"
                       onClick={() => handleSkip(group)}
                       disabled={isPending}
                     >
                       {t("aiTagPanel.skip")}
                     </button>
                     <button
-                      className="tc-aitag-btn"
+                      className="tc-aitag-card-btn"
                       onClick={() => handlePreview(group)}
                       disabled={isPending}
                     >
                       {t("aiTagPanel.preview")}
                     </button>
                     <button
-                      className="tc-aitag-btn"
+                      className="tc-aitag-card-btn"
                       data-primary="true"
                       onClick={() => applyGroup(group)}
                       disabled={isPending}

@@ -1,4 +1,5 @@
 use ignore::WalkBuilder;
+use image::ImageDecoder;
 use parking_lot::RwLock;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -343,27 +344,28 @@ fn parse_metadata_for(path: &Path, extension: &str, asset_type: &AssetType) -> O
     parsed
 }
 
-/// Parse image metadata (dimensions, alpha)
+/// Parse image metadata (dimensions, alpha).
+///
+/// Reads only the header (dimensions + color type) via the decoder instead of
+/// decoding every pixel — a 4K texture is hundreds of ms to fully decode and we
+/// only need w/h/alpha. The incremental scan cache means this runs at most once
+/// per file version, but the first scan of a texture-heavy project is far
+/// cheaper this way. On any header/format error we return None, exactly as the
+/// old full-decode path did on `Err`.
 fn parse_image_metadata(path: &Path) -> Option<AssetMetadata> {
-    match image::open(path) {
-        Ok(img) => {
-            let has_alpha = match img.color() {
-                image::ColorType::Rgba8
-                | image::ColorType::Rgba16
-                | image::ColorType::Rgba32F
-                | image::ColorType::La8
-                | image::ColorType::La16 => true,
-                _ => false,
-            };
-            Some(AssetMetadata {
-                width: Some(img.width()),
-                height: Some(img.height()),
-                has_alpha: Some(has_alpha),
-                ..Default::default()
-            })
-        }
-        Err(_) => None,
-    }
+    let reader = image::ImageReader::open(path)
+        .ok()?
+        .with_guessed_format()
+        .ok()?;
+    let decoder = reader.into_decoder().ok()?;
+    let (width, height) = decoder.dimensions();
+    let has_alpha = decoder.color_type().has_alpha();
+    Some(AssetMetadata {
+        width: Some(width),
+        height: Some(height),
+        has_alpha: Some(has_alpha),
+        ..Default::default()
+    })
 }
 
 /// Extract the value of a quoted XML attribute from a tag body.

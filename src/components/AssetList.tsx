@@ -460,37 +460,38 @@ export function AssetList() {
 
         {/* View toolbar */}
         <div className="tc-main-toolbar">
-          <button
-            className="tc-pill"
-            data-active={typeFilter === null ? "true" : undefined}
-            onClick={() => setTypeFilter(null)}
-          >
-            {t("assetTypes.all")}
-            <span className="mono">{scanResult.total_count}</span>
-          </button>
-          {FILTER_TYPE_ORDER.filter(
-            (type) => (scanResult.type_counts[type] ?? 0) > 0
-          ).map((type) => (
+          <div className="tc-toolbar-pills">
             <button
-              key={type}
               className="tc-pill"
-              data-active={typeFilter === type ? "true" : undefined}
-              onClick={() => setTypeFilter(type)}
+              data-active={typeFilter === null ? "true" : undefined}
+              onClick={() => setTypeFilter(null)}
             >
-              <span
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: "50%",
-                  background: `var(--c-${type})`,
-                  display: "inline-block",
-                }}
-              />
-              {t(`assetTypes.${type}` as const)}
-              <span className="mono">{scanResult.type_counts[type]}</span>
+              {t("assetTypes.all")}
+              <span className="mono">{scanResult.total_count}</span>
             </button>
-          ))}
-          <span className="tc-toolbar-spacer" />
+            {FILTER_TYPE_ORDER.filter(
+              (type) => (scanResult.type_counts[type] ?? 0) > 0
+            ).map((type) => (
+              <button
+                key={type}
+                className="tc-pill"
+                data-active={typeFilter === type ? "true" : undefined}
+                onClick={() => setTypeFilter(type)}
+              >
+                <span
+                  style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: "50%",
+                    background: `var(--c-${type})`,
+                    display: "inline-block",
+                  }}
+                />
+                {t(`assetTypes.${type}` as const)}
+                <span className="mono">{scanResult.type_counts[type]}</span>
+              </button>
+            ))}
+          </div>
           <button
             className="tc-pill"
             onClick={toggleSortDirection}

@@ -4,12 +4,17 @@ import { X, ZoomIn, ZoomOut, RotateCw, Maximize2, Minimize2 } from "lucide-react
 interface ImageLightboxProps {
   isOpen: boolean;
   imageSrc: string;
+  /** Full-resolution source; falls back to this (a thumbnail data-URL) if
+   *  imageSrc fails to load — the Tauri asset protocol can 404 on paths with
+   *  spaces / non-ASCII characters. */
+  fallbackSrc?: string;
   imageName: string;
   onClose: () => void;
 }
 
-export function ImageLightbox({ isOpen, imageSrc, imageName, onClose }: ImageLightboxProps) {
+export function ImageLightbox({ isOpen, imageSrc, fallbackSrc, imageName, onClose }: ImageLightboxProps) {
   const [scale, setScale] = useState(1);
+  const [useFallback, setUseFallback] = useState(false);
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
@@ -24,6 +29,7 @@ export function ImageLightbox({ isOpen, imageSrc, imageName, onClose }: ImageLig
       setPosition({ x: 0, y: 0 });
       setRotation(0);
       setIsFitToScreen(true);
+      setUseFallback(false);
     }
   }, [isOpen, imageSrc]);
 
@@ -185,7 +191,10 @@ export function ImageLightbox({ isOpen, imageSrc, imageName, onClose }: ImageLig
         onMouseDown={handleMouseDown}
       >
         <img
-          src={imageSrc}
+          src={useFallback && fallbackSrc ? fallbackSrc : imageSrc}
+          onError={() => {
+            if (fallbackSrc && !useFallback) setUseFallback(true);
+          }}
           alt={imageName}
           className="max-w-none select-none"
           style={{

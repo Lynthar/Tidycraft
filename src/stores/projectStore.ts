@@ -4,6 +4,7 @@ import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { basename, dirname } from "../lib/pathUtils";
 import type { ScanResult, AssetInfo, ScanProgress, AssetType, ProjectType, AnalysisResult, UndoResult, HistoryEntry, GitInfo, GitStatusMap, GitFileStatus, FsChangeEvent } from "../types/asset";
 import { useSettingsStore } from "./settingsStore";
+import { evictThumbs } from "../lib/thumbnailCache";
 
 // Per-project filesystem-watcher unlisten handles. Kept outside the zustand
 // store because function references don't belong in serialized state, and
@@ -359,6 +360,11 @@ function applyFsChange(projectId: string, event: FsChangeEvent) {
   for (const p of event.removed) merged.delete(p);
   for (const a of event.updated) merged.set(a.path, a);
 
+  // Modified/removed files may have a stale thumbnail in the gallery's
+  // in-memory cache (path-keyed; the backend disk cache is mtime-keyed and
+  // regenerates on its own). Evict them so cards re-fetch fresh images.
+  evictThumbs([...event.updated.map((a) => a.path), ...event.removed]);
+
   const newScanResult: ScanResult = {
     ...target.scanResult,
     assets: Array.from(merged.values()),
@@ -465,6 +471,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // If the project is already open and this isn't a force-rescan, just
     // switch the active project.
     if (existingProject && !options?.force) {
+      get().setActiveProject(existingProject.id);
+      return;
+    }
+
+    // Don't start a second scan while one is already in flight for this
+    // project. The backend rejects concurrent scans (its scan_state guard),
+    // but bailing here avoids the wasted IPC and a spurious error toast.
+    if (existingProject?.isScanning) {
       get().setActiveProject(existingProject.id);
       return;
     }
@@ -597,6 +611,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         }
       }
     } catch (err) {
+      // A concurrent scan already owns this project's scan state (the backend
+      // rejected this one); let that scan finish and drive isScanning /
+      // scanResult — don't clobber it here. The finally block still unlistens.
+      if (String(err).includes("already in progress")) return;
       const errorMessage = String(err);
       const state = get();
       const target = state.projects.get(projectId);

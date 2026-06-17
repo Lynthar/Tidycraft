@@ -128,7 +128,14 @@
     "openWithDefaultApp": "用默认应用打开",
     "openInEditor": "用 {{name}} 打开",
     "openFailed": "打开失败：{{reason}}",
-    "viewDependencies": "依赖关系图"
+    "viewDependencies": "依赖关系图",
+    "close": "关闭"
+  },
+  "directoryTree": {
+    "scanning": "扫描中…",
+    "empty": "打开文件夹以开始",
+    "collapse": "折叠",
+    "expand": "展开"
   },
   "depGraph": {
     "title": "依赖关系 — {{name}}",

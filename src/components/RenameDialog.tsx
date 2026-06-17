@@ -166,7 +166,7 @@ export function RenameDialog({
           <button
             onClick={handleRename}
             disabled={isRenaming || !newName.trim()}
-            className="px-4 py-2 text-sm bg-primary text-white rounded hover:bg-primary/90 transition-colors disabled:opacity-50"
+            className="px-4 py-2 text-sm bg-primary text-[var(--on-primary)] rounded hover:bg-primary/90 transition-colors disabled:opacity-50"
           >
             {isRenaming ? t("batchRename.renaming") : t("contextMenu.rename")}
           </button>

@@ -2,13 +2,18 @@ import { useState } from "react";
 import { ChevronRight, Folder, FolderOpen } from "lucide-react";
 import { useProjectStore } from "../stores/projectStore";
 import type { DirectoryNode } from "../types/asset";
+import { useTranslation } from "react-i18next";
 
 interface TreeNodeProps {
   node: DirectoryNode;
   level: number;
+  // Passed down rather than pulled via useTranslation per node — the tree can
+  // render many nodes and per-node i18n subscriptions would be wasted work
+  // (same rationale as GitStatusBadge).
+  t: (key: string) => string;
 }
 
-function TreeNode({ node, level }: TreeNodeProps) {
+function TreeNode({ node, level, t }: TreeNodeProps) {
   const [isExpanded, setIsExpanded] = useState(level === 0);
   const { selectedDirectory, setSelectedDirectory } = useProjectStore();
 
@@ -38,7 +43,7 @@ function TreeNode({ node, level }: TreeNodeProps) {
           data-leaf={!hasChildren ? "true" : undefined}
           onClick={handleToggle}
           tabIndex={hasChildren ? 0 : -1}
-          aria-label={hasChildren ? (isExpanded ? "Collapse" : "Expand") : undefined}
+          aria-label={hasChildren ? (isExpanded ? t("directoryTree.collapse") : t("directoryTree.expand")) : undefined}
         >
           <ChevronRight size={11} />
         </button>
@@ -56,7 +61,7 @@ function TreeNode({ node, level }: TreeNodeProps) {
       {isExpanded && hasChildren && (
         <div>
           {node.children.map((child) => (
-            <TreeNode key={child.path} node={child} level={level + 1} />
+            <TreeNode key={child.path} node={child} level={level + 1} t={t} />
           ))}
         </div>
       )}
@@ -66,18 +71,19 @@ function TreeNode({ node, level }: TreeNodeProps) {
 
 export function DirectoryTree() {
   const { scanResult, isScanning } = useProjectStore();
+  const { t } = useTranslation();
 
   if (isScanning) {
-    return <div className="tc-tree-empty">Scanning...</div>;
+    return <div className="tc-tree-empty">{t("directoryTree.scanning")}</div>;
   }
 
   if (!scanResult) {
-    return <div className="tc-tree-empty">Open a folder to start</div>;
+    return <div className="tc-tree-empty">{t("directoryTree.empty")}</div>;
   }
 
   return (
     <div className="tc-tree">
-      <TreeNode node={scanResult.directory_tree} level={0} />
+      <TreeNode node={scanResult.directory_tree} level={0} t={t} />
     </div>
   );
 }
