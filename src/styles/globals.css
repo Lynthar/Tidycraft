@@ -203,7 +203,7 @@ select {
 /* Selection styles */
 ::selection {
   background-color: var(--color-primary);
-  color: white;
+  color: var(--on-primary);
 }
 
 /* Animated gradient background for special elements */

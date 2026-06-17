@@ -1,5 +1,4 @@
 import { Plus, Pencil, Trash2, AlertCircle } from "lucide-react";
-import { cn } from "../lib/utils";
 import type { GitFileStatus } from "../types/asset";
 
 /// Small inline badge rendered next to file names in AssetListView and
@@ -16,16 +15,20 @@ export function GitStatusBadge({
   status: GitFileStatus;
   t: (key: string) => string;
 }) {
+  // Status colors come from the design tokens (git-* palette) rather than
+  // hardcoded Tailwind classes, so badges track the active theme. `untracked`
+  // has no dedicated token (folded into "new" upstream) → muted text;
+  // `conflicted` borrows the generic error token.
   const configs: Record<
     GitFileStatus,
-    { icon: React.ReactNode; color: string; bg: string } | null
+    { icon: React.ReactNode; color: string } | null
   > = {
-    new: { icon: <Plus size={10} />, color: "text-green-400", bg: "bg-green-400/20" },
-    modified: { icon: <Pencil size={10} />, color: "text-yellow-400", bg: "bg-yellow-400/20" },
-    deleted: { icon: <Trash2 size={10} />, color: "text-red-400", bg: "bg-red-400/20" },
-    renamed: { icon: <Pencil size={10} />, color: "text-blue-400", bg: "bg-blue-400/20" },
-    untracked: { icon: <Plus size={10} />, color: "text-gray-400", bg: "bg-gray-400/20" },
-    conflicted: { icon: <AlertCircle size={10} />, color: "text-red-500", bg: "bg-red-500/20" },
+    new: { icon: <Plus size={10} />, color: "var(--git-new)" },
+    modified: { icon: <Pencil size={10} />, color: "var(--git-modified)" },
+    deleted: { icon: <Trash2 size={10} />, color: "var(--git-deleted)" },
+    renamed: { icon: <Pencil size={10} />, color: "var(--git-renamed)" },
+    untracked: { icon: <Plus size={10} />, color: "var(--text-3)" },
+    conflicted: { icon: <AlertCircle size={10} />, color: "var(--err)" },
     typechange: null,
     ignored: null,
     unchanged: null,
@@ -36,11 +39,11 @@ export function GitStatusBadge({
 
   return (
     <span
-      className={cn(
-        "inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[10px] font-medium",
-        config.color,
-        config.bg
-      )}
+      className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[10px] font-medium"
+      style={{
+        color: config.color,
+        background: `color-mix(in oklch, ${config.color} 20%, transparent)`,
+      }}
       title={t(`git.status.${status}`)}
     >
       {config.icon}

@@ -1781,7 +1781,19 @@
   background: var(--panel);
   flex-shrink: 0;
 }
-.tc-toolbar-spacer { flex: 1; }
+.tc-toolbar-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;        /* Firefox: hide the horizontal scrollbar */
+}
+.tc-toolbar-pills::-webkit-scrollbar { display: none; }   /* WebView2 / WebKit */
+.tc-toolbar-pills .tc-pill { flex-shrink: 0; }            /* pills keep size → container scrolls */
+.tc-main-toolbar > .tc-pill,
+.tc-main-toolbar > .tc-view-toggle { flex-shrink: 0; }    /* sort + view toggle stay pinned/visible */
 .tc-view-toggle {
   display: flex;
   background: var(--panel-2);
@@ -2150,7 +2162,7 @@
   gap: 6px;
   margin-top: 2px;
 }
-.tc-aitag-btn {
+.tc-aitag-card-btn {
   flex: 1;
   height: 26px;
   border-radius: 6px;
@@ -2162,17 +2174,17 @@
   cursor: pointer;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
-.tc-aitag-btn:hover { background: var(--panel-hover); color: var(--text); }
-.tc-aitag-btn[data-primary="true"] {
+.tc-aitag-card-btn:hover { background: var(--panel-hover); color: var(--text); }
+.tc-aitag-card-btn[data-primary="true"] {
   background: var(--primary);
   color: var(--on-primary);
   border-color: var(--primary);
   flex: 1.4;
 }
-.tc-aitag-btn[data-primary="true"]:hover {
+.tc-aitag-card-btn[data-primary="true"]:hover {
   background: var(--primary-strong);
 }
-.tc-aitag-btn:disabled {
+.tc-aitag-card-btn:disabled {
   opacity: 0.5;
   cursor: default;
 }

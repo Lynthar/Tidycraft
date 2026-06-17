@@ -319,7 +319,7 @@ export function BatchRenameDialog({
           <button
             onClick={handleExecute}
             disabled={isLoading || changedCount === 0}
-            className="flex items-center gap-2 px-4 py-2 text-sm bg-primary text-white rounded hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-2 px-4 py-2 text-sm bg-primary text-[var(--on-primary)] rounded hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isLoading ? (
               <>

@@ -32,6 +32,7 @@ import type {
   GitStatusMap,
 } from "../types/asset";
 import { GitStatusBadge } from "./GitStatusBadge";
+import { peekThumb, hasThumb, putThumb } from "../lib/thumbnailCache";
 
 const CARD_MIN_WIDTH = 168;
 const CARD_GAP = 12;
@@ -39,10 +40,10 @@ const FOOT_HEIGHT = 52;
 /// Thumbnail render size matches AssetPreview so the disk cache is shared.
 const THUMB_SIZE = 256;
 
-/// Module-scoped thumbnail cache. Survives component remounts (e.g. switching
-/// list↔grid) so users don't pay the invoke roundtrip again. `null` means
-/// "tried, failed" — don't retry.
-const thumbnailCache = new Map<string, string | null>();
+/// Thumbnails live in the shared `lib/thumbnailCache` LRU (bounded; evicted by
+/// projectStore on fs-change so external edits show fresh images). Survives
+/// component remounts (e.g. switching list↔grid) so users don't re-pay the
+/// invoke roundtrip.
 
 const GLYPH_ICONS: Record<AssetType, LucideIcon> = {
   texture: ImageIcon,
@@ -64,7 +65,7 @@ interface CardThumbProps {
 
 function CardThumb({ asset }: CardThumbProps) {
   const Glyph = GLYPH_ICONS[asset.asset_type] ?? FileText;
-  const cached = thumbnailCache.get(asset.path);
+  const cached = peekThumb(asset.path);
   const [thumb, setThumb] = useState<string | null | undefined>(cached);
 
   useEffect(() => {
@@ -72,8 +73,8 @@ function CardThumb({ asset }: CardThumbProps) {
     // even if cache.has(path) — the cache map is per-asset, so different
     // types coexist without collision.
     if (asset.asset_type !== "texture") return;
-    if (thumbnailCache.has(asset.path)) {
-      setThumb(thumbnailCache.get(asset.path));
+    if (hasThumb(asset.path)) {
+      setThumb(peekThumb(asset.path));
       return;
     }
     let cancelled = false;
@@ -83,10 +84,10 @@ function CardThumb({ asset }: CardThumbProps) {
           path: asset.path,
           size: THUMB_SIZE,
         });
-        thumbnailCache.set(asset.path, base64);
+        putThumb(asset.path, base64);
         if (!cancelled) setThumb(base64);
       } catch {
-        thumbnailCache.set(asset.path, null);
+        putThumb(asset.path, null);
         if (!cancelled) setThumb(null);
       }
     })();

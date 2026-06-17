@@ -3,6 +3,7 @@ import { useProjectStore } from "../stores/projectStore";
 import { useUiStore, isBlockingOverlayOpen } from "../stores/uiStore";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getPlatform } from "../lib/platform";
+import { useTranslation } from "react-i18next";
 
 interface KeyboardShortcuts {
   onOpenFolder?: () => void;
@@ -21,6 +22,7 @@ export function useKeyboardShortcuts({ onOpenFolder, onFocusSearch }: KeyboardSh
     setSelectedAsset,
     setSearchQuery,
   } = useProjectStore();
+  const { t } = useTranslation();
 
   const handleOpenFolder = useCallback(async () => {
     if (isScanning) return;
@@ -28,13 +30,13 @@ export function useKeyboardShortcuts({ onOpenFolder, onFocusSearch }: KeyboardSh
     const selected = await open({
       directory: true,
       multiple: false,
-      title: "Select Project Folder",
+      title: t("header.selectProjectFolder"),
     });
 
     if (selected && typeof selected === "string") {
       openProject(selected);
     }
-  }, [isScanning, openProject]);
+  }, [isScanning, openProject, t]);
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {

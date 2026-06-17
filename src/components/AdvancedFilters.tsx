@@ -118,7 +118,7 @@ export function AdvancedFiltersPanel() {
         <Filter size={14} />
         <span>{t("filters.advanced", "Filters")}</span>
         {hasActiveFilters && (
-          <span className="ml-1 px-1.5 py-0.5 text-xs bg-primary text-white rounded-full">
+          <span className="ml-1 px-1.5 py-0.5 text-xs bg-primary text-[var(--on-primary)] rounded-full">
             {[
               typeFilter !== null ? 1 : 0,
               advancedFilters.minSize !== null || advancedFilters.maxSize !== null ? 1 : 0,
@@ -180,7 +180,7 @@ export function AdvancedFiltersPanel() {
                   onClick={() => setTypeFilter(null)}
                   className={`px-2 py-1 text-xs rounded transition-colors ${
                     typeFilter === null
-                      ? "bg-primary text-white"
+                      ? "bg-primary text-[var(--on-primary)]"
                       : "bg-background text-text-secondary hover:text-text-primary"
                   }`}
                 >
@@ -192,7 +192,7 @@ export function AdvancedFiltersPanel() {
                     onClick={() => setTypeFilter(typeFilter === type ? null : type)}
                     className={`px-2 py-1 text-xs rounded transition-colors ${
                       typeFilter === type
-                        ? "bg-primary text-white"
+                        ? "bg-primary text-[var(--on-primary)]"
                         : "bg-background text-text-secondary hover:text-text-primary"
                     }`}
                   >
@@ -332,7 +332,7 @@ export function AdvancedFiltersPanel() {
                     onClick={() => setAdvancedFilters({ hasAlpha: v })}
                     className={`px-2 py-1 text-xs rounded transition-colors ${
                       advancedFilters.hasAlpha === v
-                        ? "bg-primary text-white"
+                        ? "bg-primary text-[var(--on-primary)]"
                         : "bg-background text-text-secondary hover:text-text-primary"
                     }`}
                   >
@@ -362,7 +362,7 @@ export function AdvancedFiltersPanel() {
                     onClick={() => setAdvancedFilters({ colorSpace: v })}
                     className={`px-2 py-1 text-xs rounded transition-colors ${
                       advancedFilters.colorSpace === v
-                        ? "bg-primary text-white"
+                        ? "bg-primary text-[var(--on-primary)]"
                         : "bg-background text-text-secondary hover:text-text-primary"
                     }`}
                   >
@@ -384,7 +384,7 @@ export function AdvancedFiltersPanel() {
                     onClick={() => toggleExtension(ext)}
                     className={`px-2 py-1 text-xs rounded transition-colors ${
                       advancedFilters.extensions.includes(ext)
-                        ? "bg-primary text-white"
+                        ? "bg-primary text-[var(--on-primary)]"
                         : "bg-background text-text-secondary hover:text-text-primary hover:bg-background/80"
                     }`}
                   >
@@ -411,7 +411,7 @@ export function AdvancedFiltersPanel() {
                       onClick={() => toggleGitStatus(status)}
                       className={`px-2 py-1 text-xs rounded transition-colors ${
                         advancedFilters.gitStatusFilter.includes(status)
-                          ? "bg-primary text-white"
+                          ? "bg-primary text-[var(--on-primary)]"
                           : "bg-background text-text-secondary hover:text-text-primary"
                       }`}
                     >

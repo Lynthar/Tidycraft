@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import {
   Image,
   Box,
@@ -347,7 +347,7 @@ export function AssetPreview() {
             onClick={() => setSelectedAsset(null)}
             className="tc-icon-btn"
             style={{ width: 26, height: 26 }}
-            title="Close"
+            title={t("assetPreview.close")}
           >
             <X size={13} />
           </button>
@@ -721,7 +721,8 @@ export function AssetPreview() {
       {thumbnail && (
         <ImageLightbox
           isOpen={lightboxOpen}
-          imageSrc={`data:image/png;base64,${thumbnail}`}
+          imageSrc={convertFileSrc(selectedAsset.path)}
+          fallbackSrc={`data:image/png;base64,${thumbnail}`}
           imageName={selectedAsset.name}
           onClose={() => setLightboxOpen(false)}
         />

@@ -62,7 +62,7 @@ export function Sidebar() {
           onClick={() => setViewMode("stats")}
         >
           <BarChart3 size={12} />
-          Stats
+          {t("sidebar.stats")}
         </button>
       </div>
 

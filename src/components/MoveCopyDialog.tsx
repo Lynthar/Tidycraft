@@ -327,8 +327,8 @@ export function MoveCopyDialog({
               className={cn(
                 "px-3 py-1.5 text-sm rounded font-medium transition-colors",
                 isWorking || !selectedPath
-                  ? "bg-primary/50 text-white cursor-not-allowed"
-                  : "bg-primary hover:bg-primary/90 text-white"
+                  ? "bg-primary/50 text-[var(--on-primary)] cursor-not-allowed"
+                  : "bg-primary hover:bg-primary/90 text-[var(--on-primary)]"
               )}
             >
               {isWorking ? workingLabel : confirmLabel}

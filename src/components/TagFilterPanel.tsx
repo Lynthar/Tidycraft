@@ -69,7 +69,7 @@ export function TagFilterPanel() {
             <span className="text-text-secondary/60">({tags.length})</span>
           )}
           {tagFilters.length > 0 && (
-            <span className="px-1.5 py-0.5 text-[10px] bg-primary text-white rounded-full">
+            <span className="px-1.5 py-0.5 text-[10px] bg-primary text-[var(--on-primary)] rounded-full">
               {tagFilters.length}
             </span>
           )}
@@ -160,7 +160,7 @@ export function TagFilterPanel() {
                 <button
                   onClick={handleCreateTag}
                   disabled={!newTagName.trim()}
-                  className="px-2 py-1 text-xs bg-primary text-white rounded hover:bg-primary/90 transition-colors disabled:opacity-50"
+                  className="px-2 py-1 text-xs bg-primary text-[var(--on-primary)] rounded hover:bg-primary/90 transition-colors disabled:opacity-50"
                 >
                   {t("tags.createTag")}
                 </button>

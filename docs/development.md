@@ -52,8 +52,9 @@ phase), `regex` (AI-Learning `filename_regex` rules), `toml` + `toml_edit`
 (read-only parse + comment-preserving write-back for `[project]`),
 `reqwest` + `async-trait` (LLM HTTP clients), `parking_lot` (non-poisoning
 mutexes), `tauri-plugin-dialog` / `tauri-plugin-fs` /
-`tauri-plugin-clipboard-manager` / `tauri-plugin-opener` (the last one
-backs `open_with_default_app` and `open_in_editor`).
+`tauri-plugin-clipboard-manager` / `tauri-plugin-opener` (backs
+`open_with_default_app` and `open_in_editor`) / `tauri-plugin-window-state`
+(persists window size + position across launches).
 
 ---
 
@@ -287,6 +288,10 @@ The frontend and backend communicate exclusively through two mechanisms:
 - **`lib/platform.ts`** — `getPlatform()` / `isMacOS()` / `isWindows()` /
   `isLinux()`. Cached UA sniff; used by `formatShortcut` (renders `⌘⇧R`
   on macOS) and the `tc-platform-macos` body-class CSS hook.
+- **`lib/thumbnailCache.ts`** — Bounded (LRU) in-memory cache of gallery
+  thumbnail data-URLs, shared by `AssetGalleryView` (read/write) and
+  `projectStore.applyFsChange` (evict on file change so external edits show
+  fresh images). Standalone module to avoid a store→component import.
 - **`types/asset.ts`** — TS mirrors of the Rust `serde` structs. **Kept in
   sync manually; no codegen.** If you add a field to a Rust type that crosses
   the boundary, update this file.

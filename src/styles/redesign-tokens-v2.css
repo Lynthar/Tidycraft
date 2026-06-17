@@ -144,6 +144,11 @@
   --color-warning: var(--warn);
   --color-success: var(--ok);
   --color-info: var(--info);
+
+  /* Scrollbar — warm bridge (globals.css default is cold #1a1a2e/#3a3a5c) */
+  --scrollbar-track: var(--bg-soft);
+  --scrollbar-thumb: var(--line-strong);
+  --scrollbar-thumb-hover: var(--text-3);
 }
 
 [data-theme="light"] {
@@ -224,6 +229,11 @@
   --color-warning: var(--warn);
   --color-success: var(--ok);
   --color-info: var(--info);
+
+  /* Scrollbar — warm bridge (globals.css default is cold #f1f5f9/#cbd5e1) */
+  --scrollbar-track: var(--bg-soft);
+  --scrollbar-thumb: var(--line-strong);
+  --scrollbar-thumb-hover: var(--text-3);
 }
 
 /* Utility classes —— 与 v1 一致，二选一 import 时各自生效 */

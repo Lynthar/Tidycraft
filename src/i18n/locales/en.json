@@ -128,7 +128,14 @@
     "openWithDefaultApp": "Open with Default App",
     "openInEditor": "Open in {{name}}",
     "openFailed": "Open failed: {{reason}}",
-    "viewDependencies": "Dependency Graph"
+    "viewDependencies": "Dependency Graph",
+    "close": "Close"
+  },
+  "directoryTree": {
+    "scanning": "Scanning...",
+    "empty": "Open a folder to start",
+    "collapse": "Collapse",
+    "expand": "Expand"
   },
   "depGraph": {
     "title": "Dependencies — {{name}}",

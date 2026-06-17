@@ -1,6 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Group, Panel, Separator } from "react-resizable-panels";
+import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels";
 import { Header } from "./components/Header";
 import { Sidebar } from "./components/Sidebar";
 import { AssetList } from "./components/AssetList";
@@ -66,7 +66,23 @@ function App() {
     },
   });
 
-  const showPreview = scanResult && selectedAsset && viewMode === "assets";
+  const showPreview = !!(scanResult && selectedAsset && viewMode === "assets");
+
+  // Persist panel sizes across reloads, and restore the preview width when it
+  // re-mounts after a deselect→reselect. panelIds tracks which Panels are
+  // currently mounted so the 2- and 3-panel layouts are saved separately —
+  // react-resizable-panels' documented mechanism for conditionally-rendered
+  // panels. On first run defaultLayout is undefined and each Panel falls back
+  // to its own defaultSize.
+  const panelIds = useMemo(
+    () => (showPreview ? ["sidebar", "main", "preview"] : ["sidebar", "main"]),
+    [showPreview]
+  );
+  const { defaultLayout, onLayoutChange } = useDefaultLayout({
+    id: "tidycraft-panels",
+    panelIds,
+    storage: localStorage,
+  });
 
   const handleExportJson = async () => {
     if (!activeProjectId) return;
@@ -181,6 +197,8 @@ function App() {
           id="tidycraft-panels"
           className="flex-1 h-full"
           style={{ height: "100%" }}
+          defaultLayout={defaultLayout}
+          onLayoutChange={onLayoutChange}
         >
           <Panel
             id="sidebar"
