@@ -578,7 +578,7 @@ tidycraft/
 │   │   ├── settingsStore.ts          # Persistent user prefs (git display / external editors / AI providers / respectGitignore)
 │   │   ├── themeStore.ts             # dark / light / system + matchMedia listener
 │   │   └── searchHistoryStore.ts     # Recent search queries
-│   ├── styles/                       # globals.css + redesign-tokens(/-v2) + redesign-components
+│   ├── styles/                       # globals.css + redesign-tokens-v2 + redesign-components
 │   ├── types/asset.ts                # TS mirrors of Rust structs
 │   ├── lib/                          # Shared utilities (pathUtils, platform, modelUrlResolver, utils)
 │   ├── hooks/                        # React hooks (useKeyboardShortcuts)

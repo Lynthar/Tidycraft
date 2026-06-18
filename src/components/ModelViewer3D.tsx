@@ -30,6 +30,16 @@ interface LoadingStats {
   meshCount: number;
 }
 
+// Error stored as an i18n key (+ optional fallback) rather than a
+// pre-translated string, so it re-translates on a language switch
+// without re-running the WebGL setup effect — which would otherwise
+// tear down and rebuild the whole scene just to relabel one message.
+// Rendered via t(error.key, error.fallback) in the JSX below.
+interface ModelError {
+  key: string;
+  fallback?: string;
+}
+
 export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer3DProps) {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -43,7 +53,7 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
   const clockRef = useRef<THREE.Clock>(new THREE.Clock());
 
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ModelError | null>(null);
   const [stats, setStats] = useState<LoadingStats | null>(null);
 
   // Clean up Three.js resources
@@ -243,7 +253,7 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
       rendererRef.current = renderer;
     } catch (err) {
       console.error("Failed to create WebGL renderer:", err);
-      setError(t("modelViewer.webglError", "WebGL not supported"));
+      setError({ key: "modelViewer.webglError", fallback: "WebGL not supported" });
       setIsLoading(false);
       return;
     }
@@ -332,7 +342,7 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
 
       // Provide more helpful error messages
       if (message.includes("404") || message.includes("not found")) {
-        setError(t("modelViewer.fileNotFound", "File not found"));
+        setError({ key: "modelViewer.fileNotFound", fallback: "File not found" });
       } else if (
         // three.js's FBXLoader is a reverse-engineered parser that
         // doesn't cover every UV/MappingInformationType combination
@@ -344,17 +354,20 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
         (message.includes("Cannot read properties of undefined") ||
           message.includes("parseUVs"))
       ) {
-        setError(t("modelViewer.fbxIncompatible"));
+        setError({ key: "modelViewer.fbxIncompatible" });
       } else if (message.includes("parse") || message.includes("invalid")) {
-        setError(t("modelViewer.parseError", "Failed to parse model file"));
+        setError({ key: "modelViewer.parseError", fallback: "Failed to parse model file" });
       } else {
-        setError(t("modelViewer.loadError", "Failed to load model"));
+        setError({ key: "modelViewer.loadError", fallback: "Failed to load model" });
       }
       setIsLoading(false);
     };
 
     if (!SUPPORTED_FORMATS.includes(ext)) {
-      setError(t("modelViewer.unsupportedFormat", `Format .${ext} not supported. Use GLTF, GLB, FBX, or OBJ.`));
+      setError({
+        key: "modelViewer.unsupportedFormat",
+        fallback: `Format .${ext} not supported. Use GLTF, GLB, FBX, or OBJ.`,
+      });
       setIsLoading(false);
     } else {
       // Kick off loading in an async IIFE so we can await the sibling-texture
@@ -494,7 +507,7 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
             // exists. We surface a clear "export to GLB" message rather
             // than fail mysteriously or fall through to "unsupported".
             if (!isMountedRef.current) return;
-            setError(t("modelViewer.blendUnsupported"));
+            setError({ key: "modelViewer.blendUnsupported" });
             setIsLoading(false);
           }
         } catch (err) {
@@ -523,7 +536,10 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
     };
     animate();
 
-    // Handle resize
+    // Handle resize. Observe the container (not just window) so the canvas
+    // also tracks react-resizable-panels divider drags — those resize the
+    // panel without firing a window `resize` event. A container observer
+    // covers window resizes too, since the container is responsive.
     const handleResize = () => {
       if (!containerRef.current || !cameraRef.current || !rendererRef.current) return;
       const newWidth = containerRef.current.clientWidth || 250;
@@ -533,13 +549,14 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
       rendererRef.current.setSize(newWidth, newHeight);
     };
 
-    window.addEventListener("resize", handleResize);
+    const resizeObserver = new ResizeObserver(handleResize);
+    resizeObserver.observe(container);
 
     return () => {
-      window.removeEventListener("resize", handleResize);
+      resizeObserver.disconnect();
       cleanup();
     };
-  }, [filePath, extension, t]);
+  }, [filePath, extension]);
 
   const resetCamera = () => {
     if (cameraRef.current && controlsRef.current) {
@@ -566,7 +583,7 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
           <div className="absolute inset-0 flex items-center justify-center bg-[#1a1a1a] z-10">
             <div className="text-center text-error px-4">
               <Box size={32} className="mx-auto mb-2 opacity-50" />
-              <span className="text-sm">{error}</span>
+              <span className="text-sm">{error.fallback ? t(error.key, error.fallback) : t(error.key)}</span>
             </div>
           </div>
         )}
