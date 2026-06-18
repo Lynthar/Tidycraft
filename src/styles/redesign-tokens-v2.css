@@ -1,58 +1,15 @@
 /* ============================================================
-   Tidycraft Redesign — Design tokens v2 (proposal)
+   Tidycraft Redesign — 设计 token（Forge, OKLCH）
 
-   与 v1 (redesign-tokens.css) 并列存在的提案版。两者**二选一**
-   import，不要同时启用。
+   现行 token 系统，在 main.tsx 里于 globals.css 之后 import。
+   定义 Forge 配色：5 级递进背景、4 级文字、琥珀 --primary +
+   青蓝 --accent、11 种资产类型色、git / 语义状态色，按
+   [data-theme="dark"|"light"] 分组（useThemeStore 写在 <html>
+   上的属性）。
 
-   切换方法：编辑 src/main.tsx，把
-       import "./styles/redesign-tokens.css";
-   换成
-       import "./styles/redesign-tokens-v2.css";
-   想退回 v1 改回去即可。
-
-   ----- 与 v1 的核心差异 -----
-
-   1. 背景更深：oklch(20%) → oklch(14%)
-      工程感更强，接近 Linear / Houdini / Cursor 的甜点。
-
-   2. 背景色相微调：hue 60 → hue 50
-      仍微暖，但比 v1 的"焦黄感"更中性，长时间盯视压力更小。
-
-   3. 主色"品牌+操作"双职合一
-      v1 单一 --primary 既是品牌又是 CTA。v2 保留这个设定，
-      但把 --primary 略调暗（78% → 74%），在更深的背景上不
-      过曝。
-
-   4. 新增 --accent 三件套（青蓝 hue 200）
-      用于"次级强调 / 链接 / 非品牌 chip"。这把"主操作"和
-      "辅助强调"两层意图分开 —— v1 用同一个琥珀承担两种语义
-      会让选中态和链接颜色完全一样。
-
-      ⚠️  --accent 要在 Tailwind 中作为独立 utility，需要把
-      tailwind.config.js 里 `accent: var(--primary)` 一组改成
-      `accent: var(--accent)` / `on-accent: var(--on-accent)`。
-      切换 v2 后第一步是改这个 config，否则 bg-accent / text-
-      on-accent 仍然显示琥珀。
-
-   5. 警告色推到 hue 95（v1 是 hue 80）
-      与品牌琥珀 hue 70 的距离从 10° 扩到 25°，肉眼能稳定区分
-      "warning toast" 和 "primary button"。
-
-   6. --c-texture 推到 hue 40（v1 是 hue 50）
-      远离 primary hue 70，让 "texture chip" 不与主操作色混淆。
-      11 种资产类型其余只做小幅亮度微调。
-
-   7. --c-animation 推到 hue 175 (青)（v1 是 hue 195 偏蓝）
-      让它和 --c-data (hue 180) / --c-script (hue 240) 三者
-      在"蓝-青"区间分得开。
-
-   ----- 不变的事 -----
-
-   - 4 级文字层级（--text → --text-4）
-   - 11 种资产类型完整覆盖
-   - 4 件 git 状态色
-   - dark/light 双主题
-   - .mono / .tnum 工具类
+   下方「legacy bridge」段把 globals.css 的 --color-* / --scrollbar-*
+   重映射到 Forge 取值，让尚未迁移的组件不改 markup 也能用上新
+   配色——该桥接是过渡手段，见 #28（双样式迁移）待退场。
    ============================================================ */
 
 [data-theme="dark"] {
@@ -236,7 +193,7 @@
   --scrollbar-thumb-hover: var(--text-3);
 }
 
-/* Utility classes —— 与 v1 一致，二选一 import 时各自生效 */
+/* Utility classes */
 .mono {
   font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   font-feature-settings: "ss02", "zero";
