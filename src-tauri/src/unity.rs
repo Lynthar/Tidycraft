@@ -28,6 +28,7 @@ pub enum UnityFileType {
     Material,
     Controller,
     Asset,
+    Anim,
     Unknown,
 }
 
@@ -37,8 +38,11 @@ impl UnityFileType {
             "prefab" => UnityFileType::Prefab,
             "unity" => UnityFileType::Scene,
             "mat" => UnityFileType::Material,
-            "controller" => UnityFileType::Controller,
+            // Animator override controllers reference a base controller + clips.
+            "controller" | "overridecontroller" => UnityFileType::Controller,
             "asset" => UnityFileType::Asset,
+            // Sprite-animation .anim files reference sprites/clips via PPtr guids.
+            "anim" => UnityFileType::Anim,
             _ => UnityFileType::Unknown,
         }
     }

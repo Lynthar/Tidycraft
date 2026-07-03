@@ -229,10 +229,13 @@ fn dimension_bucket(w: u32, h: u32) -> Option<u32> {
     if max == 0 {
         return None;
     }
-    let mut p: u32 = 1;
-    while p.saturating_mul(2) <= max {
-        p = p.saturating_mul(2);
-    }
+    // Largest power of two <= max. Computed via `leading_zeros` rather than the
+    // old `while p.saturating_mul(2) <= max` loop, which spun forever when
+    // max == u32::MAX: `saturating_mul(2)` pins p at u32::MAX, so the condition
+    // stays true every iteration. A corrupt DDS header reporting 0xFFFFFFFF
+    // dimensions could trigger that infinite loop while holding the project lock.
+    // `max >= 1` here (0 returned above), so the shift distance is 0..=31.
+    let p: u32 = 1 << (31 - max.leading_zeros());
     if p < 256 {
         return None;
     }

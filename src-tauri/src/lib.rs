@@ -905,7 +905,11 @@ fn run_full_analysis(
     result
 }
 
-#[tauri::command]
+// `(async)` runs this on Tauri's thread pool instead of the main thread.
+// duplicate-hashing + full Unity re-parse under the project lock is heavy;
+// on the main thread it froze the whole UI (window drag/resize) for the
+// duration. The frontend contract is unchanged — `invoke` already awaits.
+#[tauri::command(async)]
 fn analyze_assets(project_id: String, config_toml: Option<String>) -> Result<AnalysisResult, String> {
     let config = if let Some(toml_str) = config_toml {
         RuleConfig::from_toml(&toml_str).map_err(|e| format!("Invalid config: {}", e))?
@@ -1027,7 +1031,10 @@ fn suggest_tags(project_id: String) -> Result<Vec<TagGroup>, String> {
 
 // ============ Git Commands ============
 
-#[tauri::command]
+// `(async)`: libgit2 opens the repo + runs a full-tree status (twice per
+// refresh, with get_git_statuses) — off the main thread so large repos don't
+// freeze the UI.
+#[tauri::command(async)]
 fn get_git_info(project_id: String, path: String) -> GitInfo {
     let manager = GitManager::open(Path::new(&path));
     let info = manager.get_info();
@@ -1045,7 +1052,9 @@ pub struct GitStatusMap {
     pub statuses: HashMap<String, String>,
 }
 
-#[tauri::command]
+// `(async)`: full-repo libgit2 status under the project lock — off the main
+// thread so a large working tree doesn't stall the event loop.
+#[tauri::command(async)]
 fn get_git_statuses(project_id: String) -> GitStatusMap {
     let statuses = project::with_mut(&project_id, |state| {
         let map = if let Some(manager) = state.git_manager.as_mut() {
@@ -1103,7 +1112,29 @@ pub struct DependencyEdge {
     pub to: String,
 }
 
-#[tauri::command]
+/// Unity text files that carry GUID references to other assets. Both the
+/// dependency graph (`get_unity_dependencies`) and the unused-asset scan
+/// (`find_unused_assets`) walk this *same* set so their reference views never
+/// diverge (previously deps used prefab/unity/mat and unused added controller —
+/// so their results disagreed). Beyond prefab/scene/material/controller it adds:
+///   - `.asset` — ScriptableObjects + EditorBuildSettings (scene refs live here,
+///     so scenes were otherwise always flagged unused),
+///   - `.anim` — sprite-animation PPtr curves,
+///   - `.overridecontroller` — animator override controllers.
+/// `unity::parse_unity_file` recognizes each of these extensions.
+const UNITY_REFERENCEABLE_EXTS: &[&str] = &[
+    "prefab",
+    "unity",
+    "mat",
+    "controller",
+    "overridecontroller",
+    "asset",
+    "anim",
+];
+
+// `(async)`: re-reads + parses every prefab/scene/mat under the project lock —
+// off the main thread so a 10k-asset project doesn't freeze the window.
+#[tauri::command(async)]
 fn get_unity_dependencies(project_id: String) -> Result<DependencyGraph, String> {
     project::with_ref(&project_id, |state| {
         let scan_result = state.require_scan()?;
@@ -1130,7 +1161,7 @@ fn get_unity_dependencies(project_id: String) -> Result<DependencyGraph, String>
 
         for asset in &scan_result.assets {
             let ext = asset.extension.to_lowercase();
-            if ext == "prefab" || ext == "unity" || ext == "mat" {
+            if UNITY_REFERENCEABLE_EXTS.contains(&ext.as_str()) {
                 if let Some(unity_info) = unity::parse_unity_file(Path::new(&asset.path)) {
                     if let Some(ref from_guid) = asset.unity_guid {
                         for reference in &unity_info.references {
@@ -1150,7 +1181,9 @@ fn get_unity_dependencies(project_id: String) -> Result<DependencyGraph, String>
     })
 }
 
-#[tauri::command]
+// `(async)`: same heavy Unity/Godot re-parse under the lock as the dependency
+// graph — kept off the main thread.
+#[tauri::command(async)]
 fn find_unused_assets(project_id: String) -> Result<Vec<String>, String> {
     project::with_ref(&project_id, |state| {
         let scan_result = state.require_scan()?;
@@ -1184,7 +1217,7 @@ fn find_unused_assets(project_id: String) -> Result<Vec<String>, String> {
 
         for asset in &scan_result.assets {
             let ext = asset.extension.to_lowercase();
-            if ext == "prefab" || ext == "unity" || ext == "mat" || ext == "controller" {
+            if UNITY_REFERENCEABLE_EXTS.contains(&ext.as_str()) {
                 if let Some(unity_info) = unity::parse_unity_file(Path::new(&asset.path)) {
                     for reference in &unity_info.references {
                         referenced_guids.insert(reference.guid.clone());
@@ -1207,7 +1240,9 @@ fn find_unused_assets(project_id: String) -> Result<Vec<String>, String> {
 /// asset keyed by its `res://` id; edges come from the `res://` references in
 /// scenes / resources / scripts (target filtered to known nodes). Same parser
 /// and known gaps as the unused-asset check (uid-only / dynamic `load()` missed).
-#[tauri::command]
+// `(async)`: parses every scene/resource/script under the lock — off the
+// main thread (mirrors get_unity_dependencies).
+#[tauri::command(async)]
 fn get_godot_dependencies(project_id: String) -> Result<DependencyGraph, String> {
     project::with_ref(&project_id, |state| {
         let scan_result = state.require_scan()?;
@@ -1371,7 +1406,8 @@ fn export_to_csv(project_id: String) -> Result<String, String> {
     })
 }
 
-#[tauri::command]
+// `(async)`: runs a full analysis (incl. duplicate re-hashing) under the lock.
+#[tauri::command(async)]
 fn export_issues_to_json(project_id: String) -> Result<String, String> {
     project::with_ref(&project_id, |state| {
         let scan_result = state.require_scan()?;
@@ -1389,7 +1425,8 @@ fn export_issues_to_json(project_id: String) -> Result<String, String> {
     })
 }
 
-#[tauri::command]
+// `(async)`: runs a full analysis (incl. duplicate re-hashing) under the lock.
+#[tauri::command(async)]
 fn export_to_html(project_id: String) -> Result<String, String> {
     project::with_ref(&project_id, |state| {
         let scan_result = state.require_scan()?;
@@ -1725,6 +1762,17 @@ fn apply_rename_operation(name: &str, operation: &RenameOperation) -> String {
     }
 }
 
+/// True when `old_name` and `new_name` differ only in case (e.g. `Foo.PNG` vs
+/// `foo.png`). On case-insensitive filesystems (NTFS/APFS) such a rename makes
+/// the target `exists()`-resolve to the *source* file itself, so the "target
+/// already exists" guard must skip it — `fs::rename` performs the case change
+/// correctly. Uses full Unicode case folding (`to_lowercase`), not just ASCII,
+/// so `Ä`→`ä` is covered too. `old_name == new_name` is not a case-only rename
+/// (the callers skip no-op renames earlier anyway).
+fn is_case_only_rename(old_name: &str, new_name: &str) -> bool {
+    old_name != new_name && old_name.to_lowercase() == new_name.to_lowercase()
+}
+
 #[tauri::command]
 fn preview_batch_rename(paths: Vec<String>, operation: RenameOperation) -> Vec<RenamePreview> {
     paths
@@ -1778,7 +1826,13 @@ fn execute_batch_rename(
 
         let new_path = path_obj.with_file_name(&new_name);
 
-        if new_path.exists() {
+        // A pure case change (foo.PNG → foo.png) resolves `exists()` to the
+        // source file itself on case-insensitive filesystems (NTFS/APFS), which
+        // would wrongly abort the rename. `fs::rename` handles case-only renames
+        // fine, so only reject a *different* pre-existing file. (This guard is
+        // why the ToLowercase/ToUppercase/ToTitleCase ops were 100% broken on
+        // Windows/macOS.)
+        if !is_case_only_rename(&name, &new_name) && new_path.exists() {
             errors.push(format!("Target already exists: {}", new_path.display()));
             error_count += 1;
             continue;
@@ -2354,15 +2408,18 @@ fn rename_file(project_id: String, old_path: String, new_name: String) -> Result
     let parent = old_path_ref.parent().ok_or("Cannot get parent directory")?;
     let new_path = parent.join(&new_name);
 
-    if new_path.exists() {
-        return Err("A file with this name already exists".to_string());
-    }
-
     let old_name = old_path_ref
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("")
         .to_string();
+
+    // A pure case change (foo.PNG → foo.png) trips `exists()` against the source
+    // file itself on case-insensitive filesystems; `fs::rename` handles it fine,
+    // so skip the guard for a case-only rename (see execute_batch_rename).
+    if !is_case_only_rename(&old_name, &new_name) && new_path.exists() {
+        return Err("A file with this name already exists".to_string());
+    }
 
     // Normalize to forward slashes so the returned path, the undo record, and
     // the tag binding all match what the scanner produces — `to_string_lossy`
@@ -2411,22 +2468,24 @@ fn rename_file(project_id: String, old_path: String, new_name: String) -> Result
 
 // ============ Undo Commands ============
 
-/// After an undo renames files back to their original paths, carry their tag
-/// bindings the same direction (new_path → original_path), mirroring the
-/// forward-direction carry in `move_assets` / `rename_file`. Only carries a
-/// binding when the file actually arrived at `original` — a file whose undo
-/// failed (e.g. its target already existed) stays at `new_path`, so its binding
-/// must stay there too. No-op when tags were never loaded this session (the
-/// same lazy-load guard the forward ops and the watcher cleanup use).
-fn carry_tags_after_undo(state: &mut project::ProjectState, pairs: &[(String, String)]) {
-    if pairs.is_empty() || state.tags_data.is_none() {
+/// After an undo reverts renames/moves, carry each reverted file's tag binding
+/// back the same direction (new_path → original_path), mirroring the forward
+/// carry in `move_assets` / `rename_file`. The pairs passed in are exactly the
+/// ones the undo ACTUALLY reverted (`UndoResult.reverted_pairs`), so a file
+/// whose undo failed (source lost, or target occupied by an unrelated
+/// placeholder) keeps its binding at `new_path` instead of having it stripped.
+/// Using the real per-file result — rather than an `original.exists()` guess —
+/// also correctly handles case-only rename undos, where `new_path` still
+/// `exists()`-resolves to the restored file on case-insensitive filesystems.
+/// No-op when tags were never loaded this session (the same lazy-load guard the
+/// forward ops and the watcher cleanup use).
+fn carry_tags_after_undo(state: &mut project::ProjectState, reverted_pairs: &[(String, String)]) {
+    if reverted_pairs.is_empty() || state.tags_data.is_none() {
         return;
     }
     let tags = state.ensure_tags();
-    for (original, new_path) in pairs {
-        if Path::new(original).exists() {
-            tags.rename_path(new_path, original);
-        }
+    for (original, new_path) in reverted_pairs {
+        tags.rename_path(new_path, original);
     }
     let _ = state.save_tags();
 }
@@ -2439,15 +2498,14 @@ fn get_undo_history(project_id: String) -> Vec<undo::HistoryEntry> {
 #[tauri::command]
 fn undo_last_operation(project_id: String) -> Result<undo::UndoResult, String> {
     project::with_mut(&project_id, |state| {
-        // Snapshot the path pairs of the batch about to be reverted BEFORE the
-        // undo runs, so we can carry tag bindings back to the original paths
-        // afterwards (undo.rs has no access to TagsData).
-        let pairs = state.undo_manager.peek_last_undoable_pairs();
         let result = state
             .undo_manager
             .undo_last()
             .ok_or_else(|| "No operation to undo".to_string())?;
-        carry_tags_after_undo(state, &pairs);
+        // Carry tag bindings back for the files the undo actually reverted
+        // (undo.rs has no access to TagsData). `reverted_pairs` excludes any
+        // file whose undo failed, so their tags stay put at new_path.
+        carry_tags_after_undo(state, &result.reverted_pairs);
         Ok(result)
     })
 }
@@ -2455,12 +2513,11 @@ fn undo_last_operation(project_id: String) -> Result<undo::UndoResult, String> {
 #[tauri::command]
 fn undo_operation_by_id(project_id: String, id: String) -> Result<undo::UndoResult, String> {
     project::with_mut(&project_id, |state| {
-        let pairs = state.undo_manager.peek_pairs_by_id(&id);
         let result = state
             .undo_manager
             .undo_by_id(&id)
             .ok_or_else(|| format!("Operation '{}' not found or already undone", id))?;
-        carry_tags_after_undo(state, &pairs);
+        carry_tags_after_undo(state, &result.reverted_pairs);
         Ok(result)
     })
 }

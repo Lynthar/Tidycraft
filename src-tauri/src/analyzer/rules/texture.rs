@@ -227,6 +227,14 @@ fn next_power_of_two(n: u32) -> u32 {
     if n == 0 {
         return 1;
     }
+    // Above 2^31 there is no next power of two representable in u32; the
+    // bit-fill + 1 below would overflow (panic in debug, wrap to 0 in release).
+    // Cap at 2^31 — a dimension this large only comes from a corrupt texture
+    // header, and this value only feeds a human-readable "Resize to NxN"
+    // suggestion, not any real computation.
+    if n > (1 << 31) {
+        return 1 << 31;
+    }
     let mut v = n - 1;
     v |= v >> 1;
     v |= v >> 2;

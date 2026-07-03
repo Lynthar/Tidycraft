@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { useProjectStore } from "./projectStore";
 
 /// Tracks transient UI state for app-level overlays (modals + command palette).
 /// Lives in a global store rather than App.tsx local state so that any
@@ -206,3 +207,22 @@ export function isBlockingOverlayOpen(): boolean {
     s.depGraphOpen
   );
 }
+
+// Dismiss the AI / learning write-flows (and the floating AI Tag panel) whenever
+// the active project changes. Their contents — tag suggestions, learning rules,
+// theme/goal edits, cost previews — were computed for the PREVIOUS project, and
+// every apply/save path resolves the project id live at write time, so applying
+// them after a switch would mutate the newly-active project's tags / config
+// (the cross-project-write bug). Closing them on switch is the safe behavior and
+// matches intent — the user navigated away. Read-only overlays (the dependency
+// graph) are intentionally left alone. Mirrors tagsStore's project subscription;
+// projectStore imports nothing from here, so there's no import cycle.
+useProjectStore.subscribe((state, prev) => {
+  if (state.activeProjectId === prev.activeProjectId) return;
+  const ui = useUiStore.getState();
+  if (ui.aiAnalyzeOpen) ui.setAiAnalyzeOpen(false);
+  if (ui.aiResultOpen) ui.setAiResultOpen(false);
+  if (ui.learnSetupOpen) ui.setLearnSetupOpen(false);
+  if (ui.learnReviewOpen) ui.setLearnReviewOpen(false);
+  if (ui.aiPanelOpen) ui.setAiPanelOpen(false);
+});

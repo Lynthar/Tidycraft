@@ -177,10 +177,18 @@ export function AITagPanel() {
 
   const handleApplyAll = async () => {
     if (!groups || groups.length === 0) return;
+    // Snapshot the project this apply-all targets. If the user switches projects
+    // mid-loop (Sidebar / Switcher), abort the remaining groups — the tags-store
+    // actions resolve the active project id LIVE, so they'd otherwise create the
+    // rest of the tags in the newly-active project. (The panel itself also closes
+    // on switch via uiStore's subscription; this stops the loop already running.)
+    const targetProjectId = useProjectStore.getState().activeProjectId;
+    if (!targetProjectId) return;
     setApplyingAll(true);
     // Snapshot the list — applyGroup mutates state.groups as it goes.
     const snapshot = [...groups];
     for (const group of snapshot) {
+      if (useProjectStore.getState().activeProjectId !== targetProjectId) break;
       // eslint-disable-next-line no-await-in-loop
       await applyGroup(group);
     }

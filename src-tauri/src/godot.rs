@@ -354,28 +354,34 @@ pub fn find_unused_godot_assets(root_path: &str, assets: &[AssetInfo]) -> Vec<St
     let root = Path::new(root_path);
     let mut referenced: HashSet<String> = HashSet::new();
 
+    // All res:// refs sit inside double quotes, so one quoted-res:// regex
+    // catches ext_resource paths, preload/load literals, C# GD.Load strings,
+    // and project.godot's resource keys alike.
+    let re = regex::Regex::new(r#""(res://[^"]*)""#).expect("static regex compiles");
+
     // 1. Entry points from project.godot — used roots even when nothing else
-    //    references them (otherwise the main scene reports as unused).
+    //    references them. A generic quoted-res:// scan captures the main scene,
+    //    config/icon, boot splash image, default bus layout, default
+    //    environment, and every other res:// key, so a *default* project's
+    //    icon.svg / splash / bus layout aren't falsely reported as unused.
+    //    Autoloads carry a leading `*` inside the quotes (`"*res://..."`), which
+    //    the quoted-res:// scan can't match, so parse those explicitly.
     if let Ok(content) = fs::read_to_string(root.join("project.godot")) {
-        let config = parse_godot_config(&content);
-        if let Some(main_scene) = config
-            .get("application")
-            .and_then(|app| app.get("run/main_scene"))
-        {
-            referenced.insert(unquote(main_scene));
+        for r in extract_res_references(&content, &re) {
+            referenced.insert(r);
         }
-        for autoload in extract_autoloads(&config) {
+        for autoload in extract_autoloads(&parse_godot_config(&content)) {
             referenced.insert(autoload.path);
         }
     }
 
-    // 2. Every res:// path referenced by a scene / resource / script. All refs
-    //    sit inside double quotes, so one quoted-res:// regex catches
-    //    ext_resource paths and preload/load literals alike.
-    let re = regex::Regex::new(r#""(res://[^"]*)""#).expect("static regex compiles");
+    // 2. Every res:// path referenced by a scene / resource / script / C# file.
+    //    `.cs` is included so Mono projects' GD.Load("res://…") / ResourceLoader
+    //    references count — they were previously invisible, so any asset used
+    //    only from C# was mis-reported as unused.
     for asset in assets {
         let ext = asset.extension.to_lowercase();
-        if ext == "tscn" || ext == "tres" || ext == "gd" {
+        if ext == "tscn" || ext == "tres" || ext == "gd" || ext == "cs" {
             if let Ok(content) = fs::read_to_string(&asset.path) {
                 for r in extract_res_references(&content, &re) {
                     referenced.insert(r);
@@ -406,7 +412,7 @@ pub fn godot_dependency_edges(root: &Path, assets: &[AssetInfo]) -> Vec<(String,
     let mut edges = Vec::new();
     for asset in assets {
         let ext = asset.extension.to_lowercase();
-        if ext == "tscn" || ext == "tres" || ext == "gd" {
+        if ext == "tscn" || ext == "tres" || ext == "gd" || ext == "cs" {
             let Some(from) = asset_to_res_path(&asset.path, root) else {
                 continue;
             };
