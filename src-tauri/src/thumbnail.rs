@@ -134,7 +134,20 @@ fn generate_thumbnail(path: &Path, max_size: u32) -> Result<Vec<u8>, ThumbnailEr
         img
     };
 
-    // Encode to PNG
+    // Encode to PNG. PNG supports 8- and 16-bit integer channels but NOT
+    // 32-bit float, so HDR/EXR images (which `image::open` decodes to Rgb32F /
+    // Rgba32F) must be flattened to 8-bit first — otherwise `PngEncoder`
+    // returns `Unsupported` and the thumbnail silently fails (the README's
+    // claimed HDR/EXR support never actually rendered). `to_rgba8` naively
+    // clamps values > 1.0 (blown highlights), which is fine for a small
+    // preview; non-float images pass through untouched.
+    let thumbnail = match thumbnail.color() {
+        image::ColorType::Rgb32F | image::ColorType::Rgba32F => {
+            image::DynamicImage::ImageRgba8(thumbnail.to_rgba8())
+        }
+        _ => thumbnail,
+    };
+
     let mut buffer = Cursor::new(Vec::new());
     thumbnail
         .write_to(&mut buffer, ImageFormat::Png)
@@ -175,4 +188,29 @@ pub fn get_cache_size() -> u64 {
                 .sum()
         })
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generate_thumbnail_flattens_hdr_float_to_png() {
+        // Regression for the HDR/EXR thumbnail bug: `image::open` decodes .hdr
+        // to an Rgb32F image, which `PngEncoder` rejects (Unsupported) — so the
+        // preview silently failed with an encode error. generate_thumbnail must
+        // flatten float pixels to 8-bit before PNG-encoding. A pixel value > 1.0
+        // exercises real HDR data (clamped on the way down to 8-bit).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hdr_preview.hdr");
+        let img = image::Rgb32FImage::from_pixel(8, 4, image::Rgb([2.5, 0.5, 0.1]));
+        image::DynamicImage::ImageRgb32F(img)
+            .save_with_format(&path, ImageFormat::Hdr)
+            .expect("write test .hdr");
+
+        let bytes =
+            generate_thumbnail(&path, 256).expect("HDR thumbnail must encode to PNG, not error");
+        // The output is a real PNG (8-byte signature), not an encoder failure.
+        assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n");
+    }
 }

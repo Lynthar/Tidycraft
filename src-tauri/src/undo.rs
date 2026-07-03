@@ -64,6 +64,12 @@ pub struct UndoResult {
     pub errors: Vec<String>,
     /// 被撤销的操作描述
     pub operation_description: String,
+    /// 本次**实际还原成功**的 `(原路径, 新路径)` 对。命令层用它把标签绑定迁回
+    /// (new_path → original)——只迁移真正搬回去了的文件,所以部分失败的撤销不会把
+    /// 仍停在 new_path 的文件的标签剥走(旧实现用 `original.exists()` 猜测,在
+    /// 「original 被无关占位文件顶替」时会误判)。不序列化给前端。
+    #[serde(skip)]
+    pub reverted_pairs: Vec<(String, String)>,
 }
 
 /// 历史记录摘要（用于 UI 显示）
@@ -200,6 +206,7 @@ impl UndoManager {
             failed_count: result.failed_count,
             errors: result.errors,
             operation_description: description,
+            reverted_pairs: result.reverted_pairs,
         })
     }
 
@@ -226,6 +233,7 @@ impl UndoManager {
             failed_count: result.failed_count,
             errors: result.errors,
             operation_description: description,
+            reverted_pairs: result.reverted_pairs,
         })
     }
 
@@ -255,25 +263,6 @@ impl UndoManager {
     /// 检查是否有可撤销的操作
     pub fn can_undo(&self) -> bool {
         self.history.iter().any(|op| !op.undone)
-    }
-
-    /// 返回 `undo_last` 接下来会撤销的那一批的 `(原路径, 新路径)` 列表(最近一个
-    /// 未撤销批次),不做任何修改。命令层用它在文件被改回原名后把标签绑定一并迁
-    /// 回——`undo.rs` 本身访问不到项目的 `TagsData`。无可撤销时返回空。
-    pub fn peek_last_undoable_pairs(&self) -> Vec<(String, String)> {
-        match self.history.iter().rposition(|op| !op.undone) {
-            Some(idx) => batch_pairs(&self.history[idx]),
-            None => Vec::new(),
-        }
-    }
-
-    /// 同 [`Self::peek_last_undoable_pairs`],但针对 `undo_by_id` 会命中的批次
-    /// (相同的 `id == id && !undone` 选择逻辑)。
-    pub fn peek_pairs_by_id(&self, id: &str) -> Vec<(String, String)> {
-        match self.history.iter().find(|op| op.id == id && !op.undone) {
-            Some(batch) => batch_pairs(batch),
-            None => Vec::new(),
-        }
     }
 
     /// 清空历史记录
@@ -310,18 +299,17 @@ impl Default for UndoManager {
     }
 }
 
-/// 从一个批次中提取 `(原路径, 新路径)` 对,跳过没有记录 `new_path` 的操作
-/// (今天没有——Rename/Move 总会写——但字段是 `Option`,防御性处理)。
-fn batch_pairs(batch: &BatchOperation) -> Vec<(String, String)> {
-    batch
-        .operations
-        .iter()
-        .filter_map(|op| {
-            op.new_path
-                .as_ref()
-                .map(|np| (op.original_path.clone(), np.clone()))
-        })
-        .collect()
+/// 判断 `a`、`b` 是否在同一目录下、文件名仅大小写不同——即大小写不敏感文件系统上
+/// 「撤销一次纯大小写改名」会让目标 `exists()` 命中源文件自身的情形。仅用于 Rename
+/// 撤销分支放行这种改名。
+fn same_file_ignoring_case(a: &Path, b: &Path) -> bool {
+    a.parent() == b.parent()
+        && match (a.file_name(), b.file_name()) {
+            (Some(x), Some(y)) => {
+                x.to_string_lossy().to_lowercase() == y.to_string_lossy().to_lowercase()
+            }
+            _ => false,
+        }
 }
 
 /// 执行批量撤销
@@ -329,11 +317,19 @@ fn execute_batch_undo(operations: &[FileOperation]) -> UndoResult {
     let mut reverted_count = 0;
     let mut failed_count = 0;
     let mut errors = Vec::new();
+    // 只收集真正还原成功的 (原路径, 新路径) 对,供命令层把标签迁回。失败的操作
+    // (源丢失 / 目标被占用)不进此列表,其标签因此留在 new_path 不被误迁。
+    let mut reverted_pairs: Vec<(String, String)> = Vec::new();
 
     // 反向遍历操作列表，按相反顺序撤销
     for op in operations.iter().rev() {
         match execute_single_undo(op) {
-            Ok(()) => reverted_count += 1,
+            Ok(()) => {
+                reverted_count += 1;
+                if let Some(np) = &op.new_path {
+                    reverted_pairs.push((op.original_path.clone(), np.clone()));
+                }
+            }
             Err(e) => {
                 failed_count += 1;
                 errors.push(e);
@@ -347,6 +343,7 @@ fn execute_batch_undo(operations: &[FileOperation]) -> UndoResult {
         failed_count,
         errors,
         operation_description: String::new(),
+        reverted_pairs,
     }
 }
 
@@ -370,8 +367,10 @@ fn execute_single_undo(operation: &FileOperation) -> Result<(), String> {
                 ));
             }
 
-            // 检查目标路径是否已存在
-            if dst.exists() {
+            // 检查目标路径是否已存在。纯大小写改名的撤销(foo.png → FOO.PNG)在大小写
+            // 不敏感文件系统上会让 dst.exists() 命中 src 自身,所以当 dst 只是 src 的
+            // 大小写变体(同目录、文件名忽略大小写相等)时放行——fs::rename 能正确改名。
+            if dst.exists() && !same_file_ignoring_case(src, dst) {
                 return Err(format!(
                     "Target path already exists: {}",
                     operation.original_path
@@ -745,50 +744,6 @@ mod tests {
     }
 
     #[test]
-    fn peek_last_undoable_pairs_is_read_only_and_empties_after_undone() {
-        // The command layer peeks these pairs to carry tag bindings back after
-        // an undo. Peeking must not mutate, and a fully-undone history yields
-        // nothing (so no stale tag carry happens).
-        let mut manager = UndoManager::new(10);
-        manager.record_batch(
-            "Rename".to_string(),
-            vec![FileOperation {
-                operation_type: OperationType::Rename,
-                original_path: "/a.txt".to_string(),
-                new_path: Some("/b.txt".to_string()),
-                timestamp: current_timestamp(),
-            }],
-        );
-
-        let pairs = manager.peek_last_undoable_pairs();
-        assert_eq!(pairs, vec![("/a.txt".to_string(), "/b.txt".to_string())]);
-        // Read-only: still undoable after peeking.
-        assert!(manager.can_undo());
-
-        manager.history[0].undone = true;
-        assert!(manager.peek_last_undoable_pairs().is_empty());
-    }
-
-    #[test]
-    fn peek_pairs_by_id_matches_the_targeted_batch() {
-        let mut manager = UndoManager::new(10);
-        let id = manager.record_batch(
-            "Move".to_string(),
-            vec![FileOperation {
-                operation_type: OperationType::Move,
-                original_path: "/old/x.png".to_string(),
-                new_path: Some("/new/x.png".to_string()),
-                timestamp: current_timestamp(),
-            }],
-        );
-        assert_eq!(
-            manager.peek_pairs_by_id(&id),
-            vec![("/old/x.png".to_string(), "/new/x.png".to_string())]
-        );
-        assert!(manager.peek_pairs_by_id("nonexistent").is_empty());
-    }
-
-    #[test]
     fn generated_ids_do_not_collide_within_the_same_second() {
         // The old id was `timestamp_secs ^ stack_addr`, so two batches recorded
         // in the same second produced the same id and undo_by_id targeted the
@@ -797,5 +752,74 @@ mod tests {
         let b = generate_operation_id();
         assert_ne!(a, b);
         assert!(a.starts_with("op_") && b.starts_with("op_"));
+    }
+
+    #[test]
+    fn same_file_ignoring_case_detects_case_only_variants() {
+        // Case-only renames (foo.PNG → foo.png) must be recognized so the undo
+        // guard lets them through on case-insensitive filesystems.
+        assert!(same_file_ignoring_case(
+            Path::new("/a/foo.PNG"),
+            Path::new("/a/foo.png")
+        ));
+        assert!(same_file_ignoring_case(
+            Path::new("/a/FOO.png"),
+            Path::new("/a/foo.png")
+        ));
+        // Different names in the same dir are a real collision, not a variant.
+        assert!(!same_file_ignoring_case(
+            Path::new("/a/foo.png"),
+            Path::new("/a/bar.png")
+        ));
+        // Same name but different directory is not the "src == dst" case.
+        assert!(!same_file_ignoring_case(
+            Path::new("/a/foo.png"),
+            Path::new("/b/foo.png")
+        ));
+    }
+
+    #[test]
+    fn undo_reports_reverted_pairs_for_success_and_omits_failures() {
+        let dir = tempdir().unwrap();
+
+        // A real rename we can undo successfully.
+        let ok_original = create_test_file(dir.path(), "ok_orig.txt");
+        let ok_new = dir.path().join("ok_new.txt");
+        fs::rename(&ok_original, &ok_new).unwrap();
+        let ok_new_str = ok_new.to_string_lossy().to_string();
+
+        let mut manager = UndoManager::new(10);
+        manager.record_batch(
+            "Rename".to_string(),
+            vec![FileOperation {
+                operation_type: OperationType::Rename,
+                original_path: ok_original.clone(),
+                new_path: Some(ok_new_str.clone()),
+                timestamp: current_timestamp(),
+            }],
+        );
+
+        let result = manager.undo_last().unwrap();
+        assert!(result.success);
+        // The successfully reverted pair is reported so the command layer can
+        // carry its tags back to the restored path.
+        assert_eq!(result.reverted_pairs, vec![(ok_original, ok_new_str)]);
+
+        // A rename whose source (new_path) no longer exists fails to undo and
+        // must NOT appear in reverted_pairs — otherwise the command layer would
+        // migrate tags off a file that never moved (the #7 bug).
+        let mut manager2 = UndoManager::new(10);
+        manager2.record_batch(
+            "Rename".to_string(),
+            vec![FileOperation {
+                operation_type: OperationType::Rename,
+                original_path: dir.path().join("gone_orig.txt").to_string_lossy().to_string(),
+                new_path: Some(dir.path().join("gone_new.txt").to_string_lossy().to_string()),
+                timestamp: current_timestamp(),
+            }],
+        );
+        let result2 = manager2.undo_last().unwrap();
+        assert!(!result2.success);
+        assert!(result2.reverted_pairs.is_empty());
     }
 }

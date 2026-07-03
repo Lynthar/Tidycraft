@@ -86,13 +86,16 @@ export const useTagsStore = create<TagsState>((set, get) => ({
     if (!projectId) return;
     // Backend accepts `Option<Option<String>>` for description, mapping:
     //   undefined → don't send the field (leave unchanged)
-    //   null      → set to None (clear)
+    //   null / "" → clear the description
     //   string    → set to Some(s)
-    // Tauri serializes `null` to JSON null which serde reads as `Some(None)`,
-    // and an absent field maps to `None`. The wrapper below preserves that.
+    // IMPORTANT: plain serde deserializes JSON `null` to the OUTER `None`
+    // ("leave unchanged"), NOT `Some(None)` — so sending `null` is a silent
+    // no-op and the description could never actually be cleared. We send an
+    // empty string instead; the backend (`tags.rs::update_tag`) normalizes a
+    // blank string to `None`. An omitted field still means "leave unchanged".
     const payload: Record<string, unknown> = { projectId, tagId, name, color };
     if (description !== undefined) {
-      payload.description = description; // null or string
+      payload.description = description ?? ""; // null → "" so the clear lands
     }
     await invoke<Tag>("update_tag", payload);
     set((state) => ({

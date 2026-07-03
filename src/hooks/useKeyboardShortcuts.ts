@@ -45,9 +45,18 @@ export function useKeyboardShortcuts({ onOpenFolder, onFocusSearch }: KeyboardSh
 
       // Ctrl/Cmd + K: toggle the command palette. Handled before the
       // input-blur guard so it works from inside any text field too.
+      // Only OPEN it when nothing else blocking is up: otherwise the palette
+      // (z-100) stacks over an open modal (Settings / Tag Manager / the AI +
+      // learning modals, z-50) and its switch/close-project commands would run
+      // underneath that modal, so the modal's Apply/Save then writes to the
+      // wrong project. Still allow Ctrl+K to CLOSE the palette when it's the
+      // overlay that's open.
       if (modKey && key.toLowerCase() === "k") {
-        event.preventDefault();
-        useUiStore.getState().toggleCmdk();
+        const ui = useUiStore.getState();
+        if (ui.cmdkOpen || !isBlockingOverlayOpen()) {
+          event.preventDefault();
+          ui.toggleCmdk();
+        }
         return;
       }
 
