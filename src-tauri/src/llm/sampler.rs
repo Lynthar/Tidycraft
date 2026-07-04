@@ -189,6 +189,7 @@ mod tests {
             extension: path.rsplit('.').next().unwrap_or("").to_string(),
             asset_type,
             size: 0,
+            modified: 0,
             metadata: Some(AssetMetadata::default()),
             unity_guid: None,
         }

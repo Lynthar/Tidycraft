@@ -31,6 +31,11 @@ pub struct AssetInfo {
     pub extension: String,
     pub asset_type: AssetType,
     pub size: u64,
+    /// File mtime as unix seconds (0 when unreadable). Besides display,
+    /// this is the frontend's change signal for mounted components:
+    /// CardThumb / AssetPreview key their thumbnail effects on it so an
+    /// external edit refreshes a card that never left the viewport.
+    pub modified: u64,
     pub metadata: Option<AssetMetadata>,
     pub unity_guid: Option<String>,
 }
@@ -1464,7 +1469,12 @@ pub fn scan_directory_with_state(
 
             // Get file metadata
             let metadata = entry_path.metadata().ok();
-            let size = metadata.map(|m| m.len()).unwrap_or(0);
+            let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+            let modified = metadata
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::SystemTime::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
 
             // Determine asset type
             let asset_type = get_asset_type(&extension);
@@ -1484,6 +1494,7 @@ pub fn scan_directory_with_state(
                 extension,
                 asset_type,
                 size,
+                modified,
                 metadata: asset_metadata,
                 unity_guid,
             })
@@ -1575,6 +1586,12 @@ pub fn parse_asset_file(
     // Get file metadata
     let metadata = path.metadata().ok()?;
     let size = metadata.len();
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::SystemTime::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
 
     // Determine asset type
     let asset_type = get_asset_type(&extension);
@@ -1594,6 +1611,7 @@ pub fn parse_asset_file(
         extension,
         asset_type,
         size,
+        modified,
         metadata: asset_metadata,
         unity_guid,
     })

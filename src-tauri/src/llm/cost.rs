@@ -56,6 +56,22 @@ const PROMPT_OVERHEAD_TOKENS_PER_ASSET: usize = 100;
 /// overestimate is preferred to surprise.
 const OUTPUT_TOKENS_PER_ASSET: usize = 150;
 
+/// Rough chars→tokens divisor for the learning estimator. Prompts are
+/// mostly ASCII paths and English prose, where ~4 chars/token is the
+/// standard heuristic; path-heavy text tokenizes a bit denser, which
+/// errs the estimate high — preferred for a pre-call preview.
+const CHARS_PER_TOKEN: usize = 4;
+
+/// Learning output budget. One call returns ONE document, not per-asset
+/// tag lists: fixed conventions/gaps/rules sections plus terms that
+/// scale with what the prompt asks to be echoed back —
+/// `existing_tag_meanings` covers every user tag, and `sample_tags`
+/// carries one entry (path echo + matched/suggested tags) per sampled
+/// file.
+const LEARNING_OUTPUT_BASE_TOKENS: usize = 600;
+const LEARNING_OUTPUT_TOKENS_PER_TAG: usize = 30;
+const LEARNING_OUTPUT_TOKENS_PER_SAMPLE: usize = 40;
+
 fn pricing(model: &str) -> Option<Pricing> {
     match model {
         // Anthropic
@@ -170,12 +186,16 @@ pub fn estimate_cost(request: &TagRequest) -> CostEstimate {
 
     let output_tokens = OUTPUT_TOKENS_PER_ASSET.saturating_mul(request.assets.len());
 
+    finish_estimate(&p, input_tokens, output_tokens)
+}
+
+/// Price a (input, output) token pair with `p` and ceiling-round to whole
+/// cents (10_000 micro-USD = 1 cent). Free providers return 0 cents.
+fn finish_estimate(p: &Pricing, input_tokens: usize, output_tokens: usize) -> CostEstimate {
     let input_micros = (input_tokens as u64).saturating_mul(p.input_per_m) / 1_000_000;
     let output_micros = (output_tokens as u64).saturating_mul(p.output_per_m) / 1_000_000;
     let total_micros = input_micros.saturating_add(output_micros);
 
-    // Ceiling-divide to the next whole cent (10_000 micro-USD = 1 cent).
-    // Free providers return 0 cents.
     let usd_cents = if total_micros == 0 {
         0
     } else {
@@ -187,6 +207,34 @@ pub fn estimate_cost(request: &TagRequest) -> CostEstimate {
         output_tokens_estimate: output_tokens,
         usd_cents,
     }
+}
+
+/// Estimate a LEARNING run. Deliberately NOT `estimate_cost` with a fake
+/// asset count: learning is one text-only call returning one document, so
+/// the tagging math (`150 output tokens × asset_count`) both overcharges
+/// the output side and invites callers to stuff "directory count" into
+/// `asset_count`, which explodes the estimate by orders of magnitude
+/// (~$18 shown for a run that really costs ~$0.32). Input is derived
+/// from the byte length of the ACTUAL prompt the run would send (the
+/// caller builds it with the same sampler + prompt builder as the real
+/// call); output is the bounded document described on the constants.
+pub fn estimate_learning_cost(
+    model: &str,
+    prompt_chars: usize,
+    sample_count: usize,
+    existing_tag_count: usize,
+) -> CostEstimate {
+    let p = match pricing(model) {
+        Some(p) => p,
+        None => return CostEstimate::default(),
+    };
+
+    let input_tokens = prompt_chars / CHARS_PER_TOKEN;
+    let output_tokens = LEARNING_OUTPUT_BASE_TOKENS
+        .saturating_add(LEARNING_OUTPUT_TOKENS_PER_TAG.saturating_mul(existing_tag_count))
+        .saturating_add(LEARNING_OUTPUT_TOKENS_PER_SAMPLE.saturating_mul(sample_count));
+
+    finish_estimate(&p, input_tokens, output_tokens)
 }
 
 #[cfg(test)]
@@ -313,5 +361,53 @@ mod tests {
         let with = estimate_cost(&req("claude-sonnet-4-6", 10, true));
         let without = estimate_cost(&req("claude-sonnet-4-6", 10, false));
         assert!(without.input_tokens < with.input_tokens);
+    }
+
+    // ----- Learning estimator -----
+
+    #[test]
+    fn learning_unknown_model_returns_zero() {
+        let est = estimate_learning_cost("not-a-model", 100_000, 500, 10);
+        assert_eq!(est.usd_cents, 0);
+        assert_eq!(est.input_tokens, 0);
+    }
+
+    #[test]
+    fn learning_output_scales_with_samples_and_tags_not_dirs_times_150() {
+        // 800 dirs × depth 10 = 8000 samples. The tagging estimator abused
+        // with that as "asset count" would budget 8000 × 150 = 1.2M output
+        // tokens (~$18 on Sonnet). The learning call returns ONE document;
+        // its output must stay orders of magnitude below that.
+        let est = estimate_learning_cost("claude-sonnet-4-6", 400_000, 8000, 20);
+        assert!(
+            est.output_tokens_estimate < 8000 * OUTPUT_TOKENS_PER_ASSET / 3,
+            "learning output budget ({}) must not look like per-asset tagging",
+            est.output_tokens_estimate
+        );
+        // And it still scales in the right direction.
+        let smaller = estimate_learning_cost("claude-sonnet-4-6", 40_000, 200, 5);
+        assert!(smaller.output_tokens_estimate < est.output_tokens_estimate);
+        assert!(smaller.input_tokens < est.input_tokens);
+    }
+
+    #[test]
+    fn learning_typical_project_is_cents_not_dollars() {
+        // ~120 dirs × depth 10 ≈ 1200 samples; the real prompt for that is
+        // roughly 60k chars (≈15k tokens). On Sonnet this must land in
+        // "cents" territory (the report's worked example: ~$0.32), far from
+        // the ~$18 the abused tagging estimator displayed.
+        let est = estimate_learning_cost("claude-sonnet-4-6", 60_000, 1200, 10);
+        assert!(est.usd_cents >= 1);
+        assert!(
+            est.usd_cents < 200,
+            "expected cents-range estimate, got {} cents",
+            est.usd_cents
+        );
+    }
+
+    #[test]
+    fn learning_input_tracks_prompt_size() {
+        let est = estimate_learning_cost("claude-sonnet-4-6", 80_000, 100, 0);
+        assert_eq!(est.input_tokens, 80_000 / CHARS_PER_TOKEN);
     }
 }

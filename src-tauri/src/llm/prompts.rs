@@ -104,7 +104,7 @@ Output strict JSON in this exact shape:
     { "kind": "filename_token", "pattern": "BaseColor", "tags": ["diffuse-map"], "confidence": 0.95 },
     { "kind": "path_prefix",    "pattern": "Characters/Hero/", "tags": ["hero"], "confidence": 0.99 },
     { "kind": "path_segment",   "pattern": "weapons", "tags": ["weapon"], "confidence": 0.92 },
-    { "kind": "filename_regex", "pattern": "^SM_.*\\.fbx$", "tags": ["static-mesh", "model"], "confidence": 0.9 }
+    { "kind": "filename_regex", "pattern": "(^|/)SM_[^/]*\\.fbx$", "tags": ["static-mesh", "model"], "confidence": 0.9 }
   ]
 }
 
@@ -119,7 +119,7 @@ Rule kinds:
 - "filename_token": match if filename (basename) contains the literal token, case-insensitive. Most common; prefer this.
 - "path_prefix": match if relative path starts with the literal prefix. Use for "everything under X is Y".
 - "path_segment": match if relative path contains the literal segment as a full path component (so "hero" matches "a/hero/b" but not "a/heroic/b").
-- "filename_regex": free-form regex applied to the full relative path. Use only when the simpler kinds don't fit — regexes are harder to review.
+- "filename_regex": free-form regex applied to the FULL relative path (e.g. "Props/Rocks/SM_Rock.fbx"), NOT the bare filename. To match a filename prefix, anchor with "(^|/)" as in the example — a bare "^" only matches at the start of the whole path, so "^SM_" would never match files inside subdirectories. Use only when the simpler kinds don't fit — regexes are harder to review.
 
 Hard rules:
 - PREFER existing project tags when matching samples (`matched_existing`) and when emitting rules (`rules[].tags`). Only invent NEW tags (`suggested_new`, `tag_gaps`, fresh labels in rules) when no existing tag fits.

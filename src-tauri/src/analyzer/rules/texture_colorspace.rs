@@ -124,6 +124,7 @@ mod tests {
             extension: name.rsplit('.').next().unwrap_or("png").to_string(),
             asset_type: AssetType::Texture,
             size: 1024,
+            modified: 0,
             metadata: Some(AssetMetadata {
                 color_space: color_space.map(str::to_string),
                 ..Default::default()

@@ -285,6 +285,7 @@ mod tests {
             extension: path.rsplit('.').next().unwrap_or("").into(),
             asset_type: AssetType::Texture,
             size: 0,
+            modified: 0,
             metadata: Some(AssetMetadata::default()),
             unity_guid: None,
         }
@@ -397,6 +398,44 @@ mod tests {
         assert_eq!(groups[0].file_paths.len(), 1);
         assert!(groups[0].file_paths[0].ends_with("SM_Sword.fbx"));
         assert!(groups[0].hint.contains("regex"));
+    }
+
+    #[test]
+    fn prompt_example_regex_is_alive_in_subdirectories() {
+        // The learning system prompt's filename_regex example must produce a
+        // rule that matches files inside subdirectories. The old example
+        // `^SM_.*\.fbx$` anchored to the START OF THE PATH — models imitating
+        // it emitted rules that never matched anything below the project
+        // root ("dead rules" the review panel's syntax check can't catch).
+        let s = scan(
+            "/p",
+            &[
+                "/p/SM_Root.fbx",
+                "/p/Props/Rocks/SM_Rock.fbx",
+                "/p/Props/XSM_NotAMatch.fbx",
+            ],
+        );
+        let rules = vec![LearnedRule::FilenameRegex {
+            pattern: r"(^|/)SM_[^/]*\.fbx$".into(),
+            tags: vec!["static-mesh".into()],
+            confidence: 0.9,
+        }];
+        let groups = RuleSuggester::new(rules).suggest(&s);
+        assert_eq!(groups.len(), 1);
+        let mut hits = groups[0].file_paths.clone();
+        hits.sort();
+        assert_eq!(hits.len(), 2, "root + subdirectory files must both match");
+        assert!(hits[0].ends_with("Props/Rocks/SM_Rock.fbx"));
+        assert!(hits[1].ends_with("SM_Root.fbx"));
+
+        // And the prompt's JSON example must carry the live pattern — guard
+        // against a regression back to the dead string-start anchor. (The
+        // prose may still MENTION "^SM_" as the counter-example; only the
+        // example rule's pattern value matters, since that's what models
+        // imitate.)
+        let prompt = crate::llm::prompts::SYSTEM_PROMPT_LEARNING;
+        assert!(prompt.contains(r#""pattern": "(^|/)SM_[^/]*\\.fbx$""#));
+        assert!(!prompt.contains(r#""pattern": "^SM_"#));
     }
 
     #[test]

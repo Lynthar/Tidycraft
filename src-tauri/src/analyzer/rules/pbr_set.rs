@@ -282,6 +282,7 @@ mod tests {
             extension,
             asset_type: AssetType::Texture,
             size: 1024,
+            modified: 0,
             metadata: Some(AssetMetadata::default()),
             unity_guid: None,
         }

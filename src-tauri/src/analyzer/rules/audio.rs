@@ -185,6 +185,7 @@ mod tests {
             extension: "wav".to_string(),
             asset_type: AssetType::Audio,
             size: 1024,
+            modified: 0,
             metadata: Some(AssetMetadata {
                 sample_rate: Some(sample_rate),
                 ..Default::default()

@@ -223,10 +223,15 @@ export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose 
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      // Letter shortcuts must be unmodified: Ctrl/Cmd+R is the app-level
+      // rescan chord (gated while the lightbox is open) and must not
+      // double as "reset camera" here.
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       switch (e.key) {
-        case "Escape":
-          onClose();
-          break;
         case "g":
         case "G":
           setShowGrid((prev) => !prev);

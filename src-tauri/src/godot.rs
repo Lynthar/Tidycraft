@@ -664,6 +664,7 @@ config/name="Minimal"
             extension: ext.to_string(),
             asset_type: AssetType::Other,
             size: 1,
+            modified: 0,
             metadata: None,
             unity_guid: None,
         };
@@ -699,6 +700,7 @@ config/name="Minimal"
             extension: ext.to_string(),
             asset_type: AssetType::Other,
             size: 1,
+            modified: 0,
             metadata: None,
             unity_guid: None,
         };

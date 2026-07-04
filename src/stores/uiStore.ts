@@ -120,6 +120,14 @@ interface UiState {
   depGraphOpen: boolean;
   depGraphAssetPath: string | null;
 
+  /** True while a fullscreen media lightbox (image or 3D model) is up.
+   *  The lightboxes live as AssetPreview-local state; AssetPreview
+   *  mirrors them here so `isBlockingOverlayOpen` can gate global
+   *  shortcuts — otherwise Del inside a lightbox opens a delete-confirm
+   *  dialog HIDDEN BEHIND it with the confirm button focused (Enter
+   *  blind-deletes), and Ctrl+R rescans the whole project. */
+  lightboxOpen: boolean;
+
   setCmdkOpen: (open: boolean) => void;
   toggleCmdk: () => void;
   setSettingsOpen: (open: boolean) => void;
@@ -139,6 +147,7 @@ interface UiState {
   setLearnSetupOpen: (open: boolean) => void;
   setLearnReviewOpen: (open: boolean, data?: AiLearningResult) => void;
   setDepGraphOpen: (open: boolean, assetPath?: string) => void;
+  setLightboxOpen: (open: boolean) => void;
 }
 
 export const useUiStore = create<UiState>((set, get) => ({
@@ -156,6 +165,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   learnReviewData: null,
   depGraphOpen: false,
   depGraphAssetPath: null,
+  lightboxOpen: false,
   setCmdkOpen: (open) => set({ cmdkOpen: open }),
   toggleCmdk: () => set({ cmdkOpen: !get().cmdkOpen }),
   setSettingsOpen: (open) => set({ settingsOpen: open }),
@@ -183,12 +193,14 @@ export const useUiStore = create<UiState>((set, get) => ({
       depGraphOpen: open,
       depGraphAssetPath: open ? assetPath ?? null : null,
     }),
+  setLightboxOpen: (open) => set({ lightboxOpen: open }),
 }));
 
 /// True when a blocking, backdrop-covered overlay is open (command palette,
 /// settings, tag manager, the AI analyze/result modals, the learning modals,
-/// or the dependency graph). Global window-level key handlers (Del, Ctrl+1/2/3,
-/// rescan, …) consult this so they don't fire underneath a modal.
+/// the dependency graph, or a fullscreen media lightbox). Global window-level
+/// key handlers (Del, Ctrl+1/2/3, rescan, …) consult this so they don't fire
+/// underneath a modal.
 ///
 /// Deliberately EXCLUDES `aiPanelOpen` — the AI Tag panel is a floating side
 /// panel with no backdrop, so the asset list behind it stays interactive.
@@ -204,7 +216,8 @@ export function isBlockingOverlayOpen(): boolean {
     s.aiResultOpen ||
     s.learnSetupOpen ||
     s.learnReviewOpen ||
-    s.depGraphOpen
+    s.depGraphOpen ||
+    s.lightboxOpen
   );
 }
 

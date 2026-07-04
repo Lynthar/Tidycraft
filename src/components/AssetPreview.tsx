@@ -71,6 +71,20 @@ export function AssetPreview() {
     return () => clearTimeout(handle);
   }, [errorMsg]);
 
+  // Mirror the fullscreen lightboxes into uiStore so global shortcut
+  // handlers (Del, Ctrl+D, Ctrl+R, arrow navigation…) are gated by
+  // isBlockingOverlayOpen while one is up. Their open flags are local
+  // to this component; without the mirror, Del inside a lightbox used
+  // to open a delete-confirm dialog hidden BEHIND it with the confirm
+  // button focused — Enter then deleted files sight unseen.
+  const setLightboxUiOpen = useUiStore((s) => s.setLightboxOpen);
+  const anyLightboxOpen = lightboxOpen || modelLightboxOpen;
+  useEffect(() => {
+    setLightboxUiOpen(anyLightboxOpen);
+    // Unmount while open (asset deselected / project switched): unblock.
+    return () => setLightboxUiOpen(false);
+  }, [anyLightboxOpen, setLightboxUiOpen]);
+
   // Look up an editor mapping for the selected asset's extension. The
   // header ⤴ button's behavior switches between "open in <editor>" and
   // "open with default app" based on whether this is set.
@@ -123,7 +137,11 @@ export function AssetPreview() {
     return () => {
       cancelled = true;
     };
-  }, [selectedAsset?.path]);
+    // `modified` re-fetches when the watcher re-parses the selected file
+    // after an external edit (applyFsChange swaps selectedAsset to the
+    // fresh copy); the backend disk cache is mtime-keyed, so this returns
+    // the regenerated image rather than the stale one.
+  }, [selectedAsset?.path, selectedAsset?.modified]);
 
   const copyToClipboard = async (text: string, type: "path" | "guid") => {
     try {

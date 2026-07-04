@@ -48,6 +48,10 @@ export interface AssetInfo {
   extension: string;
   asset_type: AssetType;
   size: number;
+  /** File mtime as unix seconds (0 when unreadable). Change signal for
+   *  mounted thumbnail views: CardThumb / AssetPreview key their fetch
+   *  effects on it so an externally edited file refreshes in place. */
+  modified: number;
   metadata?: AssetMetadata;
   unity_guid?: string;
 }

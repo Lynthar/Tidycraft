@@ -445,6 +445,7 @@ mod tests {
                 .to_string(),
             asset_type,
             size: 1,
+            modified: 0,
             metadata: Some(AssetMetadata::default()),
             unity_guid: None,
         }

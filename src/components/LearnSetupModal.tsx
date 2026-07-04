@@ -65,20 +65,21 @@ export function LearnSetupModal() {
       .catch((e) => console.warn("[LearnSetup] read_project_meta failed:", e));
   }, [open, activeProjectId]);
 
-  // Quick cost preview using `llm_estimate_cost` as an approximation —
-  // the real learning prompt size depends on sample count (depth × dirs)
-  // + tag count. For now we approximate as `depth × 10` "asset-equivalent
-  // calls" which matches order-of-magnitude for typical projects.
+  // Cost preview via the dedicated learning estimator: the backend builds
+  // the SAME prompt the run would send (same sampler + seed + builder) and
+  // prices that, plus a bounded single-document output budget. The old
+  // `depth × 10` asset-equivalents fed into the per-asset tagging estimator
+  // were off by orders of magnitude on directory-heavy projects (its
+  // 150-output-tokens-per-"asset" math never described a learning call).
   useEffect(() => {
-    if (!open || !provider || !config) return;
+    if (!open || !provider || !config || !activeProjectId) return;
     let cancelled = false;
     setLoadingCost(true);
-    const approxAssetCount = Math.max(depth * 10, 20);
-    invoke<CostEstimate>("llm_estimate_cost", {
+    invoke<CostEstimate>("estimate_learning_cost", {
+      projectId: activeProjectId,
       provider,
       model: config.model,
-      assetCount: approxAssetCount,
-      hasThumbnails: false, // learning mode is text-only
+      samplingDepth: depth,
     })
       .then((c) => {
         if (!cancelled) setCost(c);
@@ -92,7 +93,7 @@ export function LearnSetupModal() {
     return () => {
       cancelled = true;
     };
-  }, [open, provider, config?.model, depth]);
+  }, [open, provider, config?.model, depth, activeProjectId]);
 
   const handleContinue = async () => {
     if (!provider || !config || !activeProjectId || running) return;
