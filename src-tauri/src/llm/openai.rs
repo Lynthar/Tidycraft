@@ -96,6 +96,11 @@ struct OpenAIResponse {
 #[derive(Deserialize)]
 struct OpenAIChoice {
     message: OpenAIChoiceMessage,
+    /// `"stop"` normally; `"length"` when the reply was cut at the output
+    /// cap — surfaced as `LLMError::Truncated` (mirrors claude.rs's
+    /// `stop_reason` handling). Optional so shapes without it still parse.
+    #[serde(default)]
+    finish_reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -140,22 +145,33 @@ fn build_user_content_blocks(
 
 // ---- Response → TagResponse ----
 
-fn extract_response(parsed: OpenAIResponse) -> Result<TagResponse, LLMError> {
-    let text = parsed
+/// Pull the text reply + usage out of a parsed response. A
+/// `finish_reason: "length"` reply was cut at the output cap, so it's
+/// reported as `Truncated` before any JSON parsing (which would fail by
+/// construction) — mirrors claude.rs's `stop_reason` handling. Shared by
+/// the tagging path and learning's `send_text_chat`.
+fn extract_text_response(parsed: OpenAIResponse) -> Result<(String, Usage), LLMError> {
+    let usage = Usage {
+        input_tokens: parsed.usage.prompt_tokens,
+        output_tokens: parsed.usage.completion_tokens,
+        cached: false,
+    };
+    let choice = parsed
         .choices
         .into_iter()
         .next()
-        .map(|c| c.message.content)
         .ok_or_else(|| LLMError::ParseError("OpenAI response had no choices".into()))?;
+    if choice.finish_reason.as_deref() == Some("length") {
+        return Err(LLMError::Truncated);
+    }
+    Ok((choice.message.content, usage))
+}
+
+/// Tagging-path wrapper: text reply → parsed suggestions.
+fn extract_response(parsed: OpenAIResponse) -> Result<TagResponse, LLMError> {
+    let (text, usage) = extract_text_response(parsed)?;
     let suggestions = super::parse_suggestions(&text)?;
-    Ok(TagResponse {
-        suggestions,
-        usage: Usage {
-            input_tokens: parsed.usage.prompt_tokens,
-            output_tokens: parsed.usage.completion_tokens,
-            cached: false,
-        },
-    })
+    Ok(TagResponse { suggestions, usage })
 }
 
 // ---- HTTP call ----
@@ -250,8 +266,13 @@ impl LLMProvider for OpenAIProvider {
             .clone()
             .unwrap_or_else(|| ENDPOINT.to_string());
 
-        suggest_with_cache(self.id(), request, move |miss_request| async move {
-            call_openai(&api_key, &model, &endpoint, miss_request).await
+        // FnMut: called once per chunk of misses, so clone per call instead
+        // of moving into a one-shot async block.
+        suggest_with_cache(self.id(), request, move |miss_request| {
+            let api_key = api_key.clone();
+            let model = model.clone();
+            let endpoint = endpoint.clone();
+            async move { call_openai(&api_key, &model, &endpoint, miss_request).await }
         })
         .await
     }
@@ -342,20 +363,9 @@ async fn send_text_chat(
         .json()
         .await
         .map_err(|e| LLMError::ParseError(format!("OpenAI JSON: {e}")))?;
-    let text = parsed
-        .choices
-        .into_iter()
-        .next()
-        .map(|c| c.message.content)
-        .ok_or_else(|| LLMError::ParseError("OpenAI response had no choices".into()))?;
-    Ok((
-        text,
-        Usage {
-            input_tokens: parsed.usage.prompt_tokens,
-            output_tokens: parsed.usage.completion_tokens,
-            cached: false,
-        },
-    ))
+    // Shared extractor: also turns a finish_reason="length" cutoff into
+    // `Truncated` for the learning path.
+    extract_text_response(parsed)
 }
 
 #[cfg(test)]
@@ -396,6 +406,37 @@ mod tests {
             Err(LLMError::ParseError(msg)) => assert!(msg.contains("no choices"), "got: {msg}"),
             other => panic!("expected ParseError, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn truncated_response_reports_truncation_not_parse_error() {
+        // `finish_reason: "length"` = reply cut at the output cap (OpenAI's
+        // equivalent of Anthropic's `stop_reason: "max_tokens"`). Same
+        // treatment: Truncated, not an opaque ParseError.
+        let json = r#"{
+            "choices": [{
+                "message": { "role": "assistant", "content": "{\"suggestions\":[{\"asset_pa" },
+                "finish_reason": "length"
+            }],
+            "usage": { "prompt_tokens": 5000, "completion_tokens": 4096 }
+        }"#;
+        match parse_response_json(json) {
+            Err(LLMError::Truncated) => {}
+            other => panic!("expected Truncated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn normal_finish_reason_still_parses() {
+        let json = r#"{
+            "choices": [{
+                "message": { "role": "assistant", "content": "{\"suggestions\":[]}" },
+                "finish_reason": "stop"
+            }],
+            "usage": { "prompt_tokens": 10, "completion_tokens": 5 }
+        }"#;
+        let r = parse_response_json(json).unwrap();
+        assert!(r.suggestions.is_empty());
     }
 
     #[test]

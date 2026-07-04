@@ -26,7 +26,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 // ============ Project Lifecycle ============
 
@@ -640,9 +640,12 @@ async fn learn_project_conventions(
 
     let result = prov.learn_project(&request).await.map_err(String::from)?;
 
-    // Persist rules to <project>/tidycraft.ai.toml. Save errors are
-    // non-fatal — the user already has the result in hand; worst case
-    // they re-learn next time. We log via eprintln (no log crate yet).
+    // Stage the rules in memory — NOTHING is written to disk here. The review
+    // panel's Save (`save_ai_rules`) is the single commit point: it takes this
+    // pending doc (true provider/model/depth metadata included) and persists
+    // the user-approved rule list. Closing the panel without saving therefore
+    // really discards the run, and unreviewed rules never influence
+    // `suggest_tags` (which reads only the on-disk tidycraft.ai.toml).
     let doc = llm::rule_store::AiRulesDoc {
         last_learned: chrono::Utc::now().to_rfc3339(),
         prompt_version: llm::learning::LEARNING_PROMPT_VERSION,
@@ -651,17 +654,19 @@ async fn learn_project_conventions(
         model_used: model,
         rules: result.rules.clone(),
     };
-    if let Err(e) = doc.save(Path::new(&root_path)) {
-        eprintln!("[learn_project_conventions] save tidycraft.ai.toml failed: {e}");
-    }
+    project::with_mut(&project_id, |state| {
+        state.pending_ai_rules = Some(doc);
+        Ok(())
+    })?;
 
     Ok(result)
 }
 
 /// Read the project's `tidycraft.ai.toml` if it exists. Frontend uses
 /// this to populate the AITagPanel header status badge ("AI · 5d ago,
-/// N rules") and to pre-fill LearnReviewPanel when the user clicks
-/// Review without re-running the call.
+/// N rules"). Deliberately reads only the SAVED doc — a learning run
+/// that hasn't been confirmed in the review panel (still pending in
+/// `ProjectState.pending_ai_rules`) is not active and doesn't show here.
 #[tauri::command]
 fn read_ai_rules(project_id: String) -> Result<Option<llm::rule_store::AiRulesDoc>, String> {
     project::with_ref(&project_id, |state| {
@@ -669,31 +674,25 @@ fn read_ai_rules(project_id: String) -> Result<Option<llm::rule_store::AiRulesDo
     })
 }
 
-/// Persist a hand-edited rule list (e.g. user deleted unwanted rules in
-/// LearnReviewPanel before applying). Preserves the original metadata
-/// (last_learned, provider_used, etc.) loaded from disk; only `rules`
-/// is replaced. If no doc exists yet (shouldn't happen — we only call
-/// save after a successful learn), creates a fresh one with current
-/// timestamp.
+/// The review panel's Save: the single point where learned rules reach disk.
+/// Takes the pending doc staged by `learn_project_conventions` (carrying that
+/// run's true metadata) and writes it with the user-edited rule list; with no
+/// pending run (re-saving edits later), preserves the on-disk doc's metadata.
+/// See `AiRulesDoc::for_save` for the exact precedence.
 #[tauri::command]
 fn save_ai_rules(
     project_id: String,
     rules: Vec<llm::learning::LearnedRule>,
 ) -> Result<(), String> {
-    project::with_ref(&project_id, |state| {
+    project::with_mut(&project_id, |state| {
         let root = Path::new(&state.root_path);
-        let mut doc = llm::rule_store::AiRulesDoc::load(root)?.unwrap_or_else(|| {
-            llm::rule_store::AiRulesDoc {
-                last_learned: chrono::Utc::now().to_rfc3339(),
-                prompt_version: llm::learning::LEARNING_PROMPT_VERSION,
-                sampling_depth: 5,
-                provider_used: "unknown".into(),
-                model_used: "unknown".into(),
-                rules: Vec::new(),
-            }
-        });
-        doc.rules = rules;
-        doc.save(root)
+        let pending = state.pending_ai_rules.take();
+        let on_disk = if pending.is_none() {
+            llm::rule_store::AiRulesDoc::load(root)?
+        } else {
+            None
+        };
+        llm::rule_store::AiRulesDoc::for_save(pending, on_disk, rules).save(root)
     })
 }
 
@@ -1762,17 +1761,6 @@ fn apply_rename_operation(name: &str, operation: &RenameOperation) -> String {
     }
 }
 
-/// True when `old_name` and `new_name` differ only in case (e.g. `Foo.PNG` vs
-/// `foo.png`). On case-insensitive filesystems (NTFS/APFS) such a rename makes
-/// the target `exists()`-resolve to the *source* file itself, so the "target
-/// already exists" guard must skip it — `fs::rename` performs the case change
-/// correctly. Uses full Unicode case folding (`to_lowercase`), not just ASCII,
-/// so `Ä`→`ä` is covered too. `old_name == new_name` is not a case-only rename
-/// (the callers skip no-op renames earlier anyway).
-fn is_case_only_rename(old_name: &str, new_name: &str) -> bool {
-    old_name != new_name && old_name.to_lowercase() == new_name.to_lowercase()
-}
-
 #[tauri::command]
 fn preview_batch_rename(paths: Vec<String>, operation: RenameOperation) -> Vec<RenamePreview> {
     paths
@@ -1826,13 +1814,15 @@ fn execute_batch_rename(
 
         let new_path = path_obj.with_file_name(&new_name);
 
-        // A pure case change (foo.PNG → foo.png) resolves `exists()` to the
-        // source file itself on case-insensitive filesystems (NTFS/APFS), which
-        // would wrongly abort the rename. `fs::rename` handles case-only renames
-        // fine, so only reject a *different* pre-existing file. (This guard is
-        // why the ToLowercase/ToUppercase/ToTitleCase ops were 100% broken on
-        // Windows/macOS.)
-        if !is_case_only_rename(&name, &new_name) && new_path.exists() {
+        // The target may `exists()`-resolve to the source file itself — a pure
+        // case change (foo.PNG → foo.png) on case-insensitive filesystems
+        // (NTFS/APFS), or an NFC/NFD Unicode variant on macOS. `fs::rename`
+        // handles those fine, so only reject when the occupant is genuinely a
+        // *different* file. Identity is checked by dev+inode (undo.rs), not by
+        // name: on case-sensitive filesystems `foo.png` and `FOO.PNG` can
+        // coexist, and a name-based "case-only ⇒ allow" guess would let the
+        // rename silently clobber the other file.
+        if new_path.exists() && !undo::paths_are_same_file(path_obj, &new_path) {
             errors.push(format!("Target already exists: {}", new_path.display()));
             error_count += 1;
             continue;
@@ -2414,10 +2404,11 @@ fn rename_file(project_id: String, old_path: String, new_name: String) -> Result
         .unwrap_or("")
         .to_string();
 
-    // A pure case change (foo.PNG → foo.png) trips `exists()` against the source
-    // file itself on case-insensitive filesystems; `fs::rename` handles it fine,
-    // so skip the guard for a case-only rename (see execute_batch_rename).
-    if !is_case_only_rename(&old_name, &new_name) && new_path.exists() {
+    // The target may `exists()`-resolve to the source itself (case-only rename
+    // on a case-insensitive filesystem, NFC/NFD variant on macOS) — allowed,
+    // `fs::rename` handles it. Only a genuinely different occupant is a
+    // conflict; identity is by dev+inode, not name (see execute_batch_rename).
+    if new_path.exists() && !undo::paths_are_same_file(old_path_ref, &new_path) {
         return Err("A file with this name already exists".to_string());
     }
 
@@ -2651,10 +2642,17 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
-        .setup(|app| {
+        .setup(|_app| {
+            // Debug builds auto-open the inspector. `open_devtools` (and the
+            // inspector itself) only exists under `debug_assertions` now that
+            // the `devtools` cargo feature is off — release builds ship
+            // without it (see the tauri dependency note in Cargo.toml).
+            // `_app` + the scoped Manager import keep release builds free of
+            // unused warnings once this block compiles away.
             #[cfg(debug_assertions)]
             {
-                if let Some(window) = app.get_webview_window("main") {
+                use tauri::Manager;
+                if let Some(window) = _app.get_webview_window("main") {
                     window.open_devtools();
                 }
             }

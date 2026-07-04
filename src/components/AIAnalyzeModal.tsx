@@ -149,6 +149,12 @@ export function AIAnalyzeModal() {
         endpoint: config.endpoint ?? null,
         uploadThumbnails,
       });
+      // Project switched while the request was in flight? The switch
+      // subscription already dismissed the AI modals; re-opening the result
+      // panel here would float project A's suggestions over project B, and
+      // AIResultPanel's Apply writes to whichever project is active — the
+      // cross-project-write bug. Discard the response instead.
+      if (useProjectStore.getState().activeProjectId !== activeProjectId) return;
       setAiResultOpen(true, response, paths);
       setAiAnalyzeOpen(false);
     } catch (err) {
@@ -174,6 +180,10 @@ export function AIAnalyzeModal() {
         msg.includes("timed out")
       ) {
         setError(t("aiAnalyze.errNetwork"));
+      } else if (msg.includes("truncated")) {
+        // LLMError::Truncated — output cap hit mid-reply. Chunking makes
+        // this rare, but when it fires the fix is a smaller selection.
+        setError(t("aiAnalyze.errTruncated"));
       } else if (msg.includes("parse")) {
         setError(t("aiAnalyze.errParse"));
       } else {

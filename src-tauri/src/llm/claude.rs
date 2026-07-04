@@ -73,6 +73,12 @@ struct ImageSource {
 struct AnthropicResponse {
     content: Vec<ResponseContent>,
     usage: AnthropicUsage,
+    /// `"end_turn"` normally; `"max_tokens"` when the reply was cut off at
+    /// the output cap — surfaced as `LLMError::Truncated` so the user gets
+    /// "make a smaller request" instead of an opaque parse failure.
+    /// Optional so mock/legacy shapes without the field keep deserializing.
+    #[serde(default)]
+    stop_reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -123,24 +129,36 @@ fn build_content_blocks(
 
 // ---- Response → TagResponse ----
 
-/// Pull the first text block out of the response and parse its JSON
-/// body into suggestions. Separated from the HTTP layer so unit tests
-/// can feed in mock response shapes without spinning up a fake server.
-fn extract_response(parsed: AnthropicResponse) -> Result<TagResponse, LLMError> {
+/// Pull the text reply + usage out of a parsed response. Checks
+/// `stop_reason` BEFORE anything else: a `max_tokens` reply is cut off
+/// mid-generation, so downstream JSON parsing would fail by construction —
+/// and "truncated, make a smaller request" is the actionable diagnosis,
+/// where ParseError would read as model garbage. Shared by the tagging
+/// path (`extract_response`) and the learning path (`send_text_chat`).
+/// Separated from the HTTP layer so unit tests can feed in mock response
+/// shapes without spinning up a fake server.
+fn extract_text_response(parsed: AnthropicResponse) -> Result<(String, Usage), LLMError> {
+    if parsed.stop_reason.as_deref() == Some("max_tokens") {
+        return Err(LLMError::Truncated);
+    }
+    let usage = Usage {
+        input_tokens: parsed.usage.input_tokens,
+        output_tokens: parsed.usage.output_tokens,
+        cached: false,
+    };
     let text = parsed
         .content
         .into_iter()
         .find_map(|c| c.text)
         .ok_or_else(|| LLMError::ParseError("Anthropic response had no text block".into()))?;
+    Ok((text, usage))
+}
+
+/// Tagging-path wrapper: text reply → parsed suggestions.
+fn extract_response(parsed: AnthropicResponse) -> Result<TagResponse, LLMError> {
+    let (text, usage) = extract_text_response(parsed)?;
     let suggestions = super::parse_suggestions(&text)?;
-    Ok(TagResponse {
-        suggestions,
-        usage: Usage {
-            input_tokens: parsed.usage.input_tokens,
-            output_tokens: parsed.usage.output_tokens,
-            cached: false,
-        },
-    })
+    Ok(TagResponse { suggestions, usage })
 }
 
 // ---- HTTP call ----
@@ -225,8 +243,12 @@ impl LLMProvider for ClaudeProvider {
             .ok_or_else(|| LLMError::NoApiKey("claude".into()))?;
         let model = self.config.model.clone();
 
-        suggest_with_cache(self.id(), request, move |miss_request| async move {
-            call_anthropic(&api_key, &model, miss_request).await
+        // FnMut: called once per chunk of misses, so clone the credentials
+        // per call instead of moving them into a one-shot async block.
+        suggest_with_cache(self.id(), request, move |miss_request| {
+            let api_key = api_key.clone();
+            let model = model.clone();
+            async move { call_anthropic(&api_key, &model, miss_request).await }
         })
         .await
     }
@@ -308,19 +330,10 @@ async fn send_text_chat(
         .json()
         .await
         .map_err(|e| LLMError::ParseError(format!("Anthropic JSON: {e}")))?;
-    let text = parsed
-        .content
-        .into_iter()
-        .find_map(|c| c.text)
-        .ok_or_else(|| LLMError::ParseError("Anthropic response had no text block".into()))?;
-    Ok((
-        text,
-        Usage {
-            input_tokens: parsed.usage.input_tokens,
-            output_tokens: parsed.usage.output_tokens,
-            cached: false,
-        },
-    ))
+    // Shared extractor: also turns a max_tokens cutoff into `Truncated` —
+    // learning's single big reply is the likeliest place to hit the cap
+    // now that tag batches are chunked.
+    extract_text_response(parsed)
 }
 
 #[cfg(test)]
@@ -403,6 +416,36 @@ mod tests {
             Err(LLMError::ParseError(_)) => {}
             other => panic!("expected ParseError, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn truncated_response_reports_truncation_not_parse_error() {
+        // `stop_reason: "max_tokens"` means the reply was cut mid-generation:
+        // the JSON is broken BECAUSE of the output cap, not because the model
+        // emitted garbage. Surfacing it as ParseError hides the one action
+        // that helps (smaller request) and made truncation indistinguishable
+        // from a bad response while the input tokens were still billed.
+        let json = r#"{
+            "content": [{"type":"text","text":"{\"suggestions\":[{\"asset_pa"}],
+            "stop_reason": "max_tokens",
+            "usage": {"input_tokens":5000,"output_tokens":4096}
+        }"#;
+        match parse_response_json(json) {
+            Err(LLMError::Truncated) => {}
+            other => panic!("expected Truncated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn normal_stop_reason_still_parses() {
+        // The common `end_turn` value must not trip the truncation check.
+        let json = r#"{
+            "content": [{"type":"text","text":"{\"suggestions\":[]}"}],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens":10,"output_tokens":5}
+        }"#;
+        let r = parse_response_json(json).unwrap();
+        assert!(r.suggestions.is_empty());
     }
 
     #[test]

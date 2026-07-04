@@ -106,6 +106,9 @@ function IssueRow({ issue, expanded, onToggle, onLocate, suggestionLabel, locate
 
 interface IssueListProps {
   result: AnalysisResult | null;
+  /// Files changed after `result` was computed (watcher event / rescan) —
+  /// the store's `analysisStale`. Shows the "results may be outdated" banner.
+  stale?: boolean;
   isAnalyzing?: boolean;
   onAnalyze?: () => void;
   onLocate?: (path: string) => void;
@@ -118,7 +121,7 @@ type VirtualRow =
   | { kind: "group-head"; key: string; ruleName: string; count: number }
   | { kind: "issue"; key: string; issue: Issue };
 
-export function IssueList({ result, isAnalyzing, onAnalyze, onLocate }: IssueListProps) {
+export function IssueList({ result, stale, isAnalyzing, onAnalyze, onLocate }: IssueListProps) {
   const { t } = useTranslation();
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const [filter, setFilter] = useState<Severity | "all">("all");
@@ -293,6 +296,31 @@ export function IssueList({ result, isAnalyzing, onAnalyze, onLocate }: IssueLis
 
   return (
     <div className="tc-issues">
+      {/* Point-in-time snapshot warning: files changed since this analysis
+          ran, so counts/paths below may reference a world that's gone. */}
+      {stale && (
+        <div
+          className="flex items-center gap-2 px-3 py-2 text-xs shrink-0"
+          style={{
+            background: "color-mix(in oklch, var(--warn) 12%, transparent)",
+            borderBottom: "1px solid var(--line)",
+            color: "var(--text-2)",
+          }}
+        >
+          <AlertTriangle size={12} style={{ color: "var(--warn)" }} />
+          <span className="flex-1">{t("issues.staleBanner")}</span>
+          {onAnalyze && (
+            <button
+              onClick={onAnalyze}
+              disabled={isAnalyzing}
+              className="px-2 py-0.5 rounded disabled:opacity-50"
+              style={{ border: "1px solid var(--line)", color: "var(--text)" }}
+            >
+              {t("issues.reanalyze")}
+            </button>
+          )}
+        </div>
+      )}
       <div className="tc-issues-toolbar">
         {filterPill("all", "all", t("issues.all"), result.issue_count)}
         {filterPill(

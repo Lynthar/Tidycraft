@@ -168,6 +168,7 @@
     "title": "问题",
     "noResults": "没有分析结果",
     "analyzing": "正在分析资产...",
+    "staleBanner": "分析之后文件已发生变化——结果可能已过期。",
     "reanalyze": "重新分析",
     "locate": "定位",
     "suggestion": "建议",
@@ -506,6 +507,7 @@
     "costHint": "估算值——实际成本取决于 tag 数量 + 抽样文本大小。",
     "running": "正在运行 AI 学习…需要 30-60 秒。",
     "errNoScan": "请先扫描项目（侧边栏刷新按钮）。",
+    "errTruncated": "回复在模型输出上限处被截断——请尝试降低采样深度。",
     "errWrite": "写入 tidycraft.toml 失败 — 主题/目标的修改未保存。"
   },
   "learnReview": {
@@ -556,14 +558,15 @@
     "errNetwork": "网络错误。请检查连接或接入点。",
     "errRateLimit": "已达限速或配额。稍后再试。",
     "errParse": "无法解析模型输出。",
+    "errTruncated": "回复在模型输出上限处被截断——请减少选择的资产数量。",
     "errGeneric": "AI 请求失败：{{reason}}"
   },
   "aiResult": {
     "title": "AI 标签建议",
     "summary": "{{count}} 个资产 · {{tokens}} tokens",
     "summaryCached": "{{count}} 个资产 · 命中缓存（无费用）",
-    "applyAll": "全部应用",
-    "applySelected": "应用所选",
+    "apply_one": "应用 {{count}} 个标签",
+    "apply_other": "应用 {{count}} 个标签",
     "skip": "跳过",
     "close": "关闭",
     "empty": "未返回任何建议。",

@@ -129,8 +129,9 @@ The frontend and backend communicate exclusively through two mechanisms:
   per-file parsing is `parse_metadata_for(path, ext, asset_type)` — add
   new format parsers there. DCC source files (`.blend` / `.psd` / `.spp`
   / etc.) are labelled with `AssetMetadata.dcc_source_kind` via
-  `dcc_source_kind_for(ext)` so the `dcc_source` analyzer can find them
-  without re-deriving classification. Paths crossing to the frontend go
+  `dcc_source_kind_for(ext)` — informational metadata only; the
+  `dcc_source` analyzer matches file extensions from its own config and
+  does not read this field. Paths crossing to the frontend go
   through `path_to_string()` which normalizes to forward slashes.
 - **`watcher.rs`** — `notify-debouncer-full` watcher. 500ms debounce, then
   re-parse affected files, patch `ProjectState.cached_scan`, emit

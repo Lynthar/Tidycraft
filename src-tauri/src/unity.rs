@@ -253,4 +253,17 @@ mod tests {
         assert_eq!(UnityFileType::from_extension("unity"), UnityFileType::Scene);
         assert_eq!(UnityFileType::from_extension("mat"), UnityFileType::Material);
     }
+
+    #[test]
+    fn file_type_matches_real_world_extension_casing() {
+        // Unity writes `.overrideController` (camelCase) on disk, and
+        // `parse_unity_file` feeds `Path::extension()` verbatim — matching must
+        // not depend on the caller lowercasing first.
+        assert_eq!(
+            UnityFileType::from_extension("overrideController"),
+            UnityFileType::Controller
+        );
+        assert_eq!(UnityFileType::from_extension("PREFAB"), UnityFileType::Prefab);
+        assert_eq!(UnityFileType::from_extension("Anim"), UnityFileType::Anim);
+    }
 }

@@ -1,6 +1,6 @@
 //! LLM-backed asset tagging.
 //!
-//! Plumbing for the "AI Tag" flow described in `docs/ai-tagging-plan.md`.
+//! Plumbing for the "AI Tag" flow.
 //! The user picks an asset selection in the UI; the frontend invokes
 //! `llm_estimate_cost` to render a confirm modal, then `llm_suggest_tags`
 //! once the user accepts. Each provider (Claude / OpenAI / Ollama) implements
@@ -186,6 +186,13 @@ pub enum LLMError {
     RateLimit,
     #[error("Failed to parse provider response: {0}")]
     ParseError(String),
+    /// The model hit its output-token cap mid-reply (Anthropic
+    /// `stop_reason: "max_tokens"`), so the JSON is cut off — distinct from
+    /// ParseError because the actionable fix is a smaller request, and the
+    /// input tokens were billed either way. Chunking makes this rare for
+    /// tag batches; learning's single big reply can still hit it.
+    #[error("Response truncated: the model hit its output-token limit before finishing; try a smaller request")]
+    Truncated,
     #[error("Provider {0} not enabled in settings")]
     ProviderDisabled(String),
     /// Day 1 placeholder — every provider returns this until Day 2 wires
@@ -333,29 +340,67 @@ fn strip_markdown_fence(text: &str) -> Option<&str> {
 
 // ============ Shared cache + fetcher orchestration ============
 
+/// Pair fresh suggestions with the cache keys of the assets they answer,
+/// matching by `asset_path` — NOT by position. The system prompt allows the
+/// model to skip assets it can't classify and never instructs it to preserve
+/// input order, so zip-by-index would mis-key every suggestion after a skip
+/// and persist the corruption until the context hash happens to move.
+/// Suggestions whose path matches no requested asset (hallucinations) pair
+/// with nothing and are simply not cached.
+fn pair_suggestions_with_keys<'a>(
+    suggestions: &'a [TagSuggestion],
+    miss_assets: &[AssetInput],
+    miss_keys: &'a [String],
+) -> Vec<(&'a TagSuggestion, &'a str)> {
+    // This zip IS by index — but assets and keys were built together in
+    // suggest_with_cache's miss loop, so their alignment is structural,
+    // unlike the model's output order.
+    let key_by_path: std::collections::HashMap<&str, &'a str> = miss_assets
+        .iter()
+        .zip(miss_keys)
+        .map(|(a, k)| (a.path.as_str(), k.as_str()))
+        .collect();
+    suggestions
+        .iter()
+        .filter_map(|s| key_by_path.get(s.asset_path.as_str()).map(|&k| (s, k)))
+        .collect()
+}
+
+/// Upper bound on assets per provider request. The project's own cost model
+/// (`cost::OUTPUT_TOKENS_PER_ASSET` = 150) meets Claude's 4096-token output
+/// cap at ~27 assets — a single oversized request truncates mid-JSON and
+/// loses the WHOLE batch while its input tokens are still billed. 20 leaves
+/// comfortable headroom (~3000 output tokens) and also relieves Ollama's
+/// small default context. Chunks run sequentially; each completed chunk's
+/// suggestions are cached before the next request, so a mid-way failure
+/// forfeits only the remaining chunks and a retry re-pays for those alone.
+const MAX_ASSETS_PER_REQUEST: usize = 20;
+
 /// Wraps a provider's actual API call with the per-asset cache.
 ///
-/// Splits `request.assets` into hits (already cached) and misses,
-/// calls `fetcher` exactly once with a misses-only request, persists
-/// the fresh suggestions, then merges hits + fresh into the final
-/// `TagResponse`. The provider-level call paths only have to know how
-/// to make one batched request — caching, key generation, and merging
-/// live here.
+/// Splits `request.assets` into hits (already cached) and misses, calls
+/// `fetcher` once per chunk of at most [`MAX_ASSETS_PER_REQUEST`] missing
+/// assets (sequentially), persists each chunk's fresh suggestions, then
+/// merges hits + fresh into the final `TagResponse`. The provider-level
+/// call paths only have to know how to make one batched request — caching,
+/// key generation, chunking, and merging live here.
 ///
-/// `fetcher` receives an OWNED `TagRequest` (so it can ship into an
-/// async block / move into a closure freely) containing only the
-/// missing assets. It must return suggestions in the same order as the
-/// input assets — the cache save loop pairs them by index.
+/// `fetcher` receives an OWNED `TagRequest` (so it can ship into an async
+/// block / move into a closure freely) containing one chunk of missing
+/// assets. The model's output order is NOT trusted: suggestions are paired
+/// with cache keys by `asset_path` (see [`pair_suggestions_with_keys`]),
+/// since the prompt allows skipping unclassifiable assets and says nothing
+/// about order.
 ///
 /// Returns `Usage { cached: true, tokens: 0 }` when every asset is a
 /// cache hit (fetcher is never called).
 pub async fn suggest_with_cache<F, Fut>(
     provider_id: &str,
     request: &TagRequest,
-    fetcher: F,
+    mut fetcher: F,
 ) -> Result<TagResponse, LLMError>
 where
-    F: FnOnce(TagRequest) -> Fut + Send,
+    F: FnMut(TagRequest) -> Fut + Send,
     Fut: std::future::Future<Output = Result<TagResponse, LLMError>> + Send,
 {
     let mut hits: Vec<TagSuggestion> = Vec::new();
@@ -403,35 +448,49 @@ where
         });
     }
 
-    let miss_request = TagRequest {
-        assets: miss_assets,
-        prompt_version: request.prompt_version,
-        model: request.model.clone(),
-        include_thumbnails: request.include_thumbnails,
-        // Carry the project context through to the misses-only call so
-        // the LLM still sees framing + existing tags when it bills only
-        // for the cache misses.
-        project_ctx: request.project_ctx.clone(),
-        existing_tags: request.existing_tags.clone(),
-    };
+    let mut fresh_suggestions: Vec<TagSuggestion> = Vec::new();
+    let mut input_tokens = 0usize;
+    let mut output_tokens = 0usize;
 
-    let fresh = fetcher(miss_request).await?;
+    for (chunk_assets, chunk_keys) in miss_assets
+        .chunks(MAX_ASSETS_PER_REQUEST)
+        .zip(miss_keys.chunks(MAX_ASSETS_PER_REQUEST))
+    {
+        let chunk_request = TagRequest {
+            assets: chunk_assets.to_vec(),
+            prompt_version: request.prompt_version,
+            model: request.model.clone(),
+            include_thumbnails: request.include_thumbnails,
+            // Carry the project context into every chunk so the LLM still
+            // sees framing + existing tags while billing only for misses.
+            project_ctx: request.project_ctx.clone(),
+            existing_tags: request.existing_tags.clone(),
+        };
 
-    // Persist fresh suggestions. A cache save failure is non-fatal —
-    // worst case we'll re-bill on the next call. We pair by index
-    // because the LLM is instructed to preserve input order.
-    for (s, k) in fresh.suggestions.iter().zip(miss_keys.iter()) {
-        let _ = cache::save(k, s);
+        let fresh = fetcher(chunk_request).await?;
+
+        // Persist this chunk's suggestions immediately — paired by
+        // asset_path, never by position (the model may skip or reorder).
+        // A cache save failure is non-fatal: worst case we re-bill that
+        // asset next call. Caching per chunk also means an error on a LATER
+        // chunk doesn't waste what's already been paid for.
+        for (s, k) in pair_suggestions_with_keys(&fresh.suggestions, chunk_assets, chunk_keys) {
+            let _ = cache::save(k, s);
+        }
+
+        input_tokens += fresh.usage.input_tokens;
+        output_tokens += fresh.usage.output_tokens;
+        fresh_suggestions.extend(fresh.suggestions);
     }
 
     let mut all = hits;
-    all.extend(fresh.suggestions);
+    all.extend(fresh_suggestions);
 
     Ok(TagResponse {
         suggestions: all,
         usage: Usage {
-            input_tokens: fresh.usage.input_tokens,
-            output_tokens: fresh.usage.output_tokens,
+            input_tokens,
+            output_tokens,
             // Even partial-cache responses count as a real (paid) call —
             // the UI distinguishes "everything was cached" from "some hit,
             // some paid" via the input_tokens field, not this flag.
@@ -530,6 +589,61 @@ That's it!"#;
         assert!(s.is_empty());
     }
 
+    // ---- cache-save pairing (#6a) ----
+
+    fn asset(path: &str) -> AssetInput {
+        AssetInput {
+            path: path.into(),
+            filename: path.rsplit('/').next().unwrap_or(path).into(),
+            thumbnail_base64: None,
+            metadata_hint: None,
+        }
+    }
+
+    fn suggestion(path: &str) -> TagSuggestion {
+        TagSuggestion {
+            asset_path: path.into(),
+            tags: vec![],
+        }
+    }
+
+    #[test]
+    fn cache_pairing_matches_by_path_not_position() {
+        // The model answered out of order AND skipped b.png — index-zipping
+        // would cache c's suggestion under a's key and a's under b's key.
+        let assets = vec![asset("a/a.png"), asset("a/b.png"), asset("a/c.png")];
+        let keys = vec!["key-a".to_string(), "key-b".to_string(), "key-c".to_string()];
+        let fresh = vec![suggestion("a/c.png"), suggestion("a/a.png")];
+
+        let pairs = pair_suggestions_with_keys(&fresh, &assets, &keys);
+
+        assert_eq!(pairs.len(), 2);
+        assert!(pairs
+            .iter()
+            .any(|(s, k)| s.asset_path == "a/c.png" && *k == "key-c"));
+        assert!(pairs
+            .iter()
+            .any(|(s, k)| s.asset_path == "a/a.png" && *k == "key-a"));
+        // The skipped asset must get NO cache entry (so it stays a miss and
+        // is re-asked next time), rather than inheriting a neighbour's answer.
+        assert!(!pairs.iter().any(|(_, k)| *k == "key-b"));
+    }
+
+    #[test]
+    fn cache_pairing_drops_hallucinated_paths() {
+        // A suggestion for a path that was never requested pairs with
+        // nothing — it must not steal a real asset's cache slot.
+        let assets = vec![asset("a/a.png")];
+        let keys = vec!["key-a".to_string()];
+        let fresh = vec![suggestion("ghost/never-asked.png"), suggestion("a/a.png")];
+
+        let pairs = pair_suggestions_with_keys(&fresh, &assets, &keys);
+
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(pairs[0].0.asset_path, "a/a.png");
+        assert_eq!(pairs[0].1, "key-a");
+    }
+
     // ---- suggest_with_cache ----
 
     #[tokio::test]
@@ -557,5 +671,69 @@ That's it!"#;
         .unwrap();
         assert!(!called, "fetcher should not be called when no assets");
         assert!(response.usage.cached);
+    }
+
+    #[tokio::test]
+    async fn misses_are_chunked_into_bounded_requests() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, Mutex};
+
+        // 45 misses must go out as ceil(45 / MAX_ASSETS_PER_REQUEST) requests
+        // of at most MAX_ASSETS_PER_REQUEST assets each — one unchunked
+        // request would blow Claude's 4096-token output cap (~27 assets at
+        // the cost model's 150 output tokens/asset) and lose the whole batch.
+        // A uuid model string keeps this test's cache keys disjoint from
+        // anything real; entries are removed again below.
+        let model = format!("test-chunk-{}", uuid::Uuid::new_v4().simple());
+        let assets: Vec<AssetInput> = (0..45).map(|i| asset(&format!("c/a{i}.png"))).collect();
+        let req = TagRequest {
+            assets: assets.clone(),
+            prompt_version: 1,
+            model: model.clone(),
+            include_thumbnails: false,
+            project_ctx: None,
+            existing_tags: Vec::new(),
+        };
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let sizes = Arc::new(Mutex::new(Vec::<usize>::new()));
+        let fetcher = {
+            let calls = calls.clone();
+            let sizes = sizes.clone();
+            move |r: TagRequest| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                sizes.lock().unwrap().push(r.assets.len());
+                let suggestions: Vec<TagSuggestion> =
+                    r.assets.iter().map(|a| suggestion(&a.path)).collect();
+                async move {
+                    Ok(TagResponse {
+                        suggestions,
+                        usage: Usage {
+                            input_tokens: 10,
+                            output_tokens: 5,
+                            cached: false,
+                        },
+                    })
+                }
+            }
+        };
+
+        let response = suggest_with_cache("claude", &req, fetcher).await.unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 3, "45 misses → 3 chunks");
+        assert_eq!(*sizes.lock().unwrap(), vec![20, 20, 5]);
+        assert_eq!(response.suggestions.len(), 45);
+        // Usage sums across chunks.
+        assert_eq!(response.usage.input_tokens, 30);
+        assert_eq!(response.usage.output_tokens, 15);
+        assert!(!response.usage.cached);
+
+        // Clean the entries this test wrote to the real cache dir.
+        let ctx = cache::hash_context(None, &[]);
+        for a in &assets {
+            cache::remove(&cache::cache_key(
+                None, &a.filename, &a.path, "claude", &model, 1, &ctx,
+            ));
+        }
     }
 }

@@ -37,10 +37,11 @@ const isValidRegex = (pattern: string): boolean => {
 
 /// Reviews an LLM learning result.
 ///
-/// Behaviour on mount: tag-gaps are auto-created (per design discussion
-/// — saves the user a click; review panel shows "AI added N tags" with
-/// per-row revoke). Rules can be deleted before save; "Save rules"
-/// persists the current list to `tidycraft.ai.toml` via `save_ai_rules`.
+/// Nothing is committed until Save: gap tags are created for the rows the
+/// user keeps checked, and the (possibly edited) rule list is persisted to
+/// `tidycraft.ai.toml` via `save_ai_rules` — which takes the pending doc the
+/// learn command staged in backend memory. Closing the panel without saving
+/// discards the run entirely; unreviewed rules never affect suggestions.
 export function LearnReviewPanel() {
   const { t } = useTranslation();
   const open = useUiStore((s) => s.learnReviewOpen);

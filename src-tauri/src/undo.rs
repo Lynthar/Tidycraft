@@ -299,17 +299,17 @@ impl Default for UndoManager {
     }
 }
 
-/// 判断 `a`、`b` 是否在同一目录下、文件名仅大小写不同——即大小写不敏感文件系统上
-/// 「撤销一次纯大小写改名」会让目标 `exists()` 命中源文件自身的情形。仅用于 Rename
-/// 撤销分支放行这种改名。
-fn same_file_ignoring_case(a: &Path, b: &Path) -> bool {
-    a.parent() == b.parent()
-        && match (a.file_name(), b.file_name()) {
-            (Some(x), Some(y)) => {
-                x.to_string_lossy().to_lowercase() == y.to_string_lossy().to_lowercase()
-            }
-            _ => false,
-        }
+/// 判断两个路径是否指向**同一个文件**——按文件系统身份(Unix: dev+inode,
+/// Windows: 卷序列号+文件索引,经 `same-file` crate),而不是按文件名猜测。
+/// 任一路径不存在或元数据不可读时返回 false,调用方随即按「目标已存在」保守拒绝。
+///
+/// 用于改名/撤销的「目标已存在」守卫:目标 `exists()` 可能命中源文件自身
+/// (大小写不敏感文件系统上的纯大小写改名、macOS 的 NFC/NFD Unicode 变体),
+/// 这种改名必须放行;而大小写**敏感**文件系统(Linux)上 `foo.png` 与 `FOO.PNG`
+/// 可共存,旧的「文件名仅大小写不同即放行」在那里会让 `fs::rename` 静默覆盖
+/// 目标文件。按身份判断在两类文件系统上都正确。
+pub(crate) fn paths_are_same_file(a: &Path, b: &Path) -> bool {
+    same_file::is_same_file(a, b).unwrap_or(false)
 }
 
 /// 执行批量撤销
@@ -367,10 +367,11 @@ fn execute_single_undo(operation: &FileOperation) -> Result<(), String> {
                 ));
             }
 
-            // 检查目标路径是否已存在。纯大小写改名的撤销(foo.png → FOO.PNG)在大小写
-            // 不敏感文件系统上会让 dst.exists() 命中 src 自身,所以当 dst 只是 src 的
-            // 大小写变体(同目录、文件名忽略大小写相等)时放行——fs::rename 能正确改名。
-            if dst.exists() && !same_file_ignoring_case(src, dst) {
+            // 检查目标路径是否已存在。dst.exists() 可能命中 src 自身(大小写不敏感
+            // 文件系统上撤销纯大小写改名、NFC/NFD 变体),这种情况放行——fs::rename
+            // 能正确改名;只有 dst 确实是**另一个文件**时才拒绝(大小写敏感文件系统
+            // 上同名异例可共存,按文件名猜测会静默覆盖它,按身份判断不会)。
+            if dst.exists() && !paths_are_same_file(src, dst) {
                 return Err(format!(
                     "Target path already exists: {}",
                     operation.original_path
@@ -755,27 +756,61 @@ mod tests {
     }
 
     #[test]
-    fn same_file_ignoring_case_detects_case_only_variants() {
-        // Case-only renames (foo.PNG → foo.png) must be recognized so the undo
-        // guard lets them through on case-insensitive filesystems.
-        assert!(same_file_ignoring_case(
-            Path::new("/a/foo.PNG"),
-            Path::new("/a/foo.png")
+    fn paths_are_same_file_matches_identity_not_names() {
+        let dir = tempdir().unwrap();
+        let a = create_test_file(dir.path(), "a.txt");
+        let b = create_test_file(dir.path(), "b.txt");
+
+        // Same path twice → trivially the same file.
+        assert!(paths_are_same_file(Path::new(&a), Path::new(&a)));
+        // Two distinct files in the same directory → not the same.
+        assert!(!paths_are_same_file(Path::new(&a), Path::new(&b)));
+        // A hard link is the same file under a different name — only an
+        // identity check can know that; any name-based guess says "different".
+        let link = dir.path().join("a_link.txt");
+        std::fs::hard_link(&a, &link).unwrap();
+        assert!(paths_are_same_file(Path::new(&a), &link));
+        // Nonexistent path → conservatively "not the same file" (the guard
+        // then rejects, never silently proceeds).
+        assert!(!paths_are_same_file(
+            Path::new(&a),
+            &dir.path().join("missing.txt")
         ));
-        assert!(same_file_ignoring_case(
-            Path::new("/a/FOO.png"),
-            Path::new("/a/foo.png")
-        ));
-        // Different names in the same dir are a real collision, not a variant.
-        assert!(!same_file_ignoring_case(
-            Path::new("/a/foo.png"),
-            Path::new("/a/bar.png")
-        ));
-        // Same name but different directory is not the "src == dst" case.
-        assert!(!same_file_ignoring_case(
-            Path::new("/a/foo.png"),
-            Path::new("/b/foo.png")
-        ));
+    }
+
+    // POSIX rename() over an existing directory entry of the *same* file is a
+    // documented no-op success; on Windows MoveFileEx errors instead, so this
+    // behavioral check is Unix-only (the helper itself is tested above on all
+    // platforms).
+    #[cfg(unix)]
+    #[test]
+    fn undo_allows_target_occupied_by_the_same_file() {
+        // If the occupant of the original path is the renamed file ITSELF
+        // (here via a hard link; on case-insensitive filesystems via a case
+        // variant), the undo must proceed rather than report "target already
+        // exists" — that guard exists to protect a *different* file's data.
+        let dir = tempdir().unwrap();
+        let renamed = create_test_file(dir.path(), "renamed.txt");
+        let original = dir.path().join("orig.txt");
+        std::fs::hard_link(&renamed, &original).unwrap();
+
+        let mut manager = UndoManager::new(10);
+        manager.record_batch(
+            "Rename".to_string(),
+            vec![FileOperation {
+                operation_type: OperationType::Rename,
+                original_path: original.to_string_lossy().to_string(),
+                new_path: Some(renamed.clone()),
+                timestamp: current_timestamp(),
+            }],
+        );
+
+        let result = manager.undo_last().unwrap();
+        assert!(
+            result.success,
+            "the file itself must not count as a conflicting occupant: {:?}",
+            result.errors
+        );
     }
 
     #[test]

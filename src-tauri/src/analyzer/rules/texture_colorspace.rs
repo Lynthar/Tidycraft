@@ -43,10 +43,18 @@ impl Default for TextureColorSpaceConfig {
 
 /// Stem suffixes (case-insensitive, `ends_with` match after lowercasing)
 /// that imply the texture is data, not sRGB color.
+///
+/// Single letters other than `_n` are deliberately absent: `_r` ("right") and
+/// `_m` ("medium" / UI size) collide with ordinary non-PBR names too readily —
+/// the same reasoning behind tag_suggest's suffix list (see the comment on
+/// `KNOWN_CHANNEL_SUFFIXES` in `analyzer/tag_suggest.rs`, which omits all
+/// three). `_n` is kept here because it's the
+/// dominant normal-map shorthand and an sRGB-de-gammaed normal map is the
+/// worst-case corruption this rule exists to catch.
 const DATA_HINTS: &[&str] = &[
     "_n", "_normal", "_norm", "_nrm",
-    "_r", "_rough", "_roughness",
-    "_m", "_metal", "_metallic",
+    "_rough", "_roughness",
+    "_metal", "_metallic",
     "_ao", "_mask",
     "_data", "_lin", "_linear",
     "_height", "_disp", "_displacement",
@@ -164,5 +172,23 @@ mod tests {
         let rule = TextureColorSpaceRule;
         let asset = texture("ROCK_N.PNG", Some("sRGB"));
         assert!(rule.check(&asset).is_some());
+    }
+
+    #[test]
+    fn ignores_non_pbr_single_letter_collisions() {
+        // `_r` ("right") and `_m` ("medium"/UI size) collide with ordinary
+        // naming far too often — same reasoning as tag_suggest's suffix list.
+        // Only `_n` earns single-letter status (see DATA_HINTS comment).
+        let rule = TextureColorSpaceRule;
+        assert!(rule.check(&texture("arrow_r.png", Some("sRGB"))).is_none());
+        assert!(rule.check(&texture("icon_m.png", Some("sRGB"))).is_none());
+    }
+
+    #[test]
+    fn still_fires_on_single_letter_normal_suffix() {
+        // `_n` stays: it's the dominant shorthand for normal maps, and a
+        // normal map de-gammaed as sRGB is the worst-case corruption.
+        let rule = TextureColorSpaceRule;
+        assert!(rule.check(&texture("rock_n.png", Some("sRGB"))).is_some());
     }
 }

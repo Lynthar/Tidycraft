@@ -95,6 +95,12 @@ export interface ProjectData {
   error: string | null;
   scanProgress: ScanProgress | null;
   analysisResult: AnalysisResult | null;
+  /// True when files changed (watcher event or rescan) AFTER analysisResult
+  /// was computed — the analysis is a point-in-time snapshot and is now
+  /// showing pre-change data. IssueList surfaces this as a "re-run" banner,
+  /// and passCount math treats the issue set as potentially referencing
+  /// deleted files. Cleared by the next successful runAnalysis.
+  analysisStale: boolean;
   isAnalyzing: boolean;
   viewMode: ViewMode;
   selectedDirectory: string | null;
@@ -120,6 +126,7 @@ const createDefaultProjectData = (id: string, path: string): ProjectData => ({
   error: null,
   scanProgress: null,
   analysisResult: null,
+  analysisStale: false,
   isAnalyzing: false,
   viewMode: "assets",
   selectedDirectory: null,
@@ -176,6 +183,7 @@ interface ProjectState {
   error: string | null;
   scanProgress: ScanProgress | null;
   analysisResult: AnalysisResult | null;
+  analysisStale: boolean;
   isAnalyzing: boolean;
   viewMode: ViewMode;
   selectedDirectory: string | null;
@@ -266,6 +274,7 @@ const updateActiveProject = (
   if ('error' in updates) result.error = updates.error ?? null;
   if ('scanProgress' in updates) result.scanProgress = updates.scanProgress ?? null;
   if ('analysisResult' in updates) result.analysisResult = updates.analysisResult ?? null;
+  if ('analysisStale' in updates) result.analysisStale = updates.analysisStale ?? false;
   if ('isAnalyzing' in updates) result.isAnalyzing = updates.isAnalyzing ?? false;
   if ('viewMode' in updates) result.viewMode = updates.viewMode ?? "assets";
   if ('selectedDirectory' in updates) result.selectedDirectory = updates.selectedDirectory ?? null;
@@ -292,6 +301,7 @@ const syncFromActiveProject = (project: ProjectData | undefined): Partial<Projec
       error: null,
       scanProgress: null,
       analysisResult: null,
+      analysisStale: false,
       isAnalyzing: false,
       viewMode: "assets",
       selectedDirectory: null,
@@ -331,6 +341,7 @@ const syncFromActiveProject = (project: ProjectData | undefined): Partial<Projec
     error: project.error,
     scanProgress: project.scanProgress,
     analysisResult: project.analysisResult,
+    analysisStale: project.analysisStale,
     isAnalyzing: project.isAnalyzing,
     viewMode: project.viewMode,
     selectedDirectory: project.selectedDirectory,
@@ -390,6 +401,10 @@ function applyFsChange(projectId: string, event: FsChangeEvent) {
     ...target,
     scanResult: newScanResult,
     selectedAsset: newSelectedAsset,
+    // The analysis (if any) was computed against the pre-change files — flag
+    // it so IssueList shows the "re-run" banner instead of silently serving
+    // stale issues.
+    analysisStale: target.analysisResult !== null || target.analysisStale,
   };
   const newMap = new Map(state.projects);
   newMap.set(projectId, updated);
@@ -426,6 +441,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   error: null,
   scanProgress: null,
   analysisResult: null,
+  analysisStale: false,
   isAnalyzing: false,
   viewMode: "assets",
   selectedDirectory: null,
@@ -576,6 +592,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           selectedAsset: null,
           scanProgress: null,
           hasCustomConfig,
+          // A rescan may have changed the file set under an existing
+          // analysis snapshot — mark it stale (first scans have no
+          // analysisResult, so this stays false for them).
+          analysisStale: target.analysisResult !== null || target.analysisStale,
         };
         const newMap = new Map(state.projects);
         newMap.set(projectId, updated);
@@ -852,6 +872,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       });
       const updates: Partial<ProjectData> = {
         analysisResult: result,
+        // Fresh snapshot: whatever staleness the previous one accumulated
+        // is history now.
+        analysisStale: false,
         isAnalyzing: false,
         hasCustomConfig,
       };
