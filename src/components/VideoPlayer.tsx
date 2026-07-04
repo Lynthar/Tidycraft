@@ -1,18 +1,21 @@
 import { useRef, useState, useEffect } from "react";
 import { Play, Pause, Volume2, VolumeX, Maximize2 } from "lucide-react";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { useTranslation } from "react-i18next";
 
 interface VideoPlayerProps {
   filePath: string;
 }
 
 export function VideoPlayer({ filePath }: VideoPlayerProps) {
+  const { t } = useTranslation();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
+  const [loadError, setLoadError] = useState(false);
 
   const videoSrc = convertFileSrc(filePath);
 
@@ -21,6 +24,7 @@ export function VideoPlayer({ filePath }: VideoPlayerProps) {
     setIsPlaying(false);
     setProgress(0);
     setCurrentTime(0);
+    setLoadError(false);
     if (videoRef.current) {
       videoRef.current.currentTime = 0;
     }
@@ -30,10 +34,20 @@ export function VideoPlayer({ filePath }: VideoPlayerProps) {
     if (videoRef.current) {
       if (isPlaying) {
         videoRef.current.pause();
+        setIsPlaying(false);
       } else {
-        videoRef.current.play();
+        // play() returns a promise that REJECTS for unsupported codecs /
+        // decode failures / autoplay policy. Only flip the state on
+        // success — the old unconditional flip left a "playing" UI over a
+        // frozen frame, plus an unhandled-rejection console error.
+        videoRef.current
+          .play()
+          .then(() => setIsPlaying(true))
+          .catch((err) => {
+            console.warn("[VideoPlayer] play() failed:", err);
+            setIsPlaying(false);
+          });
       }
-      setIsPlaying(!isPlaying);
     }
   };
 
@@ -49,7 +63,9 @@ export function VideoPlayer({ filePath }: VideoPlayerProps) {
       const current = videoRef.current.currentTime;
       const total = videoRef.current.duration;
       setCurrentTime(current);
-      setProgress((current / total) * 100);
+      // duration is NaN until metadata loads (and Infinity for streams) —
+      // don't let the progress width go NaN%.
+      setProgress(Number.isFinite(total) && total > 0 ? (current / total) * 100 : 0);
     }
   };
 
@@ -61,10 +77,12 @@ export function VideoPlayer({ filePath }: VideoPlayerProps) {
 
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
     if (videoRef.current) {
+      const total = videoRef.current.duration;
+      // Before metadata loads duration is NaN — seeking to NaN throws.
+      if (!Number.isFinite(total) || total <= 0) return;
       const rect = e.currentTarget.getBoundingClientRect();
       const percent = (e.clientX - rect.left) / rect.width;
-      const time = percent * videoRef.current.duration;
-      videoRef.current.currentTime = time;
+      videoRef.current.currentTime = percent * total;
     }
   };
 
@@ -79,6 +97,7 @@ export function VideoPlayer({ filePath }: VideoPlayerProps) {
   };
 
   const formatTime = (seconds: number): string => {
+    if (!Number.isFinite(seconds)) return "0:00";
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, "0")}`;
@@ -100,7 +119,15 @@ export function VideoPlayer({ filePath }: VideoPlayerProps) {
           onLoadedMetadata={handleLoadedMetadata}
           onEnded={handleEnded}
           onClick={togglePlay}
+          onError={() => setLoadError(true)}
         />
+        {loadError && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+            <span className="text-xs px-4 text-center" style={{ color: "var(--err)" }}>
+              {t("mediaPlayer.loadError")}
+            </span>
+          </div>
+        )}
         {/* Play overlay when paused */}
         {!isPlaying && (
           <div

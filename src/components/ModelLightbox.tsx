@@ -611,28 +611,28 @@ export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose 
           <button
             onClick={() => setShowGrid(!showGrid)}
             className={`p-2 rounded transition-colors ${showGrid ? 'bg-white/20' : 'hover:bg-white/10'}`}
-            title="Toggle grid (G)"
+            title={t("modelViewer.gridTitle")}
           >
             <Grid3X3 size={18} />
           </button>
           <button
             onClick={() => setDarkMode(!darkMode)}
             className="p-2 rounded hover:bg-white/10 transition-colors"
-            title="Toggle background (L)"
+            title={t("modelViewer.backgroundTitle")}
           >
             {darkMode ? <Sun size={18} /> : <Moon size={18} />}
           </button>
           <button
             onClick={resetCamera}
             className="p-2 rounded hover:bg-white/10 transition-colors"
-            title="Reset view (R)"
+            title={t("modelViewer.resetTitle")}
           >
             <RotateCcw size={18} />
           </button>
           <button
             onClick={onClose}
             className="p-2 rounded hover:bg-white/10 transition-colors ml-2"
-            title="Close (Esc)"
+            title={t("modelViewer.closeTitle")}
           >
             <X size={18} />
           </button>

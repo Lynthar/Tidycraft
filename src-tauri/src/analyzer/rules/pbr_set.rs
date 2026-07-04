@@ -159,13 +159,16 @@ pub fn find_pbr_set_issues(assets: &[AssetInfo], config: &PbrSetConfig) -> Analy
         return result;
     }
 
-    // (directory, base_stem) → roles present in the set.
+    // (directory, lowercased base_stem) → roles present in the set.
     type SetKey = (String, String);
     let mut sets: HashMap<SetKey, HashSet<String>> = HashMap::new();
     // Anchor each set's issue on the trigger channel's first matching
     // file so clicking the issue takes the user to the most relevant
     // texture in the group.
     let mut trigger_path_per_set: HashMap<SetKey, String> = HashMap::new();
+    // First-seen original casing per set, for the issue message (the key
+    // itself is lowercased for grouping).
+    let mut display_stem: HashMap<SetKey, String> = HashMap::new();
 
     let trigger = config.trigger.to_lowercase();
 
@@ -190,7 +193,12 @@ pub fn find_pbr_set_issues(assets: &[AssetInfo], config: &PbrSetConfig) -> Analy
             None => continue,
         };
         let (base_stem, role) = parsed;
-        let key = (dir, base_stem);
+        // Case-insensitive set grouping: the SUFFIX match is already
+        // case-insensitive, but a case-sensitive stem key split
+        // `T_Wood_BaseColor` + `t_wood_Normal` into two phantom sets —
+        // each then reported as incomplete.
+        let key = (dir, base_stem.to_lowercase());
+        display_stem.entry(key.clone()).or_insert(base_stem);
         let entry = sets.entry(key.clone()).or_insert_with(HashSet::new);
 
         match role {
@@ -239,7 +247,7 @@ pub fn find_pbr_set_issues(assets: &[AssetInfo], config: &PbrSetConfig) -> Analy
         missing.sort();
 
         let asset_path = trigger_path_per_set.get(key).cloned().unwrap_or_default();
-        let base_stem = &key.1;
+        let base_stem = display_stem.get(key).unwrap_or(&key.1);
         result.add_issue(Issue {
             rule_id: "pbr_set.incomplete".into(),
             rule_name: "Incomplete PBR Set".into(),
@@ -288,13 +296,22 @@ mod tests {
         }
     }
 
+    /// Default config with the rule switched ON — the out-of-box default is
+    /// `enabled = false`, and a "0 issues" assertion against a disabled rule
+    /// passes vacuously without exercising any of the grouping logic.
+    fn enabled_cfg() -> PbrSetConfig {
+        let mut cfg = PbrSetConfig::default();
+        cfg.enabled = true;
+        cfg
+    }
+
     #[test]
     fn complete_set_produces_no_issue() {
         let assets = vec![
             texture("/proj/T_Wood_BaseColor.png"),
             texture("/proj/T_Wood_Normal.png"),
         ];
-        let result = find_pbr_set_issues(&assets, &PbrSetConfig::default());
+        let result = find_pbr_set_issues(&assets, &enabled_cfg());
         assert_eq!(result.issue_count, 0);
     }
 
@@ -316,7 +333,7 @@ mod tests {
         // — the user might be storing detail-normal libraries, height
         // lookup textures, etc.
         let assets = vec![texture("/proj/T_Wood_Normal.png")];
-        let result = find_pbr_set_issues(&assets, &PbrSetConfig::default());
+        let result = find_pbr_set_issues(&assets, &enabled_cfg());
         assert_eq!(result.issue_count, 0);
     }
 
@@ -338,7 +355,7 @@ mod tests {
     fn orm_satisfies_packed_roles() {
         // Custom config: require all three of metallic / roughness / ao —
         // satisfied by a single `_ORM` packed map.
-        let mut cfg = PbrSetConfig::default();
+        let mut cfg = enabled_cfg();
         cfg.required = vec_str(&[
             "basecolor",
             "normal",
@@ -360,7 +377,7 @@ mod tests {
         // `T_brand_new` must NOT be treated as Normal: the suffix after
         // the last `_` is "new", which isn't a configured channel.
         let assets = vec![texture("/proj/T_brand_new.png")];
-        let result = find_pbr_set_issues(&assets, &PbrSetConfig::default());
+        let result = find_pbr_set_issues(&assets, &enabled_cfg());
         assert_eq!(result.issue_count, 0);
     }
 
@@ -370,7 +387,7 @@ mod tests {
             texture("/proj/T_Wood_BASECOLOR.png"),
             texture("/proj/T_Wood_normal.png"),
         ];
-        let result = find_pbr_set_issues(&assets, &PbrSetConfig::default());
+        let result = find_pbr_set_issues(&assets, &enabled_cfg());
         assert_eq!(result.issue_count, 0);
     }
 
@@ -387,7 +404,7 @@ mod tests {
     fn non_texture_assets_ignored() {
         let mut asset = texture("/proj/T_Wood_BaseColor.fbx");
         asset.asset_type = AssetType::Model;
-        let result = find_pbr_set_issues(&[asset], &PbrSetConfig::default());
+        let result = find_pbr_set_issues(&[asset], &enabled_cfg());
         assert_eq!(result.issue_count, 0);
     }
 
@@ -399,7 +416,20 @@ mod tests {
             texture("/proj/T_Stone_Albedo.png"),
             texture("/proj/T_Stone_Normal.png"),
         ];
-        let result = find_pbr_set_issues(&assets, &PbrSetConfig::default());
+        let result = find_pbr_set_issues(&assets, &enabled_cfg());
+        assert_eq!(result.issue_count, 0);
+    }
+
+    #[test]
+    fn stem_case_variants_group_into_one_set() {
+        // Suffix matching is case-insensitive; the stem grouping must be
+        // too, or one artist's casing slip splits the set into two
+        // phantom-incomplete halves.
+        let assets = vec![
+            texture("/proj/T_Wood_BaseColor.png"),
+            texture("/proj/t_wood_Normal.png"),
+        ];
+        let result = find_pbr_set_issues(&assets, &enabled_cfg());
         assert_eq!(result.issue_count, 0);
     }
 }

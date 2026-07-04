@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { basename, dirname } from "../lib/pathUtils";
-import type { ScanResult, AssetInfo, ScanProgress, AssetType, ProjectType, AnalysisResult, UndoResult, HistoryEntry, GitInfo, GitStatusMap, GitFileStatus, FsChangeEvent } from "../types/asset";
+import type { ScanResult, AssetInfo, ScanProgress, AssetType, ProjectType, AnalysisResult, UndoResult, HistoryEntry, GitInfo, GitStatusMap, GitFileStatus, FsChangeEvent, DirectoryNode } from "../types/asset";
 import { useSettingsStore } from "./settingsStore";
 import { evictThumbs } from "../lib/thumbnailCache";
 
@@ -390,6 +390,15 @@ const syncFromActiveProject = (project: ProjectData | undefined): Partial<Projec
   };
 };
 
+// True when `path` names a directory node anywhere in `tree`. Used to keep
+// `selectedDirectory` honest against a fresh directory tree — filtering the
+// asset list by a directory that no longer exists yields a blank view with
+// no explanation.
+function directoryExistsInTree(tree: DirectoryNode, path: string): boolean {
+  if (tree.path === path) return true;
+  return tree.children.some((child) => directoryExistsInTree(child, path));
+}
+
 // Apply a filesystem-change event from the backend watcher into the store.
 // Runs outside any specific store action — targets the project the event was
 // emitted for, even if the user has switched away. See openProject's scan
@@ -430,10 +439,22 @@ function applyFsChange(projectId: string, event: FsChangeEvent) {
     }
   }
 
+  // Reconcile selectedDirectory: an external delete of the selected folder
+  // used to leave the list filtering against a ghost path — blank view, no
+  // explanation, and clicking the (gone) tree node couldn't fix it.
+  let newSelectedDirectory = target.selectedDirectory;
+  if (
+    newSelectedDirectory &&
+    !directoryExistsInTree(event.directory_tree, newSelectedDirectory)
+  ) {
+    newSelectedDirectory = newScanResult.root_path;
+  }
+
   const updated: ProjectData = {
     ...target,
     scanResult: newScanResult,
     selectedAsset: newSelectedAsset,
+    selectedDirectory: newSelectedDirectory,
     // The analysis (if any) was computed against the pre-change files — flag
     // it so IssueList shows the "re-run" banner instead of silently serving
     // stale issues.
@@ -549,6 +570,22 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       return;
     }
 
+    // Concurrent double-open guard: a second openProject for the same path
+    // that started while our register_project was in flight may have written
+    // its Map entry already (both calls snapshot `projects` BEFORE any
+    // await). Adopt the winner instead of inserting a duplicate row; our
+    // freshly generated backend registration is dropped best-effort.
+    if (!existingProject) {
+      const winner = Array.from(get().projects.values()).find(
+        (p) => p.projectPath === path
+      );
+      if (winner) {
+        void invoke("unregister_project", { projectId }).catch(() => {});
+        get().setActiveProject(winner.id);
+        return;
+      }
+    }
+
     // For force-rescan, keep the user's UI state (view mode, filters,
     // selection, etc.) and only reset the scan-related fields.
     const projectData: ProjectData = existingProject
@@ -618,11 +655,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const state = get();
       const target = state.projects.get(projectId);
       if (target) {
+        // Force-rescan promises to keep UI state; honor it for the directory
+        // selection too — the old unconditional reset to root kicked the user
+        // out of the folder they were working in on every Ctrl+R. Falls back
+        // to the root when the directory vanished between scans.
+        const keptDirectory =
+          target.selectedDirectory &&
+          directoryExistsInTree(result.directory_tree, target.selectedDirectory)
+            ? target.selectedDirectory
+            : path;
         const updated = {
           ...target,
           scanResult: result,
           isScanning: false,
-          selectedDirectory: path,
+          selectedDirectory: keptDirectory,
           selectedAsset: null,
           scanProgress: null,
           hasCustomConfig,
@@ -787,6 +833,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       await invoke("register_project", { projectId, path });
     } catch (err) {
       console.error("Failed to register project stub:", err);
+      return;
+    }
+
+    // Same double-entry guard as openProject: the pre-await dedupe above
+    // can't see an entry that lands while register_project is in flight.
+    const winner = Array.from(get().projects.values()).find(
+      (p) => p.projectPath === path
+    );
+    if (winner) {
+      void invoke("unregister_project", { projectId }).catch(() => {});
       return;
     }
 

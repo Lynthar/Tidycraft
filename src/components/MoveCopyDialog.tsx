@@ -51,6 +51,7 @@ function TreeRow({
   onSelect: (path: string) => void;
   disabledDirs: Set<string>;
 }) {
+  const { t } = useTranslation();
   const hasChildren = node.children.length > 0;
   const isExpanded = expanded.has(node.path);
   const isSelected = selectedPath === node.path;
@@ -76,7 +77,7 @@ function TreeRow({
           isDisabled && "opacity-40 cursor-not-allowed"
         )}
         style={{ paddingLeft: 8 + depth * 14 }}
-        title={isDisabled ? "Source or its parent — cannot target" : node.path}
+        title={isDisabled ? t("moveCopy.disabledTarget") : node.path}
       >
         {hasChildren ? (
           <button

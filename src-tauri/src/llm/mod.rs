@@ -151,7 +151,12 @@ pub enum TagCategory {
     Mood,
     /// Free-form noun more specific than `type` (e.g. "rusty-metal", "wolf").
     Subject,
-    /// Anything that doesn't fit the four buckets above.
+    /// Anything that doesn't fit the four buckets above. `serde(other)`
+    /// makes this the catch-all for values the model invents outside the
+    /// schema ("texture", "environment", …) — one out-of-vocabulary
+    /// category used to fail deserialization of the ENTIRE already-paid
+    /// response.
+    #[serde(other)]
     Other,
 }
 

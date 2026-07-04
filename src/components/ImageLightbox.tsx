@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { X, ZoomIn, ZoomOut, RotateCw, Maximize2, Minimize2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 interface ImageLightboxProps {
   isOpen: boolean;
@@ -13,6 +14,7 @@ interface ImageLightboxProps {
 }
 
 export function ImageLightbox({ isOpen, imageSrc, fallbackSrc, imageName, onClose }: ImageLightboxProps) {
+  const { t } = useTranslation();
   const [scale, setScale] = useState(1);
   const [useFallback, setUseFallback] = useState(false);
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -153,7 +155,7 @@ export function ImageLightbox({ isOpen, imageSrc, fallbackSrc, imageName, onClos
           <button
             onClick={handleZoomOut}
             className="p-2 rounded hover:bg-white/10 transition-colors"
-            title="Zoom out (-)"
+            title={t("imageLightbox.zoomOut")}
           >
             <ZoomOut size={18} />
           </button>
@@ -161,28 +163,28 @@ export function ImageLightbox({ isOpen, imageSrc, fallbackSrc, imageName, onClos
           <button
             onClick={handleZoomIn}
             className="p-2 rounded hover:bg-white/10 transition-colors"
-            title="Zoom in (+)"
+            title={t("imageLightbox.zoomIn")}
           >
             <ZoomIn size={18} />
           </button>
           <button
             onClick={handleRotate}
             className="p-2 rounded hover:bg-white/10 transition-colors"
-            title="Rotate (R)"
+            title={t("imageLightbox.rotate")}
           >
             <RotateCw size={18} />
           </button>
           <button
             onClick={toggleFitToScreen}
             className="p-2 rounded hover:bg-white/10 transition-colors"
-            title={isFitToScreen ? "Actual size" : "Fit to screen (0)"}
+            title={isFitToScreen ? t("imageLightbox.actualSize") : t("imageLightbox.fitToScreen")}
           >
             {isFitToScreen ? <Maximize2 size={18} /> : <Minimize2 size={18} />}
           </button>
           <button
             onClick={onClose}
             className="p-2 rounded hover:bg-white/10 transition-colors ml-2"
-            title="Close (Esc)"
+            title={t("imageLightbox.close")}
           >
             <X size={18} />
           </button>
@@ -215,7 +217,7 @@ export function ImageLightbox({ isOpen, imageSrc, fallbackSrc, imageName, onClos
 
       {/* Footer hint */}
       <div className="text-center py-2 text-white/50 text-xs">
-        Scroll to zoom • Drag to pan • R to rotate • Esc to close
+        {t("imageLightbox.hint")}
       </div>
     </div>
   );

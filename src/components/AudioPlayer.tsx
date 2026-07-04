@@ -1,12 +1,14 @@
 import { useRef, useState, useEffect, useCallback } from "react";
 import { Play, Pause, Volume2, VolumeX } from "lucide-react";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { useTranslation } from "react-i18next";
 
 interface AudioPlayerProps {
   filePath: string;
 }
 
 export function AudioPlayer({ filePath }: AudioPlayerProps) {
+  const { t } = useTranslation();
   const audioRef = useRef<HTMLAudioElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animationRef = useRef<number>(0);
@@ -18,6 +20,7 @@ export function AudioPlayer({ filePath }: AudioPlayerProps) {
   const [isMuted, setIsMuted] = useState(false);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [loadError, setLoadError] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [volume, setVolume] = useState(1);
 
@@ -98,6 +101,7 @@ export function AudioPlayer({ filePath }: AudioPlayerProps) {
     setIsPlaying(false);
     setProgress(0);
     setCurrentTime(0);
+    setLoadError(false);
     if (animationRef.current) {
       cancelAnimationFrame(animationRef.current);
     }
@@ -105,23 +109,31 @@ export function AudioPlayer({ filePath }: AudioPlayerProps) {
 
   const togglePlay = async () => {
     if (audioRef.current) {
-      if (isPlaying) {
-        audioRef.current.pause();
-        if (animationRef.current) {
-          cancelAnimationFrame(animationRef.current);
+      try {
+        if (isPlaying) {
+          audioRef.current.pause();
+          if (animationRef.current) {
+            cancelAnimationFrame(animationRef.current);
+          }
+        } else {
+          // Setup audio context on first play (requires user interaction)
+          if (!audioContextRef.current) {
+            setupAudioContext();
+          }
+          if (audioContextRef.current?.state === "suspended") {
+            await audioContextRef.current.resume();
+          }
+          await audioRef.current.play();
+          drawWaveform();
         }
-      } else {
-        // Setup audio context on first play (requires user interaction)
-        if (!audioContextRef.current) {
-          setupAudioContext();
-        }
-        if (audioContextRef.current?.state === "suspended") {
-          await audioContextRef.current.resume();
-        }
-        await audioRef.current.play();
-        drawWaveform();
+        setIsPlaying(!isPlaying);
+      } catch (err) {
+        // play() rejects for unsupported codecs / decode failures — keep
+        // the UI in the paused state instead of surfacing an unhandled
+        // rejection and a lying play button.
+        console.warn("[AudioPlayer] play() failed:", err);
+        setIsPlaying(false);
       }
-      setIsPlaying(!isPlaying);
     }
   };
 
@@ -137,7 +149,8 @@ export function AudioPlayer({ filePath }: AudioPlayerProps) {
       const current = audioRef.current.currentTime;
       const total = audioRef.current.duration;
       setCurrentTime(current);
-      setProgress((current / total) * 100);
+      // duration is NaN until metadata loads — no NaN% widths.
+      setProgress(Number.isFinite(total) && total > 0 ? (current / total) * 100 : 0);
     }
   };
 
@@ -149,10 +162,12 @@ export function AudioPlayer({ filePath }: AudioPlayerProps) {
 
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
     if (audioRef.current) {
+      const total = audioRef.current.duration;
+      // Before metadata loads duration is NaN — seeking to NaN throws.
+      if (!Number.isFinite(total) || total <= 0) return;
       const rect = e.currentTarget.getBoundingClientRect();
       const percent = (e.clientX - rect.left) / rect.width;
-      const time = percent * audioRef.current.duration;
-      audioRef.current.currentTime = time;
+      audioRef.current.currentTime = percent * total;
     }
   };
 
@@ -195,8 +210,15 @@ export function AudioPlayer({ filePath }: AudioPlayerProps) {
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
         onEnded={handleEnded}
+        onError={() => setLoadError(true)}
         crossOrigin="anonymous"
       />
+
+      {loadError && (
+        <div className="px-3 py-2 text-xs" style={{ color: "var(--err)" }}>
+          {t("mediaPlayer.loadError")}
+        </div>
+      )}
 
       {/* Waveform Visualization */}
       <div className="relative aspect-[2/1] bg-[rgb(30,30,30)] rounded-t">

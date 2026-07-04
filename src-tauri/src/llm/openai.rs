@@ -22,7 +22,6 @@ use super::{
     TagRequest, TagResponse, Usage,
 };
 
-pub const DEFAULT_MODEL: &str = "gpt-5.4-mini";
 
 const ENDPOINT: &str = "https://api.openai.com/v1/chat/completions";
 const REQUEST_TIMEOUT_SECS: u64 = 120;
@@ -301,6 +300,7 @@ impl LLMProvider for OpenAIProvider {
             send_text_chat(&api_key, &model, &endpoint, prompts::SYSTEM_PROMPT_LEARNING, &user)
                 .await?;
         let mut result: learning::LearningResult = parse_json_lenient(&text)?;
+        result.drop_unknown_rules();
         result.usage = usage;
         Ok(result)
     }

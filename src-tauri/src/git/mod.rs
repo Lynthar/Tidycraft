@@ -21,8 +21,14 @@ impl From<Status> for GitFileStatus {
     fn from(status: Status) -> Self {
         if status.is_conflicted() {
             GitFileStatus::Conflicted
-        } else if status.is_index_new() || status.is_wt_new() {
+        } else if status.is_index_new() {
+            // Staged addition. A worktree-only new file is Untracked below —
+            // the old `is_index_new() || is_wt_new()` arm swallowed both,
+            // leaving the Untracked variant (and its frontend badge)
+            // unreachable.
             GitFileStatus::New
+        } else if status.is_wt_new() {
+            GitFileStatus::Untracked
         } else if status.is_index_modified() || status.is_wt_modified() {
             GitFileStatus::Modified
         } else if status.is_index_deleted() || status.is_wt_deleted() {
@@ -33,8 +39,6 @@ impl From<Status> for GitFileStatus {
             GitFileStatus::Typechange
         } else if status.is_ignored() {
             GitFileStatus::Ignored
-        } else if status.contains(Status::WT_NEW) {
-            GitFileStatus::Untracked
         } else {
             GitFileStatus::Unchanged
         }
@@ -54,6 +58,13 @@ pub struct GitManager {
     repo: Option<Repository>,
     root_path: PathBuf,
     status_cache: HashMap<PathBuf, GitFileStatus>,
+    /// True while `status_cache` holds an unconsumed full-status pass.
+    /// `get_info` fills the cache as a side effect (it needs the same
+    /// data for `has_changes`), and the immediately following
+    /// `get_all_statuses` call consumes it instead of running a second
+    /// full-repo scan. One-shot: consuming resets the flag, so a lone
+    /// `get_all_statuses` still re-queries like it always did.
+    statuses_fresh: bool,
 }
 
 impl GitManager {
@@ -69,6 +80,7 @@ impl GitManager {
             repo,
             root_path,
             status_cache: HashMap::new(),
+            statuses_fresh: false,
         }
     }
 
@@ -78,9 +90,11 @@ impl GitManager {
         self.repo.is_some()
     }
 
-    /// Get repository info
-    pub fn get_info(&self) -> GitInfo {
-        let Some(repo) = &self.repo else {
+    /// Get repository info. Runs one full status pass (for `has_changes`)
+    /// and leaves it in `status_cache` for the `get_all_statuses` call that
+    /// follows in the same refresh — previously each did its own scan.
+    pub fn get_info(&mut self) -> GitInfo {
+        if self.repo.is_none() {
             return GitInfo {
                 is_repo: false,
                 branch: None,
@@ -90,18 +104,22 @@ impl GitManager {
             };
         };
 
+        self.load_statuses();
+        // Includes untracked files, matching `git status` (and the per-file
+        // badges this map feeds). The old `statuses(None)` used libgit2's
+        // raw defaults, which exclude untracked — an "untracked-only" repo
+        // read as clean.
+        let has_changes = !self.status_cache.is_empty();
+
+        let repo = self.repo.as_ref().unwrap();
+
         let branch = repo
             .head()
             .ok()
             .and_then(|head| head.shorthand().map(String::from));
 
-        let has_changes = repo
-            .statuses(None)
-            .map(|statuses| !statuses.is_empty())
-            .unwrap_or(false);
-
         // Get ahead/behind counts
-        let (ahead, behind) = self.get_ahead_behind(repo);
+        let (ahead, behind) = Self::get_ahead_behind(repo);
 
         GitInfo {
             is_repo: true,
@@ -112,7 +130,7 @@ impl GitManager {
         }
     }
 
-    fn get_ahead_behind(&self, repo: &Repository) -> (u32, u32) {
+    fn get_ahead_behind(repo: &Repository) -> (u32, u32) {
         let head = match repo.head() {
             Ok(h) => h,
             Err(_) => return (0, 0),
@@ -123,19 +141,23 @@ impl GitManager {
             None => return (0, 0),
         };
 
-        // Try to find upstream branch
         let branch_name = match head.shorthand() {
             Some(name) => name,
             None => return (0, 0),
         };
 
-        let upstream_name = format!("origin/{}", branch_name);
-        let upstream_ref = match repo.find_reference(&format!("refs/remotes/{}", upstream_name)) {
-            Ok(r) => r,
+        // Resolve the CONFIGURED upstream (branch.<name>.remote + .merge)
+        // instead of assuming `origin/<branch>` — renamed remotes and forks
+        // track elsewhere, and the hardcoded guess silently reported 0/0.
+        let local_branch = match repo.find_branch(branch_name, git2::BranchType::Local) {
+            Ok(b) => b,
             Err(_) => return (0, 0),
         };
-
-        let upstream_oid = match upstream_ref.target() {
+        let upstream = match local_branch.upstream() {
+            Ok(u) => u,
+            Err(_) => return (0, 0), // no upstream configured
+        };
+        let upstream_oid = match upstream.get().target() {
             Some(oid) => oid,
             None => return (0, 0),
         };
@@ -145,17 +167,13 @@ impl GitManager {
             .unwrap_or((0, 0))
     }
 
-    /// Get all file statuses, freshly re-queried each call.
-    ///
-    /// `status_cache` exists only as the owned home for the returned borrow —
-    /// the previous cache-short-circuit was unsafe (callers had no way to
-    /// invalidate after files changed) and the lifetime of a `GitManager`
-    /// today is one refresh anyway, since `get_git_info` rebuilds it.
-    pub fn get_all_statuses(&mut self) -> &HashMap<PathBuf, GitFileStatus> {
+    /// Run the full status query into `status_cache` and mark it fresh.
+    fn load_statuses(&mut self) {
         self.status_cache.clear();
+        self.statuses_fresh = true;
 
         let Some(repo) = &self.repo else {
-            return &self.status_cache;
+            return;
         };
 
         let mut opts = StatusOptions::new();
@@ -172,7 +190,20 @@ impl GitManager {
                 }
             }
         }
+    }
 
+    /// Get all file statuses. Fresh data every call from the caller's
+    /// perspective: either the pass `get_info` ran a moment ago in the same
+    /// refresh (consumed exactly once via `statuses_fresh`), or a re-query.
+    /// The lifetime of a `GitManager` is one refresh anyway, since
+    /// `get_git_info` rebuilds it.
+    pub fn get_all_statuses(&mut self) -> &HashMap<PathBuf, GitFileStatus> {
+        // Consume the pass `get_info` just ran (see `statuses_fresh`);
+        // re-query only when called standalone.
+        if !self.statuses_fresh {
+            self.load_statuses();
+        }
+        self.statuses_fresh = false;
         &self.status_cache
     }
 

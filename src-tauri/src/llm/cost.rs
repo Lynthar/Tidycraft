@@ -175,7 +175,23 @@ pub fn estimate_cost(request: &TagRequest) -> CostEstimate {
         None => return CostEstimate::default(),
     };
 
-    let mut input_tokens = 0usize;
+    // System prompt + shared context blocks (project framing, existing
+    // tags) — previously uncounted, and at ~450+ tokens they dominate the
+    // relative error for small text-only batches. `llm_estimate_cost`
+    // still passes empty context (the modal has no cheap way to size it),
+    // so the tag/sample terms only sharpen estimates for callers that do.
+    let mut input_tokens = super::prompts::SYSTEM_PROMPT.len() / CHARS_PER_TOKEN;
+    if let Some(meta) = &request.project_ctx {
+        let chars = meta.theme.as_deref().map_or(0, str::len)
+            + meta.goal.as_deref().map_or(0, str::len);
+        input_tokens = input_tokens.saturating_add(chars / CHARS_PER_TOKEN);
+    }
+    for tag in &request.existing_tags {
+        let chars = tag.name.len()
+            + tag.description.as_deref().map_or(0, str::len)
+            + tag.sample_paths.iter().map(String::len).sum::<usize>();
+        input_tokens = input_tokens.saturating_add(chars / CHARS_PER_TOKEN + 4);
+    }
     for asset in &request.assets {
         if request.include_thumbnails && asset.thumbnail_base64.is_some() {
             input_tokens =
@@ -342,10 +358,22 @@ mod tests {
     fn cost_50_assets_sonnet_matches_expected() {
         // Per-asset: 87 (image) + 100 (prompt) = 187 input + 150 output.
         // 50 × (187 × 3 + 150 × 15) / 1_000_000 USD
-        //   = 50 × (561 + 2250) micros = 140_550 micros = $0.14 = 14 cents.
+        //   = 50 × (561 + 2250) micros = 140_550 micros ≈ 14 cents,
+        // plus the (fixed) system-prompt input term — still 15 cents
+        // after ceiling.
         let r = req("claude-sonnet-4-6", 50, true);
         let est = estimate_cost(&r);
-        assert_eq!(est.usd_cents, 15); // 140_550 / 10_000 ceil = 15 cents
+        assert_eq!(est.usd_cents, 15);
+    }
+
+    #[test]
+    fn estimate_includes_the_system_prompt() {
+        // A text-only single-asset request is dominated by the system
+        // prompt; it used to be silently uncounted.
+        let est = estimate_cost(&req("claude-sonnet-4-6", 1, false));
+        let system_tokens = crate::llm::prompts::SYSTEM_PROMPT.len() / CHARS_PER_TOKEN;
+        assert!(system_tokens > 300, "system prompt unexpectedly tiny");
+        assert!(est.input_tokens >= system_tokens + PROMPT_OVERHEAD_TOKENS_PER_ASSET);
     }
 
     #[test]

@@ -22,6 +22,7 @@ import { useProjectStore } from "./stores/projectStore";
 import { useUiStore } from "./stores/uiStore";
 import { restoreSession } from "./stores/sessionStore";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useShallow } from "zustand/react/shallow";
 import { isMacOS } from "./lib/platform";
 import { version as appVersion } from "../package.json";
 
@@ -37,7 +38,9 @@ function App() {
     locateAsset,
     getProjectList,
     activeProjectId,
-  } = useProjectStore();
+  } = useProjectStore(
+    useShallow((s) => ({ selectedAsset: s.selectedAsset, scanResult: s.scanResult, viewMode: s.viewMode, analysisResult: s.analysisResult, analysisStale: s.analysisStale, isAnalyzing: s.isAnalyzing, runAnalysis: s.runAnalysis, locateAsset: s.locateAsset, getProjectList: s.getProjectList, activeProjectId: s.activeProjectId, }))
+  );
 
   const projects = getProjectList();
   const isEmpty = projects.length === 0;

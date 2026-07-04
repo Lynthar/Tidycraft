@@ -136,6 +136,10 @@ impl NamingRule {
             "PascalCase" => is_pascal_case(name),
             "snake_case" => is_snake_case(name),
             "camelCase" => is_camel_case(name),
+            // Documented in the sample config since day one, but the branch
+            // was missing — a `case_style = "kebab-case"` silently behaved
+            // like "any".
+            "kebab-case" => is_kebab_case(name),
             _ => true, // "any" or unknown
         }
     }
@@ -158,15 +162,18 @@ impl Rule for NamingRule {
         let name = &asset.name;
         let name_without_ext = name.rsplit_once('.').map(|(n, _)| n).unwrap_or(name);
 
-        // Check length
-        if name.len() > self.config.max_length {
+        // Check length in CHARACTERS — `len()` counts bytes, which triples
+        // the tally for CJK names (a 40-character Chinese filename read as
+        // 120 and false-tripped the limit).
+        let char_count = name.chars().count();
+        if char_count > self.config.max_length {
             return Some(Issue {
                 rule_id: "naming.length".to_string(),
                 rule_name: "Name Too Long".to_string(),
                 severity: Severity::Warning,
                 message: format!(
                     "File name is {} characters, max allowed is {}",
-                    name.len(),
+                    char_count,
                     self.config.max_length
                 ),
                 asset_path: asset.path.clone(),
@@ -252,4 +259,9 @@ fn is_camel_case(s: &str) -> bool {
     }
     let first = s.chars().next().unwrap();
     first.is_lowercase() && !s.contains('_')
+}
+
+fn is_kebab_case(s: &str) -> bool {
+    // Same leniency level as is_snake_case, with `-` as the separator.
+    s.chars().all(|c| c.is_lowercase() || c.is_numeric() || c == '-')
 }

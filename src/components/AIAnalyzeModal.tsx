@@ -83,13 +83,17 @@ export function AIAnalyzeModal() {
     (!needsConsentGate || consented || consentLocal);
 
   // Reset transient state when modal closes/reopens. Without this,
-  // a previous error / cost number would briefly flash on the next open.
+  // a previous error / cost number would briefly flash on the next open —
+  // and the thumbnail-upload consent stuck across opens, so a second run
+  // in the same session silently defaulted to uploading images the user
+  // only agreed to for the FIRST batch.
   useEffect(() => {
     if (!aiAnalyzeOpen) {
       setCost(null);
       setError(null);
       setConsentLocal(false);
       setRunning(false);
+      setUploadThumbnails(false);
     }
   }, [aiAnalyzeOpen]);
 

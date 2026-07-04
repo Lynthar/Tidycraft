@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useProjectStore } from "../stores/projectStore";
+import { useShallow } from "zustand/react/shallow";
 import { useTagsStore } from "../stores/tagsStore";
 import { useColumnStore } from "../stores/columnStore";
 import { useUiStore, isBlockingOverlayOpen } from "../stores/uiStore";
@@ -45,8 +46,6 @@ export function AssetList() {
     setSelectedAsset,
     getFilteredAssets,
     isScanning,
-    projectPath,
-    openProject,
     sortField,
     sortDirection,
     setSortField,
@@ -58,7 +57,9 @@ export function AssetList() {
     selectedDirectory,
     refreshUndoState,
     advancedFilters,
-  } = useProjectStore();
+  } = useProjectStore(
+    useShallow((s) => ({ scanResult: s.scanResult, selectedAsset: s.selectedAsset, setSelectedAsset: s.setSelectedAsset, getFilteredAssets: s.getFilteredAssets, isScanning: s.isScanning, sortField: s.sortField, sortDirection: s.sortDirection, setSortField: s.setSortField, toggleSortDirection: s.toggleSortDirection, gitStatuses: s.gitStatuses, typeFilter: s.typeFilter, setTypeFilter: s.setTypeFilter, searchQuery: s.searchQuery, selectedDirectory: s.selectedDirectory, refreshUndoState: s.refreshUndoState, advancedFilters: s.advancedFilters, }))
+  );
   const { loadTags, assetTags: allAssetTags, tagFilters } = useTagsStore();
   const viewMode = useColumnStore((s) => s.viewMode);
   const setViewMode = useColumnStore((s) => s.setViewMode);
@@ -202,13 +203,13 @@ export function AssetList() {
       await refreshUndoState();
       // Tags followed the renamed files on the backend; re-sync the store so the
       // moved bindings show immediately rather than after the watcher's ~500ms
-      // scanResult refresh re-triggers loadTags.
+      // scanResult refresh re-triggers loadTags. The scan list itself is
+      // refreshed by that watcher pass — the bare openProject(path) that
+      // used to sit here was a guaranteed no-op (already-open + not-force
+      // short-circuits into setActiveProject's same-id early return).
       await loadTags();
-      if (projectPath) {
-        openProject(projectPath);
-      }
     },
-    [projectPath, openProject, refreshUndoState, clearSelection, loadTags]
+    [refreshUndoState, clearSelection, loadTags]
   );
 
   // Context menu handlers
@@ -267,12 +268,10 @@ export function AssetList() {
   const handleSingleRenameComplete = useCallback(async () => {
     setRenameAsset(null);
     await refreshUndoState();
-    // Tag binding followed the file on the backend — re-sync (see batch handler).
+    // Tag binding followed the file on the backend — re-sync (see batch
+    // handler; the watcher refreshes the scan list itself).
     await loadTags();
-    if (projectPath) {
-      openProject(projectPath);
-    }
-  }, [projectPath, openProject, refreshUndoState, loadTags]);
+  }, [refreshUndoState, loadTags]);
 
   // Rule shared by delete / move / copy / duplicate: if the right-clicked asset
   // is part of the current multi-selection, operate on the whole selection.

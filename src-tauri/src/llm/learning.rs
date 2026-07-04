@@ -169,6 +169,13 @@ pub enum LearnedRule {
         tags: Vec<String>,
         confidence: f32,
     },
+    /// Catch-all for `kind` values the model invents outside the schema
+    /// (e.g. "path_regex"). One hallucinated kind used to fail
+    /// deserialization of the ENTIRE already-paid learning response.
+    /// Never surfaces: [`LearningResult::drop_unknown_rules`] strips these
+    /// right after parse, and rule loading skips them defensively.
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -182,6 +189,23 @@ pub struct LearningResult {
     pub rules: Vec<LearnedRule>,
     #[serde(default)]
     pub usage: Usage,
+}
+
+impl LearningResult {
+    /// Strip rules whose `kind` fell into the [`LearnedRule::Unknown`]
+    /// catch-all. Called by every provider right after parsing, so
+    /// downstream consumers (review panel, rule store, suggester) never
+    /// see them.
+    pub fn drop_unknown_rules(&mut self) {
+        let before = self.rules.len();
+        self.rules.retain(|r| !matches!(r, LearnedRule::Unknown));
+        let dropped = before - self.rules.len();
+        if dropped > 0 {
+            eprintln!(
+                "[learning] dropped {dropped} rule(s) with unrecognized kind from the model response"
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -287,5 +311,37 @@ mod tests {
         assert_eq!(result.tag_gaps.len(), 1);
         assert_eq!(result.rules.len(), 4);
         assert_eq!(result.usage.input_tokens, 0);
+    }
+
+    #[test]
+    fn unknown_rule_kind_and_category_survive_parsing() {
+        // One hallucinated `kind` / out-of-vocabulary `category` must not
+        // fail the whole (already paid) response — the unknown rule is
+        // parsed into the catch-all and stripped, everything else kept.
+        let json = r#"{
+            "inferred_conventions": {
+                "naming": "n", "directories": "d", "existing_tag_meanings": {}
+            },
+            "sample_tags": [{
+                "asset_path": "a.png",
+                "matched_existing": [],
+                "suggested_new": [{"label": "x", "category": "environment", "confidence": 0.8}]
+            }],
+            "tag_gaps": [],
+            "rules": [
+                {"kind": "path_regex", "pattern": "boom", "tags": ["t"], "confidence": 0.9},
+                {"kind": "filename_token", "pattern": "BaseColor", "tags": ["t"], "confidence": 0.9}
+            ]
+        }"#;
+        let mut result: LearningResult = serde_json::from_str(json).unwrap();
+        assert_eq!(result.rules.len(), 2);
+        result.drop_unknown_rules();
+        assert_eq!(result.rules.len(), 1);
+        assert!(matches!(result.rules[0], LearnedRule::FilenameToken { .. }));
+        // invented category fell into Other instead of erroring
+        assert_eq!(
+            result.sample_tags[0].suggested_new[0].category,
+            crate::llm::TagCategory::Other
+        );
     }
 }

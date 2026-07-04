@@ -88,7 +88,7 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const runAnalysis = useProjectStore((s) => s.runAnalysis);
   const cancelScan = useProjectStore((s) => s.cancelScan);
-  const openProject = useProjectStore((s) => s.openProject);
+  const rescan = useProjectStore((s) => s.rescan);
   const setViewMode = useProjectStore((s) => s.setViewMode);
   const setActiveProject = useProjectStore((s) => s.setActiveProject);
   const locateAsset = useProjectStore((s) => s.locateAsset);
@@ -161,7 +161,11 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
         shortcut: "⌘R",
         icon: <RefreshCw size={13} />,
         onSelect: () => {
-          openProject(projectPath, { force: true });
+          // Same contract as the ⌘R it advertises: rescan() clears the
+          // disk scan cache first. The bare force-open this used to call
+          // kept serving cached entries — a different, weaker operation
+          // under the same label.
+          void rescan();
           close();
         },
       });
