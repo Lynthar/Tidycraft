@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import type { Tag, AssetTagsMap } from "../types/asset";
-import { useProjectStore } from "./projectStore";
+import { useProjectStore, registerTagFilterBridge } from "./projectStore";
 
 interface TagsState {
   // State
@@ -256,4 +256,19 @@ useProjectStore.subscribe((state, prev) => {
   if (state.activeProjectId !== prev.activeProjectId) {
     useTagsStore.getState().loadTags();
   }
+});
+
+// Give projectStore.locateAsset a way to clear tag filters that would hide
+// the located asset (it can't import this store — see the bridge's comment).
+// The exclusion test mirrors AssetList's AND semantics: an asset is visible
+// only when it carries EVERY active filter tag.
+registerTagFilterBridge({
+  clearIfFiltering: (path: string) => {
+    const { tagFilters, assetTags, clearTagFilters } = useTagsStore.getState();
+    if (tagFilters.length === 0) return;
+    const tagIds = (assetTags[path] || []).map((t) => t.id);
+    if (!tagFilters.every((id) => tagIds.includes(id))) {
+      clearTagFilters();
+    }
+  },
 });
