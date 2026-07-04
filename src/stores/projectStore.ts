@@ -162,6 +162,21 @@ const generateProjectId = (): string => {
   return `project_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 };
 
+// Bridge registered by tagsStore at its module init. locateAsset needs to
+// clear tag filters that would hide the located asset, but tag state lives
+// in tagsStore — and tagsStore already imports this store (its top-level
+// `useProjectStore.subscribe(...)` runs at module evaluation), so a static
+// import from here would close an ESM cycle and TDZ-crash at startup.
+interface TagFilterBridge {
+  /// Clear the active tag filters if (and only if) they would exclude
+  /// `path` from the asset list.
+  clearIfFiltering: (path: string) => void;
+}
+let tagFilterBridge: TagFilterBridge | null = null;
+export const registerTagFilterBridge = (bridge: TagFilterBridge) => {
+  tagFilterBridge = bridge;
+};
+
 // True when a project entry is an unhydrated stub — registered (usually by
 // session restore) but never scanned — that should be lazily hydrated the
 // moment it becomes the active project. Deliberately false when `error` is
@@ -186,6 +201,13 @@ interface ProjectState {
   /// change for any project. StatusBar subscribes to this to flash a
   /// "syncing" indicator. 0 = no events seen yet this session.
   watcherPulse: number;
+
+  /// Monotonic counter bumped by every locateAsset call. The asset views
+  /// scroll the selected row into view on [selectedAsset.path, locatePulse]
+  /// — the pulse makes a repeat locate of the already-selected asset still
+  /// scroll, without making every ordinary filter change fight the user's
+  /// scroll position.
+  locatePulse: number;
 
   // Convenience getters for active project
   projectPath: string | null;
@@ -444,6 +466,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   canUndo: false,
   undoHistory: [],
   watcherPulse: 0,
+  locatePulse: 0,
 
   // Initial convenience fields (no active project)
   projectPath: null,
@@ -948,14 +971,29 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!scanResult) return;
 
     const asset = scanResult.assets.find((a) => a.path === path);
-    if (asset) {
-      const dir = dirname(path);
-      set(updateActiveProject(get(), {
-        viewMode: "assets",
-        selectedDirectory: dir,
-        selectedAsset: asset,
-      }));
+    if (!asset) return;
+
+    const dir = dirname(path);
+    set(updateActiveProject(get(), {
+      viewMode: "assets",
+      selectedDirectory: dir,
+      selectedAsset: asset,
+    }));
+
+    // "Locate" must actually land on a visible row. If the current filters
+    // exclude the target (checked through the real pipeline, not a
+    // re-implementation of it), reset them; when they don't, leave the
+    // user's filter context alone. Tag filters live in tagsStore and are
+    // handled through the registered bridge (import-cycle constraint, see
+    // registerTagFilterBridge).
+    if (!get().getFilteredAssets().some((a) => a.path === path)) {
+      set(updateActiveProject(get(), { searchQuery: "", typeFilter: null }));
+      get().resetAdvancedFilters();
     }
+    tagFilterBridge?.clearIfFiltering(path);
+
+    // Fire last so the views scroll against the settled, post-clear list.
+    set({ locatePulse: get().locatePulse + 1 });
   },
 
   setAdvancedFilters: (filters: Partial<AdvancedFilters>) => {

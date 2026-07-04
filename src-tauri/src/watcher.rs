@@ -101,7 +101,16 @@ pub fn start(
             let mut candidates: HashSet<PathBuf> = HashSet::new();
             for event in events {
                 for path in &event.event.paths {
-                    candidates.insert(path.clone());
+                    // A `.meta` change is really a change to its host asset's
+                    // Unity metadata (the GUID) — remap to the host so it gets
+                    // re-parsed. `is_trackable_path` below drops sidecars, so
+                    // without this the cached `unity_guid` goes stale until
+                    // the next full rescan whenever Unity (re)generates one.
+                    if let Some(host) = meta_host_path(path) {
+                        candidates.insert(host);
+                    } else {
+                        candidates.insert(path.clone());
+                    }
                 }
             }
 
@@ -117,7 +126,8 @@ pub fn start(
                 continue;
             }
 
-            let payload = apply_changes(&thread_project_id, &filtered);
+            let payload =
+                apply_changes(&thread_project_id, &filtered, ignore_matcher.as_ref());
 
             if let Ok(ev) = payload {
                 let _ = app.emit(&event_name, &ev);
@@ -144,7 +154,11 @@ pub fn start(
 /// it inside the same closure because borrowing `state.cached_scan` as
 /// `&mut` already takes the lock and a sibling `&mut state.tags_data`
 /// would need a destructure — the two-pass version is plainer.
-fn apply_changes(project_id: &str, candidates: &[PathBuf]) -> Result<FsChangeEvent, String> {
+fn apply_changes(
+    project_id: &str,
+    candidates: &[PathBuf],
+    ignore_matcher: Option<&scanner::IgnoreMatcher>,
+) -> Result<FsChangeEvent, String> {
     let event = project::with_mut(project_id, |state| {
         let scan_result = state
             .cached_scan
@@ -214,6 +228,7 @@ fn apply_changes(project_id: &str, candidates: &[PathBuf]) -> Result<FsChangeEve
         let new_tree = scanner::build_directory_tree(
             Path::new(&scan_result.root_path),
             &scan_result.assets,
+            ignore_matcher,
         );
         scan_result.directory_tree = new_tree.clone();
 
@@ -248,6 +263,17 @@ fn apply_changes(project_id: &str, candidates: &[PathBuf]) -> Result<FsChangeEve
     }
 
     Ok(event)
+}
+
+/// Host asset for a Unity `.meta` sidecar path (`foo.png.meta` → `foo.png`),
+/// or `None` when the path isn't a sidecar. A bare `".meta"` has no host.
+fn meta_host_path(path: &Path) -> Option<PathBuf> {
+    let name = path.file_name()?.to_str()?;
+    let host = name.strip_suffix(".meta")?;
+    if host.is_empty() {
+        return None;
+    }
+    Some(path.with_file_name(host))
 }
 
 /// Mirrors the scanner's discovery filters: skip hidden path components (e.g.
@@ -323,6 +349,22 @@ mod tests {
             Path::new("/proj/sub/.hidden/file.png"),
             root
         ));
+    }
+
+    #[test]
+    fn meta_events_map_to_their_host_asset() {
+        assert_eq!(
+            meta_host_path(Path::new("/proj/tex.png.meta")),
+            Some(PathBuf::from("/proj/tex.png"))
+        );
+        // Not a sidecar → no remap.
+        assert_eq!(meta_host_path(Path::new("/proj/tex.png")), None);
+        // A bare ".meta" has no host.
+        assert_eq!(meta_host_path(Path::new("/proj/.meta")), None);
+        // Extensionless host: remapped, but is_trackable_path drops it later
+        // (mirrors the scanner, which only tracks extensioned files).
+        let host = meta_host_path(Path::new("/proj/Makefile.meta")).unwrap();
+        assert!(!is_trackable_path(&host, Path::new("/proj")));
     }
 
     #[test]

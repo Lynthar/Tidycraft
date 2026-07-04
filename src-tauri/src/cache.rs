@@ -13,6 +13,14 @@ pub struct CacheEntry {
     pub path: String,
     pub modified: u64,
     pub size: u64,
+    /// Modification time of the asset's Unity `.meta` sidecar at scan time
+    /// (`None` = no sidecar, or a non-Unity project where sidecars aren't
+    /// consulted). Part of the invalidation key: Unity rewriting just the
+    /// sidecar (new GUID) must re-parse the asset even though the asset
+    /// file itself is untouched — otherwise `unity_guid` and everything
+    /// built on it (dependency graph, unused-asset detection) goes stale
+    /// until the asset body changes or the cache is cleared.
+    pub meta_modified: Option<u64>,
     pub asset: AssetInfo,
 }
 
@@ -29,7 +37,8 @@ impl ScanCache {
     /// Bump whenever the set of extracted metadata fields changes so older
     /// caches with missing fields (e.g. FBX vertex/face before Phase 1.4a,
     /// SVG dimensions before the 2026-04 pass) get rejected and re-scanned.
-    const CACHE_VERSION: u32 = 4;
+    /// v5: entries carry the `.meta` sidecar mtime in the invalidation key.
+    const CACHE_VERSION: u32 = 5;
 
     /// Create a new empty cache
     pub fn new(project_path: &str) -> Self {
@@ -87,20 +96,33 @@ impl ScanCache {
         Ok(())
     }
 
-    /// Check if a file needs re-scanning
-    pub fn needs_rescan(&self, path: &str, modified: u64, size: u64) -> bool {
+    /// Check if a file needs re-scanning. `meta_modified` is the current
+    /// mtime of the file's `.meta` sidecar (see [`CacheEntry::meta_modified`]);
+    /// any change — created, rewritten, or deleted — invalidates the entry.
+    pub fn needs_rescan(
+        &self,
+        path: &str,
+        modified: u64,
+        size: u64,
+        meta_modified: Option<u64>,
+    ) -> bool {
         match self.entries.get(path) {
-            Some(entry) => entry.modified != modified || entry.size != size,
+            Some(entry) => {
+                entry.modified != modified
+                    || entry.size != size
+                    || entry.meta_modified != meta_modified
+            }
             None => true,
         }
     }
 
     /// Add or update an entry
-    pub fn update_entry(&mut self, asset: AssetInfo, modified: u64) {
+    pub fn update_entry(&mut self, asset: AssetInfo, modified: u64, meta_modified: Option<u64>) {
         let entry = CacheEntry {
             path: asset.path.clone(),
             modified,
             size: asset.size,
+            meta_modified,
             asset,
         };
         self.entries.insert(entry.path.clone(), entry);
@@ -152,6 +174,36 @@ mod tests {
     #[test]
     fn test_needs_rescan() {
         let cache = ScanCache::new("/test");
-        assert!(cache.needs_rescan("/test/file.png", 12345, 1000));
+        assert!(cache.needs_rescan("/test/file.png", 12345, 1000, None));
+    }
+
+    fn dummy_asset(path: &str, size: u64) -> AssetInfo {
+        AssetInfo {
+            path: path.to_string(),
+            name: "file.png".to_string(),
+            extension: "png".to_string(),
+            asset_type: crate::scanner::AssetType::Texture,
+            size,
+            metadata: None,
+            unity_guid: None,
+        }
+    }
+
+    #[test]
+    fn needs_rescan_tracks_sidecar_meta_mtime() {
+        let mut cache = ScanCache::new("/test");
+        cache.update_entry(dummy_asset("/test/file.png", 1000), 12345, Some(50));
+
+        // Unchanged on all three axes → cached.
+        assert!(!cache.needs_rescan("/test/file.png", 12345, 1000, Some(50)));
+        // Sidecar rewritten (mtime moved) → rescan.
+        assert!(cache.needs_rescan("/test/file.png", 12345, 1000, Some(60)));
+        // Sidecar deleted → rescan.
+        assert!(cache.needs_rescan("/test/file.png", 12345, 1000, None));
+
+        // Entry recorded without a sidecar; one appearing later → rescan.
+        cache.update_entry(dummy_asset("/test/new.png", 500), 111, None);
+        assert!(!cache.needs_rescan("/test/new.png", 111, 500, None));
+        assert!(cache.needs_rescan("/test/new.png", 111, 500, Some(70)));
     }
 }

@@ -1067,6 +1067,16 @@ fn parse_audio_metadata(path: &Path) -> Option<AssetMetadata> {
     })
 }
 
+/// Modification time of the Unity sidecar `<file>.meta`, if present.
+/// Unity's convention is the full filename plus ".meta" (`foo.png` →
+/// `foo.png.meta`). Used by the incremental scan to fold the sidecar
+/// into the cache-invalidation key — see [`crate::cache::CacheEntry`].
+fn meta_modified_time(path: &Path) -> Option<u64> {
+    let mut p = path.as_os_str().to_owned();
+    p.push(".meta");
+    get_modified_time(Path::new(&p))
+}
+
 /// Parse Unity .meta file to get GUID
 fn parse_unity_meta(path: &Path) -> Option<String> {
     let meta_path = path.with_extension(format!(
@@ -1169,12 +1179,28 @@ fn precompute_dir_stats(assets: &[AssetInfo]) -> HashMap<String, DirStats> {
 /// New implementation: one O(N) preprocessing pass groups assets by their
 /// parent directory path into a HashMap, then the recursive tree build only
 /// does an O(1) hashmap lookup per node for its direct counts.
-pub(crate) fn build_directory_tree(root: &Path, assets: &[AssetInfo]) -> DirectoryNode {
+///
+/// `ignore` prunes gitignored directories from the `fs::read_dir` recursion
+/// (pass the same matcher the scan/watcher uses; `None` = gitignore off).
+/// Without it, a Unity project's `Library/` — 50k+ entries the scan never
+/// looks at — got fully re-walked on every scan AND every watcher batch,
+/// and showed up in the sidebar tree even though none of its files exist
+/// in the scan result.
+pub(crate) fn build_directory_tree(
+    root: &Path,
+    assets: &[AssetInfo],
+    ignore: Option<&IgnoreMatcher>,
+) -> DirectoryNode {
     let stats = precompute_dir_stats(assets);
-    build_dir_node(root, &stats)
+    build_dir_node(root, root, &stats, ignore)
 }
 
-fn build_dir_node(path: &Path, stats: &HashMap<String, DirStats>) -> DirectoryNode {
+fn build_dir_node(
+    path: &Path,
+    root: &Path,
+    stats: &HashMap<String, DirStats>,
+    ignore: Option<&IgnoreMatcher>,
+) -> DirectoryNode {
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -1190,9 +1216,15 @@ fn build_dir_node(path: &Path, stats: &HashMap<String, DirStats>) -> DirectoryNo
             let entry_path = entry.path();
             if entry_path.is_dir() {
                 let dir_name = entry_path.file_name().unwrap_or_default().to_string_lossy();
-                if !dir_name.starts_with('.') {
-                    children.push(build_dir_node(&entry_path, stats));
+                if dir_name.starts_with('.') {
+                    continue;
                 }
+                if let (Some(matcher), Ok(rel)) = (ignore, entry_path.strip_prefix(root)) {
+                    if matcher.is_ignored(rel, true) {
+                        continue;
+                    }
+                }
+                children.push(build_dir_node(&entry_path, root, stats, ignore));
             }
         }
     }
@@ -1500,7 +1532,8 @@ pub fn scan_directory_with_state(
         *s.phase.write() = ScanPhase::Building;
     }
 
-    let directory_tree = build_directory_tree(root_path, &assets);
+    let tree_ignore = build_gitignore_matcher(root_path, respect_gitignore);
+    let directory_tree = build_directory_tree(root_path, &assets, tree_ignore.as_ref());
 
     let total_count = assets.len();
     let total_size = assets.iter().map(|a| a.size).sum();
@@ -1658,13 +1691,17 @@ pub fn scan_directory_incremental(
     // "deleted" here — see the function's doc comment.
     cache.prune(&current_paths);
 
-    // Determine which files need scanning.
+    // Determine which files need scanning. Sidecar mtimes only matter for
+    // Unity projects (the only place `.meta` is parsed) — everyone else
+    // skips the extra stat per file.
+    let is_unity = matches!(project_type, Some(ProjectType::Unity));
     let files_to_scan: Vec<&(PathBuf, u64)> = file_entries
         .iter()
         .filter(|(p, modified)| {
             let path_str = path_to_string(p);
             let size = p.metadata().map(|m| m.len()).unwrap_or(0);
-            cache.needs_rescan(&path_str, *modified, size)
+            let meta_modified = if is_unity { meta_modified_time(p) } else { None };
+            cache.needs_rescan(&path_str, *modified, size, meta_modified)
         })
         .collect();
 
@@ -1719,9 +1756,17 @@ pub fn scan_directory_incremental(
         }
     }
 
-    // Update cache with parsed assets
+    // Update cache with parsed assets. The sidecar mtime is re-stat'ed here
+    // rather than carried from the filter pass — if the .meta changed in
+    // between, storing the later value just means one more (correct)
+    // re-parse next scan.
     for (asset, modified) in parsed_assets {
-        cache.update_entry(asset, modified);
+        let meta_modified = if is_unity {
+            meta_modified_time(Path::new(&asset.path))
+        } else {
+            None
+        };
+        cache.update_entry(asset, modified, meta_modified);
     }
 
     // Get all assets from cache
@@ -1758,7 +1803,8 @@ pub fn scan_directory_incremental(
         *s.phase.write() = ScanPhase::Building;
     }
 
-    let directory_tree = build_directory_tree(root_path, &assets);
+    let tree_ignore = build_gitignore_matcher(root_path, respect_gitignore);
+    let directory_tree = build_directory_tree(root_path, &assets, tree_ignore.as_ref());
 
     let total_count = assets.len();
     let total_size = assets.iter().map(|a| a.size).sum();
@@ -2603,5 +2649,117 @@ mod tests {
         let path = dir.path().join("srgb.png");
         fs::write(&path, png).unwrap();
         assert_eq!(parse_png_color_space(&path).as_deref(), Some("sRGB"));
+    }
+
+    /// Set a file's mtime a fixed number of seconds into the future so a
+    /// rewrite within the same wall-clock second still registers as a
+    /// change (cache mtimes have whole-second granularity).
+    fn bump_mtime(path: &Path, secs_ahead: u64) {
+        let file = fs::File::options().write(true).open(path).unwrap();
+        let t = std::time::SystemTime::now() + std::time::Duration::from_secs(secs_ahead);
+        file.set_times(fs::FileTimes::new().set_modified(t)).unwrap();
+    }
+
+    #[test]
+    fn incremental_rescan_picks_up_meta_only_changes() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().to_str().unwrap();
+        // Unity project marker so unity_guid parsing kicks in.
+        fs::create_dir_all(dir.path().join("ProjectSettings")).unwrap();
+        fs::write(dir.path().join("tex.png"), "png data").unwrap();
+        fs::write(
+            dir.path().join("tex.png.meta"),
+            "fileFormatVersion: 2\nguid: aaaa1111aaaa1111aaaa1111aaaa1111\n",
+        )
+        .unwrap();
+
+        let (r1, _) = scan_directory_incremental(root, None, false).unwrap();
+        assert_eq!(
+            r1.assets[0].unity_guid.as_deref(),
+            Some("aaaa1111aaaa1111aaaa1111aaaa1111")
+        );
+
+        // Rewrite ONLY the sidecar (the asset itself is untouched) — the
+        // second scan must re-parse the asset and surface the new GUID.
+        fs::write(
+            dir.path().join("tex.png.meta"),
+            "fileFormatVersion: 2\nguid: bbbb2222bbbb2222bbbb2222bbbb2222\n",
+        )
+        .unwrap();
+        bump_mtime(&dir.path().join("tex.png.meta"), 5);
+
+        let (r2, _) = scan_directory_incremental(root, None, false).unwrap();
+        // Clean up the on-disk cache this test created in the user cache dir.
+        let _ = crate::cache::ScanCache::clear(root);
+        assert_eq!(
+            r2.assets[0].unity_guid.as_deref(),
+            Some("bbbb2222bbbb2222bbbb2222bbbb2222")
+        );
+    }
+
+    #[test]
+    fn incremental_rescan_notices_meta_created_and_deleted() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().to_str().unwrap();
+        fs::create_dir_all(dir.path().join("ProjectSettings")).unwrap();
+        fs::write(dir.path().join("tex.png"), "png data").unwrap();
+
+        // First scan: no sidecar yet.
+        let (r1, _) = scan_directory_incremental(root, None, false).unwrap();
+        assert_eq!(r1.assets[0].unity_guid, None);
+
+        // Unity generates the sidecar afterwards ("copy asset in, let the
+        // editor produce the .meta") — the next scan must pick it up.
+        fs::write(
+            dir.path().join("tex.png.meta"),
+            "fileFormatVersion: 2\nguid: cccc3333cccc3333cccc3333cccc3333\n",
+        )
+        .unwrap();
+        let (r2, _) = scan_directory_incremental(root, None, false).unwrap();
+        assert_eq!(
+            r2.assets[0].unity_guid.as_deref(),
+            Some("cccc3333cccc3333cccc3333cccc3333")
+        );
+
+        // Sidecar removed again → guid must clear.
+        fs::remove_file(dir.path().join("tex.png.meta")).unwrap();
+        let (r3, _) = scan_directory_incremental(root, None, false).unwrap();
+        let _ = crate::cache::ScanCache::clear(root);
+        assert_eq!(r3.assets[0].unity_guid, None);
+    }
+
+    #[test]
+    fn directory_tree_prunes_gitignored_dirs() {
+        let dir = tempdir().unwrap();
+
+        fs::create_dir_all(dir.path().join("Library").join("Artifacts")).unwrap();
+        fs::create_dir_all(dir.path().join("Assets")).unwrap();
+        fs::write(dir.path().join(".gitignore"), "Library/\n").unwrap();
+        fs::write(dir.path().join("Assets").join("a.png"), "x").unwrap();
+
+        // gitignore respected → Library/ neither walked nor shown.
+        let result =
+            scan_directory_with_state(dir.path().to_str().unwrap(), None, true).unwrap();
+        let names: Vec<&str> = result
+            .directory_tree
+            .children
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect();
+        assert!(names.contains(&"Assets"), "tree children: {:?}", names);
+        assert!(
+            !names.contains(&"Library"),
+            "gitignored dir leaked into the tree: {:?}",
+            names
+        );
+
+        // gitignore off → the dir still appears (scan-everything mode).
+        let result_all =
+            scan_directory_with_state(dir.path().to_str().unwrap(), None, false).unwrap();
+        assert!(result_all
+            .directory_tree
+            .children
+            .iter()
+            .any(|c| c.name == "Library"));
     }
 }

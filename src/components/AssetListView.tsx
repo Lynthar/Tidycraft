@@ -22,6 +22,7 @@ import type {
   AssetTagsMap,
   GitStatusMap,
 } from "../types/asset";
+import { useProjectStore } from "../stores/projectStore";
 import type { SortField, SortDirection } from "../stores/projectStore";
 import { TagBadge } from "./TagSelector";
 import { GitStatusBadge } from "./GitStatusBadge";
@@ -419,6 +420,20 @@ export function AssetListView({
     estimateSize: () => ROW_HEIGHT,
     overscan: 10,
   });
+
+  // Scroll the selected row into view on selection change / locate pulse.
+  // align:"auto" is a no-op when the row is already visible, so ordinary
+  // clicks don't jump the list; the pulse makes a repeat "locate" of the
+  // same asset scroll again (assets is deliberately not a dependency —
+  // re-filtering while searching must not fight the user's scrolling).
+  const locatePulse = useProjectStore((s) => s.locatePulse);
+  useEffect(() => {
+    if (!selectedAsset) return;
+    const idx = assets.findIndex((a) => a.path === selectedAsset.path);
+    if (idx >= 0) {
+      virtualizer.scrollToIndex(idx, { align: "auto" });
+    }
+  }, [selectedAsset?.path, locatePulse]);
 
   const virtualItems = virtualizer.getVirtualItems();
 

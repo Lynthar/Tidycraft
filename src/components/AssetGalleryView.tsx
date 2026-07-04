@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { formatFileSize } from "../lib/utils";
+import { useProjectStore } from "../stores/projectStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import type {
   AssetInfo,
@@ -280,6 +281,19 @@ export function AssetGalleryView({
   useEffect(() => {
     virtualizer.measure();
   }, [rowHeight, rowCount, virtualizer]);
+
+  // Scroll the selected card's ROW into view on selection change / locate
+  // pulse (this virtualizer's unit is the row of `cols` cards, not the
+  // card). Mirrors AssetListView — see the comment there for why `assets`
+  // is deliberately not a dependency.
+  const locatePulse = useProjectStore((s) => s.locatePulse);
+  useEffect(() => {
+    if (!selectedAsset) return;
+    const idx = assets.findIndex((a) => a.path === selectedAsset.path);
+    if (idx >= 0) {
+      virtualizer.scrollToIndex(Math.floor(idx / cols), { align: "auto" });
+    }
+  }, [selectedAsset?.path, locatePulse]);
 
   if (contentWidth <= 0) {
     // First paint: container hasn't been measured yet. Render the bare
