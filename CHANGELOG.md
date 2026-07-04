@@ -38,6 +38,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **AI apply can no longer mint duplicate "(AI)" tags** — every create path checks for an existing tag of the same name first, including tags created earlier in the same run.
 - **Ollama "model not found" reads as what it is.** A 404 now names the model and suggests `ollama pull`, instead of masquerading as a network error.
 - **Metadata panels no longer render "null" / "-bit" / "0.0 kHz"** rows for fields a format doesn't have — unset metadata is omitted from the wire instead of serialized as `null`.
+- **Lightbox grid / background / language toggles no longer reload the model.** Pressing G or L (or switching the app language) used to tear down the whole scene and reload the file — seconds on a large FBX, plus a camera reset; the toggles now patch the live scene, and viewer error messages re-translate on a language switch.
+- **A slow model load can no longer pollute the next preview.** Switching models mid-load let the previous file's late completion hijack the animation mixer, paint "Failed to load" over the successfully rendered next model, or display the wrong stats; stale loader callbacks are now discarded (preview panel and fullscreen lightbox both).
+- **The preview panel's thumbnail always matches the selected asset** — a slow thumbnail response for a previously selected texture no longer overwrites the current one's image (the image lightbox fallback consumed the same state).
+- **Closing the active project can't strand you on a blank asset view.** If the next project in line was a session-restored stub that had never been scanned, it now scans on promotion — previously only Ctrl+R could recover it.
+- **Tag edits that resolve during a project switch stay out of the other project's view.** A tag create/assign completing just after a quick switch no longer shows up as a phantom in the newly active project's tag list (the write itself always landed in the correct project).
 - Locale files' duplicate top-level `common` blocks merged (a JSON-editing key-loss trap; verified key-for-key lossless).
 
 ### Planned

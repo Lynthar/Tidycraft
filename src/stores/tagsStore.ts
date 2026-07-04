@@ -88,6 +88,14 @@ export const useTagsStore = create<TagsState>((set, get) => ({
     const projectId = activeProjectId();
     if (!projectId) return null;
     const tag = await invoke<Tag>("create_tag", { projectId, name, color });
+    // The backend write above targeted the snapshot projectId and stays
+    // valid; the in-memory mirror, however, belongs to whatever project is
+    // active NOW. If the user switched projects mid-flight, skip the mirror
+    // update (same snapshot-and-check as loadTags) — otherwise this project's
+    // tag shows up as a phantom in the other project's UI until its next
+    // loadTags. Switching back re-loads the truth from disk. Same guard in
+    // every mutation action below.
+    if (activeProjectId() !== projectId) return tag;
     set((state) => ({ tags: [...state.tags, tag] }));
     return tag;
   },
@@ -114,6 +122,7 @@ export const useTagsStore = create<TagsState>((set, get) => ({
       payload.description = description ?? ""; // null → "" so the clear lands
     }
     await invoke<Tag>("update_tag", payload);
+    if (activeProjectId() !== projectId) return; // mid-flight project switch — see createTag
     set((state) => ({
       tags: state.tags.map((t) =>
         t.id === tagId
@@ -135,6 +144,7 @@ export const useTagsStore = create<TagsState>((set, get) => ({
     const projectId = activeProjectId();
     if (!projectId) return;
     await invoke("delete_tag", { projectId, tagId });
+    if (activeProjectId() !== projectId) return; // mid-flight project switch — see createTag
     set((state) => {
       // Also prune the id from the active filters — a deleted tag left in an
       // AND filter can never match, so it would silently hide every asset
@@ -159,6 +169,7 @@ export const useTagsStore = create<TagsState>((set, get) => ({
     const projectId = activeProjectId();
     if (!projectId) return;
     await invoke("add_tag_to_asset", { projectId, assetPath, tagId });
+    if (activeProjectId() !== projectId) return; // mid-flight project switch — see createTag
     const { tags, assetTags } = get();
     const tag = tags.find((t) => t.id === tagId);
     if (tag) {
@@ -178,6 +189,7 @@ export const useTagsStore = create<TagsState>((set, get) => ({
     const projectId = activeProjectId();
     if (!projectId) return;
     await invoke("remove_tag_from_asset", { projectId, assetPath, tagId });
+    if (activeProjectId() !== projectId) return; // mid-flight project switch — see createTag
     const { assetTags } = get();
     set({
       assetTags: {
@@ -191,6 +203,7 @@ export const useTagsStore = create<TagsState>((set, get) => ({
     const projectId = activeProjectId();
     if (!projectId) return;
     await invoke("add_tag_to_assets", { projectId, assetPaths, tagId });
+    if (activeProjectId() !== projectId) return; // mid-flight project switch — see createTag
     const { tags, assetTags } = get();
     const tag = tags.find((t) => t.id === tagId);
     if (tag) {

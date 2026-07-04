@@ -162,6 +162,17 @@ const generateProjectId = (): string => {
   return `project_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 };
 
+// True when a project entry is an unhydrated stub — registered (usually by
+// session restore) but never scanned — that should be lazily hydrated the
+// moment it becomes the active project. Deliberately false when `error` is
+// set: auto-retrying a permanent failure (path gone, permission denied)
+// would loop the user through "switch → error → switch back → error"
+// forever; the Header rescan button remains the manual retry path.
+// Shared by setActiveProject and closeProject so every code path that can
+// promote a project to active applies the same hydration rule.
+const needsHydration = (project: ProjectData): boolean =>
+  project.scanResult === null && !project.isScanning && !project.error;
+
 interface ProjectState {
   // Multi-project state
   projects: Map<string, ProjectData>;
@@ -700,6 +711,15 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       activeProjectId: newActiveId,
       ...syncFromActiveProject(activeProject),
     });
+
+    // Closing the active project promotes the next one directly (bypassing
+    // setActiveProject), so apply the same lazy-hydration rule here: a
+    // promoted session-restored stub would otherwise render a permanently
+    // blank asset view — clicking its row hits setActiveProject's same-id
+    // early return, leaving a force rescan as the only way out.
+    if (idToClose === activeProjectId && activeProject && needsHydration(activeProject)) {
+      void get().openProject(activeProject.projectPath, { force: true });
+    }
   },
 
   setActiveProject: (projectId: string) => {
@@ -708,23 +728,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const project = projects.get(projectId);
     if (!project) return;
 
-    // Lazy hydration: if this is a stub (registered but never scanned)
-    // and it isn't already in flight or in an error state, kick off a
+    // Lazy hydration: if this is a stub (see needsHydration), kick off a
     // full openProject. openProject's force=true path will replace the
     // stub's ProjectData with isScanning=true, set activeProjectId,
     // wire scan-progress and fs-change listeners, run the scan, and
     // start the watcher + refresh git on completion.
-    //
-    // We deliberately do NOT auto-retry when `error` is non-empty —
-    // a permanent failure (path no longer exists, permission denied)
-    // would otherwise loop the user through "switch → error → switch
-    // away → switch back → error" forever. The Header rescan button
-    // remains the manual retry path.
-    if (
-      project.scanResult === null &&
-      !project.isScanning &&
-      !project.error
-    ) {
+    if (needsHydration(project)) {
       void get().openProject(project.projectPath, { force: true });
       return;
     }

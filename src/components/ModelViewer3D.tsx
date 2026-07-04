@@ -48,7 +48,15 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const animationIdRef = useRef<number>(0);
-  const isMountedRef = useRef(true);
+  // Monotonic token identifying the current setup-effect run. Loader
+  // callbacks capture their run's value and re-check it before touching
+  // any state — a shared boolean can't do this, because the next run
+  // resets it to "alive" and a still-in-flight onLoad/onError from the
+  // previous model then passes the guard (hijacking mixerRef, adding the
+  // stale mesh to an orphaned scene, or painting "Failed to load" over a
+  // successfully rendered model). cleanup() bumps it so unmount/close
+  // invalidates in-flight callbacks too.
+  const runIdRef = useRef(0);
   const mixerRef = useRef<THREE.AnimationMixer | null>(null);
   const clockRef = useRef<THREE.Clock>(new THREE.Clock());
 
@@ -58,7 +66,7 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
 
   // Clean up Three.js resources
   const cleanup = () => {
-    isMountedRef.current = false;
+    runIdRef.current++; // invalidate any in-flight loader callbacks
     if (animationIdRef.current) {
       cancelAnimationFrame(animationIdRef.current);
       animationIdRef.current = 0;
@@ -218,13 +226,12 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
   };
 
   useEffect(() => {
-    isMountedRef.current = true;
-
     if (!containerRef.current) return;
 
-    // Cleanup previous instance
+    // Cleanup previous instance (bumps runIdRef, cutting off any loader
+    // callback still in flight from the previous model).
     cleanup();
-    isMountedRef.current = true;
+    const runId = runIdRef.current;
 
     setIsLoading(true);
     setError(null);
@@ -292,7 +299,7 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
     const resourcePath = convertFileSrc(modelDir);
 
     const onLoad = (object: THREE.Object3D) => {
-      if (!isMountedRef.current) return;
+      if (runIdRef.current !== runId) return;
 
       // Fix materials and get stats
       const modelStats = fixMaterials(object);
@@ -332,7 +339,7 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
     };
 
     const onError = (err: unknown) => {
-      if (!isMountedRef.current) return;
+      if (runIdRef.current !== runId) return;
       console.error(`[ModelViewer3D] Failed to load ${ext.toUpperCase()} model:`, {
         filePath,
         modelUrl,
@@ -375,7 +382,7 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
       // walk of the model's directory, typically <10ms.
       (async () => {
         const urlModifier = await buildTextureUrlResolver(filePath);
-        if (!isMountedRef.current) return;
+        if (runIdRef.current !== runId) return;
 
         const loadingManager = new THREE.LoadingManager();
         loadingManager.setURLModifier(urlModifier);
@@ -411,7 +418,7 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
               onError(err);
               return;
             }
-            if (!isMountedRef.current) return;
+            if (runIdRef.current !== runId) return;
 
             const mtllibMatch = objText.match(/^mtllib\s+(.+?)\s*$/m);
             const objLoader = new OBJLoader(loadingManager);
@@ -450,7 +457,7 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
             loader.load(modelUrl, onLoad, undefined, onError);
           } else if (ext === "dae") {
             const { ColladaLoader } = await import("three/addons/loaders/ColladaLoader.js");
-            if (!isMountedRef.current) return;
+            if (runIdRef.current !== runId) return;
             const loader = new ColladaLoader(loadingManager);
             loader.setResourcePath(resourcePath);
             loader.load(
@@ -461,7 +468,7 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
             );
           } else if (ext === "3ds") {
             const { TDSLoader } = await import("three/addons/loaders/TDSLoader.js");
-            if (!isMountedRef.current) return;
+            if (runIdRef.current !== runId) return;
             const loader = new TDSLoader(loadingManager);
             loader.setResourcePath(resourcePath);
             loader.load(modelUrl, onLoad, undefined, onError);
@@ -479,12 +486,12 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
             const { VOXLoader, buildMesh } = await import(
               "three/addons/loaders/VOXLoader.js"
             );
-            if (!isMountedRef.current) return;
+            if (runIdRef.current !== runId) return;
             const loader = new VOXLoader(loadingManager);
             loader.load(
               modelUrl,
               (result) => {
-                if (!isMountedRef.current) return;
+                if (runIdRef.current !== runId) return;
                 let root: THREE.Object3D | null = result.scene;
                 if (!root) {
                   if (!result.chunks || result.chunks.length === 0) {
@@ -506,7 +513,7 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
             // .blend is Blender's private binary format — no web loader
             // exists. We surface a clear "export to GLB" message rather
             // than fail mysteriously or fall through to "unsupported".
-            if (!isMountedRef.current) return;
+            if (runIdRef.current !== runId) return;
             setError({ key: "modelViewer.blendUnsupported" });
             setIsLoading(false);
           }
@@ -518,7 +525,7 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
 
     // Animation loop
     const animate = () => {
-      if (!isMountedRef.current) return;
+      if (runIdRef.current !== runId) return;
       animationIdRef.current = requestAnimationFrame(animate);
 
       // Update animation mixer if present

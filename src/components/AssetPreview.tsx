@@ -90,9 +90,15 @@ export function AssetPreview() {
   useEffect(() => {
     if (!selectedAsset || selectedAsset.asset_type !== "texture") {
       setThumbnail(null);
+      setLoadingThumbnail(false);
       return;
     }
 
+    // Stale-response guard (same pattern as the gallery's CardThumb): a
+    // slow thumbnail for the previously selected asset must not land on
+    // top of the current one's — the ImageLightbox fallback consumes this
+    // state too, so a stale write would survive into the lightbox.
+    let cancelled = false;
     const loadThumbnail = async () => {
       setLoadingThumbnail(true);
       try {
@@ -100,20 +106,23 @@ export function AssetPreview() {
           path: selectedAsset.path,
           size: 256,
         });
-        setThumbnail(base64);
+        if (!cancelled) setThumbnail(base64);
       } catch (err) {
         // Thumbnail failure always falls back to the type-icon placeholder,
         // so we log at debug regardless of cause — extension-not-whitelisted,
         // codec gaps (e.g. EXR DWAA / deep EXR), corrupted files, IO errors.
         // None of these are actionable from a console.error.
         console.debug("Thumbnail not available:", err);
-        setThumbnail(null);
+        if (!cancelled) setThumbnail(null);
       } finally {
-        setLoadingThumbnail(false);
+        if (!cancelled) setLoadingThumbnail(false);
       }
     };
 
     loadThumbnail();
+    return () => {
+      cancelled = true;
+    };
   }, [selectedAsset?.path]);
 
   const copyToClipboard = async (text: string, type: "path" | "guid") => {
