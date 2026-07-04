@@ -120,6 +120,13 @@ export function LearnSetupModal() {
         endpoint: config.endpoint ?? null,
         samplingDepth: depth,
       });
+      // If the user switched projects while the call was in flight, the
+      // switch subscription already closed this modal — do NOT re-open the
+      // review panel over the new project: its Save resolves the active
+      // project at click time, so surfacing this (other-project) result
+      // would recreate the cross-project write. Discard; the staged rules
+      // sit harmlessly in the original project's pending_ai_rules.
+      if (useProjectStore.getState().activeProjectId !== activeProjectId) return;
       setLearnReviewOpen(true, result);
       setOpen(false);
     } catch (err) {
@@ -130,6 +137,10 @@ export function LearnSetupModal() {
         setError(t("aiAnalyze.errRateLimit"));
       else if (msg.includes("Network") || msg.includes("Could not reach") || msg.includes("timed out"))
         setError(t("aiAnalyze.errNetwork"));
+      else if (msg.includes("truncated"))
+        // Learning is one big reply, so the output cap is reachable on huge
+        // projects — the lever here is a lower sampling depth.
+        setError(t("learnSetup.errTruncated"));
       else if (msg.includes("hasn't been scanned"))
         setError(t("learnSetup.errNoScan"));
       else if (msg.includes("tidycraft.toml"))

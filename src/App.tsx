@@ -31,6 +31,7 @@ function App() {
     scanResult,
     viewMode,
     analysisResult,
+    analysisStale,
     isAnalyzing,
     runAnalysis,
     locateAsset,
@@ -40,6 +41,21 @@ function App() {
 
   const projects = getProjectList();
   const isEmpty = projects.length === 0;
+
+  // Live-vs-snapshot arithmetic: scanResult.total_count is watcher-patched
+  // while analysisResult.issues is a frozen snapshot, so a naive subtraction
+  // could count flagged files that no longer exist and even go negative
+  // (delete enough analyzed files and total < flagged). Intersect the flagged
+  // set with the live asset paths, and clamp as a belt-and-braces.
+  const passCount = useMemo(() => {
+    if (!scanResult) return 0;
+    if (!analysisResult) return scanResult.total_count;
+    const live = new Set(scanResult.assets.map((a) => a.path));
+    const flaggedLive = new Set(
+      analysisResult.issues.map((i) => i.asset_path).filter((p) => live.has(p))
+    );
+    return Math.max(0, scanResult.total_count - flaggedLive.size);
+  }, [scanResult, analysisResult]);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -154,6 +170,7 @@ function App() {
         return (
           <IssueList
             result={analysisResult}
+            stale={analysisStale}
             isAnalyzing={isAnalyzing}
             onAnalyze={runAnalysis}
             onLocate={locateAsset}
@@ -163,12 +180,7 @@ function App() {
         return (
           <StatsDashboard
             issueCount={analysisResult?.issue_count || 0}
-            passCount={
-              scanResult
-                ? scanResult.total_count -
-                  new Set((analysisResult?.issues ?? []).map((i) => i.asset_path)).size
-                : 0
-            }
+            passCount={passCount}
             onExportJson={handleExportJson}
             onExportCsv={handleExportCsv}
             onExportHtml={handleExportHtml}

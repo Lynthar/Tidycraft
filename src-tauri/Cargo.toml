@@ -17,7 +17,13 @@ crate-type = ["lib", "cdylib", "staticlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset", "devtools"] }
+# No `devtools` feature: debug builds get the inspector automatically
+# (tauri enables it under `debug_assertions`, and lib.rs's setup hook
+# auto-opens it there); the feature's only effect was compiling the
+# inspector into RELEASE builds, where it exposed localStorage (and the
+# plaintext API key) to anyone at the machine. Re-add temporarily if a
+# production-build issue ever needs on-site inspection.
+tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-opener = "2"
@@ -46,6 +52,17 @@ toml_edit = "0.22"
 git2 = { version = "0.20", features = ["vendored-openssl"] }
 ignore = "0.4"
 globset = "0.4"
+# File-identity comparison (dev+inode / Windows file index) for the rename
+# "target already exists" guards: a case-only rename's target resolves to the
+# source itself on case-insensitive filesystems and must be allowed, while a
+# genuine case-variant *collision* on case-sensitive filesystems must be
+# rejected. Already in the tree transitively via `ignore` → `walkdir`.
+same-file = "1"
+# zlib inflate for the PNG iCCP chunk: the embedded ICC profile is parsed to
+# tell linear from sRGB-encoded textures (scanner::classify_icc_profile)
+# instead of blindly assuming any profile means sRGB. Pure Rust, already in
+# the tree transitively via the `png` decoder.
+miniz_oxide = "0.8"
 # `default-features = false` drops the unicode tables we don't need (asset
 # paths are ASCII-dominant; learned-regex rules don't use \p{...} classes).
 # Saves ~1MB binary and a few seconds compile. `std` feature is required —

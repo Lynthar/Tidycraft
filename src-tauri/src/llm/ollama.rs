@@ -206,8 +206,12 @@ impl LLMProvider for OllamaProvider {
             .unwrap_or_else(|| DEFAULT_ENDPOINT.to_string());
         let model = self.config.model.clone();
 
-        suggest_with_cache(self.id(), request, move |miss_request| async move {
-            call_ollama(&endpoint, &model, miss_request).await
+        // FnMut: called once per chunk of misses, so clone per call instead
+        // of moving into a one-shot async block.
+        suggest_with_cache(self.id(), request, move |miss_request| {
+            let endpoint = endpoint.clone();
+            let model = model.clone();
+            async move { call_ollama(&endpoint, &model, miss_request).await }
         })
         .await
     }

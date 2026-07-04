@@ -95,6 +95,36 @@ impl AiRulesDoc {
         Ok(Some(doc))
     }
 
+    /// Build the doc that a "Save rules" action should persist, choosing
+    /// where the metadata (provider / model / depth / timestamp) comes from:
+    ///
+    /// 1. `pending` — the doc a just-finished learning run staged in memory
+    ///    (`ProjectState.pending_ai_rules`). Rules are NOT written to disk at
+    ///    learn time; Save is the single commit point, and the staged doc
+    ///    carries the true metadata of that run.
+    /// 2. `on_disk` — no pending run: the user is re-saving edits over a
+    ///    previously saved doc; its metadata is preserved unchanged.
+    /// 3. Neither — defensive fallback (Save without any prior learn or
+    ///    file); metadata is stamped "unknown" with the current time.
+    ///
+    /// `rules` (the user's edited list) always replaces the doc's rules.
+    pub fn for_save(
+        pending: Option<Self>,
+        on_disk: Option<Self>,
+        rules: Vec<LearnedRule>,
+    ) -> Self {
+        let mut doc = pending.or(on_disk).unwrap_or_else(|| AiRulesDoc {
+            last_learned: chrono::Utc::now().to_rfc3339(),
+            prompt_version: super::learning::LEARNING_PROMPT_VERSION,
+            sampling_depth: 5,
+            provider_used: "unknown".into(),
+            model_used: "unknown".into(),
+            rules: Vec::new(),
+        });
+        doc.rules = rules;
+        doc
+    }
+
     /// Delete the file. Used for "Clear AI rules" Settings action
     /// (Day 8). No-op if the file doesn't exist.
     #[allow(dead_code)]
@@ -192,5 +222,52 @@ mod tests {
         fs::write(AiRulesDoc::project_path(dir.path()), "not valid = toml [").unwrap();
         let result = AiRulesDoc::load(dir.path());
         assert!(result.is_err());
+    }
+
+    fn edited_rules() -> Vec<LearnedRule> {
+        vec![LearnedRule::FilenameToken {
+            pattern: "Roughness".into(),
+            tags: vec!["roughness-map".into()],
+            confidence: 0.8,
+        }]
+    }
+
+    #[test]
+    fn for_save_prefers_pending_metadata() {
+        // Fresh-learn flow: the staged (pending) doc carries that run's true
+        // provider/model/depth — they must survive into the saved doc even if
+        // an older doc with different metadata exists on disk.
+        let mut pending = sample_doc();
+        pending.provider_used = "claude".into();
+        pending.model_used = "claude-sonnet-4-6".into();
+        let mut stale_disk = sample_doc();
+        stale_disk.provider_used = "ollama".into();
+
+        let doc = AiRulesDoc::for_save(Some(pending), Some(stale_disk), edited_rules());
+        assert_eq!(doc.provider_used, "claude");
+        assert_eq!(doc.model_used, "claude-sonnet-4-6");
+        assert_eq!(doc.rules, edited_rules());
+    }
+
+    #[test]
+    fn for_save_preserves_disk_metadata_without_pending() {
+        // Re-saving edits with no fresh learn staged: the on-disk doc's
+        // metadata (when it was learned, by what) must be preserved.
+        let disk = sample_doc();
+        let doc = AiRulesDoc::for_save(None, Some(disk.clone()), edited_rules());
+        assert_eq!(doc.last_learned, disk.last_learned);
+        assert_eq!(doc.provider_used, disk.provider_used);
+        assert_eq!(doc.sampling_depth, disk.sampling_depth);
+        assert_eq!(doc.rules, edited_rules());
+    }
+
+    #[test]
+    fn for_save_falls_back_to_fresh_doc() {
+        // Defensive: nothing staged, nothing on disk — still produce a valid
+        // doc so Save never fails, with metadata marked unknown.
+        let doc = AiRulesDoc::for_save(None, None, edited_rules());
+        assert_eq!(doc.provider_used, "unknown");
+        assert_eq!(doc.rules, edited_rules());
+        assert!(!doc.last_learned.is_empty());
     }
 }

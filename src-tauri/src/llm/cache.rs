@@ -125,6 +125,17 @@ pub fn save(key: &str, suggestion: &TagSuggestion) -> io::Result<()> {
     fs::write(&path, content)
 }
 
+/// Remove a single cache entry. Test support: lets suggest_with_cache tests
+/// clean up the entries they wrote to the real cache dir (mirroring
+/// `save_then_get_roundtrip`'s cleanup) without reaching the private
+/// `cache_dir` from another module.
+#[cfg(test)]
+pub(crate) fn remove(key: &str) {
+    if let Some(dir) = cache_dir() {
+        let _ = fs::remove_file(dir.join(format!("{key}.json")));
+    }
+}
+
 /// Remove every cached suggestion. Returns the total bytes freed
 /// (sum of file sizes before deletion) so the UI can render
 /// "Freed N MB" feedback like the thumbnail-cache button.

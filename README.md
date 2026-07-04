@@ -108,7 +108,7 @@ Common to both:
 - **Cost preview** before every cloud call (verified pricing math; per-asset cents shown).
 - **Per-provider consent** for thumbnail uploads — first call with thumbnails on shows a checkbox; revocable in Settings.
 - **Project-aware prompt** — pulls `theme` / `goal` from the `[project]` table of your project's `tidycraft.toml` and your existing tag system (with descriptions + sample paths) so the model **prefers your existing labels** instead of inventing synonyms.
-- **Per-asset disk cache** keyed on `(thumbnail bytes, filename, path, provider, model, prompt version)` — partial-batch hits stay free.
+- **Per-asset disk cache** keyed on `(thumbnail bytes, filename, path, provider, model, prompt version, tag-system context)` — re-running over the same assets is free **as long as your tag system is unchanged**. The deliberate flip side: applying suggestions creates/changes tags, which changes that context — so a suggest run *after* Apply is recomputed (and billed) rather than served stale answers that don't know about your new tags.
 - **Local + private** — Ollama path uploads nothing off-machine; cloud paths upload filenames + project-relative paths + tag context (and thumbnails only if you opt in).
 
 ### Metadata Extraction
@@ -355,6 +355,7 @@ Tidycraft is **local-first by design**:
 - **All state lives on your disk**: scan cache (`~/.cache/tidycraft/` or the platform equivalent), tag bindings (`.tidycraft-tags.json` per project), undo history, thumbnail cache, settings.
 - **No account, no sign-in.** Open the app and use it.
 - **AI tag suggestions** are **opt-in only** — no calls happen until you configure a provider in Settings → AI Tagging. Configuring a cloud provider (Claude / OpenAI) is itself consent to send that provider text context — filenames, project-relative paths, and your tag system — for the assets you analyze. Thumbnails are never uploaded unless you tick the per-provider consent box (off by default; the first cloud call with thumbnails enabled requires it). The local provider (Ollama) uploads nothing off-machine.
+- **API keys are stored in plaintext** in the app's local settings (the WebView's `localStorage` on your machine). They are only ever sent to the provider you configured, but anything that can read your OS user profile can read them — treat them like any other local credential, and prefer scoped/limited keys.
 
 ---
 

@@ -78,8 +78,11 @@ pub struct AssetMetadata {
     // (`.blend` / `.ma` / `.psd` / `.spp` / etc). Values are the stable
     // strings returned by `dcc_source_kind_for` — see that function for
     // the canonical list. None for runtime exports (`.fbx` / `.png` / ...)
-    // and non-asset files. Consumed by the dcc_source analyzer to pair
-    // sources with exports and warn when sources are newer.
+    // and non-asset files. Informational only: nothing consumes it today —
+    // the dcc_source analyzer matches on file extensions from its own
+    // config, NOT on this field (a long-standing comment claiming otherwise
+    // was wrong). Kept because it's already on the wire (types/asset.ts
+    // mirrors it) and a UI "source app" badge is a plausible consumer.
     pub dcc_source_kind: Option<String>,
 }
 
@@ -254,9 +257,12 @@ fn get_asset_type(extension: &str) -> AssetType {
 /// Map an extension to a DCC tool identifier when the file is an
 /// authoring/source format. Returns `None` for runtime exports
 /// (`.fbx` / `.png` / ...) and non-asset files. The string returned is
-/// the stable wire-format value persisted into `AssetMetadata.dcc_source_kind`
-/// — bumping a value here is a breaking change for the dcc_source
-/// analyzer's config matching.
+/// the wire-format value persisted into `AssetMetadata.dcc_source_kind`,
+/// which is informational-only (mirrored to the frontend, read by nothing
+/// today — the dcc_source analyzer matches extensions from its own config).
+/// Keep values stable anyway: they're serialized into scan caches, so a
+/// rename would surface as inconsistent metadata across cached vs fresh
+/// entries until the cache version is bumped.
 ///
 /// Why a separate function (not just `get_asset_type` returning a
 /// richer enum): asset_type is the user-visible category (Texture /
@@ -517,17 +523,22 @@ fn parse_dds_metadata(path: &Path) -> Option<AssetMetadata> {
     })
 }
 
-/// Walk PNG chunks looking for color-space signals. Returns "sRGB" if an
-/// explicit sRGB chunk or an iCCP (embedded ICC profile) is present;
-/// otherwise None so callers can distinguish "explicitly sRGB" from "no
-/// color-profile info at all" — important because the naming rule only
-/// fires on *known* sRGB encodings to avoid false positives on old PNGs.
+/// Walk PNG chunks looking for color-space signals. An explicit `sRGB` chunk
+/// wins; an `iCCP` chunk has its embedded ICC profile parsed and classified
+/// ("sRGB" for gamma-encoded transfer curves, "Linear" for identity ones —
+/// see `classify_icc_profile`); an unreadable profile yields None (unknown)
+/// rather than a guess. None also means "no color-profile info at all" — the
+/// colorspace rule only fires on *known* encodings to avoid false positives.
 ///
 /// PNG chunk layout (after 8-byte magic): repeated [4-byte big-endian length]
 /// [4-byte type] [length bytes of data] [4-byte CRC]. Chunks before IDAT
 /// carry the color metadata we care about.
 fn parse_png_color_space(path: &Path) -> Option<String> {
     use std::io::{Read, Seek, SeekFrom};
+
+    // Real iCCP payloads are tens of KB; anything past this is corrupt or
+    // hostile and just gets skipped (leaving the classification unknown).
+    const MAX_ICCP_CHUNK: u32 = 8 << 20;
 
     let mut file = File::open(path).ok()?;
     let mut magic = [0u8; 8];
@@ -537,7 +548,9 @@ fn parse_png_color_space(path: &Path) -> Option<String> {
     }
 
     let mut has_srgb = false;
-    let mut has_iccp = false;
+    // `Some(...)` once an iCCP chunk was seen: the inner Option is the
+    // profile's classification (None = present but unreadable → unknown).
+    let mut iccp: Option<Option<String>> = None;
 
     // Cap the walk to protect against malformed files.
     for _ in 0..64 {
@@ -553,7 +566,20 @@ fn parse_png_color_space(path: &Path) -> Option<String> {
         }
         match kind {
             b"sRGB" => has_srgb = true,
-            b"iCCP" => has_iccp = true,
+            b"iCCP" if iccp.is_none() && len <= MAX_ICCP_CHUNK => {
+                // Consume the chunk data (instead of seeking past it) so the
+                // profile can be classified, then skip the 4-byte CRC.
+                let mut data = vec![0u8; len as usize];
+                if file.read_exact(&mut data).is_err() {
+                    break;
+                }
+                file.seek(SeekFrom::Current(4)).ok()?;
+                iccp = Some(classify_iccp_chunk(&data));
+                continue;
+            }
+            // Oversized chunk: mark "seen but unreadable" — without clobbering
+            // a classification from an earlier (spec says: the only) iCCP.
+            b"iCCP" if iccp.is_none() => iccp = Some(None),
             _ => {}
         }
 
@@ -561,10 +587,159 @@ fn parse_png_color_space(path: &Path) -> Option<String> {
         file.seek(SeekFrom::Current(len as i64 + 4)).ok()?;
     }
 
-    if has_srgb || has_iccp {
-        Some("sRGB".to_string())
-    } else {
-        None
+    if has_srgb {
+        return Some("sRGB".to_string());
+    }
+    iccp.flatten()
+}
+
+/// Decode a PNG `iCCP` chunk payload — `[profile name][NUL][compression
+/// method byte][zlib stream]` — and classify the embedded ICC profile.
+/// `None` = unreadable/unknown, so the colorspace rule stays silent rather
+/// than guessing (the old behavior treated ANY profile as sRGB and mis-warned
+/// on deliberately linear profiles).
+fn classify_iccp_chunk(data: &[u8]) -> Option<String> {
+    // Layout: 1-79 byte profile name, NUL, compression method (0 = zlib),
+    // compressed profile bytes.
+    let nul = data.iter().position(|&b| b == 0)?;
+    if *data.get(nul + 1)? != 0 {
+        return None; // unknown compression method
+    }
+    let compressed = data.get(nul + 2..)?;
+    // 4 MB decompressed cap: real profiles are ≤ ~1 MB; the limit defuses
+    // decompression bombs in hostile files.
+    let profile =
+        miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(compressed, 4 << 20).ok()?;
+    classify_icc_profile(&profile)
+}
+
+/// Classify a raw ICC profile: `Some("Linear")` when its tone-response curves
+/// are (approximately) identity, `Some("sRGB")` when they're gamma-encoded —
+/// which is the question the texture colorspace rule actually asks: "will the
+/// engine de-gamma this data?". Falls back to the profile description text
+/// when no TRC is readable; `None` when the profile tells us nothing.
+fn classify_icc_profile(profile: &[u8]) -> Option<String> {
+    // 128-byte header ('acsp' signature at 36) + u32 tag count at 128.
+    if profile.len() < 132 || &profile[36..40] != b"acsp" {
+        return None;
+    }
+    let tag_count = u32::from_be_bytes(profile[128..132].try_into().ok()?) as usize;
+    if tag_count > 1024 {
+        return None; // implausible table; don't walk garbage
+    }
+
+    // true = linear, one entry per readable tone-response curve.
+    let mut trc_verdicts: Vec<bool> = Vec::new();
+    let mut desc_text: Option<String> = None;
+
+    for i in 0..tag_count {
+        let entry_off = 132 + i * 12;
+        let Some(entry) = profile.get(entry_off..entry_off + 12) else {
+            break;
+        };
+        let sig = &entry[0..4];
+        let tag_off = u32::from_be_bytes(entry[4..8].try_into().ok()?) as usize;
+        let tag_size = u32::from_be_bytes(entry[8..12].try_into().ok()?) as usize;
+        let Some(end) = tag_off.checked_add(tag_size) else {
+            continue;
+        };
+        let Some(body) = profile.get(tag_off..end) else {
+            continue;
+        };
+        match sig {
+            b"rTRC" | b"gTRC" | b"bTRC" | b"kTRC" => {
+                if let Some(linear) = trc_is_linear(body) {
+                    trc_verdicts.push(linear);
+                }
+            }
+            b"desc" => desc_text = parse_icc_desc_text(body),
+            _ => {}
+        }
+    }
+
+    // Transfer curves are the ground truth: the colorspace rule's question is
+    // literally "will the engine de-gamma these pixels?".
+    if !trc_verdicts.is_empty() {
+        let all_linear = trc_verdicts.iter().all(|&l| l);
+        return Some(if all_linear { "Linear" } else { "sRGB" }.to_string());
+    }
+
+    // No readable TRC (e.g. LUT-based v4 profiles): fall back to the
+    // human-readable description most authoring tools embed.
+    let text = desc_text?.to_lowercase();
+    if text.contains("linear") {
+        return Some("Linear".to_string());
+    }
+    if text.contains("srgb") {
+        return Some("sRGB".to_string());
+    }
+    None
+}
+
+/// Is this TRC tag (`curv` / `para` body) an identity (γ≈1.0) curve?
+/// `None` = unrecognized curve type, treated as "no verdict".
+fn trc_is_linear(body: &[u8]) -> Option<bool> {
+    const GAMMA_TOLERANCE: f32 = 0.05;
+    match body.get(0..4)? {
+        b"curv" => {
+            let n = u32::from_be_bytes(body.get(8..12)?.try_into().ok()?) as usize;
+            match n {
+                // Zero entries = identity curve by definition (ICC spec).
+                0 => Some(true),
+                // One entry = u8Fixed8 gamma value.
+                1 => {
+                    let g = u16::from_be_bytes(body.get(12..14)?.try_into().ok()?) as f32 / 256.0;
+                    Some((g - 1.0).abs() <= GAMMA_TOLERANCE)
+                }
+                // Sampled LUT: identity has value[mid] ≈ mid/(n-1)·65535
+                // (≈32768); an sRGB/γ2.2 curve sits near ~14000 there, so a
+                // ±3000 band separates them with a wide margin.
+                _ => {
+                    let mid = n / 2;
+                    let at = 12 + mid * 2;
+                    let v = u16::from_be_bytes(body.get(at..at + 2)?.try_into().ok()?) as f32;
+                    let expected = mid as f32 / (n - 1) as f32 * 65535.0;
+                    Some((v - expected).abs() <= 3000.0)
+                }
+            }
+        }
+        b"para" => {
+            // parametricCurveType: u16 function id (0-4), 2 reserved bytes,
+            // then s15Fixed16 params — the first is always the exponent g
+            // (function 3, the sRGB shape, has g = 2.4).
+            let function = u16::from_be_bytes(body.get(8..10)?.try_into().ok()?);
+            if function > 4 {
+                return None;
+            }
+            let g_raw = i32::from_be_bytes(body.get(12..16)?.try_into().ok()?);
+            let g = g_raw as f32 / 65536.0;
+            Some((g - 1.0).abs() <= GAMMA_TOLERANCE)
+        }
+        _ => None,
+    }
+}
+
+/// Extract the profile description string: v2 `desc` (ASCII, NUL-terminated)
+/// or v4 `mluc` (first record, UTF-16BE).
+fn parse_icc_desc_text(body: &[u8]) -> Option<String> {
+    match body.get(0..4)? {
+        b"desc" => {
+            let count = u32::from_be_bytes(body.get(8..12)?.try_into().ok()?) as usize;
+            let raw = body.get(12..12usize.checked_add(count)?)?;
+            let end = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
+            Some(String::from_utf8_lossy(&raw[..end]).into_owned())
+        }
+        b"mluc" => {
+            let len = u32::from_be_bytes(body.get(20..24)?.try_into().ok()?) as usize;
+            let off = u32::from_be_bytes(body.get(24..28)?.try_into().ok()?) as usize;
+            let raw = body.get(off..off.checked_add(len)?)?;
+            let units: Vec<u16> = raw
+                .chunks_exact(2)
+                .map(|c| u16::from_be_bytes([c[0], c[1]]))
+                .collect();
+            Some(String::from_utf16_lossy(&units))
+        }
+        _ => None,
     }
 }
 
@@ -1985,5 +2160,157 @@ mod tests {
 
         let project_type = detect_project_type(dir.path());
         assert!(matches!(project_type, Some(ProjectType::Generic)));
+    }
+
+    // ---- ICC profile classification (PNG iCCP chunk) ----
+
+    /// Minimal valid ICC container: 128-byte header (`acsp` signature) +
+    /// tag table + tag bodies appended in order.
+    fn build_icc(tags: &[(&[u8; 4], Vec<u8>)]) -> Vec<u8> {
+        let table_end = 132 + tags.len() * 12;
+        let mut profile = vec![0u8; 132];
+        profile[36..40].copy_from_slice(b"acsp");
+        profile[128..132].copy_from_slice(&(tags.len() as u32).to_be_bytes());
+        let mut offset = table_end;
+        let mut bodies: Vec<u8> = Vec::new();
+        for (sig, body) in tags {
+            profile.extend_from_slice(*sig);
+            profile.extend_from_slice(&(offset as u32).to_be_bytes());
+            profile.extend_from_slice(&(body.len() as u32).to_be_bytes());
+            offset += body.len();
+            bodies.extend_from_slice(body);
+        }
+        profile.extend_from_slice(&bodies);
+        let total = profile.len() as u32;
+        profile[0..4].copy_from_slice(&total.to_be_bytes());
+        profile
+    }
+
+    /// `curv` TRC body with a single u8Fixed8 gamma entry.
+    fn curv_gamma(gamma: f32) -> Vec<u8> {
+        let mut body = b"curv".to_vec();
+        body.extend_from_slice(&[0u8; 4]);
+        body.extend_from_slice(&1u32.to_be_bytes());
+        body.extend_from_slice(&((gamma * 256.0) as u16).to_be_bytes());
+        body
+    }
+
+    /// v2 `desc` (textDescriptionType) body carrying an ASCII name.
+    fn desc_body(text: &str) -> Vec<u8> {
+        let mut body = b"desc".to_vec();
+        body.extend_from_slice(&[0u8; 4]);
+        body.extend_from_slice(&((text.len() + 1) as u32).to_be_bytes());
+        body.extend_from_slice(text.as_bytes());
+        body.push(0);
+        body
+    }
+
+    #[test]
+    fn icc_gamma_one_trc_classifies_linear() {
+        let profile = build_icc(&[(b"rTRC", curv_gamma(1.0))]);
+        assert_eq!(classify_icc_profile(&profile).as_deref(), Some("Linear"));
+    }
+
+    #[test]
+    fn icc_gamma_curve_trc_classifies_srgb() {
+        let profile = build_icc(&[(b"rTRC", curv_gamma(2.2))]);
+        assert_eq!(classify_icc_profile(&profile).as_deref(), Some("sRGB"));
+    }
+
+    #[test]
+    fn icc_zero_point_curv_is_identity_linear() {
+        // A `curv` with 0 entries is the identity curve per the ICC spec.
+        let mut body = b"curv".to_vec();
+        body.extend_from_slice(&[0u8; 4]);
+        body.extend_from_slice(&0u32.to_be_bytes());
+        let profile = build_icc(&[(b"gTRC", body)]);
+        assert_eq!(classify_icc_profile(&profile).as_deref(), Some("Linear"));
+    }
+
+    #[test]
+    fn icc_parametric_srgb_curve_classifies_srgb() {
+        // parametricCurveType, function 3 (the sRGB curve), g = 2.4 as
+        // s15Fixed16 — the shape a v4 sRGB profile actually uses.
+        let mut body = b"para".to_vec();
+        body.extend_from_slice(&[0u8; 4]);
+        body.extend_from_slice(&3u16.to_be_bytes());
+        body.extend_from_slice(&[0u8; 2]);
+        body.extend_from_slice(&((2.4f32 * 65536.0) as i32).to_be_bytes());
+        let profile = build_icc(&[(b"rTRC", body)]);
+        assert_eq!(classify_icc_profile(&profile).as_deref(), Some("sRGB"));
+    }
+
+    #[test]
+    fn icc_desc_text_breaks_trc_less_ties() {
+        // No readable TRC → fall back to the profile description string.
+        let linear = build_icc(&[(b"desc", desc_body("Linear Rec.709"))]);
+        assert_eq!(classify_icc_profile(&linear).as_deref(), Some("Linear"));
+        let srgb = build_icc(&[(b"desc", desc_body("sRGB IEC61966-2.1"))]);
+        assert_eq!(classify_icc_profile(&srgb).as_deref(), Some("sRGB"));
+    }
+
+    #[test]
+    fn icc_garbage_classifies_unknown() {
+        assert_eq!(classify_icc_profile(b"not a profile"), None);
+        assert_eq!(classify_icc_profile(&[]), None);
+    }
+
+    // ---- PNG chunk walk integration ----
+
+    /// PNG magic + raw chunks. CRCs are zeroed — the walker skips them
+    /// without validating.
+    fn png_with_chunks(chunks: &[(&[u8; 4], Vec<u8>)]) -> Vec<u8> {
+        let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
+        for (kind, data) in chunks {
+            out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+            out.extend_from_slice(*kind);
+            out.extend_from_slice(data);
+            out.extend_from_slice(&[0u8; 4]);
+        }
+        out
+    }
+
+    fn iccp_chunk_payload(profile: &[u8]) -> Vec<u8> {
+        let mut data = b"embedded".to_vec();
+        data.push(0); // NUL after profile name
+        data.push(0); // compression method 0 = zlib
+        data.extend_from_slice(&miniz_oxide::deflate::compress_to_vec_zlib(profile, 6));
+        data
+    }
+
+    #[test]
+    fn png_iccp_linear_profile_reports_linear() {
+        // The whole point of parsing the profile: a linear-profiled normal
+        // map must NOT be reported as sRGB (the old behavior mis-warned it).
+        let dir = tempdir().unwrap();
+        let profile = build_icc(&[(b"rTRC", curv_gamma(1.0))]);
+        let png = png_with_chunks(&[(b"iCCP", iccp_chunk_payload(&profile)), (b"IEND", vec![])]);
+        let path = dir.path().join("linear.png");
+        fs::write(&path, png).unwrap();
+        assert_eq!(parse_png_color_space(&path).as_deref(), Some("Linear"));
+    }
+
+    #[test]
+    fn png_iccp_unreadable_profile_reports_unknown() {
+        // Unparseable profile → unknown (None), not a blind "sRGB" guess —
+        // the colorspace rule then stays silent instead of mis-advising.
+        let dir = tempdir().unwrap();
+        let mut data = b"junk".to_vec();
+        data.push(0);
+        data.push(0);
+        data.extend_from_slice(b"\x01\x02this is not zlib");
+        let png = png_with_chunks(&[(b"iCCP", data), (b"IEND", vec![])]);
+        let path = dir.path().join("junk.png");
+        fs::write(&path, png).unwrap();
+        assert_eq!(parse_png_color_space(&path), None);
+    }
+
+    #[test]
+    fn png_explicit_srgb_chunk_still_reports_srgb() {
+        let dir = tempdir().unwrap();
+        let png = png_with_chunks(&[(b"sRGB", vec![0]), (b"IEND", vec![])]);
+        let path = dir.path().join("srgb.png");
+        fs::write(&path, png).unwrap();
+        assert_eq!(parse_png_color_space(&path).as_deref(), Some("sRGB"));
     }
 }

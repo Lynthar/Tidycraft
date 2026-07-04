@@ -348,14 +348,15 @@ export function AdvancedFiltersPanel() {
                 {t("filters.colorSpace", "Color Space")}
               </label>
               <div className="flex flex-wrap gap-1.5">
-                {/* Only sRGB/Any are offered: the scanner only ever derives a
-                    color space from PNG sRGB/iCCP chunks (scanner.rs), so it
-                    produces "sRGB" or nothing — a "Linear" option would never
-                    match anything. Re-add it only if the scanner learns to tag
-                    linear-space assets. */}
+                {/* Values the scanner can actually produce (scanner.rs):
+                    "sRGB" from the PNG sRGB chunk or a gamma-encoded ICC
+                    profile, "Linear" from an identity-curve ICC profile.
+                    Profile-less or unreadable files have no color space and
+                    only match "Any". */}
                 {([
                   [null, t("filters.any", "Any")],
                   ["sRGB", "sRGB"],
+                  ["Linear", "Linear"],
                 ] as const).map(([v, label]) => (
                   <button
                     key={String(v)}

@@ -30,6 +30,11 @@ function tagKey(assetPath: string, label: string, category: string): string {
 /// Behavior:
 ///   - Default state: every returned suggestion is pre-selected.
 ///   - Click a chip to toggle its inclusion in the apply set.
+///   - ONE Apply button, and it honors the chip selection ("apply
+///     everything still selected"). There is deliberately no separate
+///     "Apply all": a primary button that ignored the user's chip
+///     deselections next to a UI that presents as a selection editor
+///     applied exactly the suggestions the user had just excluded.
 ///   - Tag names get a `(AI)` suffix to disambiguate from heuristic
 ///     suggestions (which use `(suggested)`) and from manual tags.
 ///     Same suffixed name from a previous AI run is reused, not
@@ -86,7 +91,7 @@ export function AIResultPanel() {
     });
   };
 
-  const apply = async (mode: "all" | "selected") => {
+  const apply = async () => {
     if (!data || applying) return;
     setApplying(true);
     setApplyError(null);
@@ -118,7 +123,9 @@ export function AIResultPanel() {
       for (const s of data.suggestions) {
         for (const tag of s.tags) {
           const key = tagKey(s.asset_path, tag.label, tag.category);
-          if (mode === "selected" && !selected.has(key)) continue;
+          // The apply set is exactly the chips still selected — a chip the
+          // user toggled off is never applied (Q7 decision: no bypass).
+          if (!selected.has(key)) continue;
           const source = tag.source ?? "new";
           const groupKey = `${source}::${tag.category}::${tag.label}`;
           let group = tagPlan.get(groupKey);
@@ -358,28 +365,17 @@ export function AIResultPanel() {
             {t("aiResult.close")}
           </button>
           <button
-            onClick={() => apply("selected")}
+            onClick={() => apply()}
             disabled={
               applying || selected.size === 0 || data.suggestions.length === 0
             }
-            className="px-3 py-1.5 text-sm rounded disabled:opacity-50"
-            style={{
-              border: "1px solid var(--line)",
-              color: "var(--text)",
-            }}
-          >
-            {t("aiResult.applySelected")}
-          </button>
-          <button
-            onClick={() => apply("all")}
-            disabled={applying || data.suggestions.length === 0}
             className="px-3 py-1.5 text-sm rounded disabled:opacity-50"
             style={{
               background: "var(--primary)",
               color: "var(--on-primary, white)",
             }}
           >
-            {t("aiResult.applyAll")}
+            {t("aiResult.apply", { count: selected.size })}
           </button>
         </div>
       </div>

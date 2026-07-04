@@ -35,6 +35,14 @@ pub struct ProjectState {
     pub respect_gitignore: bool,
     /// Live filesystem watcher. Dropping this stops the background watch.
     pub watcher: Option<ProjectWatcher>,
+    /// Rules from the most recent AI-learning run, staged in memory until the
+    /// user confirms them in the review panel. `save_ai_rules` takes this and
+    /// writes it to `tidycraft.ai.toml` — the single commit point — so closing
+    /// the panel without saving leaves the project untouched and the rules
+    /// never reach `suggest_tags`. Replaced wholesale by the next learning
+    /// run; dropped with the project state (an unsaved run does not survive
+    /// closing the project — accepted trade-off of review-before-commit).
+    pub pending_ai_rules: Option<crate::llm::rule_store::AiRulesDoc>,
 }
 
 impl ProjectState {
@@ -51,6 +59,7 @@ impl ProjectState {
             tags_data: None,
             respect_gitignore: true,
             watcher: None,
+            pending_ai_rules: None,
         }
     }
 

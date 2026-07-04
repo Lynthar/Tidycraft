@@ -10,11 +10,12 @@ import { create } from "zustand";
 export type AiProviderId = "claude" | "openai" | "ollama";
 
 /**
- * Per-provider configuration. `apiKey` lives in plaintext localStorage
- * (D5 in `docs/ai-tagging-plan.md`); the first save flashes a toast to
- * remind the user. Empty `apiKey` for cloud providers means "configured
- * but not credentialed" — `llm_suggest_tags` returns NoApiKey when
- * called against such a state.
+ * Per-provider configuration. `apiKey` lives in plaintext localStorage —
+ * a deliberate trade-off for a local single-user tool, disclosed in
+ * README → "Privacy & Data"; the first save flashes a toast to remind
+ * the user. Empty `apiKey` for cloud providers means "configured but
+ * not credentialed" — `llm_suggest_tags` returns NoApiKey when called
+ * against such a state.
  */
 export interface AiProviderConfig {
   apiKey?: string;

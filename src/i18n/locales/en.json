@@ -168,6 +168,7 @@
     "title": "Issues",
     "noResults": "No analysis results",
     "analyzing": "Analyzing assets...",
+    "staleBanner": "Files changed since this analysis ran — results may be outdated.",
     "reanalyze": "Re-analyze",
     "locate": "Locate",
     "suggestion": "Suggestion",
@@ -506,6 +507,7 @@
     "costHint": "Approximate — actual cost depends on tag count + sample text size.",
     "running": "Running AI Learning… this can take 30–60s.",
     "errNoScan": "Scan the project first (the sidebar refresh button).",
+    "errTruncated": "The reply hit the model's output limit — try a lower sampling depth.",
     "errWrite": "Couldn't write tidycraft.toml — your theme/goal edits weren't saved."
   },
   "learnReview": {
@@ -556,14 +558,15 @@
     "errNetwork": "Network error. Check your connection or endpoint.",
     "errRateLimit": "Rate limit or quota exceeded. Try again later.",
     "errParse": "Couldn't parse the model's output.",
+    "errTruncated": "The reply hit the model's output limit — try selecting fewer assets.",
     "errGeneric": "AI request failed: {{reason}}"
   },
   "aiResult": {
     "title": "AI Suggestions",
     "summary": "{{count}} asset(s) · {{tokens}} tokens",
     "summaryCached": "{{count}} asset(s) · cached (no charge)",
-    "applyAll": "Apply all",
-    "applySelected": "Apply selected",
+    "apply_one": "Apply {{count}} tag",
+    "apply_other": "Apply {{count}} tags",
     "skip": "Skip",
     "close": "Close",
     "empty": "No suggestions returned.",
