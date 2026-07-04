@@ -214,6 +214,7 @@ mod tests {
             extension: name.split('.').last().unwrap_or("").to_string(),
             asset_type,
             size: 1024,
+            modified: 0,
             metadata: None,
             unity_guid: None,
         }
@@ -226,6 +227,7 @@ mod tests {
             extension: "png".to_string(),
             asset_type: AssetType::Texture,
             size: 1024,
+            modified: 0,
             metadata: Some(AssetMetadata {
                 width: Some(width),
                 height: Some(height),

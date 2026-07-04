@@ -38,7 +38,8 @@ impl ScanCache {
     /// caches with missing fields (e.g. FBX vertex/face before Phase 1.4a,
     /// SVG dimensions before the 2026-04 pass) get rejected and re-scanned.
     /// v5: entries carry the `.meta` sidecar mtime in the invalidation key.
-    const CACHE_VERSION: u32 = 5;
+    /// v6: `AssetInfo` gained the required `modified` field.
+    const CACHE_VERSION: u32 = 6;
 
     /// Create a new empty cache
     pub fn new(project_path: &str) -> Self {
@@ -184,6 +185,7 @@ mod tests {
             extension: "png".to_string(),
             asset_type: crate::scanner::AssetType::Texture,
             size,
+            modified: 0,
             metadata: None,
             unity_guid: None,
         }

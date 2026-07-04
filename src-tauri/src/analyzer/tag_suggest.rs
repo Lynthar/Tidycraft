@@ -480,6 +480,7 @@ mod tests {
             extension: name.rsplit('.').next().unwrap_or("").to_string(),
             asset_type: ty,
             size: 0,
+            modified: 0,
             metadata: None,
             unity_guid: None,
         }

@@ -95,7 +95,11 @@ function CardThumb({ asset }: CardThumbProps) {
     return () => {
       cancelled = true;
     };
-  }, [asset.path, asset.asset_type]);
+    // `modified` is the external-edit signal: the watcher re-parses the
+    // file into a fresh AssetInfo (new mtime) and evicts the path from
+    // the shared cache, but a card that stayed mounted would otherwise
+    // keep its old state forever (its path/type didn't change).
+  }, [asset.path, asset.asset_type, asset.modified]);
 
   const showImage = asset.asset_type === "texture" && typeof thumb === "string";
 

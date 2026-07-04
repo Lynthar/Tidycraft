@@ -38,10 +38,15 @@ export function ImageLightbox({ isOpen, imageSrc, fallbackSrc, imageName, onClos
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      // Letter/number shortcuts must be unmodified: Ctrl/Cmd+R is the
+      // app-level rescan chord (gated while the lightbox is open) and
+      // must not double as "rotate image" here.
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       switch (e.key) {
-        case "Escape":
-          onClose();
-          break;
         case "+":
         case "=":
           handleZoomIn();

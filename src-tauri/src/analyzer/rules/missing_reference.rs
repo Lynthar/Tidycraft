@@ -128,6 +128,7 @@ mod tests {
             extension: "png".to_string(),
             asset_type: AssetType::Texture,
             size: 4,
+            modified: 0,
             metadata: None,
             unity_guid: Some(guid.to_string()),
         }
@@ -149,6 +150,7 @@ mod tests {
             extension: "prefab".to_string(),
             asset_type: AssetType::Prefab,
             size: 0,
+            modified: 0,
             metadata: None,
             unity_guid: Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string()),
         }

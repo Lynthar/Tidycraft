@@ -585,11 +585,61 @@ async fn learn_project_conventions(
     };
     let prov = llm::make_provider(&provider, cfg).map_err(String::from)?;
 
+    let (samples, project_meta, existing_tags) = build_learning_inputs(&project_id, depth)?;
+
+    let request = llm::learning::LearnRequest {
+        samples,
+        project_meta,
+        existing_tags,
+        model: model.clone(),
+        sampling_depth: depth,
+        prompt_version: llm::learning::LEARNING_PROMPT_VERSION,
+    };
+
+    let result = prov.learn_project(&request).await.map_err(String::from)?;
+
+    // Stage the rules in memory — NOTHING is written to disk here. The review
+    // panel's Save (`save_ai_rules`) is the single commit point: it takes this
+    // pending doc (true provider/model/depth metadata included) and persists
+    // the user-approved rule list. Closing the panel without saving therefore
+    // really discards the run, and unreviewed rules never influence
+    // `suggest_tags` (which reads only the on-disk tidycraft.ai.toml).
+    let doc = llm::rule_store::AiRulesDoc {
+        last_learned: chrono::Utc::now().to_rfc3339(),
+        prompt_version: llm::learning::LEARNING_PROMPT_VERSION,
+        sampling_depth: depth,
+        provider_used: provider,
+        model_used: model,
+        rules: result.rules.clone(),
+    };
+    project::with_mut(&project_id, |state| {
+        state.pending_ai_rules = Some(doc);
+        Ok(())
+    })?;
+
+    Ok(result)
+}
+
+/// Snapshot + sample exactly what a learning run would send: scan / tags /
+/// root under the project lock, then `[project]` meta and the deterministic
+/// per-project sampling outside it. Shared by the real call and its cost
+/// estimator so the preview prices the ACTUAL prompt, not an approximation.
+fn build_learning_inputs(
+    project_id: &str,
+    depth: usize,
+) -> Result<
+    (
+        Vec<llm::learning::DirectorySample>,
+        Option<llm::project_meta::ProjectMeta>,
+        Vec<llm::ExistingTagContext>,
+    ),
+    String,
+> {
     // Snapshot scan + tags + root_path inside the project lock.
     // Drop the lock before any IO (toml read) or async work
     // (provider call) — same pattern as `llm_suggest_tags`.
     const SAMPLES_PER_TAG: usize = 5;
-    let snapshot = project::with_mut(&project_id, |state| {
+    let snapshot = project::with_mut(project_id, |state| {
         let root = state.root_path.clone();
         let scan = state.cached_scan.clone().ok_or("Project hasn't been scanned yet")?;
         let tags_data = state.ensure_tags();
@@ -629,37 +679,43 @@ async fn learn_project_conventions(
     };
     let samples = llm::sampler::sample_directories(&scan, depth, seed);
 
-    let request = llm::learning::LearnRequest {
-        samples,
-        project_meta,
-        existing_tags,
+    Ok((samples, project_meta, existing_tags))
+}
+
+/// Cost preview for the LearnSetupModal. Pure local math — builds the SAME
+/// prompt a learning run would send (same sampler, same seed, same builder)
+/// and prices it, instead of shoehorning "directory count" into the per-asset
+/// tagging estimator (which budgets 150 output tokens per asset and can be
+/// off by orders of magnitude for a single-document learning call).
+#[tauri::command]
+fn estimate_learning_cost(
+    project_id: String,
+    provider: String,
+    model: String,
+    sampling_depth: usize,
+) -> Result<llm::CostEstimate, String> {
+    let depth = sampling_depth.clamp(3, 30);
+
+    // Validate the provider/model pair the same way the real call would.
+    let cfg = llm::ProviderConfig {
+        api_key: None,
+        endpoint: None,
         model: model.clone(),
-        sampling_depth: depth,
-        prompt_version: llm::learning::LEARNING_PROMPT_VERSION,
     };
+    let _ = llm::make_provider(&provider, cfg).map_err(String::from)?;
 
-    let result = prov.learn_project(&request).await.map_err(String::from)?;
+    let (samples, project_meta, existing_tags) = build_learning_inputs(&project_id, depth)?;
+    let user_prompt =
+        llm::prompts::build_learning_prompt(&samples, project_meta.as_ref(), &existing_tags);
+    let prompt_chars = llm::prompts::SYSTEM_PROMPT_LEARNING.len() + user_prompt.len();
+    let sample_count = samples.iter().map(|s| s.files.len()).sum();
 
-    // Stage the rules in memory — NOTHING is written to disk here. The review
-    // panel's Save (`save_ai_rules`) is the single commit point: it takes this
-    // pending doc (true provider/model/depth metadata included) and persists
-    // the user-approved rule list. Closing the panel without saving therefore
-    // really discards the run, and unreviewed rules never influence
-    // `suggest_tags` (which reads only the on-disk tidycraft.ai.toml).
-    let doc = llm::rule_store::AiRulesDoc {
-        last_learned: chrono::Utc::now().to_rfc3339(),
-        prompt_version: llm::learning::LEARNING_PROMPT_VERSION,
-        sampling_depth: depth,
-        provider_used: provider,
-        model_used: model,
-        rules: result.rules.clone(),
-    };
-    project::with_mut(&project_id, |state| {
-        state.pending_ai_rules = Some(doc);
-        Ok(())
-    })?;
-
-    Ok(result)
+    Ok(llm::cost::estimate_learning_cost(
+        &model,
+        prompt_chars,
+        sample_count,
+        existing_tags.len(),
+    ))
 }
 
 /// Read the project's `tidycraft.ai.toml` if it exists. Frontend uses
@@ -2730,6 +2786,7 @@ pub fn run() {
             get_all_asset_tags,
             // LLM tagging
             llm_estimate_cost,
+            estimate_learning_cost,
             llm_suggest_tags,
             llm_clear_cache,
             llm_cache_size,
