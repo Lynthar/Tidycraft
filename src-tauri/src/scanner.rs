@@ -51,28 +51,45 @@ pub enum AssetType {
     Other,
 }
 
+/// Every field is optional and serializes as ABSENT (not `null`) when unset —
+/// the frontend's `metadata.field !== undefined` guards rely on this, and
+/// `types/asset.ts` declares the mirror fields as `field?: T`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssetMetadata {
     // Image metadata
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub width: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub height: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub has_alpha: Option<bool>,
     // Model metadata
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub vertex_count: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub face_count: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub material_count: Option<u32>,
     // Audio / video metadata (duration is shared)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_secs: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub sample_rate: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub channels: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub bit_depth: Option<u32>,
     // Video-specific
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub framerate: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub video_codec: Option<String>,
     // Texture color space: "sRGB" | "Linear" | "Unknown". Extracted where
     // the file format exposes it (PNG chunks); absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub color_space: Option<String>,
     // Mipmap level count (DDS). 1 = base only, no mipmaps.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub mipmap_count: Option<u32>,
     // DCC tool identifier when the file is an authoring/source format
     // (`.blend` / `.ma` / `.psd` / `.spp` / etc). Values are the stable
@@ -83,6 +100,7 @@ pub struct AssetMetadata {
     // config, NOT on this field (a long-standing comment claiming otherwise
     // was wrong). Kept because it's already on the wire (types/asset.ts
     // mirrors it) and a UI "source app" badge is a plausible consumer.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub dcc_source_kind: Option<String>,
 }
 
@@ -490,8 +508,14 @@ fn parse_svg_metadata(path: &Path) -> Option<AssetMetadata> {
 ///   28..32 : dwMipMapCount
 ///   ...
 ///   76..108: DDS_PIXELFORMAT (32-byte struct)
-///       80..84: ddspf.dwFlags (DDPF_ALPHAPIXELS = 0x1)
+///       80..84: ddspf.dwFlags (DDPF_ALPHAPIXELS = 0x1, DDPF_FOURCC = 0x4)
+///       84..88: ddspf.dwFourCC (compressed format tag, e.g. "DXT5"/"DX10")
+///   128..148: DDS_HEADER_DXT10 extension, only when FourCC == "DX10"
+///       128..132: dxgiFormat
 fn parse_dds_metadata(path: &Path) -> Option<AssetMetadata> {
+    const DDPF_ALPHAPIXELS: u32 = 0x1;
+    const DDPF_FOURCC: u32 = 0x4;
+
     let mut file = File::open(path).ok()?;
     let mut buf = [0u8; 128];
     std::io::Read::read_exact(&mut file, &mut buf).ok()?;
@@ -508,7 +532,39 @@ fn parse_dds_metadata(path: &Path) -> Option<AssetMetadata> {
     let width = u32::from_le_bytes(buf[16..20].try_into().ok()?);
     let raw_mipmaps = u32::from_le_bytes(buf[28..32].try_into().ok()?);
     let ddspf_flags = u32::from_le_bytes(buf[80..84].try_into().ok()?);
-    let has_alpha = (ddspf_flags & 0x1) != 0;
+
+    // For FourCC (compressed) formats, alpha is a property of the block
+    // format itself — the ALPHAPIXELS bit only describes uncompressed
+    // layouts and is typically 0 on compressed files.
+    let has_alpha = if (ddspf_flags & DDPF_FOURCC) != 0 {
+        match &buf[84..88] {
+            b"DXT2" | b"DXT3" | b"DXT4" | b"DXT5" => Some(true),
+            // BC1's optional 1-bit alpha isn't recorded in the header;
+            // BC4/BC5 (ATI1/ATI2) are 1–2 channel data formats.
+            b"DXT1" | b"ATI1" | b"ATI2" | b"BC4U" | b"BC4S" | b"BC5U" | b"BC5S" => Some(false),
+            b"DX10" => {
+                // The real format lives in the DXT10 extension header
+                // directly after the 128 bytes we already consumed.
+                let mut dxgi = [0u8; 4];
+                std::io::Read::read_exact(&mut file, &mut dxgi)
+                    .ok()
+                    .map(|_| {
+                        matches!(
+                            u32::from_le_bytes(dxgi),
+                            // block-compressed with alpha: BC2 / BC3 / BC7
+                            73..=78 | 97..=99
+                            // common uncompressed alpha layouts:
+                            // R32G32B32A32*, R16G16B16A16*, R10G10B10A2*,
+                            // R8G8B8A8*, A8_UNORM, B8G8R8A8*
+                            | 1..=4 | 9..=14 | 23..=25 | 27..=32 | 65 | 87 | 90 | 91
+                        )
+                    })
+            }
+            _ => None, // unrecognized compressed format — don't guess
+        }
+    } else {
+        Some((ddspf_flags & DDPF_ALPHAPIXELS) != 0)
+    };
 
     // DDS header reports 0 when the MIPMAPCOUNT flag is absent; treat that
     // as "no mipmaps generated" (effectively 1 level — the base).
@@ -517,7 +573,7 @@ fn parse_dds_metadata(path: &Path) -> Option<AssetMetadata> {
     Some(AssetMetadata {
         width: Some(width),
         height: Some(height),
-        has_alpha: Some(has_alpha),
+        has_alpha,
         mipmap_count,
         ..Default::default()
     })
@@ -752,12 +808,28 @@ fn parse_gltf_metadata(path: &Path) -> Option<AssetMetadata> {
 
             for mesh in gltf.meshes() {
                 for primitive in mesh.primitives() {
-                    if let Some(accessor) = primitive.get(&gltf::Semantic::Positions) {
-                        vertex_count += accessor.count() as u32;
-                    }
-                    if let Some(indices) = primitive.indices() {
-                        face_count += (indices.count() / 3) as u32;
-                    }
+                    let position_count = primitive
+                        .get(&gltf::Semantic::Positions)
+                        .map(|a| a.count())
+                        .unwrap_or(0);
+                    vertex_count += position_count as u32;
+
+                    // Non-indexed primitives draw straight from the vertex
+                    // stream, so the element count falls back to it. How many
+                    // triangles those elements make depends on the topology —
+                    // strips/fans share edges, points/lines have no faces.
+                    let element_count = primitive
+                        .indices()
+                        .map(|a| a.count())
+                        .unwrap_or(position_count);
+                    use gltf::mesh::Mode;
+                    face_count += match primitive.mode() {
+                        Mode::Triangles => element_count / 3,
+                        Mode::TriangleStrip | Mode::TriangleFan => {
+                            element_count.saturating_sub(2)
+                        }
+                        Mode::Points | Mode::Lines | Mode::LineLoop | Mode::LineStrip => 0,
+                    } as u32;
                 }
             }
 
@@ -844,7 +916,7 @@ fn parse_fbx_metadata(path: &Path) -> Option<AssetMetadata> {
 /// Parse OBJ model metadata
 fn parse_obj_metadata(path: &Path) -> Option<AssetMetadata> {
     match tobj::load_obj(path, &tobj::GPU_LOAD_OPTIONS) {
-        Ok((models, _materials)) => {
+        Ok((models, materials)) => {
             let mut vertex_count = 0u32;
             let mut face_count = 0u32;
 
@@ -856,7 +928,12 @@ fn parse_obj_metadata(path: &Path) -> Option<AssetMetadata> {
             Some(AssetMetadata {
                 vertex_count: Some(vertex_count),
                 face_count: Some(face_count),
-                material_count: Some(models.len() as u32),
+                // `models` are sub-meshes/groups, not materials — a 30-group
+                // export with one shared material must report 1, or the
+                // max_materials rule fires on every multi-object OBJ. The
+                // side-loaded MTL is authoritative; if it can't be read the
+                // count is unknown, not zero.
+                material_count: materials.ok().map(|m| m.len() as u32),
                 ..Default::default()
             })
         }
@@ -1272,6 +1349,7 @@ pub fn scan_directory_with_state(
 
         if let Some(ref s) = state {
             if s.is_cancelled() {
+                *s.phase.write() = ScanPhase::Cancelled;
                 return Err(ScanError::Cancelled);
             }
         }
@@ -1383,6 +1461,7 @@ pub fn scan_directory_with_state(
     // Check if cancelled during parallel processing
     if let Some(ref s) = state {
         if s.is_cancelled() {
+            *s.phase.write() = ScanPhase::Cancelled;
             return Err(ScanError::Cancelled);
         }
     }
@@ -1532,6 +1611,7 @@ pub fn scan_directory_incremental(
 
         if let Some(ref s) = state {
             if s.is_cancelled() {
+                *s.phase.write() = ScanPhase::Cancelled;
                 return Err(ScanError::Cancelled);
             }
         }
@@ -1634,6 +1714,7 @@ pub fn scan_directory_incremental(
     // Check if cancelled during parallel processing
     if let Some(ref s) = state {
         if s.is_cancelled() {
+            *s.phase.write() = ScanPhase::Cancelled;
             return Err(ScanError::Cancelled);
         }
     }
@@ -1930,6 +2011,216 @@ mod tests {
 
         let meta = parse_metadata_for(&path, "dds", &AssetType::Texture);
         assert_eq!(meta.and_then(|m| m.width), Some(128));
+    }
+
+    #[test]
+    fn test_metadata_none_fields_are_omitted_from_json() {
+        let json = serde_json::to_string(&AssetMetadata {
+            width: Some(64),
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(json.contains("\"width\":64"), "set field must serialize: {json}");
+        // None fields must be ABSENT on the wire, not `null` — the frontend's
+        // `!== undefined` guards treat null as a real value and render
+        // "-bit" / "0.0 kHz" / "null" garbage rows, and types/asset.ts
+        // declares these as `field?: T` (absent), not `T | null`.
+        assert!(!json.contains("null"), "no field may serialize as null: {json}");
+        assert!(!json.contains("sample_rate"), "unset field must be absent: {json}");
+    }
+
+    /// Legacy header with a FourCC pixel format (compressed DDS). The
+    /// ALPHAPIXELS bit is meaningless for these — alpha is a property of
+    /// the block format itself.
+    fn make_dds_fourcc_bytes(fourcc: &[u8; 4]) -> Vec<u8> {
+        let mut buf = make_dds_bytes(64, 64, false);
+        buf[80..84].copy_from_slice(&0x4u32.to_le_bytes()); // DDPF_FOURCC
+        buf[84..88].copy_from_slice(fourcc);
+        buf
+    }
+
+    #[test]
+    fn test_parse_dds_dxt5_reports_alpha() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("c.dds");
+        fs::write(&path, make_dds_fourcc_bytes(b"DXT5")).unwrap();
+
+        let meta = parse_dds_metadata(&path).expect("valid DDS should parse");
+        // DXT5/BC3 always carries an alpha block; the old ALPHAPIXELS-only
+        // check reported every compressed texture as opaque.
+        assert_eq!(meta.has_alpha, Some(true));
+    }
+
+    #[test]
+    fn test_parse_dds_dxt1_reports_opaque() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("c.dds");
+        fs::write(&path, make_dds_fourcc_bytes(b"DXT1")).unwrap();
+
+        let meta = parse_dds_metadata(&path).expect("valid DDS should parse");
+        assert_eq!(meta.has_alpha, Some(false));
+    }
+
+    #[test]
+    fn test_parse_dds_dx10_bc7_reports_alpha() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("c.dds");
+        let mut buf = make_dds_fourcc_bytes(b"DX10");
+        buf.extend_from_slice(&98u32.to_le_bytes()); // DXGI_FORMAT_BC7_UNORM
+        buf.extend_from_slice(&[0u8; 16]); // rest of the DXT10 header
+        fs::write(&path, buf).unwrap();
+
+        let meta = parse_dds_metadata(&path).expect("valid DDS should parse");
+        assert_eq!(meta.has_alpha, Some(true));
+    }
+
+    #[test]
+    fn test_parse_dds_dx10_bc5_reports_no_alpha() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("c.dds");
+        let mut buf = make_dds_fourcc_bytes(b"DX10");
+        buf.extend_from_slice(&83u32.to_le_bytes()); // DXGI_FORMAT_BC5_UNORM
+        buf.extend_from_slice(&[0u8; 16]);
+        fs::write(&path, buf).unwrap();
+
+        let meta = parse_dds_metadata(&path).expect("valid DDS should parse");
+        // Two-channel normal-map format — no alpha despite being compressed.
+        assert_eq!(meta.has_alpha, Some(false));
+    }
+
+    #[test]
+    fn test_obj_material_count_counts_materials_not_meshes() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("scene.mtl"), "newmtl shared\nKd 1.0 0.0 0.0\n").unwrap();
+        let obj_path = dir.path().join("scene.obj");
+        fs::write(
+            &obj_path,
+            concat!(
+                "mtllib scene.mtl\n",
+                "o first\nv 0 0 0\nv 1 0 0\nv 0 1 0\nusemtl shared\nf 1 2 3\n",
+                "o second\nv 0 0 1\nv 1 0 1\nv 0 1 1\nusemtl shared\nf 4 5 6\n",
+                "o third\nv 0 0 2\nv 1 0 2\nv 0 1 2\nusemtl shared\nf 7 8 9\n",
+            ),
+        )
+        .unwrap();
+
+        let meta = parse_obj_metadata(&obj_path).expect("valid OBJ should parse");
+        // Three sub-meshes sharing ONE material: the count feeds the
+        // max_materials rule, so reporting `models.len()` (3) is a false
+        // positive factory on any multi-group export.
+        assert_eq!(meta.material_count, Some(1));
+        assert_eq!(meta.face_count, Some(3));
+    }
+
+    #[test]
+    fn test_obj_unloadable_mtl_leaves_material_count_unknown() {
+        let dir = tempdir().unwrap();
+        let obj_path = dir.path().join("orphan.obj");
+        fs::write(
+            &obj_path,
+            "mtllib missing.mtl\no a\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+        )
+        .unwrap();
+
+        let meta = parse_obj_metadata(&obj_path).expect("geometry should still parse");
+        // The referenced .mtl can't be read — the material count is unknown,
+        // not zero and not the mesh count.
+        assert_eq!(meta.material_count, None);
+        assert_eq!(meta.face_count, Some(1));
+    }
+
+    /// Minimal valid glTF JSON: one primitive over `position_count`
+    /// positions, optionally indexed (`indices_count`), with the given
+    /// topology `mode`. The gltf crate validates accessors, so bufferViews
+    /// and POSITION min/max must all be present even though we never read
+    /// the (absent) binary payload for counting.
+    fn write_gltf(dir: &Path, position_count: u32, indices: Option<(u32, u32)>) -> PathBuf {
+        let pos_bytes = position_count * 12;
+        let (indices_json, mode_json, idx_view, total) = match indices {
+            Some((count, mode)) => (
+                format!(r#""indices": 1, "#),
+                format!(r#""mode": {}, "#, mode),
+                format!(
+                    r#", {{"buffer": 0, "byteOffset": {}, "byteLength": {}}}"#,
+                    pos_bytes,
+                    count * 2
+                ),
+                pos_bytes + count * 2,
+            ),
+            None => (String::new(), String::new(), String::new(), pos_bytes),
+        };
+        let idx_accessor = match indices {
+            Some((count, _)) => format!(
+                r#", {{"bufferView": 1, "componentType": 5123, "count": {}, "type": "SCALAR"}}"#,
+                count
+            ),
+            None => String::new(),
+        };
+        let json = format!(
+            r#"{{
+              "asset": {{"version": "2.0"}},
+              "meshes": [{{"primitives": [{{"attributes": {{"POSITION": 0}}, {indices_json}{mode_json}"material": 0}}]}}],
+              "materials": [{{}}],
+              "accessors": [
+                {{"bufferView": 0, "componentType": 5126, "count": {position_count}, "type": "VEC3",
+                 "min": [0.0, 0.0, 0.0], "max": [1.0, 1.0, 1.0]}}{idx_accessor}
+              ],
+              "bufferViews": [{{"buffer": 0, "byteLength": {pos_bytes}}}{idx_view}],
+              "buffers": [{{"byteLength": {total}}}]
+            }}"#
+        );
+        let path = dir.join("m.gltf");
+        fs::write(&path, json).unwrap();
+        path
+    }
+
+    #[test]
+    fn test_gltf_non_indexed_primitive_counts_faces() {
+        let dir = tempdir().unwrap();
+        let path = write_gltf(dir.path(), 6, None); // TRIANGLES is the default mode
+
+        let meta = parse_gltf_metadata(&path).expect("valid glTF should parse");
+        assert_eq!(meta.vertex_count, Some(6));
+        // Non-indexed TRIANGLES draws straight from the position stream:
+        // 6 positions = 2 triangles (used to be reported as 0).
+        assert_eq!(meta.face_count, Some(2));
+        assert_eq!(meta.material_count, Some(1));
+    }
+
+    #[test]
+    fn test_gltf_triangle_strip_counts_shared_edges() {
+        let dir = tempdir().unwrap();
+        let path = write_gltf(dir.path(), 4, Some((5, 5))); // 5 indices, mode 5 = TRIANGLE_STRIP
+
+        let meta = parse_gltf_metadata(&path).expect("valid glTF should parse");
+        // A 5-index strip is 3 triangles, not 5/3 = 1.
+        assert_eq!(meta.face_count, Some(3));
+    }
+
+    #[test]
+    fn test_gltf_line_primitives_contribute_no_faces() {
+        let dir = tempdir().unwrap();
+        let path = write_gltf(dir.path(), 4, Some((6, 1))); // 6 indices, mode 1 = LINES
+
+        let meta = parse_gltf_metadata(&path).expect("valid glTF should parse");
+        // A debug-wireframe / LINES primitive has no faces at all.
+        assert_eq!(meta.face_count, Some(0));
+    }
+
+    #[test]
+    fn test_cancelled_scan_marks_terminal_phase() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("a.png"), b"x").unwrap();
+
+        let state = Arc::new(ScanState::new());
+        state.cancel();
+        let err = scan_directory_with_state(dir.path().to_str().unwrap(), Some(state.clone()), true)
+            .expect_err("pre-cancelled scan must not complete");
+        assert!(matches!(err, ScanError::Cancelled));
+        // The progress reporter treats Cancelled as terminal and stops
+        // emitting; the scan must actually record it instead of bailing with
+        // the phase stuck at Discovering/Parsing.
+        assert!(matches!(state.get_progress().phase, ScanPhase::Cancelled));
     }
 
     #[test]

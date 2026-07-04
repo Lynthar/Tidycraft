@@ -85,10 +85,13 @@
     "rename": "Rename",
     "renaming": "Renaming...",
     "renamed": "renamed",
-    "failed": "failed"
+    "failed": "failed",
+    "errors": "Errors"
   },
   "common": {
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "undo": "Undo",
+    "done": "Done"
   },
   "assetPreview": {
     "selectAsset": "Select an asset to view details",
@@ -419,11 +422,6 @@
     "fbxIncompatible": "This FBX file uses a UV layout the loader can't parse. Re-export from your DCC tool as GLB for guaranteed compatibility.",
     "controls": "Drag to rotate • Scroll to zoom",
     "reset": "Reset view"
-  },
-  "common": {
-    "cancel": "Cancel",
-    "undo": "Undo",
-    "done": "Done"
   },
   "commandPalette": {
     "placeholder": "Type a command or search…",

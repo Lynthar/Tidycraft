@@ -132,6 +132,24 @@ fn extract_response(parsed: OllamaResponse) -> Result<TagResponse, LLMError> {
 
 // ---- HTTP call ----
 
+/// Map a non-2xx Ollama response to an error family. Local server: no
+/// auth (401) or metering (429) to speak of — but 404 is the classic
+/// "model not installed" and must NOT surface as a network problem: the
+/// frontend routes any message mentioning Network / timed out to a
+/// "check your connection" hint, which points the user in exactly the
+/// wrong direction. 5xx stays Network (server-side breakage).
+fn map_http_status(status: u16, url: &str, model: &str, body_preview: &str) -> LLMError {
+    match status {
+        404 => LLMError::Other(format!(
+            "Ollama 404 at {url}: model \"{model}\" is not installed there \
+             (run `ollama pull {model}`), or the endpoint path is wrong. \
+             Server said: {body_preview}"
+        )),
+        500..=599 => LLMError::Network(format!("Ollama {status}: {body_preview}")),
+        _ => LLMError::Other(format!("Ollama {status}: {body_preview}")),
+    }
+}
+
 async fn call_ollama(
     endpoint: &str,
     model: &str,
@@ -176,9 +194,7 @@ async fn call_ollama(
     let status = resp.status();
     if !status.is_success() {
         let body_preview = resp.text().await.unwrap_or_default();
-        return Err(LLMError::Network(format!(
-            "Ollama {status}: {body_preview}"
-        )));
+        return Err(map_http_status(status.as_u16(), &url, model, &body_preview));
     }
 
     let parsed: OllamaResponse = resp
@@ -283,9 +299,7 @@ async fn send_text_chat(
     let status = resp.status();
     if !status.is_success() {
         let body_preview = resp.text().await.unwrap_or_default();
-        return Err(LLMError::Network(format!(
-            "Ollama {status}: {body_preview}"
-        )));
+        return Err(map_http_status(status.as_u16(), &url, model, &body_preview));
     }
     let parsed: OllamaResponse = resp
         .json()
@@ -394,5 +408,44 @@ mod tests {
         }];
         let msgs = build_messages(&assets, None, &[], false);
         assert!(msgs[1].images.is_empty());
+    }
+
+    #[test]
+    fn http_404_maps_to_actionable_error_not_network() {
+        // 404 = model not installed (or wrong endpoint path). The frontend
+        // routes anything whose message mentions Network / timed out to a
+        // "check your connection" hint — exactly the wrong direction here.
+        let e = map_http_status(
+            404,
+            "http://localhost:11434/api/chat",
+            "qwen2.5vl:32b",
+            r#"{"error":"model 'qwen2.5vl:32b' not found, try pulling it first"}"#,
+        );
+        match e {
+            LLMError::Other(msg) => {
+                assert!(msg.contains("qwen2.5vl:32b"), "names the model: {msg}");
+                assert!(msg.contains("ollama pull"), "suggests the fix: {msg}");
+                assert!(!msg.contains("Network"), "must not trip the network hint: {msg}");
+            }
+            other => panic!("expected LLMError::Other, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn http_5xx_still_maps_to_network() {
+        match map_http_status(502, "http://host/api/chat", "m", "bad gateway") {
+            LLMError::Network(msg) => assert!(msg.contains("502")),
+            other => panic!("expected LLMError::Network, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn http_other_4xx_maps_to_generic_error_with_body() {
+        match map_http_status(400, "http://host/api/chat", "m", "invalid request") {
+            LLMError::Other(msg) => {
+                assert!(msg.contains("400") && msg.contains("invalid request"));
+            }
+            other => panic!("expected LLMError::Other, got {other:?}"),
+        }
     }
 }

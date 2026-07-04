@@ -45,7 +45,7 @@ Out-of-box `Run Analysis` therefore flags only **real bugs** — illegal charact
 | `model.*` | 3D models | warning |
 | `audio.*` | Audio files | warning / info |
 | `duplicate` | All assets | warning |
-| `missing_reference` | Unity prefabs / scenes / materials | error |
+| `missing_reference` | Unity prefabs / scenes / materials | warning |
 | `pbr_set.incomplete` | Texture groups (cross-asset) | warning |
 | `dcc_source.outdated_export` | DCC source files (cross-asset) | warning |
 
@@ -107,7 +107,7 @@ To suppress: rename the file (drop the suffix), re-export with Linear color spac
 
 | Sub-rule | Default | TOML key | When to relax |
 |---|---|---|---|
-| Allowed sample rates | 44100 Hz, 48000 Hz | `allowed_sample_rates = [22050, 44100]` | Retro / chiptune projects, voice-over batches |
+| Allowed sample rates | 44100 Hz, 48000 Hz | `allowed_sample_rates = [22050, 44100]` (empty list = check off) | Retro / chiptune projects, voice-over batches |
 | SFX duration | ≤ 30s | `max_sfx_duration` | Long reverb tails, stingers |
 | Force mono for SFX | off | `prefer_mono_for_sfx = true` | 3D-spatialized audio pipelines |
 | Maximum file size | 20 MB | `max_file_size` (bytes) | Music / ambient tracks |
@@ -126,10 +126,11 @@ No configuration. Files are grouped by size first (cheap), then SHA256-hashed wi
 
 ## Missing References (Unity only)
 
-For Unity projects, every referenceable file (`.prefab`, `.unity`, `.mat`, `.controller`, `.asset`) is YAML-parsed for `guid:` references. Any GUID not present in the project's `.meta` files becomes a `missing_reference` error.
+For Unity projects, every referenceable file (`.prefab`, `.unity`, `.mat`, `.controller`, `.asset`) is YAML-parsed for `guid:` references. Any GUID not present in the project's `.meta` files becomes a `missing_reference` **warning** (not an error: the scan can't see everything a GUID may live in — gitignored `Library/`, `Packages/` — so a miss is strong signal, not proof).
 
 Skips:
 - The all-zero GUID (Unity's "no reference" sentinel).
+- Unity's two built-in asset bundles (`unity default resources`, `unity_builtin_extra`) — referenced by any project using a built-in shader, material, or UI sprite, and never present as project files.
 - Duplicate references to the same missing GUID within one file (reported once).
 
 **Cannot be tuned** — the check is binary. To suppress, fix the broken reference (re-link the asset in Unity) or add the source file to `[ignore].patterns`.

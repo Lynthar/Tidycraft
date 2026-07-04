@@ -54,9 +54,14 @@ useProjectStore.subscribe((state, prev) => {
 // which point the selection is already empty, so the two never conflict.
 useProjectStore.subscribe((state, prev) => {
   if (state.scanResult === prev.scanResult) return;
+  // A null scanResult is the forced-rescan in-flight window (openProject
+  // clears the mirror while the scan runs), NOT "every file was deleted" —
+  // pruning against it would wipe the whole selection on Ctrl+R. Wait for
+  // the fresh result; this subscription fires again when it lands.
+  if (state.scanResult === null) return;
   const sel = useSelectionStore.getState().selectedPaths;
   if (sel.size === 0) return;
-  const present = new Set(state.scanResult?.assets.map((a) => a.path) ?? []);
+  const present = new Set(state.scanResult.assets.map((a) => a.path));
   const stale = Array.from(sel).filter((p) => !present.has(p));
   if (stale.length > 0) useSelectionStore.getState().removePaths(stale);
 });

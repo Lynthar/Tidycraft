@@ -34,6 +34,12 @@ jobs:
           node-version: '20'
           cache: 'pnpm'
 
+      # Must run BEFORE `pnpm build`: build's first step is sync-version in
+      # write mode, which would silently repair any drift on the runner and
+      # let it land on main unnoticed.
+      - name: Check version sync
+        run: node scripts/sync-version.mjs --check
+
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 

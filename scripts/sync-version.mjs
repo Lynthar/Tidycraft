@@ -32,8 +32,13 @@ const cargoPath = join(root, "src-tauri", "Cargo.toml");
 const confPath = join(root, "src-tauri", "tauri.conf.json");
 
 const version = JSON.parse(readFileSync(pkgPath, "utf8")).version;
-if (typeof version !== "string" || !/^\d+\.\d+\.\d+/.test(version)) {
-  console.error(`[sync-version] package.json version is not semver: ${JSON.stringify(version)}`);
+// Fully anchored on purpose: a prerelease/build suffix (`0.7.0-beta.1`)
+// would propagate into tauri.conf.json and only explode much later, deep
+// inside the tagged release build — the Windows MSI bundler cannot encode
+// non-numeric versions. Fail here, at the first step, with the reason.
+if (typeof version !== "string" || !/^\d+\.\d+\.\d+$/.test(version)) {
+  console.error(`[sync-version] package.json version must be plain MAJOR.MINOR.PATCH, got: ${JSON.stringify(version)}`);
+  console.error("[sync-version] prerelease/build suffixes are rejected because the Windows MSI bundler cannot encode them (a v-tag release would fail at the bundling step).");
   process.exit(1);
 }
 

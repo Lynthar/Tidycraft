@@ -22,10 +22,13 @@ const CATEGORY_COLORS: Record<AiTagCategory, string> = {
 /// Validate a regex pattern via JS `RegExp`. Pattern syntax is close
 /// enough between JS and Rust's `regex` crate for the simple anchors /
 /// char classes the LLM emits that this catches the vast majority of
-/// invalid patterns up-front. False positives (JS-valid, Rust-invalid —
-/// e.g. the LLM emits `(?P<name>...)` Python-style group) silent-skip
-/// in the backend; we'd surface them via a "0 matches" indicator in
-/// v2 if it becomes a problem.
+/// invalid patterns up-front. The dialects diverge both ways, though:
+/// JS-valid-but-Rust-invalid patterns (backreferences `\1`, look-around
+/// `(?=`) pass this check and silent-skip in the backend, while
+/// Rust-valid-but-JS-invalid ones (`(?P<name>...)` Python-style groups,
+/// which Rust's engine accepts) get a false warning here even though
+/// the backend compiles them fine. We'd surface true dead rules via a
+/// "0 matches" indicator in v2 if it becomes a problem.
 const isValidRegex = (pattern: string): boolean => {
   try {
     new RegExp(pattern);

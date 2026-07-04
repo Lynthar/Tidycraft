@@ -37,8 +37,9 @@ export function TagFilterPanel() {
   };
 
   const handleDeleteTag = async (tagId: string) => {
+    // deleteTag also prunes the id from tagFilters/tagFilter, so no dead
+    // filter is left silently hiding assets.
     await deleteTag(tagId);
-    // tagFilters will be automatically cleaned up since the tag no longer exists
   };
 
   const handleTagClick = (tagId: string, e: React.MouseEvent) => {

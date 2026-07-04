@@ -97,9 +97,14 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
 
   useEffect(() => {
     // Reset the on-demand unused-assets panel when the project changes so we
-    // never show a previous project's result.
+    // never show a previous project's result. Keyed on the project only —
+    // watcher-driven scanResult refreshes must NOT wipe a user-requested
+    // unused scan (it goes stale, but stale beats vanishing mid-read).
     setUnused(null);
     setUnusedError(null);
+  }, [activeProjectId]);
+
+  useEffect(() => {
     if (!activeProjectId) {
       setStats(null);
       setLoading(false);
@@ -129,7 +134,12 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
     return () => {
       cancelled = true;
     };
-  }, [activeProjectId]);
+    // `scanResult` is a dependency so watcher file changes and Ctrl+R rescans
+    // (same project id, new result object) refetch — totals/charts/largest
+    // files used to freeze at first render while the sibling passCount card
+    // kept updating. During a forced rescan the mirror briefly goes null; the
+    // extra fetch is harmless (the backend serves its last cached scan).
+  }, [activeProjectId, scanResult]);
 
   if (loading) {
     return (

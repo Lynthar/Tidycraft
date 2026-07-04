@@ -61,7 +61,23 @@ export const useTagsStore = create<TagsState>((set, get) => ({
       // slow response for project A lands after project B's load and overwrites
       // B's tags (same snapshot-and-check pattern as StatsDashboard).
       if (activeProjectId() !== projectId) return;
-      set({ tags, assetTags, isLoading: false });
+      // Prune filters whose tag ids don't exist in the loaded set — after a
+      // project switch the previous project's filter ids are dead here, and
+      // a dead id in an AND filter silently hides every asset.
+      set((state) => {
+        const valid = new Set(tags.map((t) => t.id));
+        const tagFilters = state.tagFilters.filter((id) => valid.has(id));
+        return {
+          tags,
+          assetTags,
+          isLoading: false,
+          tagFilters,
+          tagFilter:
+            state.tagFilter && valid.has(state.tagFilter)
+              ? state.tagFilter
+              : tagFilters[0] ?? null,
+        };
+      });
     } catch (err) {
       console.error("Failed to load tags:", err);
       if (activeProjectId() === projectId) set({ isLoading: false });
@@ -119,15 +135,24 @@ export const useTagsStore = create<TagsState>((set, get) => ({
     const projectId = activeProjectId();
     if (!projectId) return;
     await invoke("delete_tag", { projectId, tagId });
-    set((state) => ({
-      tags: state.tags.filter((t) => t.id !== tagId),
-      assetTags: Object.fromEntries(
-        Object.entries(state.assetTags).map(([path, tags]) => [
-          path,
-          tags.filter((t) => t.id !== tagId),
-        ])
-      ),
-    }));
+    set((state) => {
+      // Also prune the id from the active filters — a deleted tag left in an
+      // AND filter can never match, so it would silently hide every asset
+      // with no pill left to un-click.
+      const tagFilters = state.tagFilters.filter((id) => id !== tagId);
+      return {
+        tags: state.tags.filter((t) => t.id !== tagId),
+        assetTags: Object.fromEntries(
+          Object.entries(state.assetTags).map(([path, tags]) => [
+            path,
+            tags.filter((t) => t.id !== tagId),
+          ])
+        ),
+        tagFilters,
+        tagFilter:
+          state.tagFilter === tagId ? tagFilters[0] ?? null : state.tagFilter,
+      };
+    });
   },
 
   addTagToAsset: async (assetPath: string, tagId: string) => {

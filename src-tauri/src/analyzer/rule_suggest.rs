@@ -89,10 +89,13 @@ impl RuleSuggester {
 /// failure logs a one-shot warning and stores `None` so the rule
 /// silent-skips at match time. We deliberately do NOT propagate the
 /// error — a single malformed pattern shouldn't poison the whole rule
-/// set when the rest are usable. The LearnReviewPanel surfaces the
-/// same invalid-regex check on the UI side via JS `RegExp` (close
-/// enough to Rust's `regex` engine for the simple patterns the LLM
-/// emits — both reject `[`, `(?P<` legacy syntax, etc.).
+/// set when the rest are usable. The LearnReviewPanel runs a similar
+/// validity check on the UI side via JS `RegExp` — close enough for
+/// the simple patterns the LLM emits, but the dialects diverge both
+/// ways: JS accepts what this engine rejects (backreferences `\1`,
+/// look-around `(?=`), and those land here and silent-skip; while this
+/// engine accepts what JS rejects (`(?P<name>...)` named groups), so
+/// the panel can warn about a pattern that compiles fine here.
 fn compile_one(rule: LearnedRule) -> CompiledRule {
     let regex = match &rule {
         LearnedRule::FilenameRegex { pattern, .. } => match Regex::new(pattern) {

@@ -144,7 +144,9 @@ pub fn parse_uproject(path: &Path) -> Option<UnrealProjectInfo> {
         .collect();
 
     Some(UnrealProjectInfo {
-        path: path.to_string_lossy().to_string(),
+        // Normalized like every other path we hand the frontend — on
+        // Windows `to_string_lossy` alone would leak backslashes.
+        path: crate::scanner::path_to_string(path),
         project_name,
         engine_association: uproject.engine_association,
         category: uproject.category,
@@ -196,6 +198,22 @@ mod tests {
         let dir = tempdir().unwrap();
         let found = find_uproject_file(dir.path());
         assert!(found.is_none());
+    }
+
+    #[test]
+    fn parse_uproject_path_uses_forward_slashes() {
+        // Forward-slash discipline (bites on Windows CI, where the tempdir
+        // path itself contains backslashes).
+        let dir = tempdir().unwrap();
+        let uproject_path = dir.path().join("Slashes.uproject");
+        fs::write(&uproject_path, r#"{"FileVersion": 3}"#).unwrap();
+
+        let info = parse_uproject(&uproject_path).expect("uproject should parse");
+        assert!(
+            !info.path.contains('\\'),
+            "path must be forward-slash normalized: {}",
+            info.path
+        );
     }
 
     #[test]

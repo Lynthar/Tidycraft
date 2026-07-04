@@ -142,6 +142,28 @@ export function AIResultPanel() {
         }
       }
 
+      // Find the `(AI)`-suffixed tag for a label, creating it only if no
+      // tag of that exact name exists yet — in the store OR created
+      // earlier in this very loop (the backend's create_tag does not
+      // dedupe by name, so every create path must check first; the
+      // hallucinated-existing fallback used to skip the check and mint
+      // duplicate "x (AI)" tags, even twice within one run).
+      const findOrCreateSuffixed = async (
+        label: string,
+        category: AiSuggestedTag["category"]
+      ) => {
+        const fullName = label + suffix;
+        let tag = existingTags.find((tt) => tt.name === fullName);
+        if (!tag) {
+          const created = await createTag(fullName, CATEGORY_COLORS[category]);
+          if (created) {
+            tag = created;
+            existingTags.push(created);
+          }
+        }
+        return tag;
+      };
+
       let totalApplied = 0;
       for (const { label, category, source, paths } of tagPlan.values()) {
         let tag;
@@ -150,32 +172,16 @@ export function AIResultPanel() {
           // sensitive match — system prompt instructs the model to
           // copy the name verbatim. If the lookup fails (model
           // hallucinated `source: existing` against a non-existent
-          // label), gracefully fall through to the "new" branch so
-          // the tag still gets applied rather than dropped.
-          tag = existingTags.find((tt) => tt.name === label);
-          if (!tag) {
-            const created = await createTag(
-              label + suffix,
-              CATEGORY_COLORS[category]
-            );
-            if (created) {
-              tag = created;
-              existingTags.push(created);
-            }
-          }
+          // label), gracefully fall through to the suffixed-name path
+          // so the tag still gets applied rather than dropped.
+          tag =
+            existingTags.find((tt) => tt.name === label) ??
+            (await findOrCreateSuffixed(label, category));
         } else {
-          // Brand-new label — append `(AI)` suffix to disambiguate.
-          // If the same suffixed name exists from a prior AI run,
-          // reuse it instead of duplicating.
-          const fullName = label + suffix;
-          tag = existingTags.find((tt) => tt.name === fullName);
-          if (!tag) {
-            const created = await createTag(fullName, CATEGORY_COLORS[category]);
-            if (created) {
-              tag = created;
-              existingTags.push(created);
-            }
-          }
+          // Brand-new label — append `(AI)` suffix to disambiguate,
+          // reusing the tag if any prior run (or an earlier group in
+          // this loop) already created it.
+          tag = await findOrCreateSuffixed(label, category);
         }
         if (tag) {
           await addTagToAssets(paths, tag.id);

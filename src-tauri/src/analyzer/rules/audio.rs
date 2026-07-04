@@ -9,7 +9,7 @@ pub struct AudioConfig {
     #[serde(default = "default_enabled")]
     pub enabled: bool,
 
-    /// Allowed sample rates
+    /// Allowed sample rates. An empty list disables the check.
     #[serde(default = "default_sample_rates")]
     pub allowed_sample_rates: Vec<u32>,
 
@@ -93,8 +93,13 @@ impl Rule for AudioRule {
     fn check(&self, asset: &AssetInfo) -> Option<Issue> {
         let metadata = asset.metadata.as_ref()?;
 
-        // Check sample rate
-        if let Some(sample_rate) = metadata.sample_rate {
+        // Check sample rate. An empty allow-list means "no constraint" —
+        // skip entirely rather than flag every rate (indexing [0] below
+        // used to panic on `allowed_sample_rates = []` in tidycraft.toml).
+        if let (Some(sample_rate), Some(&preferred)) = (
+            metadata.sample_rate,
+            self.config.allowed_sample_rates.first(),
+        ) {
             if !self.config.allowed_sample_rates.contains(&sample_rate) {
                 return Some(Issue {
                     rule_id: "audio.sample_rate".to_string(),
@@ -105,10 +110,7 @@ impl Rule for AudioRule {
                         sample_rate, self.config.allowed_sample_rates
                     ),
                     asset_path: asset.path.clone(),
-                    suggestion: Some(format!(
-                        "Consider resampling to {} Hz",
-                        self.config.allowed_sample_rates[0]
-                    )),
+                    suggestion: Some(format!("Consider resampling to {} Hz", preferred)),
                     auto_fixable: false,
                 });
             }
@@ -168,5 +170,46 @@ impl Rule for AudioRule {
         }
 
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scanner::AssetMetadata;
+
+    fn audio_asset(sample_rate: u32) -> AssetInfo {
+        AssetInfo {
+            path: "audio/music/theme.wav".to_string(),
+            name: "theme.wav".to_string(),
+            extension: "wav".to_string(),
+            asset_type: AssetType::Audio,
+            size: 1024,
+            metadata: Some(AssetMetadata {
+                sample_rate: Some(sample_rate),
+                ..Default::default()
+            }),
+            unity_guid: None,
+        }
+    }
+
+    #[test]
+    fn empty_allowed_sample_rates_disables_check_instead_of_panicking() {
+        let rule = AudioRule::new(AudioConfig {
+            allowed_sample_rates: vec![],
+            ..Default::default()
+        });
+        // `allowed_sample_rates = []` in tidycraft.toml used to flag every
+        // rate as non-standard and then panic building the suggestion
+        // (indexed [0] into the empty list). Empty list = check off.
+        assert!(rule.check(&audio_asset(22050)).is_none());
+    }
+
+    #[test]
+    fn non_listed_sample_rate_still_reports() {
+        let rule = AudioRule::new(AudioConfig::default());
+        let issue = rule.check(&audio_asset(22050)).expect("22.05 kHz is non-standard");
+        assert_eq!(issue.rule_id, "audio.sample_rate");
+        assert!(issue.suggestion.expect("has suggestion").contains("44100"));
     }
 }
