@@ -30,6 +30,16 @@ interface LoadingStats {
   meshCount: number;
 }
 
+// Error stored as an i18n key (+ optional fallback) rather than a
+// pre-translated string, so it re-translates on a language switch
+// without re-running the WebGL setup effect — which would otherwise
+// tear down and rebuild the whole scene just to relabel one message.
+// Mirrors ModelViewer3D. Rendered via t(error.key, error.fallback).
+interface ModelError {
+  key: string;
+  fallback?: string;
+}
+
 export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose }: ModelLightboxProps) {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -38,21 +48,26 @@ export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose 
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const animationIdRef = useRef<number>(0);
-  const isMountedRef = useRef(true);
+  // Monotonic token identifying the current setup-effect run — see
+  // ModelViewer3D for the full rationale (a shared "mounted" boolean lets
+  // a previous model's slow onLoad/onError through once the next run
+  // resets it). cleanup() bumps it; callbacks compare their captured
+  // value against it before touching any state.
+  const runIdRef = useRef(0);
   const mixerRef = useRef<THREE.AnimationMixer | null>(null);
   const clockRef = useRef<THREE.Clock>(new THREE.Clock());
   const gridRef = useRef<THREE.GridHelper | null>(null);
   const lightsRef = useRef<THREE.Light[]>([]);
 
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ModelError | null>(null);
   const [stats, setStats] = useState<LoadingStats | null>(null);
   const [showGrid, setShowGrid] = useState(true);
   const [darkMode, setDarkMode] = useState(true);
 
   // Clean up Three.js resources
   const cleanup = useCallback(() => {
-    isMountedRef.current = false;
+    runIdRef.current++; // invalidate any in-flight loader callbacks
     if (animationIdRef.current) {
       cancelAnimationFrame(animationIdRef.current);
       animationIdRef.current = 0;
@@ -254,12 +269,12 @@ export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose 
       return;
     }
 
-    isMountedRef.current = true;
-
     if (!containerRef.current) return;
 
+    // Cleanup previous instance (bumps runIdRef, cutting off any loader
+    // callback still in flight from the previous model).
     cleanup();
-    isMountedRef.current = true;
+    const runId = runIdRef.current;
 
     setIsLoading(true);
     setError(null);
@@ -290,7 +305,7 @@ export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose 
       rendererRef.current = renderer;
     } catch (err) {
       console.error("Failed to create WebGL renderer:", err);
-      setError(t("modelViewer.webglError", "WebGL not supported"));
+      setError({ key: "modelViewer.webglError", fallback: "WebGL not supported" });
       setIsLoading(false);
       return;
     }
@@ -344,7 +359,7 @@ export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose 
     const resourcePath = convertFileSrc(modelDir);
 
     const onLoad = (object: THREE.Object3D) => {
-      if (!isMountedRef.current) return;
+      if (runIdRef.current !== runId) return;
 
       const modelStats = fixMaterials(object);
 
@@ -380,33 +395,36 @@ export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose 
     };
 
     const onError = (err: unknown) => {
-      if (!isMountedRef.current) return;
+      if (runIdRef.current !== runId) return;
       console.error("Failed to load model:", err);
       const message = err instanceof Error ? err.message : String(err);
 
       if (message.includes("404") || message.includes("not found")) {
-        setError(t("modelViewer.fileNotFound", "File not found"));
+        setError({ key: "modelViewer.fileNotFound", fallback: "File not found" });
       } else if (
         ext === "fbx" &&
         (message.includes("Cannot read properties of undefined") ||
           message.includes("parseUVs"))
       ) {
-        setError(t("modelViewer.fbxIncompatible"));
+        setError({ key: "modelViewer.fbxIncompatible" });
       } else if (message.includes("parse") || message.includes("invalid")) {
-        setError(t("modelViewer.parseError", "Failed to parse model file"));
+        setError({ key: "modelViewer.parseError", fallback: "Failed to parse model file" });
       } else {
-        setError(t("modelViewer.loadError", "Failed to load model"));
+        setError({ key: "modelViewer.loadError", fallback: "Failed to load model" });
       }
       setIsLoading(false);
     };
 
     if (!SUPPORTED_FORMATS.includes(ext)) {
-      setError(t("modelViewer.unsupportedFormat", `Format .${ext} not supported`));
+      setError({
+        key: "modelViewer.unsupportedFormat",
+        fallback: `Format .${ext} not supported`,
+      });
       setIsLoading(false);
     } else {
       (async () => {
         const urlModifier = await buildTextureUrlResolver(filePath);
-        if (!isMountedRef.current) return;
+        if (runIdRef.current !== runId) return;
 
         const loadingManager = new THREE.LoadingManager();
         loadingManager.setURLModifier(urlModifier);
@@ -431,7 +449,7 @@ export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose 
               onError(err);
               return;
             }
-            if (!isMountedRef.current) return;
+            if (runIdRef.current !== runId) return;
 
             const mtllibMatch = objText.match(/^mtllib\s+(.+?)\s*$/m);
             const objLoader = new OBJLoader(loadingManager);
@@ -470,13 +488,13 @@ export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose 
             loader.load(modelUrl, onLoad, undefined, onError);
           } else if (ext === "dae") {
             const { ColladaLoader } = await import("three/addons/loaders/ColladaLoader.js");
-            if (!isMountedRef.current) return;
+            if (runIdRef.current !== runId) return;
             const loader = new ColladaLoader(loadingManager);
             loader.setResourcePath(resourcePath);
             loader.load(modelUrl, (collada) => onLoad(collada.scene), undefined, onError);
           } else if (ext === "3ds") {
             const { TDSLoader } = await import("three/addons/loaders/TDSLoader.js");
-            if (!isMountedRef.current) return;
+            if (runIdRef.current !== runId) return;
             const loader = new TDSLoader(loadingManager);
             loader.setResourcePath(resourcePath);
             loader.load(modelUrl, onLoad, undefined, onError);
@@ -487,12 +505,12 @@ export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose 
             const { VOXLoader, buildMesh } = await import(
               "three/addons/loaders/VOXLoader.js"
             );
-            if (!isMountedRef.current) return;
+            if (runIdRef.current !== runId) return;
             const loader = new VOXLoader(loadingManager);
             loader.load(
               modelUrl,
               (result) => {
-                if (!isMountedRef.current) return;
+                if (runIdRef.current !== runId) return;
                 let root: THREE.Object3D | null = result.scene;
                 if (!root) {
                   if (!result.chunks || result.chunks.length === 0) {
@@ -511,8 +529,8 @@ export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose 
               onError
             );
           } else if (ext === "blend") {
-            if (!isMountedRef.current) return;
-            setError(t("modelViewer.blendUnsupported"));
+            if (runIdRef.current !== runId) return;
+            setError({ key: "modelViewer.blendUnsupported" });
             setIsLoading(false);
           }
         } catch (err) {
@@ -523,7 +541,7 @@ export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose 
 
     // Animation loop
     const animate = () => {
-      if (!isMountedRef.current) return;
+      if (runIdRef.current !== runId) return;
       animationIdRef.current = requestAnimationFrame(animate);
 
       if (mixerRef.current) {
@@ -556,7 +574,14 @@ export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose 
       window.removeEventListener("resize", handleResize);
       cleanup();
     };
-  }, [isOpen, filePath, extension, t, cleanup, darkMode, showGrid]);
+    // darkMode / showGrid are deliberately NOT dependencies: they're
+    // patched in place by the two small effects above, and re-running
+    // this effect would tear down the scene and reload the model (a
+    // 50MB FBX takes seconds) just to change the background or grid.
+    // The effect body still reads their current values whenever it does
+    // re-run (open / model switch). `t` isn't one either — errors are
+    // stored as i18n keys and translated at render time.
+  }, [isOpen, filePath, extension, cleanup]);
 
   const resetCamera = () => {
     if (cameraRef.current && controlsRef.current) {
@@ -626,7 +651,9 @@ export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose 
           <div className="absolute inset-0 flex items-center justify-center bg-[#1a1a1a] z-10">
             <div className="text-center text-red-400 px-4">
               <Box size={48} className="mx-auto mb-3 opacity-50" />
-              <span className="text-sm">{error}</span>
+              <span className="text-sm">
+                {error.fallback ? t(error.key, error.fallback) : t(error.key)}
+              </span>
             </div>
           </div>
         )}
