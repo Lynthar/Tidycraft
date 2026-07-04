@@ -2,7 +2,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use image::{imageops::FilterType, GenericImageView, ImageFormat};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
-use std::io::{Cursor, Read, Write};
+use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use thiserror::Error;
@@ -61,8 +61,11 @@ fn save_to_cache(cache_key: &str, data: &[u8]) -> Result<(), ThumbnailError> {
         fs::create_dir_all(&cache_dir)?;
 
         let cache_path = cache_dir.join(format!("{}.png", cache_key));
-        let mut file = File::create(&cache_path)?;
-        file.write_all(data)?;
+        // Atomic (unique temp + rename): two concurrent requests for the
+        // same key (e.g. gallery + preview racing on one asset) used to
+        // interleave inside one `File::create`, and the torn PNG then
+        // stayed cached until the source file's mtime changed.
+        crate::fs_atomic::write_atomic(&cache_path, data)?;
     }
     Ok(())
 }

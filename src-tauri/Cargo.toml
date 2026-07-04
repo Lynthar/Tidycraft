@@ -31,13 +31,11 @@ tauri-plugin-window-state = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "tga", "tiff", "webp", "hdr", "exr"] }
-walkdir = "2"
 thiserror = "2"
 tokio = { version = "1", features = ["sync", "rt", "macros"] }
 gltf = "1"
 tobj = "4"
 symphonia = { version = "0.5", default-features = false, features = ["mp3", "ogg", "wav", "pcm", "vorbis"] }
-serde_yaml = "0.9"
 sha2 = "0.10"
 base64 = "0.22"
 parking_lot = "0.12"

@@ -6,6 +6,7 @@ import {
   type AiSuggestedTag,
 } from "../stores/uiStore";
 import { useTagsStore } from "../stores/tagsStore";
+import { useProjectStore } from "../stores/projectStore";
 
 /// Per-category color so the user can scan a card and see at a glance
 /// which tags are types vs styles vs mood. These hex values match the
@@ -45,6 +46,7 @@ export function AIResultPanel() {
   const { t } = useTranslation();
   const open = useUiStore((s) => s.aiResultOpen);
   const data = useUiStore((s) => s.aiResultData);
+  const paths = useUiStore((s) => s.aiResultPaths);
   const setOpen = useUiStore((s) => s.setAiResultOpen);
 
   const createTag = useTagsStore((s) => s.createTag);
@@ -95,6 +97,17 @@ export function AIResultPanel() {
     if (!data || applying) return;
     setApplying(true);
     setApplyError(null);
+    // Pin the project this result belongs to. The panel closes on a
+    // project switch (uiStore subscription), but an already-running apply
+    // loop survives the unmount — each iteration would then re-snapshot
+    // the NEW active project id and write this result's tags into it.
+    const startProjectId = useProjectStore.getState().activeProjectId;
+    // The response echoes asset paths back; only paths we actually ASKED
+    // about are appliable — a hallucinated path would otherwise flow into
+    // add_tag_to_assets and mint an orphan binding for a file that isn't
+    // in the project (the cache layer already rejects these; the apply
+    // side didn't).
+    const requested = new Set(paths);
     try {
       // Snapshot tags once; manually push to the local array as we
       // create new ones so subsequent dedupe finds them without
@@ -121,6 +134,13 @@ export function AIResultPanel() {
       const tagPlan = new Map<string, Group>();
 
       for (const s of data.suggestions) {
+        if (!requested.has(s.asset_path)) {
+          console.debug(
+            "[AIResultPanel] dropping suggestion for path outside the request:",
+            s.asset_path
+          );
+          continue;
+        }
         for (const tag of s.tags) {
           const key = tagKey(s.asset_path, tag.label, tag.category);
           // The apply set is exactly the chips still selected — a chip the
@@ -166,6 +186,12 @@ export function AIResultPanel() {
 
       let totalApplied = 0;
       for (const { label, category, source, paths } of tagPlan.values()) {
+        // Abort if the user switched projects mid-apply — the remaining
+        // writes would land in the newly active project's tag store.
+        if (useProjectStore.getState().activeProjectId !== startProjectId) {
+          console.warn("[AIResultPanel] apply aborted: project switched mid-run");
+          break;
+        }
         let tag;
         if (source === "existing") {
           // Match the LLM's label to an existing tag by name. Case-
@@ -309,7 +335,9 @@ export function AIResultPanel() {
                           title={`${tag.category} · ${(
                             tag.confidence * 100
                           ).toFixed(0)}% · ${
-                            isExisting ? "existing tag" : "new tag"
+                            isExisting
+                              ? t("aiResult.chipExisting")
+                              : t("aiResult.chipNew")
                           }`}
                         >
                           {isSelected && <Check size={10} />}

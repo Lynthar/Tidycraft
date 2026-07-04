@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ChevronRight, Folder, FolderOpen } from "lucide-react";
 import { useProjectStore } from "../stores/projectStore";
+import { useShallow } from "zustand/react/shallow";
 import type { DirectoryNode } from "../types/asset";
 import { useTranslation } from "react-i18next";
 
@@ -15,7 +16,12 @@ interface TreeNodeProps {
 
 function TreeNode({ node, level, t }: TreeNodeProps) {
   const [isExpanded, setIsExpanded] = useState(level === 0);
-  const { selectedDirectory, setSelectedDirectory } = useProjectStore();
+  // Selector subscription: TreeNode instances are per-directory and the
+  // tree can hold hundreds of them — a whole-store subscribe re-rendered
+  // every node at 10Hz during any background scan.
+  const { selectedDirectory, setSelectedDirectory } = useProjectStore(
+    useShallow((s) => ({ selectedDirectory: s.selectedDirectory, setSelectedDirectory: s.setSelectedDirectory }))
+  );
 
   const isSelected = selectedDirectory === node.path;
   const hasChildren = node.children.length > 0;
@@ -70,7 +76,9 @@ function TreeNode({ node, level, t }: TreeNodeProps) {
 }
 
 export function DirectoryTree() {
-  const { scanResult, isScanning } = useProjectStore();
+  const { scanResult, isScanning } = useProjectStore(
+    useShallow((s) => ({ scanResult: s.scanResult, isScanning: s.isScanning }))
+  );
   const { t } = useTranslation();
 
   if (isScanning) {

@@ -104,10 +104,53 @@ impl Rule for TextureRule {
     }
 
     fn check(&self, asset: &AssetInfo) -> Option<Issue> {
-        let metadata = asset.metadata.as_ref()?;
-        let width = metadata.width?;
-        let height = metadata.height?;
+        // Dimensions are optional: PSD/PSB and other exotic formats often
+        // parse without them. The old `metadata.width?` early-return exempted
+        // exactly those (typically the LARGEST files) from every check — the
+        // file-size check below must run regardless; only the dimension-
+        // dependent checks are gated.
+        let dims = asset
+            .metadata
+            .as_ref()
+            .and_then(|m| Some((m.width?, m.height?)));
 
+        if let Some((width, height)) = dims {
+            if let Some(issue) = self.check_dimensions(asset, width, height) {
+                return Some(issue);
+            }
+        }
+
+        // Check file size
+        if asset.size > self.config.max_file_size {
+            return Some(Issue {
+                rule_id: "texture.file_size".to_string(),
+                rule_name: "Large File Size".to_string(),
+                severity: Severity::Warning,
+                message: format!(
+                    "Texture file size {:.2} MB exceeds maximum {:.2} MB",
+                    asset.size as f64 / 1024.0 / 1024.0,
+                    self.config.max_file_size as f64 / 1024.0 / 1024.0
+                ),
+                asset_path: asset.path.clone(),
+                suggestion: Some("Consider compressing or reducing resolution".to_string()),
+                auto_fixable: false,
+            });
+        }
+
+        if let Some((width, height)) = dims {
+            if let Some(issue) = self.check_mipmaps(asset, width, height) {
+                return Some(issue);
+            }
+        }
+
+        None
+    }
+}
+
+impl TextureRule {
+    /// The dimension-dependent checks (POT / max / min / square), in their
+    /// historical precedence order.
+    fn check_dimensions(&self, asset: &AssetInfo, width: u32, height: u32) -> Option<Issue> {
         // Check POT
         if self.config.require_pot {
             if !Self::is_power_of_two(width) || !Self::is_power_of_two(height) {
@@ -178,28 +221,15 @@ impl Rule for TextureRule {
             });
         }
 
-        // Check file size
-        if asset.size > self.config.max_file_size {
-            return Some(Issue {
-                rule_id: "texture.file_size".to_string(),
-                rule_name: "Large File Size".to_string(),
-                severity: Severity::Warning,
-                message: format!(
-                    "Texture file size {:.2} MB exceeds maximum {:.2} MB",
-                    asset.size as f64 / 1024.0 / 1024.0,
-                    self.config.max_file_size as f64 / 1024.0 / 1024.0
-                ),
-                asset_path: asset.path.clone(),
-                suggestion: Some("Consider compressing or reducing resolution".to_string()),
-                auto_fixable: false,
-            });
-        }
+        None
+    }
 
-        // DDS-only: warn when a large texture ships without a mipmap chain.
-        // Only DDS stores mipmap_count; for other formats the engine generates
-        // them on import so the file alone doesn't tell us. 512px threshold
-        // skirts UI textures that legitimately ship base-only.
-        if let Some(mips) = metadata.mipmap_count {
+    /// DDS-only: warn when a large texture ships without a mipmap chain.
+    /// Only DDS stores mipmap_count; for other formats the engine generates
+    /// them on import so the file alone doesn't tell us. 512px threshold
+    /// skirts UI textures that legitimately ship base-only.
+    fn check_mipmaps(&self, asset: &AssetInfo, width: u32, height: u32) -> Option<Issue> {
+        if let Some(mips) = asset.metadata.as_ref().and_then(|m| m.mipmap_count) {
             if mips <= 1 && (width >= 512 || height >= 512) {
                 return Some(Issue {
                     rule_id: "texture.no_mipmaps".to_string(),
@@ -242,4 +272,35 @@ fn next_power_of_two(n: u32) -> u32 {
     v |= v >> 8;
     v |= v >> 16;
     v + 1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scanner::{AssetMetadata, AssetType};
+
+    fn psd_without_dims(size: u64) -> AssetInfo {
+        AssetInfo {
+            path: "/p/huge.psd".to_string(),
+            name: "huge.psd".to_string(),
+            extension: "psd".to_string(),
+            asset_type: AssetType::Texture,
+            size,
+            modified: 0,
+            // Parsed, but no width/height (typical for PSD/PSB).
+            metadata: Some(AssetMetadata::default()),
+            unity_guid: None,
+        }
+    }
+
+    #[test]
+    fn file_size_check_covers_textures_without_dimensions() {
+        let rule = TextureRule::new(TextureConfig::default());
+        // Over the default 10 MB cap: must fire even though the old
+        // `width?` early-return used to exempt exactly these files.
+        let issue = rule.check(&psd_without_dims(11 * 1024 * 1024));
+        assert_eq!(issue.expect("expected an issue").rule_id, "texture.file_size");
+        // Under the cap: silent.
+        assert!(rule.check(&psd_without_dims(1024)).is_none());
+    }
 }

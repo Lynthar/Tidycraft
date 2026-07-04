@@ -5,13 +5,18 @@
   "projects": {
     "title": "项目",
     "addProject": "添加项目",
-    "close": "关闭项目"
+    "close": "关闭项目",
+    "selectProject": "选择项目",
+    "current": "当前",
+    "issuesCount": "{{count}} 个问题",
+    "empty": "没有打开的项目"
   },
   "header": {
     "openFolder": "打开文件夹",
     "searchPlaceholder": "搜索资产...",
     "rescan": "重新扫描",
-    "selectProjectFolder": "选择项目文件夹"
+    "selectProjectFolder": "选择项目文件夹",
+    "clearSearch": "清除"
   },
   "sidebar": {
     "assets": "资产",
@@ -86,12 +91,15 @@
     "renaming": "重命名中...",
     "renamed": "已重命名",
     "failed": "失败",
-    "errors": "错误明细"
+    "errors": "错误明细",
+    "fileCount": "{{count}} 个文件",
+    "andMore": "……以及另外 {{count}} 个"
   },
   "common": {
     "cancel": "取消",
     "undo": "撤销",
-    "done": "完成"
+    "done": "完成",
+    "close": "关闭"
   },
   "assetPreview": {
     "selectAsset": "选择一个资产以查看详情",
@@ -190,7 +198,8 @@
       "decimate": "简化网格",
       "review": "查看",
       "add_textures": "补全贴图"
-    }
+    },
+    "infos": "提示"
   },
   "settings": {
     "title": "设置",
@@ -351,7 +360,8 @@
     "confirmCopy": "复制到此处",
     "moving": "移动中…",
     "copying": "复制中…",
-    "errorsTitle": "部分文件无法处理"
+    "errorsTitle": "部分文件无法处理",
+    "disabledTarget": "源目录或其父级——不可作为目标"
   },
   "deleteConfirm": {
     "titleSingle": "移至回收站?",
@@ -381,7 +391,8 @@
     "newName": "新名称",
     "enterName": "输入新名称...",
     "emptyName": "名称不能为空",
-    "invalidChars": "名称包含无效字符"
+    "invalidChars": "名称包含无效字符",
+    "noProject": "没有活跃的项目"
   },
   "filters": {
     "advanced": "筛选",
@@ -421,7 +432,13 @@
     "blendUnsupported": ".blend 是 Blender 私有二进制格式，应用内无法直接加载。请在 Blender 中打开后导出为 GLB 或 FBX。",
     "fbxIncompatible": "此 FBX 文件的 UV 布局当前 loader 无法解析。建议在 DCC 工具中重新导出为 GLB（兼容性最佳）。",
     "controls": "拖拽旋转 • 滚轮缩放",
-    "reset": "重置视角"
+    "reset": "重置视角",
+    "fullscreen": "全屏",
+    "fullscreenHint": "拖动旋转 • 滚轮缩放 • 右键平移 • G 切换网格 • L 切换灯光 • Esc 关闭",
+    "gridTitle": "切换网格 (G)",
+    "backgroundTitle": "切换背景 (L)",
+    "resetTitle": "重置视角 (R)",
+    "closeTitle": "关闭 (Esc)"
   },
   "commandPalette": {
     "placeholder": "输入命令或搜索…",
@@ -571,6 +588,24 @@
     "tagSuffix": "(AI)",
     "applyDone_one": "已应用 {{count}} 个标签",
     "applyDone_other": "已应用 {{count}} 个标签",
-    "applyError": "部分标签未能应用——查看控制台。"
+    "applyError": "部分标签未能应用——查看控制台。",
+    "chipExisting": "已有标签",
+    "chipNew": "新标签"
+  },
+  "emptyState": {
+    "title": "打开一个项目开始",
+    "subtitle": "从左上角的项目切换器选择最近打开的项目，或打开一个文件夹开始扫描。"
+  },
+  "imageLightbox": {
+    "zoomOut": "缩小 (-)",
+    "zoomIn": "放大 (+)",
+    "rotate": "旋转 (R)",
+    "actualSize": "实际大小",
+    "fitToScreen": "适应窗口 (0)",
+    "close": "关闭 (Esc)",
+    "hint": "滚轮缩放 • 拖动平移 • R 旋转 • Esc 关闭"
+  },
+  "mediaPlayer": {
+    "loadError": "无法播放该文件——系统解码器可能不支持此编码。"
   }
 }

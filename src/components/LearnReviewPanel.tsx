@@ -136,9 +136,16 @@ export function LearnReviewPanel() {
     try {
       // Explicit commit point: create the gap tags the user kept checked
       // (skipping any that already exist), then persist the rules. Closing
-      // without Save writes nothing.
+      // without Save writes nothing. Each write re-checks that the project
+      // this result belongs to is still active — the panel closes on a
+      // switch, but an in-flight save survives the unmount and would
+      // otherwise create the gap tags inside the newly active project.
       let createdCount = 0;
       for (const gap of data.tag_gaps) {
+        if (useProjectStore.getState().activeProjectId !== activeProjectId) {
+          console.warn("[LearnReview] save aborted: project switched mid-run");
+          return;
+        }
         if (!selectedGaps.has(gap.label)) continue;
         if (existingTagNamesLower.has(gap.label.toLowerCase())) continue;
         try {
@@ -147,6 +154,10 @@ export function LearnReviewPanel() {
         } catch (e) {
           console.warn("[LearnReview] create gap failed:", gap.label, e);
         }
+      }
+      if (useProjectStore.getState().activeProjectId !== activeProjectId) {
+        console.warn("[LearnReview] save aborted: project switched mid-run");
+        return;
       }
       await invoke("save_ai_rules", { projectId: activeProjectId, rules });
       setSavedNotice(

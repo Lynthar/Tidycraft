@@ -24,7 +24,6 @@ use super::{
     TagRequest, TagResponse, Usage,
 };
 
-pub const DEFAULT_MODEL: &str = "qwen2.5vl:32b";
 pub const DEFAULT_ENDPOINT: &str = "http://localhost:11434";
 
 /// Local-model inference is dramatically slower than cloud calls,
@@ -50,6 +49,29 @@ struct OllamaRequest<'a> {
     messages: Vec<OllamaMessage>,
     stream: bool,
     format: &'static str,
+    options: OllamaOptions,
+}
+
+#[derive(Serialize)]
+struct OllamaOptions {
+    /// Context window. Without it Ollama uses the model default (often
+    /// 4096), and a prompt longer than that is SILENTLY truncated from
+    /// the front — dropping the system prompt first, which turns the
+    /// response into free-form prose that fails schema parsing. Sized
+    /// from the actual request (chars/4 + response headroom), clamped so
+    /// small requests don't over-allocate KV-cache memory and huge ones
+    /// don't ask for more than typical local models support.
+    num_ctx: usize,
+}
+
+const NUM_CTX_MIN: usize = 8_192;
+const NUM_CTX_MAX: usize = 32_768;
+
+/// Context window for a request whose messages total `prompt_chars`.
+fn num_ctx_for(prompt_chars: usize) -> usize {
+    let est_prompt_tokens = prompt_chars / 4;
+    let with_headroom = est_prompt_tokens + 2_048; // response + slack
+    with_headroom.clamp(NUM_CTX_MIN, NUM_CTX_MAX)
 }
 
 #[derive(Serialize)]
@@ -161,16 +183,21 @@ async fn call_ollama(
     let base = endpoint.trim_end_matches('/').trim_end_matches("/api/chat");
     let url = format!("{base}/api/chat");
 
+    let messages = build_messages(
+        &request.assets,
+        request.project_ctx.as_ref(),
+        &request.existing_tags,
+        request.include_thumbnails,
+    );
+    let prompt_chars: usize = messages.iter().map(|m| m.content.len()).sum();
     let body = OllamaRequest {
         model,
-        messages: build_messages(
-            &request.assets,
-            request.project_ctx.as_ref(),
-            &request.existing_tags,
-            request.include_thumbnails,
-        ),
+        messages,
         stream: false,
         format: "json",
+        options: OllamaOptions {
+            num_ctx: num_ctx_for(prompt_chars),
+        },
     };
 
     let client = reqwest::Client::builder()
@@ -250,6 +277,7 @@ impl LLMProvider for OllamaProvider {
         let (text, usage) =
             send_text_chat(&endpoint, &model, prompts::SYSTEM_PROMPT_LEARNING, &user).await?;
         let mut result: learning::LearningResult = parse_json_lenient(&text)?;
+        result.drop_unknown_rules();
         result.usage = usage;
         Ok(result)
     }
@@ -268,6 +296,9 @@ async fn send_text_chat(
 
     let body = OllamaRequest {
         model,
+        options: OllamaOptions {
+            num_ctx: num_ctx_for(system.len() + user.len()),
+        },
         messages: vec![
             OllamaMessage {
                 role: "system",

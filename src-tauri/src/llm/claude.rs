@@ -19,7 +19,6 @@ use super::{
     TagRequest, TagResponse, Usage,
 };
 
-pub const DEFAULT_MODEL: &str = "claude-sonnet-4-6";
 
 const ENDPOINT: &str = "https://api.anthropic.com/v1/messages";
 const API_VERSION: &str = "2023-06-01";
@@ -271,6 +270,7 @@ impl LLMProvider for ClaudeProvider {
         let (text, usage) =
             send_text_chat(&api_key, &model, prompts::SYSTEM_PROMPT_LEARNING, &user).await?;
         let mut result: learning::LearningResult = parse_json_lenient(&text)?;
+        result.drop_unknown_rules();
         result.usage = usage;
         Ok(result)
     }

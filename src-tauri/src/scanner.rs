@@ -1345,9 +1345,13 @@ pub fn build_gitignore_matcher(root: &Path, respect_gitignore: bool) -> Option<I
 
 /// Scan a directory with optional state for progress tracking and
 /// cancellation. `respect_gitignore=true` honors the user's
-/// `.gitignore` / `.ignore` files — typical for production scans;
-/// `false` re-enables "scan everything" for callers that need full
-/// coverage (one-off diagnostics, internal tests).
+/// `.gitignore` / `.ignore` files; `false` re-enables "scan everything".
+///
+/// The shipped scan path is `scan_directory_incremental`; since the legacy
+/// non-incremental commands were removed this full-scan variant survives as
+/// the test suite's harness for the discovery/parse/tree pipeline (it skips
+/// the disk cache, which tests must not touch).
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn scan_directory_with_state(
     path: &str,
     state: Option<Arc<ScanState>>,

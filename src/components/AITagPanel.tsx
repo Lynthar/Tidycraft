@@ -160,6 +160,13 @@ export function AITagPanel() {
       const tagName = `${group.name} (suggested)`;
       const tag = await createTag(tagName, group.color);
       if (!tag) return false;
+      // Abort between the two writes if the user switched projects — the
+      // tag landed in the original project; the asset bindings must not
+      // resolve against the newly active one.
+      if (useProjectStore.getState().activeProjectId !== activeProjectId) {
+        console.warn("[AITagPanel] apply aborted: project switched mid-run");
+        return false;
+      }
       await addTagToAssets(group.file_paths, tag.id);
       setGroups((prev) => (prev ? prev.filter((g) => g.name !== group.name) : prev));
       return true;

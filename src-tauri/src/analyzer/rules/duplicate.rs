@@ -49,7 +49,8 @@ pub fn find_duplicates(assets: &[AssetInfo]) -> AnalysisResult {
             }
         }
 
-        // Report duplicates
+        // Report duplicates (ordering fixed after the loops — both grouping
+        // maps iterate in random order)
         for (_hash, duplicates) in by_hash {
             if duplicates.len() < 2 {
                 continue;
@@ -76,6 +77,13 @@ pub fn find_duplicates(assets: &[AssetInfo]) -> AnalysisResult {
             }
         }
     }
+
+    // Both grouping maps above are HashMaps, so issue order was random per
+    // run — the report reshuffled on every analysis while every sibling rule
+    // emits deterministically. Pin it by path. (Members within a group are
+    // already path-ordered: `assets` arrives sorted from the scan, so each
+    // group's "original" is the lexicographically first path.)
+    result.issues.sort_by(|a, b| a.asset_path.cmp(&b.asset_path));
 
     result
 }

@@ -147,6 +147,9 @@ enabled = true
 trigger = "basecolor"
 required = ["basecolor", "normal"]
 
+# NOTE: supplying [pbr_set.channels] REPLACES the entire default table —
+# TOML tables don't merge. Copy the full block below and edit, or your
+# unlisted channels (and their aliases) silently stop being recognized.
 [pbr_set.channels]
 basecolor = ["BaseColor", "Albedo", "Diffuse", "Color"]
 normal    = ["Normal", "Norm"]
@@ -253,7 +256,7 @@ Glob syntax (via the [`globset`](https://docs.rs/globset/) crate):
 - `**` matches across path separators (full subtree)
 - `?` matches a single character
 - `[abc]` matches one character from a set
-- Patterns are **case-sensitive** on case-sensitive filesystems
+- Patterns are **always case-sensitive**, on every platform — matching is purely lexical against the scanned path, so `library/**` does NOT exclude `Library/` even on Windows/macOS where the filesystem itself ignores case
 
 If a pattern is malformed, Run Analysis fails fast with a "Invalid ignore pattern" error instead of silently producing garbage results.
 

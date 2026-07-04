@@ -71,23 +71,16 @@ impl TagsData {
 
     /// Save tags to the project directory.
     ///
-    /// Atomic write: serialize to a sibling temp file, then rename it over the
-    /// target. `std::fs::rename` uses `MoveFileEx(REPLACE_EXISTING)` on Windows
-    /// and `rename(2)` on Unix, so a crash mid-write can never leave the tags
-    /// file truncated — a reader sees either the old complete file or the new
-    /// one. (The previous direct `fs::write` could truncate, and combined with
-    /// `load`'s empty-fallback that meant losing every tag.) The `.tmp` sibling
-    /// is a dotfile, so the scanner and watcher both skip it.
+    /// Atomic write via [`crate::fs_atomic::write_atomic`] (temp + rename) so
+    /// a crash mid-write can never leave the tags file truncated — a reader
+    /// sees either the old complete file or the new one. (The previous direct
+    /// `fs::write` could truncate, and combined with `load`'s empty-fallback
+    /// that meant losing every tag.) The temp sibling keeps the dotfile
+    /// prefix, so the scanner and watcher both skip it.
     pub fn save(&self, project_path: &Path) -> Result<(), String> {
         let tags_file = project_path.join(TAGS_FILE);
         let content = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
-        let tmp_file = project_path.join(format!("{}.tmp", TAGS_FILE));
-        fs::write(&tmp_file, content).map_err(|e| e.to_string())?;
-        fs::rename(&tmp_file, &tags_file).map_err(|e| {
-            // Don't leave the temp file behind on a failed rename.
-            let _ = fs::remove_file(&tmp_file);
-            e.to_string()
-        })
+        crate::fs_atomic::write_atomic(&tags_file, content.as_bytes()).map_err(|e| e.to_string())
     }
 
     /// Create a new tag

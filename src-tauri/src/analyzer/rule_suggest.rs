@@ -262,6 +262,10 @@ fn match_rule<'r>(
                 }
             })
         }
+        // Unrecognized kind (serde catch-all). Providers strip these right
+        // after parse; a hand-edited tidycraft.ai.toml can still carry one,
+        // and it simply never matches.
+        LearnedRule::Unknown => None,
     }
 }
 

@@ -122,7 +122,9 @@ pub fn save(key: &str, suggestion: &TagSuggestion) -> io::Result<()> {
     let path = dir.join(format!("{key}.json"));
     let content = serde_json::to_string(suggestion)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    fs::write(&path, content)
+    // Atomic (temp + rename): a torn cache entry would fail to parse and
+    // re-bill the asset on the next run.
+    crate::fs_atomic::write_atomic(&path, content.as_bytes())
 }
 
 /// Remove a single cache entry. Test support: lets suggest_with_cache tests

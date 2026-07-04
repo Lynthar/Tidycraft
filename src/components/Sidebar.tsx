@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { DirectoryTree } from "./DirectoryTree";
 import { TagFilterPanel } from "./TagFilterPanel";
 import { useProjectStore } from "../stores/projectStore";
+import { useShallow } from "zustand/react/shallow";
 import { useUiStore } from "../stores/uiStore";
 import { formatShortcut, SHORTCUTS } from "../hooks/useKeyboardShortcuts";
 
@@ -16,7 +17,9 @@ export function Sidebar() {
     isAnalyzing,
     runAnalysis,
     hasCustomConfig,
-  } = useProjectStore();
+  } = useProjectStore(
+    useShallow((s) => ({ scanResult: s.scanResult, viewMode: s.viewMode, setViewMode: s.setViewMode, analysisResult: s.analysisResult, isAnalyzing: s.isAnalyzing, runAnalysis: s.runAnalysis, hasCustomConfig: s.hasCustomConfig, }))
+  );
 
   const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
 

@@ -1,5 +1,6 @@
 mod analyzer;
 mod cache;
+mod fs_atomic;
 mod git;
 mod godot;
 mod llm;
@@ -18,7 +19,7 @@ use analyzer::tag_suggest::{HeuristicSuggester, TagGroup, TagSuggester};
 use analyzer::{AnalysisResult, Analyzer};
 use cache::ScanCache;
 use git::{GitInfo, GitManager};
-use scanner::{IncrementalStats, ScanProgress, ScanResult, ScanState};
+use scanner::{IncrementalStats, ScanResult, ScanState};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::Path;
@@ -43,23 +44,6 @@ fn unregister_project(project_id: String) -> Result<(), String> {
 }
 
 // ============ Scan Commands ============
-
-#[tauri::command]
-fn scan_project(project_id: String, path: String) -> Result<ScanResult, String> {
-    project::register(project_id.clone(), path.clone());
-
-    // Legacy synchronous command — front-end uses scan_project_incremental
-    // for the user-toggleable setting. Hardcoding `true` here matches the
-    // "respect gitignore by default" semantics of the new flow.
-    let result = scanner::scan_directory_with_state(&path, None, true).map_err(|e| e.to_string())?;
-
-    project::with_mut(&project_id, |state| {
-        state.cached_scan = Some(result.clone());
-        Ok(())
-    })?;
-
-    Ok(result)
-}
 
 /// Spawn a background thread that emits `scan-progress-{project_id}` events
 /// every 100ms until the scan reaches a terminal phase OR the caller flips
@@ -93,84 +77,11 @@ fn spawn_progress_reporter(
 }
 
 #[tauri::command]
-async fn scan_project_async(
-    app: AppHandle,
-    project_id: String,
-    path: String,
-) -> Result<ScanResult, String> {
-    project::register(project_id.clone(), path.clone());
-
-    let state = Arc::new(ScanState::new());
-    // In-flight guard: `scan_state` being `Some` means another scan already
-    // owns this project. Reject the second one rather than overwriting the
-    // first's state (which would drop its cancellation, interleave the two
-    // progress reporters, and let an older scan's result clobber a newer one).
-    // The check + set is atomic under the project lock held by `with_mut`.
-    let already = project::with_mut(&project_id, |s| {
-        if s.scan_state.is_some() {
-            return Ok(true);
-        }
-        s.scan_state = Some(state.clone());
-        Ok(false)
-    })?;
-    if already {
-        return Err("A scan is already in progress for this project".to_string());
-    }
-
-    let stop = Arc::new(AtomicBool::new(false));
-    let progress_handle =
-        spawn_progress_reporter(app.clone(), project_id.clone(), state.clone(), stop.clone());
-
-    let state_for_scan = state.clone();
-    let path_for_scan = path.clone();
-    let join_result = tokio::task::spawn_blocking(move || {
-        // Legacy async command — same default as scan_project; the
-        // toggleable variant is scan_project_incremental.
-        scanner::scan_directory_with_state(&path_for_scan, Some(state_for_scan), true)
-    })
-    .await;
-
-    // Stop the reporter and join it BEFORE propagating any error: the scan's
-    // early `Err` paths never mark a terminal phase, so otherwise `join()`
-    // would block forever (the "stuck at discovering files" hang).
-    stop.store(true, Ordering::SeqCst);
-    let _ = progress_handle.join();
-
-    let _ = project::with_mut(&project_id, |s| {
-        s.scan_state = None;
-        Ok(())
-    });
-
-    let scan_result = join_result
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
-
-    project::with_mut(&project_id, |s| {
-        s.cached_scan = Some(scan_result.clone());
-        // Legacy command always scans with gitignore on (see above) — record
-        // it so the watcher mirrors the same exclusions.
-        s.respect_gitignore = true;
-        Ok(())
-    })?;
-
-    Ok(scan_result)
-}
-
-#[tauri::command]
 fn cancel_scan(project_id: String) -> bool {
     project::with_ref(&project_id, |s| {
         Ok(s.scan_state.as_ref().map(|st| st.cancel()).is_some())
     })
     .unwrap_or(false)
-}
-
-#[tauri::command]
-fn get_scan_progress(project_id: String) -> Option<ScanProgress> {
-    project::with_ref(&project_id, |s| {
-        Ok(s.scan_state.as_ref().map(|st| st.get_progress()))
-    })
-    .ok()
-    .flatten()
 }
 
 // ============ Incremental Scan Commands ============
@@ -797,20 +708,6 @@ fn llm_cache_size() -> u64 {
     llm::cache::size()
 }
 
-/// Backend-sourced defaults for the AI Tagging settings panel. The
-/// frontend reads these once at startup so model strings only live in
-/// one place — bumping a default in `claude.rs` / `openai.rs` /
-/// `ollama.rs` propagates to the UI without a parallel TS edit.
-#[tauri::command]
-fn llm_default_models() -> serde_json::Value {
-    serde_json::json!({
-        "claude": llm::claude::DEFAULT_MODEL,
-        "openai": llm::openai::DEFAULT_MODEL,
-        "ollama": llm::ollama::DEFAULT_MODEL,
-        "ollama_endpoint": llm::ollama::DEFAULT_ENDPOINT,
-    })
-}
-
 /// List the models installed on a local Ollama daemon. The endpoint
 /// argument is the user's Settings-configured base URL — we strip any
 /// path suffix and append `/api/tags`. Returns the raw model tag list
@@ -987,11 +884,6 @@ fn analyze_assets(project_id: String, config_toml: Option<String>) -> Result<Ana
     })
 }
 
-#[tauri::command]
-fn get_default_config() -> Result<String, String> {
-    Ok(analyzer::rules::config_template::DEFAULT_CONFIG_TEMPLATE.to_string())
-}
-
 /// Make sure `<project_root>/tidycraft.toml` exists, writing the commented
 /// default template if it doesn't, then return its absolute path. The
 /// frontend hands that path to `open_with_default_app` so the user edits
@@ -1010,14 +902,6 @@ fn ensure_project_config(project_id: String) -> Result<String, String> {
         }
         Ok(scanner::path_to_string(&path))
     })
-}
-
-#[tauri::command]
-fn validate_config(config_toml: String) -> Result<bool, String> {
-    match RuleConfig::from_toml(&config_toml) {
-        Ok(_) => Ok(true),
-        Err(e) => Err(format!("Invalid config: {}", e)),
-    }
 }
 
 /// Read a project's `tidycraft.toml` from its registered root, if present.
@@ -1091,7 +975,7 @@ fn suggest_tags(project_id: String) -> Result<Vec<TagGroup>, String> {
 // freeze the UI.
 #[tauri::command(async)]
 fn get_git_info(project_id: String, path: String) -> GitInfo {
-    let manager = GitManager::open(Path::new(&path));
+    let mut manager = GitManager::open(Path::new(&path));
     let info = manager.get_info();
 
     let _ = project::with_mut(&project_id, |state| {
@@ -1138,11 +1022,6 @@ fn get_git_statuses(project_id: String) -> GitStatusMap {
 }
 
 // ============ Unity Commands ============
-
-#[tauri::command]
-fn parse_unity_file(path: String) -> Result<unity::UnityFileInfo, String> {
-    unity::parse_unity_file(Path::new(&path)).ok_or_else(|| "Failed to parse Unity file".to_string())
-}
 
 #[derive(Serialize)]
 pub struct DependencyGraph {
@@ -1779,7 +1658,17 @@ pub struct BatchRenameResult {
 
 fn apply_rename_operation(name: &str, operation: &RenameOperation) -> String {
     match operation {
-        RenameOperation::FindReplace { find, replace } => name.replace(find, replace),
+        // An empty `find` is a no-op, NOT `str::replace("")` — that inserts
+        // the replacement between every character ("abc" → "XaXbXcX"). The
+        // preview shares this function, so the no-op also zeroes the
+        // dialog's changed-count and disables Apply.
+        RenameOperation::FindReplace { find, replace } => {
+            if find.is_empty() {
+                name.to_string()
+            } else {
+                name.replace(find, replace)
+            }
+        }
         RenameOperation::AddPrefix { prefix } => format!("{}{}", prefix, name),
         RenameOperation::AddSuffix { suffix } => {
             if let Some(dot_pos) = name.rfind('.') {
@@ -1815,6 +1704,21 @@ fn apply_rename_operation(name: &str, operation: &RenameOperation) -> String {
             .collect::<Vec<_>>()
             .join("_"),
     }
+}
+
+/// Reject rename targets that would escape the file's own directory. The
+/// dialogs validate too, but the IPC boundary must not rely on frontend
+/// checks — a separator in `new_name` turns `parent.join(new_name)` into a
+/// directory traversal, and a find→replace text can inject one just as
+/// easily as a direct call.
+fn validate_new_name(new_name: &str) -> Result<(), String> {
+    if new_name.is_empty() || new_name == "." || new_name == ".." {
+        return Err("Invalid file name".to_string());
+    }
+    if new_name.contains('/') || new_name.contains('\\') {
+        return Err("File name cannot contain path separators".to_string());
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1865,6 +1769,12 @@ fn execute_batch_rename(
         let new_name = apply_rename_operation(&name, &operation);
 
         if name == new_name {
+            continue;
+        }
+
+        if let Err(e) = validate_new_name(&new_name) {
+            errors.push(format!("{}: {}", name, e));
+            error_count += 1;
             continue;
         }
 
@@ -1948,41 +1858,7 @@ fn execute_batch_rename(
 
 // ============ Unreal Engine Commands ============
 
-#[tauri::command]
-fn get_unreal_project_info(path: String) -> Result<unreal::UnrealProjectInfo, String> {
-    let root_path = Path::new(&path);
-
-    let uproject_path = unreal::find_uproject_file(root_path)
-        .or_else(|| {
-            if path.ends_with(".uproject") {
-                Some(root_path.to_path_buf())
-            } else {
-                None
-            }
-        })
-        .ok_or("No .uproject file found")?;
-
-    unreal::parse_uproject(&uproject_path).ok_or_else(|| "Failed to parse .uproject file".to_string())
-}
-
 // ============ Godot Commands ============
-
-#[tauri::command]
-fn get_godot_project_info(path: String) -> Result<godot::GodotProjectInfo, String> {
-    let root_path = Path::new(&path);
-
-    let project_path = if path.ends_with("project.godot") {
-        root_path.to_path_buf()
-    } else {
-        root_path.join("project.godot")
-    };
-
-    if !project_path.exists() {
-        return Err("No project.godot file found".to_string());
-    }
-
-    godot::parse_project_godot(&project_path).ok_or_else(|| "Failed to parse project.godot file".to_string())
-}
 
 // ============ File System Commands ============
 
@@ -2446,6 +2322,8 @@ fn delete_assets(paths: Vec<String>) -> DeleteResult {
 fn rename_file(project_id: String, old_path: String, new_name: String) -> Result<String, String> {
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    validate_new_name(&new_name)?;
+
     let old_path_ref = Path::new(&old_path);
     if !old_path_ref.exists() {
         return Err("File does not exist".to_string());
@@ -2558,18 +2436,6 @@ fn undo_last_operation(project_id: String) -> Result<undo::UndoResult, String> {
 }
 
 #[tauri::command]
-fn undo_operation_by_id(project_id: String, id: String) -> Result<undo::UndoResult, String> {
-    project::with_mut(&project_id, |state| {
-        let result = state
-            .undo_manager
-            .undo_by_id(&id)
-            .ok_or_else(|| format!("Operation '{}' not found or already undone", id))?;
-        carry_tags_after_undo(state, &result.reverted_pairs);
-        Ok(result)
-    })
-}
-
-#[tauri::command]
 fn can_undo(project_id: String) -> bool {
     project::with_ref(&project_id, |state| Ok(state.undo_manager.can_undo())).unwrap_or(false)
 }
@@ -2580,11 +2446,6 @@ fn clear_undo_history(project_id: String) -> Result<(), String> {
         state.undo_manager.clear_history();
         Ok(())
     })
-}
-
-#[tauri::command]
-fn get_undo_count(project_id: String) -> usize {
-    project::with_ref(&project_id, |state| Ok(state.undo_manager.undoable_count())).unwrap_or(0)
 }
 
 // ============ Tags Commands ============
@@ -2630,13 +2491,6 @@ fn delete_tag(project_id: String, tag_id: String) -> Result<(), String> {
     project::with_mut(&project_id, |state| {
         state.ensure_tags().delete_tag(&tag_id);
         state.save_tags()
-    })
-}
-
-#[tauri::command]
-fn get_asset_tags(project_id: String, asset_path: String) -> Result<Vec<tags::Tag>, String> {
-    project::with_mut(&project_id, |state| {
-        Ok(state.ensure_tags().get_asset_tags(&asset_path))
     })
 }
 
@@ -2719,11 +2573,8 @@ pub fn run() {
             register_project,
             unregister_project,
             // Scan
-            scan_project,
-            scan_project_async,
             scan_project_incremental,
             cancel_scan,
-            get_scan_progress,
             clear_scan_cache,
             start_watching,
             stop_watching,
@@ -2732,8 +2583,6 @@ pub fn run() {
             clear_thumbnail_cache,
             // Analysis
             analyze_assets,
-            get_default_config,
-            validate_config,
             read_project_config,
             ensure_project_config,
             suggest_tags,
@@ -2741,7 +2590,6 @@ pub fn run() {
             get_git_info,
             get_git_statuses,
             // Unity
-            parse_unity_file,
             get_unity_dependencies,
             find_unused_assets,
             get_godot_dependencies,
@@ -2755,15 +2603,11 @@ pub fn run() {
             preview_batch_rename,
             execute_batch_rename,
             // Engine info
-            get_unreal_project_info,
-            get_godot_project_info,
             // Undo
             get_undo_history,
             undo_last_operation,
-            undo_operation_by_id,
             can_undo,
             clear_undo_history,
-            get_undo_count,
             // File System
             show_in_file_manager,
             open_with_default_app,
@@ -2779,7 +2623,6 @@ pub fn run() {
             create_tag,
             update_tag,
             delete_tag,
-            get_asset_tags,
             add_tag_to_asset,
             remove_tag_from_asset,
             add_tag_to_assets,
@@ -2790,7 +2633,6 @@ pub fn run() {
             llm_suggest_tags,
             llm_clear_cache,
             llm_cache_size,
-            llm_default_models,
             llm_ollama_models,
             learn_project_conventions,
             read_ai_rules,
@@ -2805,6 +2647,22 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rename_targets_reject_separators_and_degenerates() {
+        // A separator in new_name turns `parent.join(new_name)` into a
+        // directory traversal — the backend must reject it even though the
+        // dialogs validate too (defense in depth at the IPC boundary).
+        assert!(validate_new_name("../evil.png").is_err());
+        assert!(validate_new_name("sub/inner.png").is_err());
+        assert!(validate_new_name("sub\\inner.png").is_err());
+        assert!(validate_new_name("").is_err());
+        assert!(validate_new_name(".").is_err());
+        assert!(validate_new_name("..").is_err());
+        assert!(validate_new_name("normal_name.png").is_ok());
+        // Dotfiles are odd but legal targets.
+        assert!(validate_new_name(".hidden").is_ok());
+    }
 
     #[test]
     fn relativize_samples_strips_absolute_prefix() {

@@ -163,7 +163,7 @@ export function BatchRenameDialog({
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-border">
           <h2 className="text-lg font-semibold">
-            {t("batchRename.title", "Batch Rename")} ({selectedPaths.length} files)
+            {t("batchRename.title", "Batch Rename")} ({t("batchRename.fileCount", { count: selectedPaths.length })})
           </h2>
           <button
             onClick={handleClose}
@@ -293,7 +293,7 @@ export function BatchRenameDialog({
                     {previews.length > 50 && (
                       <tr>
                         <td colSpan={2} className="p-2 text-center text-text-secondary">
-                          ... and {previews.length - 50} more
+                          {t("batchRename.andMore", { count: previews.length - 50 })}
                         </td>
                       </tr>
                     )}

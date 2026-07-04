@@ -78,7 +78,9 @@ impl AiRulesDoc {
         let body = toml::to_string_pretty(self).map_err(|e| e.to_string())?;
         let content = format!("{HEADER}{body}");
         let path = Self::project_path(project_root);
-        fs::write(&path, content).map_err(|e| e.to_string())
+        // Atomic (temp + rename) so a crash mid-write can't leave a torn
+        // tidycraft.ai.toml that fails to parse on the next launch.
+        crate::fs_atomic::write_atomic(&path, content.as_bytes()).map_err(|e| e.to_string())
     }
 
     /// Read from disk if present. Returns `Ok(None)` for the common

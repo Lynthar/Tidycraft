@@ -154,7 +154,9 @@ impl UndoManager {
             }
         }
         if let Ok(json) = serde_json::to_string_pretty(&self.history) {
-            let _ = fs::write(path, json);
+            // Atomic (temp + rename): a crash mid-write must not tear the
+            // persisted undo history — same discipline as tags.rs.
+            let _ = crate::fs_atomic::write_atomic(path, json.as_bytes());
         }
     }
 
@@ -189,33 +191,6 @@ impl UndoManager {
             .history
             .iter()
             .rposition(|op| !op.undone)?;
-
-        let batch = &self.history[index];
-        let description = batch.description.clone();
-
-        // 执行撤销
-        let result = execute_batch_undo(&batch.operations);
-
-        // 标记为已撤销
-        self.history[index].undone = true;
-        self.save_to_disk();
-
-        Some(UndoResult {
-            success: result.failed_count == 0,
-            reverted_count: result.reverted_count,
-            failed_count: result.failed_count,
-            errors: result.errors,
-            operation_description: description,
-            reverted_pairs: result.reverted_pairs,
-        })
-    }
-
-    /// 撤销指定 ID 的操作
-    pub fn undo_by_id(&mut self, id: &str) -> Option<UndoResult> {
-        let index = self
-            .history
-            .iter()
-            .position(|op| op.id == id && !op.undone)?;
 
         let batch = &self.history[index];
         let description = batch.description.clone();
@@ -285,11 +260,6 @@ impl UndoManager {
     #[allow(dead_code)]
     pub fn history_count(&self) -> usize {
         self.history.len()
-    }
-
-    /// 获取可撤销的操作数量
-    pub fn undoable_count(&self) -> usize {
-        self.history.iter().filter(|op| !op.undone).count()
     }
 }
 
@@ -450,8 +420,7 @@ fn execute_single_undo(operation: &FileOperation) -> Result<(), String> {
 
 /// 生成唯一的操作 ID。用 uuid v4 —— 旧实现是 `秒级时间戳 ^ 栈地址`,而同一
 /// 调用点的栈地址通常不变,于是同一秒内记录的两批操作会生成相同 id,
-/// `undo_by_id` / `peek_pairs_by_id` 用 `position`/`find` 命中第一个 → 撤销
-/// 到错误的批次。
+/// 按 id 查找的路径(如 undo 历史列表)命中第一个 → 关联到错误的批次。
 fn generate_operation_id() -> String {
     format!("op_{}", uuid::Uuid::new_v4().simple())
 }
@@ -649,27 +618,6 @@ mod tests {
     }
 
     #[test]
-    fn test_undo_by_id() {
-        let mut manager = UndoManager::new(10);
-
-        let ops = vec![FileOperation {
-            operation_type: OperationType::Rename,
-            original_path: "/old.txt".to_string(),
-            new_path: Some("/new.txt".to_string()),
-            timestamp: current_timestamp(),
-        }];
-
-        let id = manager.record_batch("Test".to_string(), ops);
-
-        // 通过 ID 撤销（会失败因为文件不存在，但逻辑测试通过）
-        let result = manager.undo_by_id(&id);
-        assert!(result.is_some());
-
-        // 验证操作已标记为撤销
-        assert!(manager.history[0].undone);
-    }
-
-    #[test]
     fn test_clear_history() {
         let mut manager = UndoManager::new(10);
 
@@ -686,27 +634,6 @@ mod tests {
         manager.clear_history();
         assert_eq!(manager.history_count(), 0);
         assert!(!manager.can_undo());
-    }
-
-    #[test]
-    fn test_undoable_count() {
-        let mut manager = UndoManager::new(10);
-
-        for i in 0..3 {
-            let ops = vec![FileOperation {
-                operation_type: OperationType::Rename,
-                original_path: format!("/old{}.txt", i),
-                new_path: Some(format!("/new{}.txt", i)),
-                timestamp: current_timestamp(),
-            }];
-            manager.record_batch(format!("Op {}", i), ops);
-        }
-
-        assert_eq!(manager.undoable_count(), 3);
-
-        // 标记一个为已撤销
-        manager.history[0].undone = true;
-        assert_eq!(manager.undoable_count(), 2);
     }
 
     #[test]

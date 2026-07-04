@@ -66,15 +66,47 @@ impl AudioRule {
     }
 
     fn is_likely_sfx(&self, asset: &AssetInfo) -> bool {
-        // Simple heuristic: if name contains common SFX indicators
-        let name_lower = asset.name.to_lowercase();
-        name_lower.contains("sfx")
-            || name_lower.contains("sound")
-            || name_lower.contains("effect")
-            || name_lower.contains("hit")
-            || name_lower.contains("click")
-            || name_lower.contains("ui")
+        // Heuristic: the filename carries a common SFX indicator as a whole
+        // token. Token equality, NOT substring — `guitar.wav` contains "ui"
+        // and `white_noise.wav` contains "hit", and both used to be judged
+        // SFX (then warned for exceeding max_sfx_duration). Tokens split on
+        // non-alphanumeric boundaries and lower/upper camelCase seams, so
+        // `sword_hit_01`, `UIClick`, and `Sfx-Explosion` all still match.
+        const SFX_TOKENS: [&str; 6] = ["sfx", "sound", "effect", "hit", "click", "ui"];
+        sfx_name_tokens(&asset.name).any(|tok| SFX_TOKENS.contains(&tok.as_str()))
     }
+}
+
+/// Split a filename into lowercase word tokens: separators are any
+/// non-alphanumeric run, plus lower→upper camelCase seams ("UIClick" →
+/// ["ui", "click"] — an uppercase run followed by a lowercase letter
+/// starts a new word at its last capital).
+fn sfx_name_tokens(name: &str) -> impl Iterator<Item = String> + '_ {
+    let mut tokens: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let chars: Vec<char> = name.chars().collect();
+    for (i, &c) in chars.iter().enumerate() {
+        if !c.is_alphanumeric() {
+            if !current.is_empty() {
+                tokens.push(std::mem::take(&mut current));
+            }
+            continue;
+        }
+        let prev = i.checked_sub(1).and_then(|j| chars.get(j).copied());
+        let next = chars.get(i + 1).copied();
+        let camel_seam = c.is_uppercase()
+            && (prev.is_some_and(|p| p.is_lowercase())
+                || (prev.is_some_and(|p| p.is_uppercase())
+                    && next.is_some_and(|n| n.is_lowercase())));
+        if camel_seam && !current.is_empty() {
+            tokens.push(std::mem::take(&mut current));
+        }
+        current.extend(c.to_lowercase());
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens.into_iter()
 }
 
 impl Rule for AudioRule {
@@ -212,5 +244,28 @@ mod tests {
         let issue = rule.check(&audio_asset(22050)).expect("22.05 kHz is non-standard");
         assert_eq!(issue.rule_id, "audio.sample_rate");
         assert!(issue.suggestion.expect("has suggestion").contains("44100"));
+    }
+}
+
+#[cfg(test)]
+mod sfx_token_tests {
+    use super::sfx_name_tokens;
+
+    fn toks(name: &str) -> Vec<String> {
+        sfx_name_tokens(name).collect()
+    }
+
+    #[test]
+    fn tokenizes_separators_and_camel_case() {
+        assert_eq!(toks("sword_hit_01.wav"), ["sword", "hit", "01", "wav"]);
+        assert_eq!(toks("UIClick.wav"), ["ui", "click", "wav"]);
+        assert_eq!(toks("Sfx-Explosion.ogg"), ["sfx", "explosion", "ogg"]);
+    }
+
+    #[test]
+    fn substrings_inside_words_do_not_leak() {
+        // "guitar" must NOT produce a "ui" token, "white" no "hit" token.
+        assert!(!toks("guitar_loop.wav").iter().any(|t| t == "ui"));
+        assert!(!toks("white_noise.wav").iter().any(|t| t == "hit"));
     }
 }

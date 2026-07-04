@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
+import { useShallow } from "zustand/react/shallow";
 import { useTagsStore } from "../stores/tagsStore";
 import { useThemeStore } from "../stores/themeStore";
 import { useSettingsStore } from "../stores/settingsStore";
@@ -41,13 +42,14 @@ export function Header({ searchInputRef }: HeaderProps) {
     searchQuery,
     gitInfo,
     canUndo,
-    openProject,
     rescan,
     setSearchQuery,
     undoLastOperation,
     refreshUndoState,
     refreshGitInfo,
-  } = useProjectStore();
+  } = useProjectStore(
+    useShallow((s) => ({ projectPath: s.projectPath, isScanning: s.isScanning, scanResult: s.scanResult, searchQuery: s.searchQuery, gitInfo: s.gitInfo, canUndo: s.canUndo, rescan: s.rescan, setSearchQuery: s.setSearchQuery, undoLastOperation: s.undoLastOperation, refreshUndoState: s.refreshUndoState, refreshGitInfo: s.refreshGitInfo, }))
+  );
   const { theme, toggleTheme } = useThemeStore();
   const { showBranchInfo, showAheadBehind } = useSettingsStore();
   const { addToHistory } = useSearchHistoryStore();
@@ -99,12 +101,13 @@ export function Header({ searchInputRef }: HeaderProps) {
 
   const handleUndo = async () => {
     const result = await undoLastOperation();
-    if (result && result.success && projectPath) {
+    if (result && result.success) {
       // Undo carried tag bindings back to the original paths on the backend;
       // re-sync the tags store so they reappear without waiting for the
-      // watcher's scanResult refresh.
+      // watcher's scanResult refresh. The scan list itself is refreshed by
+      // the watcher — the bare openProject(path) that used to sit here was
+      // a guaranteed no-op (already-open + not-force short-circuits).
       await useTagsStore.getState().loadTags();
-      openProject(projectPath);
     }
   };
 

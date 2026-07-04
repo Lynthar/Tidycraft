@@ -5,13 +5,18 @@
   "projects": {
     "title": "Projects",
     "addProject": "Add Project",
-    "close": "Close Project"
+    "close": "Close Project",
+    "selectProject": "Select project",
+    "current": "current",
+    "issuesCount": "{{count}} issues",
+    "empty": "No projects open"
   },
   "header": {
     "openFolder": "Open Folder",
     "searchPlaceholder": "Search assets...",
     "rescan": "Rescan",
-    "selectProjectFolder": "Select Project Folder"
+    "selectProjectFolder": "Select Project Folder",
+    "clearSearch": "Clear"
   },
   "sidebar": {
     "assets": "Assets",
@@ -86,12 +91,15 @@
     "renaming": "Renaming...",
     "renamed": "renamed",
     "failed": "failed",
-    "errors": "Errors"
+    "errors": "Errors",
+    "fileCount": "{{count}} files",
+    "andMore": "... and {{count}} more"
   },
   "common": {
     "cancel": "Cancel",
     "undo": "Undo",
-    "done": "Done"
+    "done": "Done",
+    "close": "Close"
   },
   "assetPreview": {
     "selectAsset": "Select an asset to view details",
@@ -190,7 +198,8 @@
       "decimate": "Decimate",
       "review": "Review",
       "add_textures": "Add Textures"
-    }
+    },
+    "infos": "Info"
   },
   "settings": {
     "title": "Settings",
@@ -351,7 +360,8 @@
     "confirmCopy": "Copy here",
     "moving": "Moving…",
     "copying": "Copying…",
-    "errorsTitle": "Some files could not be processed"
+    "errorsTitle": "Some files could not be processed",
+    "disabledTarget": "Source or its parent — cannot target"
   },
   "deleteConfirm": {
     "titleSingle": "Move file to trash?",
@@ -381,7 +391,8 @@
     "newName": "New name",
     "enterName": "Enter new name...",
     "emptyName": "Name cannot be empty",
-    "invalidChars": "Name contains invalid characters"
+    "invalidChars": "Name contains invalid characters",
+    "noProject": "No active project"
   },
   "filters": {
     "advanced": "Filters",
@@ -421,7 +432,13 @@
     "blendUnsupported": ".blend is Blender's private binary format and can't be rendered in-app. Open the file in Blender and export to GLB or FBX.",
     "fbxIncompatible": "This FBX file uses a UV layout the loader can't parse. Re-export from your DCC tool as GLB for guaranteed compatibility.",
     "controls": "Drag to rotate • Scroll to zoom",
-    "reset": "Reset view"
+    "reset": "Reset view",
+    "fullscreen": "Fullscreen",
+    "fullscreenHint": "Drag to rotate • Scroll to zoom • Right-click to pan • G for grid • L for light • Esc to close",
+    "gridTitle": "Toggle grid (G)",
+    "backgroundTitle": "Toggle background (L)",
+    "resetTitle": "Reset view (R)",
+    "closeTitle": "Close (Esc)"
   },
   "commandPalette": {
     "placeholder": "Type a command or search…",
@@ -571,6 +588,24 @@
     "tagSuffix": "(AI)",
     "applyDone_one": "Applied {{count}} tag",
     "applyDone_other": "Applied {{count}} tags",
-    "applyError": "Some tags couldn't be applied — see console."
+    "applyError": "Some tags couldn't be applied — see console.",
+    "chipExisting": "existing tag",
+    "chipNew": "new tag"
+  },
+  "emptyState": {
+    "title": "Open a project to begin",
+    "subtitle": "Pick a recent project from the switcher in the top-left, or open a folder to begin scanning."
+  },
+  "imageLightbox": {
+    "zoomOut": "Zoom out (-)",
+    "zoomIn": "Zoom in (+)",
+    "rotate": "Rotate (R)",
+    "actualSize": "Actual size",
+    "fitToScreen": "Fit to screen (0)",
+    "close": "Close (Esc)",
+    "hint": "Scroll to zoom • Drag to pan • R to rotate • Esc to close"
+  },
+  "mediaPlayer": {
+    "loadError": "Could not play this file — the system decoder may not support this codec."
   }
 }
