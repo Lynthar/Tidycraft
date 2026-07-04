@@ -70,7 +70,9 @@ pub fn parse_unity_file(path: &Path) -> Option<UnityFileInfo> {
     };
 
     Some(UnityFileInfo {
-        path: path.to_string_lossy().to_string(),
+        // Normalized like every other path we hand the frontend — on
+        // Windows `to_string_lossy` alone would leak backslashes.
+        path: crate::scanner::path_to_string(path),
         file_type,
         references,
         components,
@@ -265,5 +267,22 @@ mod tests {
         );
         assert_eq!(UnityFileType::from_extension("PREFAB"), UnityFileType::Prefab);
         assert_eq!(UnityFileType::from_extension("Anim"), UnityFileType::Anim);
+    }
+
+    #[test]
+    fn parse_unity_file_path_uses_forward_slashes() {
+        // Forward-slash discipline: every path we serialize to the frontend
+        // is `/`-separated. Trivially true on Unix; on Windows CI the tempdir
+        // path contains `\` and this guards the normalization.
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("Thing.prefab");
+        std::fs::write(&p, "--- !u!1 &1\nGameObject:\n  m_Name: Thing\n").unwrap();
+
+        let info = parse_unity_file(&p).expect("prefab should parse");
+        assert!(
+            !info.path.contains('\\'),
+            "path must be forward-slash normalized: {}",
+            info.path
+        );
     }
 }

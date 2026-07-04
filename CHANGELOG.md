@@ -6,6 +6,40 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+- **Learning results now commit on review**. Learned rules are staged in memory and written to `tidycraft.ai.toml` only when the review panel saves; closing without saving truly discards the run, and unreviewed rules never influence tag suggestions.
+- **PNG color-space detection parses the embedded ICC profile** ("sRGB" / "Linear" / unknown) instead of treating any profile as sRGB. Deliberately linear data textures are no longer mis-warned, unreadable profiles keep the rule silent, and the advanced filter gains a Linear option.
+- **AI batch requests go out in chunks** (≤20 assets each) so a single reply can't blow the model's output cap. Each completed chunk is cached before the next request — a mid-run failure only re-bills the remainder on retry.
+- **The AI result panel has one Apply button**, and it honors deselected chips ("apply everything still selected"); the bypassing "Apply all" is gone.
+- **Colorspace filename hints drop the collision-prone `_r` / `_m` single-letter suffixes** ("arrow_r", "icon_m" no longer warn); the `_n` normal-map shorthand still does.
+- **Release builds no longer ship devtools** (debug builds keep the auto-opened inspector).
+- **Unity missing-reference issues are warnings and skip built-in resources.** The editor-shipped GUIDs (`unity default resources` / `unity_builtin_extra` — referenced by any project using a built-in shader, material, or UI sprite) no longer flood ordinary projects with false reports, and remaining hits are Warning instead of Error, since the scan can't see into gitignored `Library/` or `Packages/`.
+
+### Fixed
+- **Case-only rename conflict guards compare file identity, not names.** `foo.PNG → foo.png` still works everywhere, and on case-sensitive filesystems a rename can no longer silently overwrite a coexisting file whose name differs only in case (undo path included).
+- **LLM cache entries are keyed by which asset a suggestion answers**, not by response position — a model skipping one asset no longer files every later suggestion under the wrong asset's cache slot, and hallucinated paths never enter the cache.
+- **Output-cap truncation is reported as its own error** (Claude `stop_reason: max_tokens`, OpenAI `finish_reason: length`) instead of an opaque parse failure, for both tagging and learning calls.
+- **Stale analysis results are flagged** with a re-run banner when files change after the run, and the stats pass count intersects with live files — it can no longer go negative.
+- **AI modals no longer re-open with a previous project's data** when a request resolves after a project switch, so their Save / Apply can't write into the newly active project.
+- READMEs now disclose plaintext API-key storage and the real cache-invalidation behavior; several stale code comments and dead doc links corrected.
+- **OBJ material counts are material counts.** A 30-group export sharing one material used to report 30 (the sub-mesh count) and trip the max-materials rule; the count now comes from the loaded MTL, and stays unknown when the MTL can't be read.
+- **glTF face counts cover non-indexed and non-triangle primitives.** Non-indexed meshes counted 0 faces, triangle strips/fans were divided by 3 instead of using `n − 2`, and line/point primitives counted phantom faces.
+- **Compressed DDS textures report their real alpha.** DXT3/DXT5 and (via the DX10 header) BC2/BC3/BC7 read as alpha-carrying, BC4/BC5 data maps stay opaque — previously every compressed DDS claimed "no alpha" because only the uncompressed-layout flag was consulted.
+- **`allowed_sample_rates = []` no longer crashes analysis** — an empty allow-list now means "don't check sample rates".
+- **Cancelled scans emit a terminal progress event** instead of leaving the phase stuck at "parsing" (the UI previously recovered only via its own stop flag).
+- **Windows: engine info panels get forward-slash paths** — Unity / Unreal / Godot project info was the last place backslashes leaked to the frontend.
+- **Version drift and prerelease versions fail the pipeline up-front.** CI runs `check-version` before the build step (which used to silently repair drift on the runner), and `sync-version` rejects prerelease suffixes with a clear message instead of letting a tagged release die inside the Windows MSI bundler.
+- **Shift-click ranges survive filtering and sorting.** The range anchor is now the anchored file itself, not its former row number — narrowing a search between clicks no longer selects an unrelated range or silently breaks selection.
+- **Git-status filtering updates with git refreshes** (the filtered view used to lag behind the always-fresh row badges).
+- **The stats dashboard follows file changes** — watcher events and Ctrl+R rescans refresh totals, charts, and largest-files instead of freezing at first render.
+- **Ctrl+R no longer wipes the multi-selection** — the rescan's brief "no scan result yet" window was being mistaken for "every file was deleted".
+- **Deleting a tag (or switching projects) clears it from the active tag filters.** A dead filter id used to AND-hide every asset with no pill left to un-click.
+- **Batch-rename failures are visible.** On partial failure the dialog stays open with a per-file error list (the asset list still refreshes), the failed files stay selected for a retry, and a closed dialog no longer leaks its previous find/replace state into the next open. Previously any success closed the dialog before the result could render.
+- **AI apply can no longer mint duplicate "(AI)" tags** — every create path checks for an existing tag of the same name first, including tags created earlier in the same run.
+- **Ollama "model not found" reads as what it is.** A 404 now names the model and suggests `ollama pull`, instead of masquerading as a network error.
+- **Metadata panels no longer render "null" / "-bit" / "0.0 kHz"** rows for fields a format doesn't have — unset metadata is omitted from the wire instead of serialized as `null`.
+- Locale files' duplicate top-level `common` blocks merged (a JSON-editing key-loss trap; verified key-for-key lossless).
+
 ### Planned
 - VRAM budget estimates per texture / per directory.
 - Cross-engine reverse-reference graph (Unreal / Godot beyond Unity).

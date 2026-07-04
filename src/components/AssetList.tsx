@@ -81,7 +81,10 @@ export function AssetList() {
   const clearSelection = useSelectionStore((s) => s.clearSelection);
 
   const [showBatchRename, setShowBatchRename] = useState(false);
-  const [lastClickedIndex, setLastClickedIndex] = useState<number | null>(null);
+  // Shift-range anchor. Stored as a PATH, not an index: filters, search,
+  // and sorting can reshuffle or drop rows between clicks, and a stored
+  // index would then point at a different (or out-of-range) asset.
+  const [lastClickedPath, setLastClickedPath] = useState<string | null>(null);
 
   // Single rename state
   const [renameAsset, setRenameAsset] = useState<AssetInfo | null>(null);
@@ -134,6 +137,9 @@ export function AssetList() {
     sortField,
     sortDirection,
     advancedFilters,
+    // The store-level cache filters by git status too — without this dep a
+    // git refresh updates the row badges but not the filtered view.
+    gitStatuses,
   ]);
 
   const getTypeLabel = useCallback(
@@ -143,21 +149,29 @@ export function AssetList() {
 
   const handleAssetClick = useCallback(
     (asset: AssetInfo, index: number, e: React.MouseEvent) => {
+      // Re-resolve the anchor path against the CURRENT view on every shift
+      // click; if the anchor was filtered/sorted out of view, fall back to a
+      // plain click instead of selecting an unrelated range (or crashing on
+      // a stale out-of-range index, as the old index-based anchor did).
+      const anchorIndex =
+        e.shiftKey && lastClickedPath !== null
+          ? assets.findIndex((a) => a.path === lastClickedPath)
+          : -1;
       if (e.ctrlKey || e.metaKey) {
         togglePath(asset.path);
-        setLastClickedIndex(index);
-      } else if (e.shiftKey && lastClickedIndex !== null) {
-        const start = Math.min(lastClickedIndex, index);
-        const end = Math.max(lastClickedIndex, index);
+        setLastClickedPath(asset.path);
+      } else if (e.shiftKey && anchorIndex !== -1) {
+        const start = Math.min(anchorIndex, index);
+        const end = Math.max(anchorIndex, index);
         const range: string[] = [];
         for (let i = start; i <= end; i++) range.push(assets[i].path);
         addPaths(range);
       } else {
         setSelectedAsset(asset);
-        setLastClickedIndex(index);
+        setLastClickedPath(asset.path);
       }
     },
-    [lastClickedIndex, assets, setSelectedAsset, togglePath, addPaths]
+    [lastClickedPath, assets, setSelectedAsset, togglePath, addPaths]
   );
 
   const handleCheckChange = useCallback(
@@ -176,18 +190,26 @@ export function AssetList() {
     }
   }, [assets, selectedPaths.size, clearSelection, setSelectedPaths]);
 
-  const handleRenameComplete = useCallback(async () => {
-    clearSelection();
-    setShowBatchRename(false);
-    await refreshUndoState();
-    // Tags followed the renamed files on the backend; re-sync the store so the
-    // moved bindings show immediately rather than after the watcher's ~500ms
-    // scanResult refresh re-triggers loadTags.
-    await loadTags();
-    if (projectPath) {
-      openProject(projectPath);
-    }
-  }, [projectPath, openProject, refreshUndoState, clearSelection, loadTags]);
+  // Refresh after a batch rename. Deliberately does NOT close the dialog —
+  // the dialog owns its own lifecycle so a partial failure can stay open and
+  // show its error list (closing is its `onClose`). On partial failure we
+  // also keep the selection: the renamed-away paths get pruned by the
+  // selectionStore subscription when the fresh scanResult lands, leaving
+  // exactly the failed files selected for a retry.
+  const handleRenameComplete = useCallback(
+    async (fullySucceeded: boolean) => {
+      if (fullySucceeded) clearSelection();
+      await refreshUndoState();
+      // Tags followed the renamed files on the backend; re-sync the store so the
+      // moved bindings show immediately rather than after the watcher's ~500ms
+      // scanResult refresh re-triggers loadTags.
+      await loadTags();
+      if (projectPath) {
+        openProject(projectPath);
+      }
+    },
+    [projectPath, openProject, refreshUndoState, clearSelection, loadTags]
+  );
 
   // Context menu handlers
   const handleContextMenu = useCallback(

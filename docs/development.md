@@ -187,25 +187,34 @@ The frontend and backend communicate exclusively through two mechanisms:
     factory, the shared 3-tier `parse_suggestions(text)` JSON parser,
     and the `suggest_with_cache(provider_id, request, fetcher)` helper
     that splits a batch into cache hits and misses, calls the fetcher
-    only for the misses, persists fresh entries, and merges. Concrete
-    providers (`claude.rs` / `openai.rs` / `ollama.rs`) own only their
-    endpoint + auth + request/response shape + error mapping;
-    everything else lives in shared modules.
+    once per chunk of at most 20 missing assets (so one reply can't hit
+    the output-token cap), persists each completed chunk immediately —
+    pairing suggestions with cache keys by `asset_path`, never by
+    response order — and merges. Output-cap truncation surfaces as
+    `LLMError::Truncated`. Concrete providers (`claude.rs` /
+    `openai.rs` / `ollama.rs`) own only their endpoint + auth +
+    request/response shape + error mapping; everything else lives in
+    shared modules.
   - **Learning mode** (`learn_project_conventions` command). `sampler.rs`
     samples files per-directory by asset-type ratio with a seeded RNG
     (root_path hash → seed for stable re-runs). `learning.rs` defines
     `LearnRequest` / `LearningResult` / `InferredConventions` /
     `LearnedRule` (four kinds: `filename_token` / `path_prefix` /
-    `path_segment` / `filename_regex`). `rule_store.rs` persists
-    `AiRulesDoc` to `<project>/tidycraft.ai.toml`. Each provider's
+    `path_segment` / `filename_regex`). `rule_store.rs` owns the
+    `AiRulesDoc` ↔ `<project>/tidycraft.ai.toml` round-trip; a fresh
+    learn stages its doc in `ProjectState.pending_ai_rules`, and the
+    review panel's Save (`save_ai_rules`) is the single point where the
+    file is written — closing without saving discards the run. Each provider's
     `LLMProvider::learn_project` impl shares a text-only
     `send_text_chat` helper, parses via shared `parse_json_lenient<T>`.
 
   Shared infrastructure: `cost.rs` holds verified per-million pricing
   in micro-USD (integer arithmetic) plus per-provider vision token
   rules. `cache.rs` is per-asset disk cache keyed by
-  `SHA256(thumb_hash + filename + path + provider + model + prompt_version)`
-  with `\x00` separators between fields. `prompts.rs` exports
+  `SHA256(thumb_hash + filename + path + provider + model + prompt_version + context_hash)`
+  with `\x00` separators between fields — `context_hash` digests the
+  existing-tag system + `[project]` meta, so editing tags or applying
+  suggestions invalidates entries generated under the old context. `prompts.rs` exports
   `SYSTEM_PROMPT` (per-asset) + `SYSTEM_PROMPT_LEARNING` and two prompt
   builders. **Two independent version counters**: `PROMPT_VERSION`
   (per-asset cache key) and `LEARNING_PROMPT_VERSION` (learning result
@@ -269,8 +278,10 @@ The frontend and backend communicate exclusively through two mechanisms:
   inline Run / Re-learn / Review controls. AI Learning flows go through
   `LearnSetupModal` (kickoff: theme/goal write-back + sampling depth +
   cost preview) and `LearnReviewPanel` (review inferred conventions,
-  auto-created tag gaps, editable rule list with confidence slider and
-  invalid-regex marker; persists to `tidycraft.ai.toml`). Per-asset AI
+  opt-out tag-gap proposals, editable rule list with confidence slider
+  and invalid-regex marker; nothing is written until Save, which creates
+  the checked gap tags and persists the rules to `tidycraft.ai.toml`).
+  Per-asset AI
   tagging (advanced opt-in) goes through `AIAnalyzeModal` (cost preview
   + consent gate + thumbnail-upload toggle, defaults off) and
   `AIResultPanel` (chip-toggle review, batched apply by

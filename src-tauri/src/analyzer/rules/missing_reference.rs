@@ -16,6 +16,23 @@ use crate::unity;
 /// Extensions that Unity stores as YAML with GUID references.
 const REFERENCEABLE_EXTS: &[&str] = &["prefab", "unity", "mat", "controller", "asset"];
 
+/// The two GUIDs Unity reserves for editor-shipped asset bundles:
+/// `0000000000000000e000000000000000` ("unity default resources") and
+/// `0000000000000000f000000000000000` ("unity_builtin_extra"). Any project
+/// that touches a built-in shader, material, or UI sprite references them,
+/// and they never correspond to a scanned .meta — so they must not count
+/// as missing. NOTE: do not try to detect built-ins via the reference's
+/// `type:` field instead — real project asset references (e.g. a .mat's
+/// texture) are `type: 3` while built-ins are `type: 0`; filtering on type
+/// would suppress true positives.
+fn is_unity_builtin_guid(guid: &str) -> bool {
+    let bytes = guid.as_bytes();
+    bytes.len() == 32
+        && bytes[..16].iter().all(|&b| b == b'0')
+        && (bytes[16] == b'e' || bytes[16] == b'f')
+        && bytes[17..].iter().all(|&b| b == b'0')
+}
+
 pub fn find_missing_references(
     assets: &[AssetInfo],
     project_type: &Option<ProjectType>,
@@ -58,16 +75,23 @@ pub fn find_missing_references(
             if r.guid.is_empty() || r.guid.chars().all(|c| c == '0') {
                 continue;
             }
+            // Editor-shipped built-ins are never in the scan set by design.
+            if is_unity_builtin_guid(&r.guid) {
+                continue;
+            }
             if known_guids.contains(&r.guid) {
                 continue;
             }
             if !reported.insert(r.guid.clone()) {
                 continue;
             }
+            // Warning, not Error: known_guids only covers what the scan saw,
+            // and gitignored Library/ or Packages/ contents never enter it —
+            // a miss is strong signal, not proof of breakage.
             result.add_issue(Issue {
                 rule_id: "missing_reference".to_string(),
                 rule_name: "Missing Reference".to_string(),
-                severity: Severity::Error,
+                severity: Severity::Warning,
                 message: format!(
                     "References GUID `{}` which is not in the project",
                     r.guid
@@ -196,5 +220,67 @@ mod tests {
     fn empty_project_reports_nothing() {
         let r = find_missing_references(&[], &Some(ProjectType::Unity));
         assert_eq!(r.issue_count, 0);
+    }
+
+    #[test]
+    fn skips_unity_builtin_guids() {
+        // `...e...` = "unity default resources", `...f...` = "unity_builtin_extra".
+        // Both ship inside the editor, are referenced by any project touching a
+        // built-in shader/material/sprite, and never have a scanned .meta —
+        // flagging them buries real breakage in noise on ordinary projects.
+        let dir = tempdir().unwrap();
+        let assets = vec![
+            texture_with_guid(dir.path(), "t.png", "11111111111111111111111111111111"),
+            prefab_referencing(
+                dir.path(),
+                "p.prefab",
+                &[
+                    "0000000000000000e000000000000000",
+                    "0000000000000000f000000000000000",
+                ],
+            ),
+        ];
+        let r = find_missing_references(&assets, &Some(ProjectType::Unity));
+        assert_eq!(r.issue_count, 0);
+    }
+
+    #[test]
+    fn near_builtin_guids_are_still_reported() {
+        // Only the two exact builtin GUIDs are exempt; anything merely
+        // resembling them is a genuine dangling reference.
+        let dir = tempdir().unwrap();
+        let assets = vec![
+            texture_with_guid(dir.path(), "t.png", "11111111111111111111111111111111"),
+            prefab_referencing(
+                dir.path(),
+                "p.prefab",
+                &[
+                    "0000000000000000a000000000000000", // wrong marker char
+                    "0000000000000000e000000000000001", // non-zero tail
+                    "e0000000000000000000000000000000", // marker misplaced
+                ],
+            ),
+        ];
+        let r = find_missing_references(&assets, &Some(ProjectType::Unity));
+        assert_eq!(r.issue_count, 3);
+    }
+
+    #[test]
+    fn missing_reference_severity_is_warning() {
+        // The detector's evidence is heuristic — gitignored Library/ and
+        // Packages/ never enter known_guids, so a miss is strong signal but
+        // not proof. Warning, not Error (user-approved downgrade).
+        let dir = tempdir().unwrap();
+        let assets = vec![
+            texture_with_guid(dir.path(), "t.png", "11111111111111111111111111111111"),
+            prefab_referencing(
+                dir.path(),
+                "p.prefab",
+                &["22222222222222222222222222222222"],
+            ),
+        ];
+        let r = find_missing_references(&assets, &Some(ProjectType::Unity));
+        assert_eq!(r.issue_count, 1);
+        assert!(matches!(r.issues[0].severity, Severity::Warning));
     }
 }

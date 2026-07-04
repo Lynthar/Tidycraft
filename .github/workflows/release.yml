@@ -40,6 +40,13 @@ jobs:
         with:
           version: 9
 
+      # Fail the release up-front on version drift or a prerelease suffix
+      # (the Windows MSI bundler would otherwise reject it mid-build). Must
+      # run BEFORE tauri-action, whose beforeBuildCommand (`pnpm build`)
+      # starts by rewriting the derived files in place.
+      - name: Check version sync
+        run: node scripts/sync-version.mjs --check
+
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:

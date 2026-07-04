@@ -100,7 +100,7 @@
 
 多 provider LLM 标签:**Claude**(Sonnet 4.6 / Haiku 4.5 / Opus 4.7)、**OpenAI**(GPT-5.4-mini / 4o-mini / 5.4 / 5.4-nano)、**Ollama**(本地 — qwen2.5-VL / Llama 3.2-Vision / LLaVA 等;已安装模型实时列出)。
 
-**学习模式(推荐,默认路径)。** 一次 LLM 调用采样你项目的文件名 + 路径 + 已有标签系统,推断命名 / 目录约定,生成**本地启发式规则**(filename-token / path-prefix / path-segment 匹配)并持久化到 `tidycraft.ai.toml`。侧边栏的 "Suggest Tags" 面板之后跑这些规则在本地匹配 — 自此每条资产 LLM 成本为零。会自动创建模型认为你词汇里缺失的标签(可在审查面板撤回)。云 provider 每次学习运行约 ~$0.05;Ollama 免费。
+**学习模式(推荐,默认路径)。** 一次 LLM 调用采样你项目的文件名 + 路径 + 已有标签系统,推断命名 / 目录约定,生成**本地启发式规则**(filename-token / path-prefix / path-segment 匹配)供你审查 —— 在审查面板点 Save 才会持久化到 `tidycraft.ai.toml`,直接关闭则完全丢弃本次运行。侧边栏的 "Suggest Tags" 面板之后跑已保存的规则在本地匹配 — 自此每条资产 LLM 成本为零。模型认为你词汇里缺失的标签会在同一面板中提议(预勾选、可取消),Save 时才创建。云 provider 每次学习运行约 ~$0.05;Ollama 免费。
 
 **高级单资产模式**(通过 Settings → AI Tagging → "启用单资产 AI 标签" opt-in)。把单个资产元数据(文件名 + 路径;缩略图可选且默认关闭)发给 LLM 直接打标。会在多选工具栏加按钮 + 右键菜单加入口。比学习模式贵约 50× — 适合需要图像级分析、学习规则覆盖不到的场景。
 

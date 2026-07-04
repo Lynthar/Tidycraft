@@ -31,7 +31,13 @@ interface BatchRenameDialogProps {
   isOpen: boolean;
   onClose: () => void;
   selectedPaths: string[];
-  onComplete: () => void;
+  /// Called when at least one file was renamed, so the parent refreshes
+  /// the asset list / tags / undo state. `fullySucceeded` tells it whether
+  /// to also clear the selection — on a partial failure the parent keeps
+  /// it, so the failed files stay selected for a retry. Refresh and close
+  /// are deliberately decoupled: the dialog stays open on partial failure
+  /// to show the per-file errors.
+  onComplete: (fullySucceeded: boolean) => void;
 }
 
 export function BatchRenameDialog({
@@ -113,7 +119,13 @@ export function BatchRenameDialog({
       setResult(result);
 
       if (result.success_count > 0) {
-        onComplete();
+        onComplete(result.error_count === 0);
+      }
+      // Full success: nothing to review, close as before. Any failure keeps
+      // the dialog open so the result banner and error list actually render
+      // (they used to be unmounted before the first paint).
+      if (result.error_count === 0) {
+        onClose();
       }
     } catch (err) {
       setError(String(err));
@@ -122,13 +134,22 @@ export function BatchRenameDialog({
     }
   };
 
+  // Reset on close — whatever path closed us (Cancel, X, backdrop-less
+  // auto-close after success). Without this, a close that skips the Cancel
+  // button leaks the previous run's find/replace/preview/result into the
+  // next open.
+  useEffect(() => {
+    if (!isOpen) {
+      setResult(null);
+      setError(null);
+      setPreviews([]);
+      setFindText("");
+      setReplaceText("");
+      setPrefixSuffix("");
+    }
+  }, [isOpen]);
+
   const handleClose = () => {
-    setResult(null);
-    setError(null);
-    setPreviews([]);
-    setFindText("");
-    setReplaceText("");
-    setPrefixSuffix("");
     onClose();
   };
 
@@ -304,6 +325,21 @@ export function BatchRenameDialog({
                 {result.success_count} {t("batchRename.renamed", "renamed")}
                 {result.error_count > 0 && `, ${result.error_count} ${t("batchRename.failed", "failed")}`}
               </span>
+            </div>
+          )}
+
+          {/* Per-file failure details — the whole reason the dialog stays
+              open on partial failure. */}
+          {result && result.errors.length > 0 && (
+            <div className="max-h-32 overflow-auto p-3 bg-error/10 border border-error/30 rounded text-error text-sm">
+              <div className="font-medium mb-1">{t("batchRename.errors", "Errors")}</div>
+              <ul className="space-y-1">
+                {result.errors.map((e, i) => (
+                  <li key={i} className="break-all">
+                    {e}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
         </div>
