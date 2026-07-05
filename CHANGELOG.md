@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-05
+
 ### Changed
 - **Learning results now commit on review**. Learned rules are staged in memory and written to `tidycraft.ai.toml` only when the review panel saves; closing without saving truly discards the run, and unreviewed rules never influence tag suggestions.
 - **PNG color-space detection parses the embedded ICC profile** ("sRGB" / "Linear" / unknown) instead of treating any profile as sRGB. Deliberately linear data textures are no longer mis-warned, unreadable profiles keep the rule silent, and the advanced filter gains a Linear option.
@@ -16,6 +18,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **Unity missing-reference issues are warnings and skip built-in resources.** The editor-shipped GUIDs (`unity default resources` / `unity_builtin_extra` — referenced by any project using a built-in shader, material, or UI sprite) no longer flood ordinary projects with false reports, and remaining hits are Warning instead of Error, since the scan can't see into gitignored `Library/` or `Packages/`.
 
 ### Fixed
+- **External directory deletions now update the list, tree, and selection.** Deleting a watched folder from outside the app (Finder, `rm -rf`) — which macOS reports as one event on the folder rather than per file — now removes its assets from the file list and directory tree, and if it was the selected folder the view falls back to the project root instead of stranding on a ghost path.
 - **Case-only rename conflict guards compare file identity, not names.** `foo.PNG → foo.png` still works everywhere, and on case-sensitive filesystems a rename can no longer silently overwrite a coexisting file whose name differs only in case (undo path included).
 - **LLM cache entries are keyed by which asset a suggestion answers**, not by response position — a model skipping one asset no longer files every later suggestion under the wrong asset's cache slot, and hallucinated paths never enter the cache.
 - **Output-cap truncation is reported as its own error** (Claude `stop_reason: max_tokens`, OpenAI `finish_reason: length`) instead of an opaque parse failure, for both tagging and learning calls.
