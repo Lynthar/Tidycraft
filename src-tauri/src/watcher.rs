@@ -117,8 +117,20 @@ pub fn start(
             let filtered: Vec<PathBuf> = candidates
                 .into_iter()
                 .filter(|p| {
-                    is_trackable_path(p, &thread_root)
-                        && !is_gitignored(p, &thread_root, ignore_matcher.as_ref())
+                    if is_gitignored(p, &thread_root, ignore_matcher.as_ref()) {
+                        return false;
+                    }
+                    if p.exists() {
+                        // Existing path: track only real asset files (extensioned).
+                        is_trackable_path(p, &thread_root)
+                    } else {
+                        // Deletion: the path is gone. It may be a tracked file, or a
+                        // directory whose removal macOS coalesces into one event on
+                        // the extensionless directory path. Let it through (dropping
+                        // the extension requirement) so apply_changes can remove the
+                        // tracked files at or under it; keep the hidden/.meta guards.
+                        path_shape_trackable(p, &thread_root)
+                    }
                 })
                 .collect();
 
@@ -175,8 +187,9 @@ fn apply_changes(
             .collect();
 
         let mut updated: Vec<AssetInfo> = Vec::new();
-        let mut removed: Vec<String> = Vec::new();
-        let mut removed_indices: Vec<usize> = Vec::new();
+        // A set so a directory candidate and one of its own file candidates in
+        // the same batch can't schedule the same asset for removal twice.
+        let mut removed_set: HashSet<String> = HashSet::new();
 
         for path in candidates {
             // Must match the normalization scanner.rs uses for AssetInfo.path;
@@ -194,22 +207,39 @@ fn apply_changes(
                     updated.push(asset);
                 }
             } else if !path.exists() {
-                if let Some(&idx) = path_to_idx.get(&path_str) {
-                    removed_indices.push(idx);
-                    removed.push(path_str);
+                // The path is gone. Remove every tracked asset at or under it: an
+                // exact-match file, or — when macOS coalesces a directory removal
+                // into a single event on the (extensionless) directory path — all
+                // of that directory's tracked descendants. Without this, deleting a
+                // folder from outside the app leaves phantom assets in the scan and
+                // the directory tree, and the selected-directory reconcile never
+                // fires (the ghost-folder bug this watcher is meant to prevent).
+                for asset in &scan_result.assets {
+                    if path_within(&asset.path, path) {
+                        removed_set.insert(asset.path.clone());
+                    }
                 }
             }
             // else: path exists but is a directory (mkdir event) — nothing to track.
         }
 
-        if updated.is_empty() && removed.is_empty() {
+        if updated.is_empty() && removed_set.is_empty() {
             return Err("No effective changes".to_string());
         }
 
+        let mut removed_indices: Vec<usize> = scan_result
+            .assets
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| removed_set.contains(&a.path))
+            .map(|(i, _)| i)
+            .collect();
         removed_indices.sort_unstable_by(|a, b| b.cmp(a));
         for idx in removed_indices {
             scan_result.assets.swap_remove(idx);
         }
+
+        let removed: Vec<String> = removed_set.into_iter().collect();
 
         scan_result
             .assets
@@ -276,9 +306,14 @@ fn meta_host_path(path: &Path) -> Option<PathBuf> {
     Some(path.with_file_name(host))
 }
 
-/// Mirrors the scanner's discovery filters: skip hidden path components (e.g.
-/// `.git/`, `.vscode/`), `.meta` sidecars, and files without an extension.
-fn is_trackable_path(path: &Path, root: &Path) -> bool {
+/// Path-shape checks shared by tracked asset files and tracked-path
+/// *deletions*: the path is inside `root`, has no hidden path components, and
+/// its file name is neither a dotfile nor a `.meta` sidecar. Unlike
+/// `is_trackable_path` this does NOT require an extension — a deleted directory
+/// (which macOS surfaces as a single event on the extensionless directory
+/// path, never per-child removals) must still be processed so its tracked
+/// children can be removed.
+fn path_shape_trackable(path: &Path, root: &Path) -> bool {
     let rel = match path.strip_prefix(root) {
         Ok(r) => r,
         Err(_) => return false,
@@ -291,15 +326,21 @@ fn is_trackable_path(path: &Path, root: &Path) -> bool {
         }
     }
 
-    let file_name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("");
-    if file_name.is_empty() || file_name.starts_with('.') || file_name.ends_with(".meta") {
-        return false;
-    }
+    let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    !(file_name.is_empty() || file_name.starts_with('.') || file_name.ends_with(".meta"))
+}
 
-    path.extension().is_some()
+/// Mirrors the scanner's discovery filters: skip hidden path components (e.g.
+/// `.git/`, `.vscode/`), `.meta` sidecars, and files without an extension.
+fn is_trackable_path(path: &Path, root: &Path) -> bool {
+    path_shape_trackable(path, root) && path.extension().is_some()
+}
+
+/// Whether `asset_path` names a file at or under `deleted`. Component-wise (via
+/// `Path::starts_with`) so a deleted `…/Tex` does not sweep away `…/Textures/*`
+/// and a deleted directory removes every tracked file beneath it.
+fn path_within(asset_path: &str, deleted: &Path) -> bool {
+    Path::new(asset_path).starts_with(deleted)
 }
 
 /// Whether `path` is excluded by the project's `.gitignore` rules, using the
@@ -395,5 +436,48 @@ mod tests {
         assert_eq!(asset_type_key(&AssetType::Texture), "texture");
         assert_eq!(asset_type_key(&AssetType::Model), "model");
         assert_eq!(asset_type_key(&AssetType::Other), "other");
+    }
+
+    // macOS coalesces `rm -rf <dir>` into a single event on the extensionless
+    // *directory* path (never per-child Remove events). That path must survive
+    // filtering so `apply_changes` can drop the tracked files beneath it —
+    // otherwise deleting the selected folder leaves the scan (and the
+    // selected-directory reconcile) filtering against a ghost path.
+    #[test]
+    fn deleted_directory_path_is_shape_trackable_despite_no_extension() {
+        let root = Path::new("/proj");
+        assert!(path_shape_trackable(Path::new("/proj/Models"), root));
+        assert!(path_shape_trackable(Path::new("/proj/sub/Textures"), root));
+        // But an *existing* extensionless path is still not a trackable asset.
+        assert!(!is_trackable_path(Path::new("/proj/Models"), root));
+    }
+
+    #[test]
+    fn path_shape_trackable_still_rejects_hidden_meta_and_outside_root() {
+        let root = Path::new("/proj");
+        assert!(!path_shape_trackable(Path::new("/proj/.git/HEAD"), root));
+        assert!(!path_shape_trackable(Path::new("/proj/sub/.hidden/file.png"), root));
+        assert!(!path_shape_trackable(Path::new("/proj/tex.png.meta"), root));
+        assert!(!path_shape_trackable(Path::new("/other/foo.png"), root));
+    }
+
+    #[test]
+    fn path_within_removes_children_of_a_deleted_directory() {
+        let dir = Path::new("/proj/Models");
+        assert!(path_within("/proj/Models/cube.obj", dir));
+        assert!(path_within("/proj/Models/sub/deep.png", dir));
+    }
+
+    #[test]
+    fn path_within_matches_an_exact_deleted_file() {
+        assert!(path_within("/proj/a.png", Path::new("/proj/a.png")));
+    }
+
+    #[test]
+    fn path_within_is_component_wise_not_string_prefix() {
+        // A deleted `/proj/Tex` must not sweep away `/proj/Textures/*`,
+        // and `/proj/Models` must not match a sibling `/proj/ModelsX/*`.
+        assert!(!path_within("/proj/Textures/t.png", Path::new("/proj/Tex")));
+        assert!(!path_within("/proj/ModelsX/y.png", Path::new("/proj/Models")));
     }
 }
