@@ -24,6 +24,14 @@ pub struct Issue {
     pub asset_path: String,
     pub suggestion: Option<String>,
     pub auto_fixable: bool,
+    /// Every member of the same finding, root-relative and sorted, with the
+    /// kept "original" first. Currently only the `duplicate` rule fills this
+    /// (all files sharing one content hash); the frontend uses it to collapse
+    /// per-file duplicate issues into a single group card. `None` for rules
+    /// without grouped findings — omitted from serialized output so exports
+    /// stay byte-identical for those.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub related_paths: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -158,7 +166,7 @@ impl Analyzer {
 
     /// Check for duplicate files across all assets
     pub fn find_duplicates(&self, scan_result: &ScanResult) -> AnalysisResult {
-        rules::duplicate::find_duplicates(&scan_result.assets)
+        rules::duplicate::find_duplicates(&scan_result.assets, &scan_result.root_path)
     }
 
     /// Check for Unity GUID references that don't resolve to any asset in
@@ -261,6 +269,7 @@ mod tests {
             asset_path: "/test/file.png".to_string(),
             suggestion: None,
             auto_fixable: false,
+            related_paths: None,
         };
 
         result.add_issue(issue);
@@ -282,6 +291,7 @@ mod tests {
             asset_path: "/test/file.png".to_string(),
             suggestion: Some("Fix this".to_string()),
             auto_fixable: true,
+            related_paths: None,
         };
 
         result.add_issue(issue);
@@ -304,6 +314,7 @@ mod tests {
             asset_path: "/test/file1.png".to_string(),
             suggestion: None,
             auto_fixable: false,
+            related_paths: None,
         });
 
         result2.add_issue(Issue {
@@ -314,6 +325,7 @@ mod tests {
             asset_path: "/test/file2.png".to_string(),
             suggestion: None,
             auto_fixable: false,
+            related_paths: None,
         });
 
         result1.merge(result2);
@@ -358,6 +370,7 @@ mod tests {
             asset_path: "/test/file1.png".to_string(),
             suggestion: None,
             auto_fixable: false,
+            related_paths: None,
         });
 
         result.add_issue(Issue {
@@ -368,6 +381,7 @@ mod tests {
             asset_path: "/test/file2.png".to_string(),
             suggestion: None,
             auto_fixable: false,
+            related_paths: None,
         });
 
         result.add_issue(Issue {
@@ -378,6 +392,7 @@ mod tests {
             asset_path: "/test/file3.png".to_string(),
             suggestion: None,
             auto_fixable: false,
+            related_paths: None,
         });
 
         assert_eq!(*result.by_rule.get("rule_a").unwrap(), 2);

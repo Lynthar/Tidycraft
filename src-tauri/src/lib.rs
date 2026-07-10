@@ -1917,6 +1917,20 @@ fn open_with_default_app(app: tauri::AppHandle, path: String) -> Result<(), Stri
         .map_err(|e| e.to_string())
 }
 
+/// Write an export payload to a user-chosen destination. The frontend gets
+/// `path` from the native save dialog (plugin-dialog), so the user has
+/// already pointed at this exact location — the command only performs the
+/// write the webview itself cannot. Replaces the old blob-`<a download>`
+/// trick, which saved silently to Downloads on Windows and is unreliable
+/// in WKWebView.
+#[tauri::command]
+fn save_text_file(path: String, contents: String) -> Result<(), String> {
+    if path.trim().is_empty() {
+        return Err("Empty destination path".to_string());
+    }
+    std::fs::write(&path, contents).map_err(|e| e.to_string())
+}
+
 /// Open a file with a specific external application — `editor` is the
 /// absolute path to a binary or .app bundle (`Photoshop.exe`,
 /// `/Applications/Blender.app`, …). Errors bubble up to the caller as a
@@ -2599,6 +2613,7 @@ pub fn run() {
             export_to_csv,
             export_issues_to_json,
             export_to_html,
+            save_text_file,
             // Batch ops
             preview_batch_rename,
             execute_batch_rename,

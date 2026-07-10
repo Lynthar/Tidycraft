@@ -25,8 +25,20 @@ fn calculate_file_hash(path: &Path) -> Option<String> {
     Some(format!("{:x}", hash))
 }
 
-/// Find duplicate files based on content hash
-pub fn find_duplicates(assets: &[AssetInfo]) -> AnalysisResult {
+/// Root-relative form of `path` for user-facing text. Both sides come from
+/// the scanner's forward-slash normalization, so a plain prefix strip works;
+/// falls back to the absolute path if it isn't under `root`.
+fn rel<'a>(path: &'a str, root: &str) -> &'a str {
+    path.strip_prefix(root)
+        .map(|s| s.trim_start_matches('/'))
+        .filter(|s| !s.is_empty())
+        .unwrap_or(path)
+}
+
+/// Find duplicate files based on content hash. `root` is the scan root —
+/// group paths and suggestions are reported root-relative so the frontend
+/// and exports never show machine-specific prefixes.
+pub fn find_duplicates(assets: &[AssetInfo], root: &str) -> AnalysisResult {
     let mut result = AnalysisResult::new();
 
     // Group files by size first (optimization)
@@ -56,25 +68,40 @@ pub fn find_duplicates(assets: &[AssetInfo]) -> AnalysisResult {
                 continue;
             }
 
-            // Report all but the first as duplicates
+            // ONE issue per content group, carrying the full member list
+            // (original first — the group arrives path-sorted from the
+            // scan). An earlier revision emitted one issue per extra copy
+            // with the member list cloned onto each: quadratic in group
+            // size, and a real asset library (Kenney all-in-one: one 3178-
+            // file group) ballooned the IPC payload past 1 GB and OOM'd
+            // the webview. The group card in the UI never needed per-copy
+            // issues anyway.
             let original = duplicates[0];
-            for duplicate in &duplicates[1..] {
-                result.add_issue(Issue {
-                    rule_id: "duplicate".to_string(),
-                    rule_name: "Duplicate File".to_string(),
-                    severity: Severity::Warning,
-                    message: format!(
-                        "File is a duplicate of '{}'",
-                        original.name
-                    ),
-                    asset_path: duplicate.path.clone(),
-                    suggestion: Some(format!(
-                        "Consider removing this file or consolidating with '{}'",
-                        original.path
-                    )),
-                    auto_fixable: false,
-                });
-            }
+            let first_copy = duplicates[1];
+            let group: Vec<String> = duplicates
+                .iter()
+                .map(|a| rel(&a.path, root).to_string())
+                .collect();
+            result.add_issue(Issue {
+                rule_id: "duplicate".to_string(),
+                rule_name: "Duplicate File".to_string(),
+                severity: Severity::Warning,
+                message: format!(
+                    "{} files share identical content (original: '{}')",
+                    duplicates.len(),
+                    original.name
+                ),
+                // Anchor on the first redundant copy — "locate" should land
+                // on a file the user can act on, not the one to keep.
+                asset_path: first_copy.path.clone(),
+                suggestion: Some(format!(
+                    "Keep '{}' and remove or consolidate the other {} file(s)",
+                    rel(&original.path, root),
+                    duplicates.len() - 1
+                )),
+                auto_fixable: false,
+                related_paths: Some(group),
+            });
         }
     }
 

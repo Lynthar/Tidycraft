@@ -1132,6 +1132,88 @@
   border: 1px solid var(--line);
   color: var(--text-3);
 }
+/* Duplicate-group card: member list inside one issue row. */
+.tc-dup-count {
+  font-size: 11px;
+  color: var(--text-3);
+  font-weight: 400;
+}
+.tc-dup-members {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.tc-dup-members li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--text-3);
+  min-width: 0;
+}
+.tc-dup-path {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.tc-dup-original {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ok);
+  background: color-mix(in oklch, var(--ok) 12%, transparent);
+  border: 1px solid color-mix(in oklch, var(--ok) 25%, var(--line));
+  border-radius: 4px;
+  padding: 0 5px;
+  flex-shrink: 0;
+}
+.tc-dup-locate {
+  font-size: 10.5px;
+  color: var(--primary);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 1px 5px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.tc-dup-locate:hover { background: var(--primary-tint); }
+.tc-dup-more {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--primary);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 2px 0;
+}
+.tc-dup-more:hover { text-decoration: underline; }
+.tc-dup-truncated {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-4);
+  font-style: italic;
+}
+
+/* Expand affordance: rows toggle a detail area on click, so advertise it.
+   Rotates to point down when the row is expanded. */
+.tc-issue-chev {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-4);
+  transition: transform 0.12s ease;
+}
+.tc-issue-chev[data-expanded="true"] { transform: rotate(90deg); }
+.tc-issue-row:hover .tc-issue-chev { color: var(--text-2); }
 
 .tc-issue-meta {
   font-size: 11.5px;
@@ -1771,6 +1853,110 @@
 }
 .tc-pill .mono { font-size: 10px; color: var(--text-3); }
 .tc-pill[data-active="true"] .mono { color: var(--text-2); }
+/* Toast stack — fixed bottom-right, above every overlay (palette is z-100). */
+.tc-toasts {
+  position: fixed;
+  right: 16px;
+  bottom: 40px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 380px;
+}
+.tc-toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px 9px 12px;
+  border-radius: 9px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-pop);
+  font-size: 12px;
+  color: var(--text);
+  animation: tc-toast-in 0.16s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tc-toast { animation: none; }
+}
+@keyframes tc-toast-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.tc-toast[data-kind="success"] .tc-toast-icon { color: var(--ok); }
+.tc-toast[data-kind="error"] .tc-toast-icon { color: var(--err); }
+.tc-toast[data-kind="error"] { border-color: color-mix(in oklch, var(--err) 35%, var(--line)); }
+.tc-toast-icon { display: inline-flex; flex-shrink: 0; }
+.tc-toast-msg { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.tc-toast-action {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--primary);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+.tc-toast-action:hover { background: var(--primary-tint); }
+.tc-toast-close {
+  display: inline-flex;
+  color: var(--text-4);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
+}
+.tc-toast-close:hover { color: var(--text); background: var(--panel-hover); }
+
+/* Directory-scope bar — shown above the toolbar whenever the asset list is
+   scoped to one directory, so the subset-ness is visible and escapable. */
+.tc-scope-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 12px;
+  height: 30px;
+  flex-shrink: 0;
+  font-size: 11.5px;
+  color: var(--text-2);
+  background: var(--primary-tint);
+  border-bottom: 1px solid var(--line);
+}
+.tc-scope-bar > svg { color: var(--primary); flex-shrink: 0; }
+.tc-scope-path {
+  font-size: 11px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.tc-scope-count {
+  font-size: 10.5px;
+  color: var(--text-3);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 6px;
+  line-height: 16px;
+}
+.tc-scope-clear {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--primary);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+.tc-scope-clear:hover { background: color-mix(in oklch, var(--primary) 14%, transparent); }
+
 .tc-main-toolbar {
   height: 40px;
   display: flex;

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
+import { ModalShell } from "./ModalShell";
 import { X } from "lucide-react";
 import { ReactFlow, Background, Controls, type Node, type Edge } from "@xyflow/react";
 import dagre from "@dagrejs/dagre";
@@ -137,13 +138,12 @@ export function DependencyGraphModal() {
   const centerName = assetPath ? basename(assetPath) : "";
 
   return (
-    <div
-      onClick={() => setOpen(false)}
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ background: "rgba(0,0,0,0.5)" }}
+    <ModalShell
+      onClose={() => setOpen(false)}
+      ariaLabel={t("depGraph.title", { name: centerName })}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
     >
       <div
-        onClick={(e) => e.stopPropagation()}
         className="bg-card-bg border border-border rounded-lg flex flex-col overflow-hidden"
         style={{ width: "82vw", height: "82vh", maxWidth: 1100 }}
       >
@@ -197,6 +197,6 @@ export function DependencyGraphModal() {
           {t("depGraph.hint")}
         </p>
       </div>
-    </div>
+    </ModalShell>
   );
 }

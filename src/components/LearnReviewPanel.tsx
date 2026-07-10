@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Sparkles, X, Trash2, Check, AlertTriangle } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { ModalShell } from "./ModalShell";
 import {
   useUiStore,
   type AiLearnedRule,
@@ -182,7 +183,11 @@ export function LearnReviewPanel() {
   if (!open || !data) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <ModalShell
+      onClose={() => setOpen(false)}
+      ariaLabel={t("learnReview.title")}
+      disabled={saving}
+    >
       <div
         className="rounded-lg shadow-xl w-full max-w-3xl flex flex-col"
         style={{
@@ -538,6 +543,6 @@ export function LearnReviewPanel() {
           </button>
         </div>
       </div>
-    </div>
+    </ModalShell>
   );
 }

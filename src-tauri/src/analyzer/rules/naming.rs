@@ -179,6 +179,7 @@ impl Rule for NamingRule {
                 asset_path: asset.path.clone(),
                 suggestion: Some(format!("Shorten the file name to {} characters", self.config.max_length)),
                 auto_fixable: false,
+            related_paths: None,
             });
         }
 
@@ -192,6 +193,7 @@ impl Rule for NamingRule {
                 asset_path: asset.path.clone(),
                 suggestion: Some(format!("Remove '{}' from the file name", c)),
                 auto_fixable: true,
+            related_paths: None,
             });
         }
 
@@ -205,6 +207,7 @@ impl Rule for NamingRule {
                 asset_path: asset.path.clone(),
                 suggestion: Some("Use English characters for file names".to_string()),
                 auto_fixable: false,
+            related_paths: None,
             });
         }
 
@@ -218,6 +221,7 @@ impl Rule for NamingRule {
                 asset_path: asset.path.clone(),
                 suggestion: Some(format!("Rename to {}{}", prefix, name)),
                 auto_fixable: true,
+            related_paths: None,
             });
         }
 
@@ -234,6 +238,7 @@ impl Rule for NamingRule {
                 asset_path: asset.path.clone(),
                 suggestion: Some(format!("Use {} for file names", self.config.case_style)),
                 auto_fixable: true,
+            related_paths: None,
             });
         }
 

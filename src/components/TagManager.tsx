@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { X, Plus, Pencil, Trash2, Check } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { ModalShell } from "./ModalShell";
 import { useTagsStore } from "../stores/tagsStore";
 import { cn } from "../lib/utils";
 import type { Tag } from "../types/asset";
@@ -66,7 +67,11 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+    <ModalShell
+      onClose={onClose}
+      ariaLabel={t("tags.manageTitle")}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+    >
       <div className="bg-card-bg border border-border rounded-lg shadow-xl w-full max-w-md">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
@@ -236,6 +241,6 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
           </div>
         </div>
       </div>
-    </div>
+    </ModalShell>
   );
 }

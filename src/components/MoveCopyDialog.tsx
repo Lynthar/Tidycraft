@@ -10,6 +10,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { ModalShell } from "./ModalShell";
 import { invoke } from "@tauri-apps/api/core";
 import { useProjectStore } from "../stores/projectStore";
 import { cn } from "../lib/utils";
@@ -222,11 +223,11 @@ export function MoveCopyDialog({
     mode === "move" ? t("moveCopy.moving") : t("moveCopy.copying");
 
   return (
-    <div
+    <ModalShell
+      onClose={onClose}
+      ariaLabel={title}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-      onClick={(e) => {
-        if (!isWorking && e.target === e.currentTarget) onClose();
-      }}
+      disabled={isWorking}
     >
       <div className="bg-card-bg border border-border rounded-lg shadow-2xl w-[560px] max-h-[80vh] flex flex-col">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
@@ -337,6 +338,6 @@ export function MoveCopyDialog({
           )}
         </div>
       </div>
-    </div>
+    </ModalShell>
   );
 }

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
+import { ModalShell } from "./ModalShell";
 import { X, RefreshCw, Check, AlertCircle } from "lucide-react";
 import { useProjectStore } from "../stores/projectStore";
 
@@ -158,7 +159,12 @@ export function BatchRenameDialog({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+    <ModalShell
+      onClose={onClose}
+      ariaLabel={t("batchRename.title", "Batch Rename")}
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+      disabled={isLoading}
+    >
       <div className="bg-card-bg border border-border rounded-lg w-[600px] max-h-[80vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-border">
@@ -371,6 +377,6 @@ export function BatchRenameDialog({
           </button>
         </div>
       </div>
-    </div>
+    </ModalShell>
   );
 }

@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
-import { Image, Edit3, X, List, LayoutGrid, Move, Trash2, Sparkles } from "lucide-react";
+import { Image, Edit3, X, List, LayoutGrid, Move, Trash2, Sparkles, FolderOpen } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
@@ -15,6 +15,7 @@ import { RenameDialog } from "./RenameDialog";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import { MoveCopyDialog } from "./MoveCopyDialog";
 import type { FileOpResult } from "../types/asset";
+import { relativeToRoot } from "../lib/pathUtils";
 import { BatchTagSelector } from "./TagSelector";
 import { ContextMenu } from "./ContextMenu";
 import { AssetListView } from "./AssetListView";
@@ -55,10 +56,12 @@ export function AssetList() {
     setTypeFilter,
     searchQuery,
     selectedDirectory,
+    setSelectedDirectory,
+    projectPath,
     refreshUndoState,
     advancedFilters,
   } = useProjectStore(
-    useShallow((s) => ({ scanResult: s.scanResult, selectedAsset: s.selectedAsset, setSelectedAsset: s.setSelectedAsset, getFilteredAssets: s.getFilteredAssets, isScanning: s.isScanning, sortField: s.sortField, sortDirection: s.sortDirection, setSortField: s.setSortField, toggleSortDirection: s.toggleSortDirection, gitStatuses: s.gitStatuses, typeFilter: s.typeFilter, setTypeFilter: s.setTypeFilter, searchQuery: s.searchQuery, selectedDirectory: s.selectedDirectory, refreshUndoState: s.refreshUndoState, advancedFilters: s.advancedFilters, }))
+    useShallow((s) => ({ scanResult: s.scanResult, selectedAsset: s.selectedAsset, setSelectedAsset: s.setSelectedAsset, getFilteredAssets: s.getFilteredAssets, isScanning: s.isScanning, sortField: s.sortField, sortDirection: s.sortDirection, setSortField: s.setSortField, toggleSortDirection: s.toggleSortDirection, gitStatuses: s.gitStatuses, typeFilter: s.typeFilter, setTypeFilter: s.setTypeFilter, searchQuery: s.searchQuery, selectedDirectory: s.selectedDirectory, setSelectedDirectory: s.setSelectedDirectory, projectPath: s.projectPath, refreshUndoState: s.refreshUndoState, advancedFilters: s.advancedFilters, }))
   );
   const { loadTags, assetTags: allAssetTags, tagFilters } = useTagsStore();
   const viewMode = useColumnStore((s) => s.viewMode);
@@ -402,9 +405,29 @@ export function AssetList() {
   }
 
   if (assets.length === 0) {
+    // Say WHY the list is empty — an active search, other filters, or a
+    // genuinely empty directory read very differently to the user — and
+    // offer a one-click way out of a directory scope they may not even
+    // know is active (it can be set implicitly by issue-list "Locate").
+    const hasQuery = searchQuery.trim().length > 0;
+    const advancedActive = Object.values(advancedFilters).some((v) =>
+      Array.isArray(v) ? v.length > 0 : v !== null
+    );
+    const otherFiltersActive = typeFilter !== null || tagFilters.length > 0 || advancedActive;
     return (
-      <div className="flex items-center justify-center h-full text-text-secondary">
-        {t("assetList.noAssets")}
+      <div className="flex flex-col items-center justify-center h-full text-text-secondary gap-3">
+        <p>
+          {hasQuery
+            ? t("assetList.noSearchResults", { query: searchQuery.trim() })
+            : otherFiltersActive
+              ? t("assetList.noMatchingFilters")
+              : t("assetList.noAssets")}
+        </p>
+        {selectedDirectory && (
+          <button className="tc-cta" onClick={() => setSelectedDirectory(null)}>
+            {hasQuery ? t("assetList.searchWholeProject") : t("assetList.scopeShowAll")}
+          </button>
+        )}
       </div>
     );
   }
@@ -475,6 +498,24 @@ export function AssetList() {
               title={t("assetList.clearSelection", "Clear selection")}
             >
               <X size={13} />
+            </button>
+          </div>
+        )}
+
+        {/* Directory-scope bar: whenever a directory scope is active the list
+            is a subset of the project, which is otherwise invisible — the
+            type pills above keep showing whole-project counts. Locate and
+            tree clicks both set this scope, so make it visible + escapable. */}
+        {selectedDirectory && (
+          <div className="tc-scope-bar">
+            <FolderOpen size={12} />
+            <span className="tc-scope-path mono" title={selectedDirectory}>
+              {relativeToRoot(selectedDirectory, projectPath)}
+            </span>
+            <span className="tc-scope-count mono">{assets.length}</span>
+            <span style={{ flex: 1 }} />
+            <button className="tc-scope-clear" onClick={() => setSelectedDirectory(null)}>
+              {t("assetList.scopeShowAll")}
             </button>
           </div>
         )}

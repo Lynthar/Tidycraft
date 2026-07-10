@@ -3,6 +3,7 @@ import { X, GitBranch, Palette, Wrench, Trash2, Image as ImageIcon, FileCode, Ex
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
+import { ModalShell } from "./ModalShell";
 import { useSettingsStore, type AiProviderId } from "../stores/settingsStore";
 import { useThemeStore, type ThemePreference } from "../stores/themeStore";
 import { useProjectStore } from "../stores/projectStore";
@@ -701,7 +702,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <ModalShell onClose={onClose} ariaLabel={t("settings.title")}>
       {/* `max-h-[90vh]` + flex column lets the body scroll when content
           exceeds viewport height. Header + footer stay pinned. Without
           this, opening Settings on a non-fullscreen window (or after we
@@ -993,6 +994,6 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           </button>
         </div>
       </div>
-    </div>
+    </ModalShell>
   );
 }

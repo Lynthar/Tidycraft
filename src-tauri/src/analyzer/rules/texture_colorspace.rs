@@ -108,6 +108,7 @@ impl Rule for TextureColorSpaceRule {
                     .to_string(),
             ),
             auto_fixable: false,
+            related_paths: None,
         })
     }
 }

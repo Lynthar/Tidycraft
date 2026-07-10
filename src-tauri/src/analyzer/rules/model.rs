@@ -91,6 +91,7 @@ impl Rule for ModelRule {
                     asset_path: asset.path.clone(),
                     suggestion: Some("Consider reducing polygon count or using LODs".to_string()),
                     auto_fixable: false,
+            related_paths: None,
                 });
             }
         }
@@ -109,6 +110,7 @@ impl Rule for ModelRule {
                     asset_path: asset.path.clone(),
                     suggestion: Some("Consider reducing polygon count or using LODs".to_string()),
                     auto_fixable: false,
+            related_paths: None,
                 });
             }
         }
@@ -127,6 +129,7 @@ impl Rule for ModelRule {
                     asset_path: asset.path.clone(),
                     suggestion: Some("Consider combining materials to reduce draw calls".to_string()),
                     auto_fixable: false,
+            related_paths: None,
                 });
             }
         }

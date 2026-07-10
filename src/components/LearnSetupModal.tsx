@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Sparkles, Loader2, X, AlertTriangle } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { ModalShell } from "./ModalShell";
 import { useUiStore, type AiLearningResult } from "../stores/uiStore";
 import { useSettingsStore, type AiProviderId } from "../stores/settingsStore";
 import { useProjectStore } from "../stores/projectStore";
@@ -157,7 +158,11 @@ export function LearnSetupModal() {
   const dollarsString = cost ? (cost.usd_cents / 100).toFixed(2) : null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <ModalShell
+      onClose={() => setOpen(false)}
+      ariaLabel={t("learnSetup.title")}
+      disabled={running}
+    >
       <div
         className="rounded-lg shadow-xl w-full max-w-md"
         style={{ background: "var(--panel)", border: "1px solid var(--line)" }}
@@ -378,6 +383,6 @@ export function LearnSetupModal() {
           </div>
         )}
       </div>
-    </div>
+    </ModalShell>
   );
 }

@@ -61,7 +61,19 @@
     "viewGrid": "网格视图",
     "galleryPending": "网格视图即将上线 — 这里会显示 {{count}} 个资产。",
     "sortLabel": "排序",
-    "sortToggle": "切换排序方向"
+    "sortToggle": "切换排序方向",
+    "noSearchResults": "没有匹配 “{{query}}” 的资产",
+    "searchWholeProject": "在整个项目中搜索",
+    "noMatchingFilters": "当前筛选条件下没有资产",
+    "scopeShowAll": "显示整个项目"
+  },
+  "exportToast": {
+    "saved": "已导出 {{name}}",
+    "showInFolder": "打开所在文件夹",
+    "failed": "导出失败：{{reason}}"
+  },
+  "toast": {
+    "dismiss": "关闭"
   },
   "batchRename": {
     "title": "批量重命名",
@@ -191,15 +203,13 @@
     "noFilteredIssues": "没有{{filter}}类型的问题",
     "groupByRule": "按规则分组",
     "export": "导出…",
-    "fix": {
-      "locate": "定位",
-      "rename": "重命名",
-      "resize": "调整尺寸",
-      "decimate": "简化网格",
-      "review": "查看",
-      "add_textures": "补全贴图"
-    },
-    "infos": "提示"
+    "infos": "提示",
+    "dupGroupCount": "{{count}} 个文件内容相同",
+    "dupOriginal": "原件",
+    "dupGroupHint": "这些文件内容完全相同——保留一份即可，其余可移除或合并引用。",
+    "showAllMembers": "显示全部 {{count}} 个",
+    "showFewerMembers": "收起",
+    "membersTruncated": "…另外 {{count}} 个未显示——完整列表可导出报告查看"
   },
   "settings": {
     "title": "设置",

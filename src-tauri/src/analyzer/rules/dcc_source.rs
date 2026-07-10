@@ -413,6 +413,7 @@ pub fn find_dcc_source_issues(
                 mapping.name,
             )),
             auto_fixable: false,
+            related_paths: None,
         });
     }
 
