@@ -6,6 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+- **Duplicate findings are one issue per content group** — every member is listed on the issue (original first) instead of one issue per extra copy. A real library with a 3,178-file identical group used to balloon the analysis payload past a gigabyte and freeze the app to a black screen; the same run now completes in seconds, and the issue list shows one collapsible group card with per-member Locate actions (rendered members capped at 200).
+- **The preview panel is permanently mounted**, collapsing to zero width outside the assets view instead of mounting on selection. First selection used to land it at near-zero width (react-resizable-panels doesn't re-apply `defaultSize` to late-mounted panels) and every deselect→reselect reshuffled all three panels.
+- **Issue rows show project-relative paths** (absolute path in the tooltip), and the aspirational fix-verb buttons ("Decimate", "Resize") are gone — the action was always locate, so that's what the button says. Rows advertise their expandable detail with a chevron.
+- **Exports go through the native save dialog** and report the outcome as a toast (with a "Show in folder" action) instead of silently dropping files into Downloads and swallowing failures.
+
+### Added
+- **A directory-scope bar** above the asset list whenever a folder scope is active (set by the tree or issue-list Locate): scoped folder, asset count, and one-click "Show entire project". Empty states now say why the list is empty — no search matches, no filter matches, or an empty folder — and offer the same escape hatch.
+- **Escape, focus trapping, initial focus, and `aria-modal` on every blocking dialog** via a shared modal shell; focus returns to the opener on close, and the delete confirmation starts on Cancel instead of the destructive button.
+- **A "Manage Tags" entry in the asset-preview tag picker**, so an empty tag library is no longer a dead end.
+
+### Fixed
+- **Selecting the project root in the tree truly means "entire project"** — the root path and "no scope" used to be two distinct states, so the tree highlight, the type-pill counts, and the visible list could disagree after a Locate jump.
+
 ## [0.7.0] - 2026-07-05
 
 ### Changed

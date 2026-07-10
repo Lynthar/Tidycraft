@@ -118,7 +118,7 @@ To suppress: rename the file (drop the suffix), re-export with Linear color spac
 
 ## Duplicate Detection
 
-No configuration. Files are grouped by size first (cheap), then SHA256-hashed within groups of 2+ to confirm true content equality. The first asset in each duplicate group is the "original"; the rest get a `duplicate` warning.
+No configuration. Files are grouped by size first (cheap), then SHA256-hashed within groups of 2+ to confirm true content equality. Each content group produces **one** `duplicate` warning that lists every member via `related_paths` (root-relative, lexicographically-first "original" leading); the issue itself anchors on the first redundant copy so Locate lands on a file you can act on. The Issues view renders these as a single group card.
 
 **Cannot be configured because** the check is binary (same content = duplicate). To suppress, add deliberate copies to `[ignore].patterns` or accept the warnings.
 
