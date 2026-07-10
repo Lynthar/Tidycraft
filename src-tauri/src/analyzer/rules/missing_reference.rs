@@ -103,6 +103,7 @@ pub fn find_missing_references(
                         .to_string(),
                 ),
                 auto_fixable: false,
+            related_paths: None,
             });
         }
     }

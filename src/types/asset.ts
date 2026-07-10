@@ -99,6 +99,10 @@ export interface Issue {
   asset_path: string;
   suggestion?: string;
   auto_fixable: boolean;
+  /** All members of the same finding, root-relative, original first.
+   *  Currently only the `duplicate` rule fills this (see Rust `Issue`);
+   *  the issue list collapses such issues into one group card. */
+  related_paths?: string[];
 }
 
 export interface AnalysisResult {

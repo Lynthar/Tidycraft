@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Sparkles, X, Check } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { ModalShell } from "./ModalShell";
 import {
   useUiStore,
   type AiSuggestedTag,
@@ -234,7 +235,11 @@ export function AIResultPanel() {
       });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <ModalShell
+      onClose={() => setOpen(false)}
+      ariaLabel={t("aiResult.title")}
+      disabled={applying}
+    >
       <div
         className="rounded-lg shadow-xl w-full max-w-2xl flex flex-col"
         style={{
@@ -413,6 +418,6 @@ export function AIResultPanel() {
           </button>
         </div>
       </div>
-    </div>
+    </ModalShell>
   );
 }

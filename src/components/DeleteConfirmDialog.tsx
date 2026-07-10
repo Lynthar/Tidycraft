@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Trash2, AlertCircle, X } from "lucide-react";
+import { ModalShell } from "./ModalShell";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { cn } from "../lib/utils";
@@ -29,7 +30,11 @@ export function DeleteConfirmDialog({
   const { t } = useTranslation();
   const [isDeleting, setIsDeleting] = useState(false);
   const [errors, setErrors] = useState<DeleteResult["errors"]>([]);
-  const confirmButtonRef = useRef<HTMLButtonElement>(null);
+  // Initial focus lands on Cancel (via ModalShell), NOT the destructive
+  // confirm button: this dialog can open from a bare Delete keypress, and
+  // confirm-focused meant a blind Enter deleted files. Esc + focus trap +
+  // focus restore also come from ModalShell.
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -39,21 +44,8 @@ export function DeleteConfirmDialog({
       // as a disabled "Deleting..." the next time around.
       setIsDeleting(false);
       setErrors([]);
-      // Focus the confirm button so Enter submits and Esc (handled on overlay) cancels.
-      setTimeout(() => confirmButtonRef.current?.focus(), 0);
     }
   }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !isDeleting) {
-        onClose();
-      }
-    };
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
-  }, [isOpen, isDeleting, onClose]);
 
   if (!isOpen) return null;
 
@@ -87,11 +79,12 @@ export function DeleteConfirmDialog({
   };
 
   return (
-    <div
+    <ModalShell
+      onClose={onClose}
+      ariaLabel={title}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-      onClick={(e) => {
-        if (!isDeleting && e.target === e.currentTarget) onClose();
-      }}
+      initialFocusRef={cancelButtonRef}
+      disabled={isDeleting}
     >
       <div className="bg-card-bg border border-border rounded-lg shadow-2xl w-[480px] max-h-[80vh] flex flex-col">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
@@ -146,6 +139,7 @@ export function DeleteConfirmDialog({
 
         <div className="flex justify-end gap-2 px-4 py-3 border-t border-border">
           <button
+            ref={cancelButtonRef}
             onClick={onClose}
             disabled={isDeleting}
             className="px-3 py-1.5 text-sm rounded hover:bg-background text-text-secondary disabled:opacity-50"
@@ -154,7 +148,6 @@ export function DeleteConfirmDialog({
           </button>
           {errors.length === 0 && (
             <button
-              ref={confirmButtonRef}
               onClick={handleConfirm}
               disabled={isDeleting}
               className={cn(
@@ -169,6 +162,6 @@ export function DeleteConfirmDialog({
           )}
         </div>
       </div>
-    </div>
+    </ModalShell>
   );
 }

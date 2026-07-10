@@ -658,12 +658,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         // Force-rescan promises to keep UI state; honor it for the directory
         // selection too — the old unconditional reset to root kicked the user
         // out of the folder they were working in on every Ctrl+R. Falls back
-        // to the root when the directory vanished between scans.
+        // to `null` (= whole project) when the directory vanished between
+        // scans — NOT the root path: "scoped to root" and "no scope" must be
+        // one state, or the tree highlight, the scope bar, and the type-pill
+        // counts all disagree about whether a scope is active.
         const keptDirectory =
           target.selectedDirectory &&
+          target.selectedDirectory !== path &&
           directoryExistsInTree(result.directory_tree, target.selectedDirectory)
             ? target.selectedDirectory
-            : path;
+            : null;
         const updated = {
           ...target,
           scanResult: result,
@@ -993,7 +997,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   setSelectedDirectory: (path: string | null) => {
-    set(updateActiveProject(get(), { selectedDirectory: path, selectedAsset: null }));
+    // Normalize the project root to null: filtering by the root is identical
+    // to no filter, and letting both representations exist is exactly what
+    // desynced the tree highlight from the real scope.
+    const normalized = path && path === get().projectPath ? null : path;
+    set(updateActiveProject(get(), { selectedDirectory: normalized, selectedAsset: null }));
   },
 
   setSelectedAsset: (asset: AssetInfo | null) => {

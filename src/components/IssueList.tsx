@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, AlertTriangle, Info, FileWarning, Layers, Download } from "lucide-react";
+import { AlertCircle, AlertTriangle, ChevronRight, Info, FileWarning, Layers, Download } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
-import { basename } from "../lib/pathUtils";
+import { basename, relativeToRoot } from "../lib/pathUtils";
+import { exportTextFile } from "../lib/exportFile";
 import type { Issue, Severity, AnalysisResult } from "../types/asset";
 
 const SEV_TO_TONE: Record<Severity, "err" | "warn" | "info"> = {
@@ -12,25 +13,6 @@ const SEV_TO_TONE: Record<Severity, "err" | "warn" | "info"> = {
   warning: "warn",
   info: "info",
 };
-
-/// Map rule_id to a fix-action verb. The button click still calls onLocate
-/// (the actual fix is manual — we just open the asset for the user); only
-/// the label changes to suggest *what* the fix is. Falls back to "Review".
-function fixLabelKey(ruleId: string): string {
-  if (ruleId.startsWith("naming.")) return "issues.fix.rename";
-  if (
-    ruleId === "texture.max_size" ||
-    ruleId === "texture.min_size" ||
-    ruleId === "texture.pot" ||
-    ruleId === "texture.non_square"
-  )
-    return "issues.fix.resize";
-  if (ruleId === "model.vertices" || ruleId === "model.faces")
-    return "issues.fix.decimate";
-  if (ruleId === "missing_reference") return "issues.fix.locate";
-  if (ruleId === "pbr_set.incomplete") return "issues.fix.add_textures";
-  return "issues.fix.review";
-}
 
 function SeverityIcon({ severity }: { severity: Severity }) {
   switch (severity) {
@@ -45,6 +27,9 @@ function SeverityIcon({ severity }: { severity: Severity }) {
 
 interface IssueRowProps {
   issue: Issue;
+  /** Root-relative form of `issue.asset_path` for display; the absolute
+   *  path stays available in the tooltip. */
+  displayPath: string;
   expanded: boolean;
   onToggle: () => void;
   onLocate?: (path: string) => void;
@@ -54,7 +39,7 @@ interface IssueRowProps {
 
 /// `expanded` lives on the parent so virtualization (which unmounts rows
 /// outside the overscan window) doesn't lose user state on scroll.
-function IssueRow({ issue, expanded, onToggle, onLocate, suggestionLabel, locateLabel }: IssueRowProps) {
+function IssueRow({ issue, displayPath, expanded, onToggle, onLocate, suggestionLabel, locateLabel }: IssueRowProps) {
   const fileName = basename(issue.asset_path);
   const tone = SEV_TO_TONE[issue.severity];
 
@@ -71,11 +56,14 @@ function IssueRow({ issue, expanded, onToggle, onLocate, suggestionLabel, locate
         <div className="tc-issue-title">
           {issue.rule_name}
           <span className="tc-issue-rule-id">{issue.rule_id}</span>
+          <span className="tc-issue-chev" data-expanded={expanded ? "true" : undefined}>
+            <ChevronRight size={11} />
+          </span>
         </div>
         <div className="tc-issue-meta">
           <strong>{fileName}</strong>
           <span style={{ color: "var(--text-4)" }}>·</span>
-          <span>{issue.asset_path}</span>
+          <span title={issue.asset_path}>{displayPath}</span>
         </div>
         {expanded && (
           <div className="tc-issue-detail" onClick={(e) => e.stopPropagation()}>
@@ -119,11 +107,114 @@ interface IssueListProps {
 /// from a single 1-D array so positioning math stays simple.
 type VirtualRow =
   | { kind: "group-head"; key: string; ruleName: string; count: number }
-  | { kind: "issue"; key: string; issue: Issue };
+  | { kind: "issue"; key: string; issue: Issue }
+  | { kind: "dup-group"; key: string; ruleName: string; paths: string[] };
+
+/// Collapse per-file duplicate issues into one row per content group.
+/// `related_paths` (root-relative, original first) is the group identity;
+/// every member issue carries the same list, so the first occurrence emits
+/// the group row and the rest are dropped. Issues without the field (other
+/// rules, or results from an older backend) pass through untouched.
+function collapseDuplicates(issues: Issue[]): VirtualRow[] {
+  const emitted = new Set<string>();
+  const rows: VirtualRow[] = [];
+  issues.forEach((issue, i) => {
+    const group = issue.rule_id === "duplicate" ? issue.related_paths : undefined;
+    if (group && group.length > 1) {
+      const key = `dup:${group[0]}`;
+      if (emitted.has(key)) return;
+      emitted.add(key);
+      rows.push({ kind: "dup-group", key, ruleName: issue.rule_name, paths: group });
+      return;
+    }
+    rows.push({ kind: "issue", key: `${issue.rule_id}|${issue.asset_path}|${i}`, issue });
+  });
+  return rows;
+}
+
+/// How many group members show before the "Show all N" toggle. Groups from
+/// generated/atlas content can run to hundreds of files.
+const DUP_GROUP_PREVIEW = 5;
+/// Hard cap on rendered members even when expanded — real libraries produce
+/// groups with thousands of identical files (Kenney: 3178), and that many
+/// DOM rows inside one virtualized card stalls the renderer.
+const DUP_GROUP_MAX_EXPANDED = 200;
+
+interface DupGroupRowProps {
+  row: Extract<VirtualRow, { kind: "dup-group" }>;
+  expanded: boolean;
+  onToggle: () => void;
+  onLocate?: (path: string) => void;
+  projectPath: string | null;
+  locateLabel: string;
+}
+
+/// One card per duplicate-content group: every member listed (original
+/// tagged), each with its own locate action. Replaces N-1 identical
+/// stacked cards per group.
+function DupGroupRow({ row, expanded, onToggle, onLocate, projectPath, locateLabel }: DupGroupRowProps) {
+  const { t } = useTranslation();
+  const shown = row.paths.slice(0, expanded ? DUP_GROUP_MAX_EXPANDED : DUP_GROUP_PREVIEW);
+  const hiddenCount = row.paths.length - shown.length;
+  // Members are root-relative; locate needs the absolute path back.
+  const toAbsolute = (rel: string) => (projectPath ? `${projectPath}/${rel}` : rel);
+
+  return (
+    <div className="tc-issue-row" data-expanded="true" style={{ cursor: "default" }}>
+      <span className="tc-issue-icon" data-sev="warn">
+        <SeverityIcon severity="warning" />
+      </span>
+      <div className="tc-issue-body">
+        <div className="tc-issue-title">
+          {row.ruleName}
+          <span className="tc-issue-rule-id">duplicate</span>
+          <span className="tc-dup-count">{t("issues.dupGroupCount", { count: row.paths.length })}</span>
+        </div>
+        <ul className="tc-dup-members">
+          {shown.map((path, i) => (
+            <li key={path}>
+              <span className="tc-dup-path" title={path}>
+                {path}
+              </span>
+              {i === 0 && <span className="tc-dup-original">{t("issues.dupOriginal")}</span>}
+              {onLocate && (
+                <button
+                  className="tc-dup-locate"
+                  onClick={() => onLocate(toAbsolute(path))}
+                >
+                  {locateLabel}
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+        {!expanded && hiddenCount > 0 && (
+          <button className="tc-dup-more" onClick={onToggle}>
+            {t("issues.showAllMembers", { count: row.paths.length })}
+          </button>
+        )}
+        {expanded && hiddenCount > 0 && (
+          <span className="tc-dup-truncated">
+            {t("issues.membersTruncated", { count: hiddenCount })}
+          </span>
+        )}
+        {expanded && row.paths.length > DUP_GROUP_PREVIEW && (
+          <button className="tc-dup-more" onClick={onToggle}>
+            {t("issues.showFewerMembers")}
+          </button>
+        )}
+        <div className="tc-issue-detail" style={{ marginTop: 6 }}>
+          {t("issues.dupGroupHint")}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function IssueList({ result, stale, isAnalyzing, onAnalyze, onLocate }: IssueListProps) {
   const { t } = useTranslation();
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
+  const projectPath = useProjectStore((s) => s.projectPath);
   const [filter, setFilter] = useState<Severity | "all">("all");
   const [groupByRule, setGroupByRule] = useState(false);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -155,31 +246,24 @@ export function IssueList({ result, stale, isAnalyzing, onAnalyze, onLocate }: I
   /// Issue keys carry rule_id + asset_path + group-local index. The trailing
   /// index disambiguates the rare case where the same rule fires twice on
   /// one asset; without it both rows would share an expanded slot.
+  /// Duplicate-content issues collapse into one dup-group row per content
+  /// group in both modes (see collapseDuplicates).
   const rows = useMemo<VirtualRow[]>(() => {
     if (groupByRule && groups) {
       const list: VirtualRow[] = [];
       for (const [ruleId, issues] of groups) {
+        const collapsed = collapseDuplicates(issues);
         list.push({
           kind: "group-head",
           key: `head:${ruleId}`,
           ruleName: issues[0].rule_name,
-          count: issues.length,
+          count: collapsed.length,
         });
-        issues.forEach((issue, i) => {
-          list.push({
-            kind: "issue",
-            key: `${ruleId}|${issue.asset_path}|${i}`,
-            issue,
-          });
-        });
+        list.push(...collapsed);
       }
       return list;
     }
-    return filteredIssues.map((issue, i) => ({
-      kind: "issue" as const,
-      key: `${issue.rule_id}|${issue.asset_path}|${i}`,
-      issue,
-    }));
+    return collapseDuplicates(filteredIssues);
   }, [groupByRule, groups, filteredIssues]);
 
   const parentRef = useRef<HTMLDivElement>(null);
@@ -195,7 +279,10 @@ export function IssueList({ result, stale, isAnalyzing, onAnalyze, onLocate }: I
   const estimateSize = useCallback(
     (index: number) => {
       const row = rows[index];
-      return row.kind === "group-head" ? 36 : 56;
+      if (row.kind === "group-head") return 36;
+      if (row.kind === "dup-group")
+        return 88 + Math.min(row.paths.length, DUP_GROUP_PREVIEW) * 22;
+      return 56;
     },
     [rows]
   );
@@ -255,22 +342,15 @@ export function IssueList({ result, stale, isAnalyzing, onAnalyze, onLocate }: I
 
   if (!result) return null;
 
-  const handleExport = async () => {
+  const handleExport = () => {
     if (!activeProjectId) return;
-    try {
-      const json = await invoke<string>("export_issues_to_json", {
-        projectId: activeProjectId,
-      });
-      const blob = new Blob([json], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "issues.json";
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error("Failed to export issues:", err);
-    }
+    exportTextFile({
+      defaultName: "issues.json",
+      filterName: "JSON",
+      extensions: ["json"],
+      fetchContents: () =>
+        invoke<string>("export_issues_to_json", { projectId: activeProjectId }),
+    });
   };
 
   const filterPill = (
@@ -430,18 +510,24 @@ export function IssueList({ result, stale, isAnalyzing, onAnalyze, onLocate }: I
                       <span>{row.ruleName}</span>
                       <span className="mono">{row.count}</span>
                     </div>
+                  ) : row.kind === "dup-group" ? (
+                    <DupGroupRow
+                      row={row}
+                      expanded={expandedIds.has(row.key)}
+                      onToggle={() => toggleExpanded(row.key)}
+                      onLocate={onLocate}
+                      projectPath={projectPath}
+                      locateLabel={t("issues.locate")}
+                    />
                   ) : (
                     <IssueRow
                       issue={row.issue}
+                      displayPath={relativeToRoot(row.issue.asset_path, projectPath)}
                       expanded={expandedIds.has(row.key)}
                       onToggle={() => toggleExpanded(row.key)}
                       onLocate={onLocate}
                       suggestionLabel={t("issues.suggestion")}
-                      locateLabel={
-                        groupByRule
-                          ? t("issues.locate")
-                          : t(fixLabelKey(row.issue.rule_id))
-                      }
+                      locateLabel={t("issues.locate")}
                     />
                   )}
                 </div>

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { X, AlertCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { ModalShell } from "./ModalShell";
 import { invoke } from "@tauri-apps/api/core";
 import { useProjectStore } from "../stores/projectStore";
 
@@ -99,7 +100,12 @@ export function RenameDialog({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+    <ModalShell
+      onClose={onClose}
+      ariaLabel={t("contextMenu.rename")}
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+      disabled={isRenaming}
+    >
       <div className="bg-card-bg border border-border rounded-lg shadow-xl w-[400px] max-w-[90vw]">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
@@ -172,6 +178,6 @@ export function RenameDialog({
           </button>
         </div>
       </div>
-    </div>
+    </ModalShell>
   );
 }

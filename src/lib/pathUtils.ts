@@ -44,6 +44,21 @@ export function basenameWithoutExt(path: string): string {
   return lastDot > 0 ? name.slice(0, lastDot) : name;
 }
 
+/// Project-relative form of `path` when it lives under `root`; otherwise the
+/// input unchanged. Accepts either separator on both sides and compares the
+/// prefix case-insensitively (Windows drive-letter / user-folder casing can
+/// differ between the dialog, the backend, and persisted state). Used for
+/// user-facing path display — issue rows, the directory-scope bar — where the
+/// absolute prefix is pure noise.
+export function relativeToRoot(path: string, root: string | null | undefined): string {
+  if (!root) return path;
+  const p = path.replace(/\\/g, "/");
+  const r = root.replace(/\\/g, "/").replace(/\/+$/, "");
+  if (p.toLowerCase() === r.toLowerCase()) return basename(p) || p;
+  if (p.toLowerCase().startsWith(r.toLowerCase() + "/")) return p.slice(r.length + 1);
+  return path;
+}
+
 /// Pretty display name for an editor binary path: strips directory and
 /// the `.exe` / `.app` suffix common on Windows / macOS. Used in
 /// ContextMenu and AssetPreview to render "Open in Photoshop" rather

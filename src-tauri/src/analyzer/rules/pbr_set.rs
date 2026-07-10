@@ -262,6 +262,7 @@ pub fn find_pbr_set_issues(assets: &[AssetInfo], config: &PbrSetConfig) -> Analy
                 "Add the missing texture(s) to the set, or rename so the file no longer ends with a known PBR suffix. To skip a known-incomplete folder, add it to `[ignore].patterns`.".to_string(),
             ),
             auto_fixable: false,
+            related_paths: None,
         });
     }
 

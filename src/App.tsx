@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels";
+import { Group, Panel, Separator, useDefaultLayout, type PanelImperativeHandle } from "react-resizable-panels";
 import { Header } from "./components/Header";
 import { Sidebar } from "./components/Sidebar";
 import { AssetList } from "./components/AssetList";
@@ -21,14 +21,19 @@ import { DependencyGraphModal } from "./components/DependencyGraphModal";
 import { useProjectStore } from "./stores/projectStore";
 import { useUiStore } from "./stores/uiStore";
 import { restoreSession } from "./stores/sessionStore";
+import { Toasts } from "./components/Toasts";
+import { exportTextFile } from "./lib/exportFile";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useShallow } from "zustand/react/shallow";
 import { isMacOS } from "./lib/platform";
 import { version as appVersion } from "../package.json";
 
+/// Every panel id the layout can ever contain, in order. Must stay constant
+/// across renders (module scope) — see the useDefaultLayout call in App.
+const ALL_PANEL_IDS = ["sidebar", "main", "preview"];
+
 function App() {
   const {
-    selectedAsset,
     scanResult,
     viewMode,
     analysisResult,
@@ -39,7 +44,7 @@ function App() {
     getProjectList,
     activeProjectId,
   } = useProjectStore(
-    useShallow((s) => ({ selectedAsset: s.selectedAsset, scanResult: s.scanResult, viewMode: s.viewMode, analysisResult: s.analysisResult, analysisStale: s.analysisStale, isAnalyzing: s.isAnalyzing, runAnalysis: s.runAnalysis, locateAsset: s.locateAsset, getProjectList: s.getProjectList, activeProjectId: s.activeProjectId, }))
+    useShallow((s) => ({ scanResult: s.scanResult, viewMode: s.viewMode, analysisResult: s.analysisResult, analysisStale: s.analysisStale, isAnalyzing: s.isAnalyzing, runAnalysis: s.runAnalysis, locateAsset: s.locateAsset, getProjectList: s.getProjectList, activeProjectId: s.activeProjectId, }))
   );
 
   const projects = getProjectList();
@@ -85,70 +90,77 @@ function App() {
     },
   });
 
-  const showPreview = !!(scanResult && selectedAsset && viewMode === "assets");
+  // The preview panel is expanded on the assets view of any scanned project
+  // (AssetPreview renders its own "select an asset" empty state when nothing
+  // is selected) and collapsed to zero width on issues/stats and when no
+  // project is open.
+  const showPreview = !!(scanResult && viewMode === "assets" && !isEmpty);
 
-  // Persist panel sizes across reloads, and restore the preview width when it
-  // re-mounts after a deselect→reselect. panelIds tracks which Panels are
-  // currently mounted so the 2- and 3-panel layouts are saved separately —
-  // react-resizable-panels' documented mechanism for conditionally-rendered
-  // panels. On first run defaultLayout is undefined and each Panel falls back
-  // to its own defaultSize.
-  const panelIds = useMemo(
-    () => (showPreview ? ["sidebar", "main", "preview"] : ["sidebar", "main"]),
-    [showPreview]
-  );
+  // All three Panels stay PERMANENTLY mounted; visibility is driven through
+  // the collapse/expand imperative API below. react-resizable-panels 4.2
+  // does not re-consult defaultLayout / defaultSize when a Panel mounts into
+  // an existing Group — a conditionally-rendered preview panel came up at
+  // near-zero width (even below its minSize) and every mount/unmount cycle
+  // shifted the other panels. A fixed panel set sidesteps that entire
+  // behavior class and keeps the persisted layout key stable.
+  // Plain useRef instead of the library's usePanelRef: its return type is
+  // RefObject<Handle | null>, which React 18's Ref<Handle> prop type rejects.
+  const previewPanelRef = useRef<PanelImperativeHandle>(null);
+  useEffect(() => {
+    // Deferred a frame: on first mount this effect fires before the Group
+    // has registered the panel's constraints, and collapse()/expand() then
+    // throw "Panel constraints not found". The catch covers HMR/unmount
+    // races; the next run settles the state either way.
+    const raf = requestAnimationFrame(() => {
+      const handle = previewPanelRef.current;
+      if (!handle) return;
+      try {
+        if (showPreview) handle.expand();
+        else handle.collapse();
+      } catch {
+        /* group not registered yet — re-runs on next showPreview change */
+      }
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [showPreview]);
+
   const { defaultLayout, onLayoutChange } = useDefaultLayout({
     id: "tidycraft-panels",
-    panelIds,
+    panelIds: ALL_PANEL_IDS,
     storage: localStorage,
   });
 
-  const handleExportJson = async () => {
+  // Exports run through the shared native-save-dialog flow (lib/exportFile):
+  // destination picked by the user, success/failure surfaced as a toast. The
+  // export command itself only runs after a destination is chosen.
+  const handleExportJson = () => {
     if (!activeProjectId) return;
-    try {
-      const json = await invoke<string>("export_to_json", { projectId: activeProjectId });
-      const blob = new Blob([json], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "assets.json";
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error("Failed to export JSON:", err);
-    }
+    exportTextFile({
+      defaultName: "assets.json",
+      filterName: "JSON",
+      extensions: ["json"],
+      fetchContents: () => invoke<string>("export_to_json", { projectId: activeProjectId }),
+    });
   };
 
-  const handleExportCsv = async () => {
+  const handleExportCsv = () => {
     if (!activeProjectId) return;
-    try {
-      const csv = await invoke<string>("export_to_csv", { projectId: activeProjectId });
-      const blob = new Blob([csv], { type: "text/csv" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "assets.csv";
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error("Failed to export CSV:", err);
-    }
+    exportTextFile({
+      defaultName: "assets.csv",
+      filterName: "CSV",
+      extensions: ["csv"],
+      fetchContents: () => invoke<string>("export_to_csv", { projectId: activeProjectId }),
+    });
   };
 
-  const handleExportHtml = async () => {
+  const handleExportHtml = () => {
     if (!activeProjectId) return;
-    try {
-      const html = await invoke<string>("export_to_html", { projectId: activeProjectId });
-      const blob = new Blob([html], { type: "text/html" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "tidycraft-report.html";
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error("Failed to export HTML:", err);
-    }
+    exportTextFile({
+      defaultName: "tidycraft-report.html",
+      filterName: "HTML",
+      extensions: ["html"],
+      fetchContents: () => invoke<string>("export_to_html", { projectId: activeProjectId }),
+    });
   };
 
   const dispatchExport = (format: "json" | "csv" | "html") => {
@@ -228,7 +240,7 @@ function App() {
 
           <Panel
             id="main"
-            defaultSize={showPreview ? "60%" : "78%"}
+            defaultSize="60%"
             minSize="30%"
             className="overflow-hidden"
           >
@@ -237,20 +249,19 @@ function App() {
             </main>
           </Panel>
 
-          {showPreview && (
-            <>
-              <Separator className="w-1 bg-border hover:bg-primary/50 active:bg-primary transition-colors cursor-col-resize" />
-              <Panel
-                id="preview"
-                defaultSize="18%"
-                minSize="15%"
-                maxSize="35%"
-                className="overflow-hidden"
-              >
-                <AssetPreview />
-              </Panel>
-            </>
-          )}
+          <Separator className="w-1 bg-border hover:bg-primary/50 active:bg-primary transition-colors cursor-col-resize" />
+          <Panel
+            id="preview"
+            panelRef={previewPanelRef}
+            defaultSize="18%"
+            minSize="15%"
+            maxSize="35%"
+            collapsible
+            collapsedSize={0}
+            className="overflow-hidden"
+          >
+            <AssetPreview />
+          </Panel>
         </Group>
       </div>
 
@@ -265,6 +276,7 @@ function App() {
       <LearnSetupModal />
       <LearnReviewPanel />
       <DependencyGraphModal />
+      <Toasts />
     </div>
   );
 }

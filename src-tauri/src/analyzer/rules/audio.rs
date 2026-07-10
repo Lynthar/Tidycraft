@@ -144,6 +144,7 @@ impl Rule for AudioRule {
                     asset_path: asset.path.clone(),
                     suggestion: Some(format!("Consider resampling to {} Hz", preferred)),
                     auto_fixable: false,
+            related_paths: None,
                 });
             }
         }
@@ -162,6 +163,7 @@ impl Rule for AudioRule {
                     asset_path: asset.path.clone(),
                     suggestion: Some("Long audio should be music/ambient, not SFX".to_string()),
                     auto_fixable: false,
+            related_paths: None,
                 });
             }
         }
@@ -179,6 +181,7 @@ impl Rule for AudioRule {
                         asset_path: asset.path.clone(),
                         suggestion: Some("Convert to mono for better 3D spatialization".to_string()),
                         auto_fixable: false,
+            related_paths: None,
                     });
                 }
             }
@@ -198,6 +201,7 @@ impl Rule for AudioRule {
                 asset_path: asset.path.clone(),
                 suggestion: Some("Consider using compressed format (OGG/MP3)".to_string()),
                 auto_fixable: false,
+            related_paths: None,
             });
         }
 

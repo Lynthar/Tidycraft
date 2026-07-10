@@ -61,7 +61,19 @@
     "viewGrid": "Grid view",
     "galleryPending": "Gallery view coming next — {{count}} items will appear here.",
     "sortLabel": "Sort",
-    "sortToggle": "Toggle sort direction"
+    "sortToggle": "Toggle sort direction",
+    "noSearchResults": "No matches for \"{{query}}\"",
+    "searchWholeProject": "Search entire project",
+    "noMatchingFilters": "No assets match the current filters",
+    "scopeShowAll": "Show entire project"
+  },
+  "exportToast": {
+    "saved": "Exported {{name}}",
+    "showInFolder": "Show in folder",
+    "failed": "Export failed: {{reason}}"
+  },
+  "toast": {
+    "dismiss": "Dismiss"
   },
   "batchRename": {
     "title": "Batch Rename",
@@ -191,15 +203,13 @@
     "noFilteredIssues": "No {{filter}} issues",
     "groupByRule": "Group by rule",
     "export": "Export…",
-    "fix": {
-      "locate": "Locate",
-      "rename": "Rename",
-      "resize": "Resize",
-      "decimate": "Decimate",
-      "review": "Review",
-      "add_textures": "Add Textures"
-    },
-    "infos": "Info"
+    "infos": "Info",
+    "dupGroupCount": "{{count}} identical files",
+    "dupOriginal": "original",
+    "dupGroupHint": "These files have identical content — keep one and remove or consolidate the rest.",
+    "showAllMembers": "Show all {{count}}",
+    "showFewerMembers": "Show fewer",
+    "membersTruncated": "+{{count}} more not shown — export the report for the full list"
   },
   "settings": {
     "title": "Settings",

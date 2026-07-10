@@ -134,6 +134,7 @@ impl Rule for TextureRule {
                 asset_path: asset.path.clone(),
                 suggestion: Some("Consider compressing or reducing resolution".to_string()),
                 auto_fixable: false,
+            related_paths: None,
             });
         }
 
@@ -169,6 +170,7 @@ impl TextureRule {
                         next_power_of_two(height)
                     )),
                     auto_fixable: false,
+            related_paths: None,
                 });
             }
         }
@@ -189,6 +191,7 @@ impl TextureRule {
                     self.config.max_size, self.config.max_size
                 )),
                 auto_fixable: false,
+            related_paths: None,
             });
         }
 
@@ -205,6 +208,7 @@ impl TextureRule {
                 asset_path: asset.path.clone(),
                 suggestion: None,
                 auto_fixable: false,
+            related_paths: None,
             });
         }
 
@@ -218,6 +222,7 @@ impl TextureRule {
                 asset_path: asset.path.clone(),
                 suggestion: None,
                 auto_fixable: false,
+            related_paths: None,
             });
         }
 
@@ -245,6 +250,7 @@ impl TextureRule {
                             .to_string(),
                     ),
                     auto_fixable: false,
+            related_paths: None,
                 });
             }
         }

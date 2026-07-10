@@ -15,6 +15,7 @@ import {
   ExternalLink,
   FolderOpen,
   Network,
+  Settings,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
@@ -54,6 +55,7 @@ export function AssetPreview() {
   const { tags, assetTags, addTagToAsset, removeTagFromAsset } = useTagsStore();
   const externalEditors = useSettingsStore((s) => s.externalEditors);
   const setDepGraphOpen = useUiStore((s) => s.setDepGraphOpen);
+  const setTagManagerOpen = useUiStore((s) => s.setTagManagerOpen);
   const [thumbnail, setThumbnail] = useState<string | null>(null);
   const [loadingThumbnail, setLoadingThumbnail] = useState(false);
   const [copiedPath, setCopiedPath] = useState(false);
@@ -677,6 +679,37 @@ export function AssetPreview() {
                         </button>
                       ))
                   )}
+                  {/* Always-available exit: with zero tags the list above is a
+                      dead end ("No tags yet") unless the user can hop straight
+                      into the manager to create one — mirrors TagSelector. */}
+                  <div style={{ borderTop: "1px solid var(--line)", marginTop: 4, paddingTop: 4 }}>
+                    <button
+                      onClick={() => {
+                        setShowTagPicker(false);
+                        setTagManagerOpen(true);
+                      }}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        width: "100%",
+                        padding: "6px 12px",
+                        fontSize: 11.5,
+                        textAlign: "left",
+                        color: "var(--text-2)",
+                        background: "transparent",
+                        border: 0,
+                        cursor: "pointer",
+                      }}
+                      onMouseEnter={(e) =>
+                        (e.currentTarget.style.background = "var(--panel-hover)")
+                      }
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                    >
+                      <Settings size={11} />
+                      {t("tags.manageTitle")}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Sparkles, AlertTriangle, Loader2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { ModalShell } from "./ModalShell";
 import { useUiStore, type AiTagResponse } from "../stores/uiStore";
 import { useSettingsStore, type AiProviderId } from "../stores/settingsStore";
 import { useProjectStore } from "../stores/projectStore";
@@ -203,7 +204,11 @@ export function AIAnalyzeModal() {
   const dollarsString = cost ? (cost.usd_cents / 100).toFixed(2) : null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <ModalShell
+      onClose={() => setAiAnalyzeOpen(false)}
+      ariaLabel={t("aiAnalyze.title")}
+      disabled={running}
+    >
       <div
         className="rounded-lg shadow-xl w-full max-w-md"
         style={{
@@ -406,6 +411,6 @@ export function AIAnalyzeModal() {
           </div>
         )}
       </div>
-    </div>
+    </ModalShell>
   );
 }
