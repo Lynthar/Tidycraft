@@ -3,11 +3,6 @@
 //! 解析 .uproject 文件，提取项目配置信息。
 //! 为未来完整的 .uasset 解析预留扩展接口。
 
-// Path classifiers and the FileVersion serde slot are placeholders for the
-// planned UE deep-integration; the lib doesn't expose them yet. Allow at
-// module scope so we don't sprinkle individual attributes.
-#![allow(dead_code)]
-
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -58,6 +53,9 @@ pub struct UnrealModule {
 /// .uproject 文件的原始 JSON 结构
 #[derive(Debug, Deserialize)]
 struct UProjectFile {
+    // Deserialized but not surfaced yet — placeholder for the planned UE
+    // deep-integration (format-version-dependent parsing).
+    #[allow(dead_code)]
     #[serde(rename = "FileVersion")]
     file_version: Option<i32>,
     #[serde(rename = "EngineAssociation")]
@@ -159,6 +157,8 @@ pub fn parse_uproject(path: &Path) -> Option<UnrealProjectInfo> {
 }
 
 /// 检查路径是否在 Unreal Content 目录中
+// Stub for the planned UE deep-integration; only tests call it today.
+#[allow(dead_code)]
 pub fn is_content_path(path: &Path, project_root: &Path) -> bool {
     let content_dir = project_root.join("Content");
     path.starts_with(&content_dir)
@@ -166,6 +166,8 @@ pub fn is_content_path(path: &Path, project_root: &Path) -> bool {
 
 /// 获取 Unreal 资源类型（基于扩展名）
 /// 预留接口，用于未来扩展 .uasset 解析
+// Stub for the planned UE deep-integration; only tests call it today.
+#[allow(dead_code)]
 pub fn get_unreal_asset_type(path: &Path) -> Option<String> {
     let ext = path.extension()?.to_str()?;
     match ext.to_lowercase().as_str() {

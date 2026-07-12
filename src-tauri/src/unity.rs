@@ -79,6 +79,46 @@ pub fn parse_unity_file(path: &Path) -> Option<UnityFileInfo> {
     })
 }
 
+/// Unity project info surfaced on the Stats dashboard's engine card. Parsed
+/// from `ProjectSettings/ProjectVersion.txt` — plain `key: value` YAML the
+/// editor rewrites on every version switch and that is committed to VCS by
+/// convention (standard Unity .gitignore templates keep ProjectSettings/).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnityProjectInfo {
+    /// e.g. "2022.3.10f1"
+    pub editor_version: String,
+    /// e.g. "2022.3.10f1 (ff3792e53c62)" — includes the changeset hash.
+    /// Absent in old Unity versions that only wrote `m_EditorVersion`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub editor_version_with_revision: Option<String>,
+}
+
+/// Read `ProjectSettings/ProjectVersion.txt` under `root_path`. `None` when
+/// the file is missing (not a Unity project, or settings not checked out) or
+/// carries no `m_EditorVersion` line — the frontend hides the card.
+pub fn parse_project_version(root_path: &Path) -> Option<UnityProjectInfo> {
+    let path = root_path.join("ProjectSettings").join("ProjectVersion.txt");
+    let content = fs::read_to_string(path).ok()?;
+
+    let mut editor_version: Option<String> = None;
+    let mut with_revision: Option<String> = None;
+    for line in content.lines() {
+        // Field order isn't guaranteed; prefix-match each line. The
+        // `WithRevision` check must come first: `m_EditorVersion:` is a
+        // prefix of `m_EditorVersionWithRevision:`.
+        if let Some(v) = line.strip_prefix("m_EditorVersionWithRevision:") {
+            with_revision = Some(v.trim().to_string()).filter(|v| !v.is_empty());
+        } else if let Some(v) = line.strip_prefix("m_EditorVersion:") {
+            editor_version = Some(v.trim().to_string()).filter(|v| !v.is_empty());
+        }
+    }
+
+    Some(UnityProjectInfo {
+        editor_version: editor_version?,
+        editor_version_with_revision: with_revision,
+    })
+}
+
 /// Extract all GUID references from Unity YAML content
 fn extract_references(content: &str) -> Vec<UnityReference> {
     let mut refs = HashSet::new();
@@ -168,7 +208,11 @@ fn extract_components(content: &str) -> Vec<String> {
         }
     }
 
-    components.into_iter().collect()
+    // HashSet iteration order is random per process — sort so the preview
+    // panel's component list doesn't reshuffle between selections.
+    let mut components: Vec<String> = components.into_iter().collect();
+    components.sort();
+    components
 }
 
 /// Extract Unity class ID from YAML header
@@ -284,5 +328,63 @@ mod tests {
             "path must be forward-slash normalized: {}",
             info.path
         );
+    }
+
+    #[test]
+    fn extract_components_is_sorted_and_deduped() {
+        let content = "\
+--- !u!4 &1\nTransform:\n\
+--- !u!23 &2\nMeshRenderer:\n\
+--- !u!4 &3\nTransform:\n\
+--- !u!114 &4\nMonoBehaviour:\n  m_Script: {fileID: 11500000, guid: abc123def456789012345678901234ab, type: 3}\n";
+        let components = extract_components(content);
+        // Deduped (two Transforms → one) and alphabetically sorted, so the
+        // preview panel's list is stable across runs.
+        assert_eq!(components, vec!["MeshRenderer", "MonoBehaviour", "Transform"]);
+    }
+
+    #[test]
+    fn parse_project_version_reads_both_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let settings = dir.path().join("ProjectSettings");
+        fs::create_dir(&settings).unwrap();
+        fs::write(
+            settings.join("ProjectVersion.txt"),
+            "m_EditorVersion: 2022.3.10f1\nm_EditorVersionWithRevision: 2022.3.10f1 (ff3792e53c62)\n",
+        )
+        .unwrap();
+
+        let info = parse_project_version(dir.path()).expect("should parse");
+        assert_eq!(info.editor_version, "2022.3.10f1");
+        assert_eq!(
+            info.editor_version_with_revision.as_deref(),
+            Some("2022.3.10f1 (ff3792e53c62)")
+        );
+    }
+
+    #[test]
+    fn parse_project_version_tolerates_missing_revision() {
+        // Old Unity versions wrote only m_EditorVersion.
+        let dir = tempfile::tempdir().unwrap();
+        let settings = dir.path().join("ProjectSettings");
+        fs::create_dir(&settings).unwrap();
+        fs::write(settings.join("ProjectVersion.txt"), "m_EditorVersion: 5.6.7f1\n").unwrap();
+
+        let info = parse_project_version(dir.path()).expect("should parse");
+        assert_eq!(info.editor_version, "5.6.7f1");
+        assert!(info.editor_version_with_revision.is_none());
+    }
+
+    #[test]
+    fn parse_project_version_none_when_absent_or_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        // No ProjectSettings at all.
+        assert!(parse_project_version(dir.path()).is_none());
+
+        // File exists but has no usable version line.
+        let settings = dir.path().join("ProjectSettings");
+        fs::create_dir(&settings).unwrap();
+        fs::write(settings.join("ProjectVersion.txt"), "m_EditorVersion:\n").unwrap();
+        assert!(parse_project_version(dir.path()).is_none());
     }
 }

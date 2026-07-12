@@ -36,9 +36,10 @@ export interface AssetMetadata {
   /** When set, identifies this file as an authoring/source file from
    *  a DCC tool ("blender" / "maya_ascii" / "maya_binary" / "max" /
    *  "zbrush" / "substance_painter" / "substance_designer" / "marvelous"
-   *  / "photoshop" / "modo" / "houdini" / "cinema4d"). The dcc_source
-   *  analyzer pairs sources with their exports and warns when the
-   *  source's mtime is newer. Mirror of Rust `AssetMetadata.dcc_source_kind`. */
+   *  / "photoshop" / "modo" / "houdini" / "cinema4d"). Drives the source
+   *  badge (list / grid / preview — display names in lib/dccSource.ts)
+   *  and exempts the file from naming-prefix checks backend-side.
+   *  Mirror of Rust `AssetMetadata.dcc_source_kind`. */
   dcc_source_kind?: string;
 }
 
@@ -112,6 +113,40 @@ export interface AnalysisResult {
   warning_count: number;
   info_count: number;
   by_rule: Record<string, number>;
+}
+
+// ============ Unity Types ============
+
+/** Mirrors Rust `unity::UnityReference` (one GUID reference inside a
+ *  Unity YAML file). Only the count is consumed by the UI today. */
+export interface UnityReference {
+  guid: string;
+  file_id?: number | null;
+  ref_type?: number | null;
+}
+
+/** Mirrors Rust `unity::UnityFileInfo` — on-demand parse of one Unity
+ *  YAML asset via `get_unity_file_info`. `components` is deduped and
+ *  sorted backend-side; it's only populated for prefab/scene files. */
+export interface UnityFileInfo {
+  path: string;
+  file_type:
+    | "prefab"
+    | "scene"
+    | "material"
+    | "controller"
+    | "asset"
+    | "anim"
+    | "unknown";
+  references: UnityReference[];
+  components: string[];
+}
+
+/** Mirrors Rust `unity::UnityProjectInfo` — parsed from
+ *  `ProjectSettings/ProjectVersion.txt` via `get_unity_project_info`. */
+export interface UnityProjectInfo {
+  editor_version: string;
+  editor_version_with_revision?: string;
 }
 
 // ============ Unreal Engine Types ============

@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, AlertTriangle, ChevronRight, Info, FileWarning, Layers, Download } from "lucide-react";
+import { AlertCircle, AlertTriangle, ChevronRight, Info, FileWarning, Layers, Download, Trash2 } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
+import { useSelectionStore } from "../stores/selectionStore";
 import { basename, relativeToRoot } from "../lib/pathUtils";
 import { exportTextFile } from "../lib/exportFile";
+import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import type { Issue, Severity, AnalysisResult } from "../types/asset";
 
 const SEV_TO_TONE: Record<Severity, "err" | "warn" | "info"> = {
@@ -147,14 +149,41 @@ interface DupGroupRowProps {
   onLocate?: (path: string) => void;
   projectPath: string | null;
   locateLabel: string;
+  /// Cleanup mode: root-relative path of the member currently picked to
+  /// keep, or `null` when this card isn't in cleanup mode.
+  cleanupKeep: string | null;
+  onStartCleanup: () => void;
+  onCancelCleanup: () => void;
+  onKeepChange: (path: string) => void;
+  onConfirmCleanup: () => void;
 }
 
 /// One card per duplicate-content group: every member listed (original
 /// tagged), each with its own locate action. Replaces N-1 identical
-/// stacked cards per group.
-function DupGroupRow({ row, expanded, onToggle, onLocate, projectPath, locateLabel }: DupGroupRowProps) {
+/// stacked cards per group. "Clean up" mode turns the member list into a
+/// keep-one picker; the rest go to the recycle bin via the shared
+/// DeleteConfirmDialog (mounted by IssueList).
+function DupGroupRow({
+  row,
+  expanded,
+  onToggle,
+  onLocate,
+  projectPath,
+  locateLabel,
+  cleanupKeep,
+  onStartCleanup,
+  onCancelCleanup,
+  onKeepChange,
+  onConfirmCleanup,
+}: DupGroupRowProps) {
   const { t } = useTranslation();
-  const shown = row.paths.slice(0, expanded ? DUP_GROUP_MAX_EXPANDED : DUP_GROUP_PREVIEW);
+  const cleanupActive = cleanupKeep !== null;
+  // Cleanup always shows the full (capped) list — picking a keeper from a
+  // 5-row preview would hide the other candidates.
+  const shown = row.paths.slice(
+    0,
+    expanded || cleanupActive ? DUP_GROUP_MAX_EXPANDED : DUP_GROUP_PREVIEW
+  );
   const hiddenCount = row.paths.length - shown.length;
   // Members are root-relative; locate needs the absolute path back.
   const toAbsolute = (rel: string) => (projectPath ? `${projectPath}/${rel}` : rel);
@@ -173,6 +202,17 @@ function DupGroupRow({ row, expanded, onToggle, onLocate, projectPath, locateLab
         <ul className="tc-dup-members">
           {shown.map((path, i) => (
             <li key={path}>
+              {cleanupActive && (
+                <input
+                  type="radio"
+                  name={`dup-keep-${row.key}`}
+                  checked={cleanupKeep === path}
+                  onChange={() => onKeepChange(path)}
+                  title={t("issues.dupKeepThis")}
+                  className="accent-primary cursor-pointer shrink-0"
+                  style={{ width: 12, height: 12 }}
+                />
+              )}
               <span className="tc-dup-path" title={path}>
                 {path}
               </span>
@@ -188,24 +228,67 @@ function DupGroupRow({ row, expanded, onToggle, onLocate, projectPath, locateLab
             </li>
           ))}
         </ul>
-        {!expanded && hiddenCount > 0 && (
+        {!expanded && !cleanupActive && hiddenCount > 0 && (
           <button className="tc-dup-more" onClick={onToggle}>
             {t("issues.showAllMembers", { count: row.paths.length })}
           </button>
         )}
-        {expanded && hiddenCount > 0 && (
+        {(expanded || cleanupActive) && hiddenCount > 0 && (
           <span className="tc-dup-truncated">
             {t("issues.membersTruncated", { count: hiddenCount })}
           </span>
         )}
-        {expanded && row.paths.length > DUP_GROUP_PREVIEW && (
+        {expanded && !cleanupActive && row.paths.length > DUP_GROUP_PREVIEW && (
           <button className="tc-dup-more" onClick={onToggle}>
             {t("issues.showFewerMembers")}
           </button>
         )}
-        <div className="tc-issue-detail" style={{ marginTop: 6 }}>
-          {t("issues.dupGroupHint")}
-        </div>
+        {cleanupActive ? (
+          <div
+            className="flex items-center gap-2 flex-wrap"
+            style={{ marginTop: 8 }}
+          >
+            <button
+              onClick={onConfirmCleanup}
+              className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded font-medium"
+              style={{
+                color: "var(--err)",
+                border: "1px solid color-mix(in oklch, var(--err) 40%, transparent)",
+                background: "color-mix(in oklch, var(--err) 10%, transparent)",
+              }}
+            >
+              <Trash2 size={11} />
+              {t("issues.dupCleanupConfirm", { count: row.paths.length - 1 })}
+            </button>
+            <button
+              onClick={onCancelCleanup}
+              className="px-2.5 py-1 text-xs rounded"
+              style={{ border: "1px solid var(--line)", color: "var(--text-2)" }}
+            >
+              {t("common.cancel")}
+            </button>
+            <span className="tc-issue-detail" style={{ marginTop: 0 }}>
+              {t("issues.dupCleanupHint")}
+            </span>
+          </div>
+        ) : (
+          <div
+            className="flex items-center gap-3 flex-wrap"
+            style={{ marginTop: 6 }}
+          >
+            <button
+              onClick={onStartCleanup}
+              className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded"
+              style={{ border: "1px solid var(--line)", color: "var(--text-2)" }}
+            >
+              <Trash2 size={11} />
+              {t("issues.dupCleanup")}
+            </button>
+            <span className="tc-issue-detail" style={{ marginTop: 0 }}>
+              {t("issues.dupGroupHint")}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -215,9 +298,22 @@ export function IssueList({ result, stale, isAnalyzing, onAnalyze, onLocate }: I
   const { t } = useTranslation();
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const projectPath = useProjectStore((s) => s.projectPath);
+  const pruneDuplicateGroup = useProjectStore((s) => s.pruneDuplicateGroup);
+  const removePaths = useSelectionStore((s) => s.removePaths);
   const [filter, setFilter] = useState<Severity | "all">("all");
   const [groupByRule, setGroupByRule] = useState(false);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  /// Duplicate-group cleanup: which card is picking a keeper (`key` is the
+  /// dup-group row key, `keep` the root-relative member to spare)…
+  const [cleanup, setCleanup] = useState<{ key: string; keep: string } | null>(null);
+  /// …and the pending recycle-bin confirmation. `projectId` is snapshotted
+  /// at confirm time so a late dialog result can't prune another project's
+  /// analysis (same discipline as every async write in projectStore).
+  const [confirmDelete, setConfirmDelete] = useState<{
+    projectId: string;
+    groupKey: string;
+    paths: string[];
+  } | null>(null);
 
   // All hooks must run before any early-return so React's hook order stays
   // stable across the (no-result / analyzing / has-result) branches below.
@@ -299,9 +395,11 @@ export function IssueList({ result, stale, isAnalyzing, onAnalyze, onLocate }: I
   /// Reset expanded state and scroll position when the underlying issue set
   /// changes (filter / group toggle / re-analyze). The functional setter
   /// returns `prev` when already empty so we don't churn a fresh Set
-  /// reference each time and force a no-op re-render.
+  /// reference each time and force a no-op re-render. Cleanup mode resets
+  /// too — its keep-selection refers to a member list that may be gone.
   useEffect(() => {
     setExpandedIds((prev) => (prev.size === 0 ? prev : new Set()));
+    setCleanup((prev) => (prev === null ? prev : null));
     if (parentRef.current) parentRef.current.scrollTop = 0;
   }, [filter, groupByRule, result]);
 
@@ -518,6 +616,30 @@ export function IssueList({ result, stale, isAnalyzing, onAnalyze, onLocate }: I
                       onLocate={onLocate}
                       projectPath={projectPath}
                       locateLabel={t("issues.locate")}
+                      cleanupKeep={cleanup?.key === row.key ? cleanup.keep : null}
+                      onStartCleanup={() =>
+                        setCleanup({ key: row.key, keep: row.paths[0] })
+                      }
+                      onCancelCleanup={() => setCleanup(null)}
+                      onKeepChange={(path) =>
+                        setCleanup((c) => (c ? { ...c, keep: path } : c))
+                      }
+                      onConfirmCleanup={() => {
+                        if (
+                          cleanup?.key !== row.key ||
+                          !projectPath ||
+                          !activeProjectId
+                        )
+                          return;
+                        const doomed = row.paths
+                          .filter((p) => p !== cleanup.keep)
+                          .map((p) => `${projectPath}/${p}`);
+                        setConfirmDelete({
+                          projectId: activeProjectId,
+                          groupKey: row.paths[0],
+                          paths: doomed,
+                        });
+                      }}
                     />
                   ) : (
                     <IssueRow
@@ -536,6 +658,25 @@ export function IssueList({ result, stale, isAnalyzing, onAnalyze, onLocate }: I
           </div>
         )}
       </div>
+
+      {/* Duplicate-group cleanup: shared recycle-bin confirmation. On full
+          success the resolved group card is pruned optimistically; partial
+          failures keep the card (and the dialog, with its per-file errors) —
+          the stale banner tells the rest of the truth either way. */}
+      <DeleteConfirmDialog
+        isOpen={confirmDelete !== null}
+        paths={confirmDelete?.paths ?? []}
+        onClose={() => setConfirmDelete(null)}
+        onDone={(deleteResult) => {
+          if (deleteResult.success_paths.length > 0) {
+            removePaths(deleteResult.success_paths);
+          }
+          if (confirmDelete && deleteResult.errors.length === 0) {
+            pruneDuplicateGroup(confirmDelete.projectId, confirmDelete.groupKey);
+            setCleanup(null);
+          }
+        }}
+      />
     </div>
   );
 }

@@ -24,12 +24,13 @@ import { useTagsStore } from "../stores/tagsStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { formatFileSize, formatDuration } from "../lib/utils";
 import { getExtension, getEditorDisplayName } from "../lib/pathUtils";
+import { dccSourceLabel } from "../lib/dccSource";
 import { VideoPlayer } from "./VideoPlayer";
 import { AudioPlayer } from "./AudioPlayer";
 import { ImageLightbox } from "./ImageLightbox";
 import { ModelViewer3D } from "./ModelViewer3D";
 import { ModelLightbox } from "./ModelLightbox";
-import type { AssetType } from "../types/asset";
+import type { AssetType, UnityFileInfo } from "../types/asset";
 
 const VIDEO_EXTENSIONS = ["mp4", "webm", "mov", "avi", "mkv", "m4v"];
 // `.3ds` and `.blend` are routed into ModelViewer3D too: 3ds renders
@@ -144,6 +145,40 @@ export function AssetPreview() {
     // fresh copy); the backend disk cache is mtime-keyed, so this returns
     // the regenerated image rather than the stale one.
   }, [selectedAsset?.path, selectedAsset?.modified]);
+
+  // Unity structure (component list + GUID reference count) for prefab /
+  // scene files, parsed on demand by `get_unity_file_info`. Same stale-
+  // response guard as the thumbnail effect above; `modified` re-parses
+  // after external edits.
+  const [unityFileInfo, setUnityFileInfo] = useState<UnityFileInfo | null>(null);
+  const isUnityStructureFile =
+    scanResult?.project_type === "unity" &&
+    !!selectedAsset &&
+    ["prefab", "unity"].includes(selectedAsset.extension.toLowerCase());
+  useEffect(() => {
+    if (!isUnityStructureFile || !selectedAsset) {
+      setUnityFileInfo(null);
+      return;
+    }
+    // Clear immediately so a prefab→prefab switch never shows the previous
+    // file's components during the (fast, but async) re-parse.
+    setUnityFileInfo(null);
+    let cancelled = false;
+    (async () => {
+      try {
+        const info = await invoke<UnityFileInfo | null>("get_unity_file_info", {
+          path: selectedAsset.path,
+        });
+        if (!cancelled) setUnityFileInfo(info);
+      } catch {
+        // Unparseable / unreadable file: the section simply doesn't render.
+        if (!cancelled) setUnityFileInfo(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isUnityStructureFile, selectedAsset?.path, selectedAsset?.modified]);
 
   const copyToClipboard = async (text: string, type: "path" | "guid") => {
     try {
@@ -411,6 +446,12 @@ export function AssetPreview() {
             <dd>.{selectedAsset.extension}</dd>
             <dt>{t("assetPreview.size")}</dt>
             <dd>{formatFileSize(selectedAsset.size)}</dd>
+            {metadata?.dcc_source_kind && (
+              <>
+                <dt>{t("assetPreview.dccSource")}</dt>
+                <dd>{dccSourceLabel(metadata.dcc_source_kind)}</dd>
+              </>
+            )}
           </dl>
         </div>
 
@@ -733,6 +774,36 @@ export function AssetPreview() {
             </div>
           </div>
         )}
+
+        {/* Unity structure: component types + GUID reference count for
+            prefab/scene files (backend parses on demand, sorted). */}
+        {unityFileInfo &&
+          (unityFileInfo.components.length > 0 ||
+            unityFileInfo.references.length > 0) && (
+            <div className="tc-meta-section">
+              <div className="tc-meta-label">{t("assetPreview.components")}</div>
+              {unityFileInfo.components.length > 0 && (
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 4,
+                    marginBottom: 8,
+                  }}
+                >
+                  {unityFileInfo.components.map((c) => (
+                    <span key={c} className="tc-mini-chip">
+                      {c}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <dl className="tc-kv-grid">
+                <dt>{t("assetPreview.references")}</dt>
+                <dd>{unityFileInfo.references.length}</dd>
+              </dl>
+            </div>
+          )}
 
         {/* Dependency graph (Unity / Godot — both reference-based engines) */}
         {(projectType === "unity" || projectType === "godot") && (

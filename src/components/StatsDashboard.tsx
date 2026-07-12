@@ -17,6 +17,11 @@ import {
 import { FileDown, Files, HardDrive, AlertTriangle, CheckCircle, Unlink } from "lucide-react";
 import { formatFileSize } from "../lib/utils";
 import { basename } from "../lib/pathUtils";
+import type {
+  GodotProjectInfo,
+  UnityProjectInfo,
+  UnrealProjectInfo,
+} from "../types/asset";
 
 interface ProjectStats {
   total_assets: number;
@@ -49,6 +54,32 @@ const TYPE_COLORS: Record<string, string> = {
 
 const SIZE_ORDER = ["< 1 KB", "1-10 KB", "10-100 KB", "100 KB - 1 MB", "1-10 MB", "> 10 MB"];
 
+/// Which engine card the project gets, tagged so render can switch on it.
+/// `null` (no marker file / unparseable) simply hides the card.
+type EngineInfo =
+  | { kind: "unity"; info: UnityProjectInfo }
+  | { kind: "godot"; info: GodotProjectInfo }
+  | { kind: "unreal"; info: UnrealProjectInfo };
+
+// Engine names are brands, not translatable strings.
+const ENGINE_NAMES: Record<EngineInfo["kind"], string> = {
+  unity: "Unity",
+  godot: "Godot",
+  unreal: "Unreal Engine",
+};
+
+/// One label/value line in the engine card. Callers skip empty values.
+function EngineRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-4 min-w-0 text-sm">
+      <span className="text-xs text-text-secondary shrink-0">{label}</span>
+      <span className="truncate text-right" title={value}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
 interface StatsDashboardProps {
   issueCount?: number;
   passCount?: number;
@@ -74,6 +105,47 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
   const [unused, setUnused] = useState<string[] | null>(null);
   const [unusedLoading, setUnusedLoading] = useState(false);
   const [unusedError, setUnusedError] = useState<string | null>(null);
+
+  // Engine info card: cheap marker-file parse backend-side
+  // (ProjectVersion.txt / project.godot / *.uproject). `null` hides the
+  // card; stale-response guard mirrors the stats fetch below.
+  const [engineInfo, setEngineInfo] = useState<EngineInfo | null>(null);
+  const rootPath = scanResult?.root_path;
+  useEffect(() => {
+    if (!rootPath || !projectType || projectType === "generic") {
+      setEngineInfo(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        if (projectType === "unity") {
+          const info = await invoke<UnityProjectInfo | null>(
+            "get_unity_project_info",
+            { rootPath }
+          );
+          if (!cancelled) setEngineInfo(info ? { kind: "unity", info } : null);
+        } else if (projectType === "godot") {
+          const info = await invoke<GodotProjectInfo | null>(
+            "get_godot_project_info",
+            { rootPath }
+          );
+          if (!cancelled) setEngineInfo(info ? { kind: "godot", info } : null);
+        } else if (projectType === "unreal") {
+          const info = await invoke<UnrealProjectInfo | null>(
+            "get_unreal_project_info",
+            { rootPath }
+          );
+          if (!cancelled) setEngineInfo(info ? { kind: "unreal", info } : null);
+        }
+      } catch {
+        if (!cancelled) setEngineInfo(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [rootPath, projectType]);
 
   const scanUnused = async () => {
     if (!activeProjectId) return;
@@ -180,8 +252,82 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
       count: value,
     }));
 
+  // Engine card content: a version chip + label/value rows, per engine.
+  // Empty/absent fields are skipped rather than rendered as "-".
+  const engineRows: Array<{ label: string; value: string }> = [];
+  let engineVersion: string | undefined;
+  let engineVersionTitle: string | undefined;
+  if (engineInfo?.kind === "unity") {
+    engineVersion = engineInfo.info.editor_version;
+    // Full changeset revision lives in the tooltip.
+    engineVersionTitle = engineInfo.info.editor_version_with_revision;
+  } else if (engineInfo?.kind === "godot") {
+    const g = engineInfo.info;
+    engineVersion = g.godot_version;
+    engineRows.push({ label: t("stats.engineProject"), value: g.project_name });
+    if (g.main_scene)
+      engineRows.push({ label: t("stats.engineMainScene"), value: g.main_scene });
+    if (g.renderer)
+      engineRows.push({ label: t("stats.engineRenderer"), value: g.renderer });
+    if (g.autoloads.length > 0)
+      engineRows.push({
+        label: t("stats.engineAutoloads"),
+        value: g.autoloads.map((a) => a.name).join(", "),
+      });
+    if (g.features.length > 0)
+      engineRows.push({
+        label: t("stats.engineFeatures"),
+        value: g.features.join(", "),
+      });
+  } else if (engineInfo?.kind === "unreal") {
+    const u = engineInfo.info;
+    engineVersion = u.engine_association;
+    engineRows.push({ label: t("stats.engineProject"), value: u.project_name });
+    if (u.modules.length > 0)
+      engineRows.push({
+        label: t("stats.engineModules"),
+        value: u.modules.map((m) => m.name).join(", "),
+      });
+    if (u.plugins.length > 0)
+      engineRows.push({
+        label: t("stats.enginePlugins"),
+        value: `${u.plugins.filter((p) => p.enabled).length} / ${u.plugins.length}`,
+      });
+    if (u.target_platforms.length > 0)
+      engineRows.push({
+        label: t("stats.enginePlatforms"),
+        value: u.target_platforms.join(", "),
+      });
+  }
+
   return (
     <div className="h-full overflow-auto p-4 space-y-4">
+      {/* Engine card: identity + key config from the project's marker file */}
+      {engineInfo && (
+        <div className="bg-card-bg border border-border rounded-lg p-4">
+          <div className={`flex items-center gap-2 ${engineRows.length > 0 ? "mb-3" : ""}`}>
+            <h3 className="text-sm font-medium">
+              {ENGINE_NAMES[engineInfo.kind]}
+            </h3>
+            {engineVersion && (
+              <span
+                className="px-1.5 py-0.5 text-[10px] font-mono rounded bg-primary/20 text-primary"
+                title={engineVersionTitle}
+              >
+                {engineVersion}
+              </span>
+            )}
+          </div>
+          {engineRows.length > 0 && (
+            <div className="grid grid-cols-2 gap-x-8 gap-y-1">
+              {engineRows.map((row) => (
+                <EngineRow key={row.label} label={row.label} value={row.value} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Summary Cards */}
       <div className="grid grid-cols-4 gap-4">
         <div className="bg-card-bg border border-border rounded-lg p-4">

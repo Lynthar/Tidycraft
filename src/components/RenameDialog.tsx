@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { X, AlertCircle } from "lucide-react";
+import { X, AlertCircle, AlertTriangle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ModalShell } from "./ModalShell";
 import { invoke } from "@tauri-apps/api/core";
@@ -22,10 +22,41 @@ export function RenameDialog({
 }: RenameDialogProps) {
   const { t } = useTranslation();
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
+  const projectType = useProjectStore((s) => s.scanResult?.project_type);
   const [newName, setNewName] = useState(currentName);
   const [isRenaming, setIsRenaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Godot rename guardrail: `res://` references are path strings, so a
+  // rename silently breaks every scene/resource/script (and project.godot
+  // entry) that points here. Warn — don't block — with the referencing
+  // files. Unity is exempt by design: its references are GUID-based and the
+  // .meta sidecar moves with the file.
+  const [godotRefs, setGodotRefs] = useState<string[] | null>(null);
+  useEffect(() => {
+    if (!isOpen || projectType !== "godot" || !activeProjectId) {
+      setGodotRefs(null);
+      return;
+    }
+    setGodotRefs(null);
+    let cancelled = false;
+    (async () => {
+      try {
+        const map = await invoke<Record<string, string[]>>(
+          "godot_asset_references",
+          { projectId: activeProjectId, paths: [assetPath] }
+        );
+        if (!cancelled) setGodotRefs(map[assetPath] ?? []);
+      } catch {
+        // Check failure must not break renaming — just show no warning.
+        if (!cancelled) setGodotRefs(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, projectType, activeProjectId, assetPath]);
 
   // Extract name without extension
   const lastDotIndex = currentName.lastIndexOf(".");
@@ -151,6 +182,34 @@ export function RenameDialog({
               )}
             </div>
           </div>
+
+          {godotRefs && godotRefs.length > 0 && (
+            <div
+              className="p-2.5 mb-4 rounded text-xs space-y-1"
+              style={{
+                background: "color-mix(in oklch, var(--warn) 10%, transparent)",
+                border: "1px solid color-mix(in oklch, var(--warn) 35%, transparent)",
+                color: "var(--text-2)",
+              }}
+            >
+              <div className="flex items-center gap-1.5" style={{ color: "var(--warn)" }}>
+                <AlertTriangle size={13} className="shrink-0" />
+                {t("rename.godotRefWarning", { count: godotRefs.length })}
+              </div>
+              <ul className="font-mono pl-5 space-y-0.5">
+                {godotRefs.slice(0, 3).map((f) => (
+                  <li key={f} className="truncate" title={f}>
+                    {f}
+                  </li>
+                ))}
+              </ul>
+              {godotRefs.length > 3 && (
+                <div className="pl-5" style={{ color: "var(--text-3)" }}>
+                  {t("rename.godotRefMore", { count: godotRefs.length - 3 })}
+                </div>
+              )}
+            </div>
+          )}
 
           {error && (
             <div className="flex items-center gap-2 p-2 mb-4 bg-error/10 border border-error/30 rounded text-sm text-error">

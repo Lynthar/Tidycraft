@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { ModalShell } from "./ModalShell";
-import { X, RefreshCw, Check, AlertCircle } from "lucide-react";
+import { X, RefreshCw, Check, AlertCircle, AlertTriangle } from "lucide-react";
 import { useProjectStore } from "../stores/projectStore";
 
 type RenameOperationType =
@@ -49,6 +49,7 @@ export function BatchRenameDialog({
 }: BatchRenameDialogProps) {
   const { t } = useTranslation();
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
+  const projectType = useProjectStore((s) => s.scanResult?.project_type);
   const [operationType, setOperationType] = useState<RenameOperationType>("FindReplace");
   const [findText, setFindText] = useState("");
   const [replaceText, setReplaceText] = useState("");
@@ -57,6 +58,37 @@ export function BatchRenameDialog({
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<BatchRenameResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Godot rename guardrail (see RenameDialog for the rationale). References
+  // depend only on the files' CURRENT paths, so one fetch per open covers
+  // every find/replace variation the user types; the aggregate below is
+  // recomputed against the live preview's will_change set.
+  const [godotRefs, setGodotRefs] = useState<Record<string, string[]> | null>(null);
+  useEffect(() => {
+    if (!isOpen || projectType !== "godot" || !activeProjectId || selectedPaths.length === 0) {
+      setGodotRefs(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const map = await invoke<Record<string, string[]>>(
+          "godot_asset_references",
+          { projectId: activeProjectId, paths: selectedPaths }
+        );
+        if (!cancelled) setGodotRefs(map);
+      } catch {
+        if (!cancelled) setGodotRefs(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Deliberately NOT keyed on `selectedPaths`: the parent passes a fresh
+    // Array.from() every render, and the selection can't change while the
+    // modal is open anyway — keying on identity would re-scan the whole
+    // project's references on every incidental parent re-render.
+  }, [isOpen, projectType, activeProjectId]);
 
   // Build the operation object for the backend
   const buildOperation = () => {
@@ -155,6 +187,16 @@ export function BatchRenameDialog({
   };
 
   const changedCount = previews.filter((p) => p.will_change).length;
+
+  // How many of the files that WILL change are referenced somewhere (and how
+  // many referencing files in total) — the batch flavor of the guardrail.
+  const referencedChanging = godotRefs
+    ? previews.filter((p) => p.will_change && (godotRefs[p.original_path]?.length ?? 0) > 0)
+    : [];
+  const referencedRefTotal = referencedChanging.reduce(
+    (n, p) => n + (godotRefs?.[p.original_path]?.length ?? 0),
+    0
+  );
 
   if (!isOpen) return null;
 
@@ -308,6 +350,26 @@ export function BatchRenameDialog({
               )}
             </div>
           </div>
+
+          {/* Godot guardrail: renamed files that other files reference by path */}
+          {referencedChanging.length > 0 && (
+            <div
+              className="flex items-start gap-2 p-3 rounded text-xs"
+              style={{
+                background: "color-mix(in oklch, var(--warn) 10%, transparent)",
+                border: "1px solid color-mix(in oklch, var(--warn) 35%, transparent)",
+                color: "var(--text-2)",
+              }}
+            >
+              <AlertTriangle size={14} className="shrink-0" style={{ color: "var(--warn)" }} />
+              <span>
+                {t("batchRename.godotRefWarning", {
+                  files: referencedChanging.length,
+                  refs: referencedRefTotal,
+                })}
+              </span>
+            </div>
+          )}
 
           {/* Error */}
           {error && (
