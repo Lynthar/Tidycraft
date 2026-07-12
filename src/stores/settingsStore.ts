@@ -97,6 +97,16 @@ interface SettingsState {
    */
   respectGitignore: boolean;
 
+  /**
+   * Row caps for the HTML report's issue / asset tables. The report is a
+   * single self-contained file, so unlimited rows on a 100k-file project
+   * produce a very large document — hence caps, but configurable ones
+   * (the old hardcoded 100/500 buried real findings on big projects).
+   * `0` means unlimited.
+   */
+  htmlReportIssueLimit: number;
+  htmlReportAssetLimit: number;
+
   // ----- Actions -----
   setShowGitStatusIndicators: (show: boolean) => void;
   setShowBranchInfo: (show: boolean) => void;
@@ -111,6 +121,8 @@ interface SettingsState {
   resetAiPrivacyConsent: (id: AiProviderId) => void;
   setAiPerAssetModeEnabled: (enabled: boolean) => void;
   setRespectGitignore: (respect: boolean) => void;
+  setHtmlReportIssueLimit: (limit: number) => void;
+  setHtmlReportAssetLimit: (limit: number) => void;
 }
 
 const STORAGE_KEY = "tidycraft-settings";
@@ -137,6 +149,9 @@ interface StoredSettings {
    * (pre-feature) merge to the default cleanly.
    */
   respectGitignore: boolean;
+  /** See `SettingsState` — HTML report row caps, 0 = unlimited. */
+  htmlReportIssueLimit: number;
+  htmlReportAssetLimit: number;
 }
 
 const DEFAULT_SETTINGS: StoredSettings = {
@@ -149,6 +164,9 @@ const DEFAULT_SETTINGS: StoredSettings = {
   aiPrivacyConsented: DEFAULT_AI_PRIVACY_CONSENTED,
   aiPerAssetModeEnabled: false,
   respectGitignore: true,
+  // Historical backend defaults, kept as the out-of-box caps.
+  htmlReportIssueLimit: 100,
+  htmlReportAssetLimit: 500,
 };
 
 /**
@@ -228,6 +246,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
     aiPrivacyConsented: get().aiPrivacyConsented,
     aiPerAssetModeEnabled: get().aiPerAssetModeEnabled,
     respectGitignore: get().respectGitignore,
+    htmlReportIssueLimit: get().htmlReportIssueLimit,
+    htmlReportAssetLimit: get().htmlReportAssetLimit,
   });
 
   return {
@@ -240,6 +260,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
     aiPrivacyConsented: initial.aiPrivacyConsented,
     aiPerAssetModeEnabled: initial.aiPerAssetModeEnabled,
     respectGitignore: initial.respectGitignore,
+    htmlReportIssueLimit: initial.htmlReportIssueLimit,
+    htmlReportAssetLimit: initial.htmlReportAssetLimit,
 
     setShowGitStatusIndicators: (show: boolean) => {
       set({ showGitStatusIndicators: show });
@@ -307,6 +329,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
 
     setRespectGitignore: (respect: boolean) => {
       set({ respectGitignore: respect });
+      saveSettings(snapshot());
+    },
+
+    setHtmlReportIssueLimit: (limit: number) => {
+      // Number inputs can produce NaN / negatives — clamp to a whole ≥ 0
+      // (0 = unlimited by contract with export_to_html).
+      set({ htmlReportIssueLimit: Math.max(0, Math.floor(limit) || 0) });
+      saveSettings(snapshot());
+    },
+
+    setHtmlReportAssetLimit: (limit: number) => {
+      set({ htmlReportAssetLimit: Math.max(0, Math.floor(limit) || 0) });
       saveSettings(snapshot());
     },
   };

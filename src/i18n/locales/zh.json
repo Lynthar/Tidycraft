@@ -65,7 +65,8 @@
     "noSearchResults": "没有匹配 “{{query}}” 的资产",
     "searchWholeProject": "在整个项目中搜索",
     "noMatchingFilters": "当前筛选条件下没有资产",
-    "scopeShowAll": "显示整个项目"
+    "scopeShowAll": "显示整个项目",
+    "dccSourceFile": "源文件"
   },
   "exportToast": {
     "saved": "已导出 {{name}}",
@@ -105,7 +106,8 @@
     "failed": "失败",
     "errors": "错误明细",
     "fileCount": "{{count}} 个文件",
-    "andMore": "……以及另外 {{count}} 个"
+    "andMore": "……以及另外 {{count}} 个",
+    "godotRefWarning": "待改名文件中有 {{files}} 个被其他文件引用（共 {{refs}} 个引用方）——重命名会破坏这些引用。"
   },
   "common": {
     "cancel": "取消",
@@ -152,6 +154,9 @@
     "openInEditor": "用 {{name}} 打开",
     "openFailed": "打开失败：{{reason}}",
     "viewDependencies": "依赖关系图",
+    "dccSource": "来源工具",
+    "components": "组件",
+    "references": "GUID 引用",
     "close": "关闭"
   },
   "directoryTree": {
@@ -209,7 +214,11 @@
     "dupGroupHint": "这些文件内容完全相同——保留一份即可，其余可移除或合并引用。",
     "showAllMembers": "显示全部 {{count}} 个",
     "showFewerMembers": "收起",
-    "membersTruncated": "…另外 {{count}} 个未显示——完整列表可导出报告查看"
+    "membersTruncated": "…另外 {{count}} 个未显示——完整列表可导出报告查看",
+    "dupCleanup": "清理此组…",
+    "dupCleanupHint": "选择要保留的一份，其余移入系统回收站。",
+    "dupCleanupConfirm": "保留选中，其余 {{count}} 个移入回收站",
+    "dupKeepThis": "保留这份"
   },
   "settings": {
     "title": "设置",
@@ -268,6 +277,10 @@
     "aiPerAssetMode": "启用单资产 AI 标签（高级）",
     "aiPerAssetModeDesc": "在多选栏和右键菜单中添加 \"AI 标签（直接）\" 入口,将缩略图发送给 LLM 直接打标。成本比学习模式高约 50×;适合需要图像级精细建议、学习规则覆盖不到的场景。",
     "scanningSection": "扫描",
+    "exportSection": "导出",
+    "exportHtmlIssueLimit": "HTML 报告：issue 行数上限",
+    "exportHtmlAssetLimit": "HTML 报告：资产行数上限",
+    "exportLimitHint": "0 = 不限。超大项目会生成很大的报告文件；JSON/CSV 导出始终是完整的。",
     "respectGitignore": "遵守 .gitignore / .ignore",
     "respectGitignoreDesc": "跳过项目 .gitignore / .ignore 匹配的文件（以及 .git/ 等隐藏目录）。关闭后会扫描所有内容 — 适合资源放在被 gitignore 路径下的项目。切换该选项会在下次打开项目时触发完整扫描。",
     "maintenanceSection": "维护",
@@ -299,7 +312,15 @@
     "scanUnused": "扫描",
     "rescanUnused": "重新扫描",
     "scanningUnused": "扫描中…",
-    "noUnusedAssets": "未发现未使用资源。"
+    "noUnusedAssets": "未发现未使用资源。",
+    "engineProject": "项目名",
+    "engineMainScene": "主场景",
+    "engineRenderer": "渲染器",
+    "engineAutoloads": "自动加载",
+    "engineFeatures": "特性",
+    "engineModules": "模块",
+    "enginePlugins": "已启用插件",
+    "enginePlatforms": "目标平台"
   },
   "theme": {
     "switchToLight": "切换到浅色模式",
@@ -402,7 +423,9 @@
     "enterName": "输入新名称...",
     "emptyName": "名称不能为空",
     "invalidChars": "名称包含无效字符",
-    "noProject": "没有活跃的项目"
+    "noProject": "没有活跃的项目",
+    "godotRefWarning": "有 {{count}} 个文件引用此路径，重命名会破坏这些引用：",
+    "godotRefMore": "还有 {{count}} 个"
   },
   "filters": {
     "advanced": "筛选",

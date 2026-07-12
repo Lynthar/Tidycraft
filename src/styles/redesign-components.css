@@ -2588,3 +2588,50 @@
   color: var(--text-3);
   letter-spacing: 0.04em;
 }
+
+/* ============ DCC source badge / mini chips ============ */
+
+/* Names the authoring tool on source files (.blend / .psd / ...) — rendered
+   inline after the file name in list rows and in the gallery card's
+   bottom-left meta slot (via .tc-card-dcc). Accent-tinted to read as
+   "pipeline input", distinct from the muted measurement chips. */
+.tc-dcc-badge {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  height: 16px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in oklch, var(--accent) 25%, transparent);
+  white-space: nowrap;
+}
+/* Gallery-card variant: occupies the bottom-left slot that dimensions use
+   on runtime textures (DCC sources never have parsed dimensions, so the
+   two can't collide). Backdrop matches .tc-card-meta-tl for legibility
+   over thumbnails. */
+.tc-card-dcc {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  backdrop-filter: blur(8px);
+}
+
+/* Small neutral chip — Unity component list in the preview panel. */
+.tc-mini-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-2);
+  background: var(--panel-2);
+  border: 1px solid var(--line-soft);
+  white-space: nowrap;
+}

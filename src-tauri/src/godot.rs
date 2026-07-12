@@ -3,11 +3,6 @@
 //! 解析 project.godot 配置文件，提取项目信息。
 //! 为未来完整的 .tscn/.tres 解析预留扩展接口。
 
-// Several types/functions here (resource classification, etc.) are kept as
-// stubs for the planned Godot deep-integration; the lib doesn't expose them
-// yet. Allow at module scope so we don't sprinkle individual attributes.
-#![allow(dead_code)]
-
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -50,6 +45,8 @@ pub struct GodotAutoload {
 }
 
 /// Godot 资源类型（预留扩展）
+// Stub for the planned Godot deep-integration; only tests use it today.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum GodotResourceType {
@@ -295,6 +292,8 @@ fn unquote(s: &str) -> String {
 
 /// 根据扩展名获取 Godot 资源类型
 /// 预留接口，用于未来扩展
+// Stub for the planned Godot deep-integration; only tests call it today.
+#[allow(dead_code)]
 pub fn get_godot_resource_type(path: &Path) -> Option<GodotResourceType> {
     let ext = path.extension()?.to_str()?;
     match ext.to_lowercase().as_str() {
@@ -402,6 +401,80 @@ pub fn find_unused_godot_assets(root_path: &str, assets: &[AssetInfo]) -> Vec<St
         })
         .map(|a| a.path.clone())
         .collect()
+}
+
+/// Rename guardrail: for each target path (absolute), collect the project
+/// files that reference it by `res://` path. Sources are the same set the
+/// unused-asset scan reads (`.tscn` / `.tres` / `.gd` / `.cs`) **plus
+/// `project.godot` itself** — renaming the main scene or an autoload breaks
+/// the project before any scene does. Each referencing file counts once per
+/// target no matter how often it repeats the path. Self-references are
+/// skipped: a file naming its own `res://` path would technically break too,
+/// but "this file references itself" reads as noise in a rename warning and
+/// such files are vanishingly rare. Returned source names are root-relative;
+/// targets nobody references are absent from the map.
+pub fn referencing_files(
+    root: &Path,
+    assets: &[AssetInfo],
+    targets: &[String],
+) -> HashMap<String, Vec<String>> {
+    let re = regex::Regex::new(r#""(res://[^"]*)""#).expect("static regex compiles");
+
+    // res:// form of each requested target → its original absolute key
+    // (the frontend looks results up by the exact string it sent).
+    let mut target_by_res: HashMap<String, String> = HashMap::new();
+    for t in targets {
+        if let Some(res) = asset_to_res_path(t, root) {
+            target_by_res.insert(res, t.clone());
+        }
+    }
+    if target_by_res.is_empty() {
+        return HashMap::new();
+    }
+
+    let mut result: HashMap<String, Vec<String>> = HashMap::new();
+    let mut record = |source_rel: &str, refs: HashSet<String>| {
+        for res in refs {
+            if let Some(abs) = target_by_res.get(&res) {
+                result
+                    .entry(abs.clone())
+                    .or_default()
+                    .push(source_rel.to_string());
+            }
+        }
+    };
+
+    // project.godot: quoted res:// values (main scene / icon / splash / ...)
+    // plus autoloads, whose leading `*` hides them from the quoted scan.
+    if let Ok(content) = fs::read_to_string(root.join("project.godot")) {
+        let mut refs: HashSet<String> =
+            extract_res_references(&content, &re).into_iter().collect();
+        for autoload in extract_autoloads(&parse_godot_config(&content)) {
+            refs.insert(autoload.path);
+        }
+        record("project.godot", refs);
+    }
+
+    for asset in assets {
+        let ext = asset.extension.to_lowercase();
+        if ext == "tscn" || ext == "tres" || ext == "gd" || ext == "cs" {
+            let Ok(content) = fs::read_to_string(&asset.path) else {
+                continue;
+            };
+            let own_res = asset_to_res_path(&asset.path, root);
+            let refs: HashSet<String> = extract_res_references(&content, &re)
+                .into_iter()
+                .filter(|r| Some(r) != own_res.as_ref())
+                .collect();
+            let source_rel = Path::new(&asset.path)
+                .strip_prefix(root)
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_else(|_| asset.name.clone());
+            record(&source_rel, refs);
+        }
+    }
+
+    result
 }
 
 /// Build the raw `(from_res, to_res)` dependency edges for a Godot project:
@@ -681,6 +754,63 @@ config/name="Minimal"
         assert!(!unused.iter().any(|p| p.ends_with("hero.png")));
         // main.tscn is the entry point -> not unused.
         assert!(!unused.iter().any(|p| p.ends_with("main.tscn")));
+    }
+
+    #[test]
+    fn test_referencing_files_for_rename_guardrail() {
+        use crate::scanner::AssetType;
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        // project.godot references main.tscn twice over (main scene + a
+        // *-prefixed autoload path — the quoted scan alone misses the latter).
+        fs::write(
+            root.join("project.godot"),
+            "config_version=5\n[application]\nrun/main_scene=\"res://main.tscn\"\n[autoload]\nBoot=\"*res://boot.gd\"\n",
+        )
+        .unwrap();
+        // main.tscn references hero.png twice — must count as ONE referencing file.
+        fs::write(
+            root.join("main.tscn"),
+            "[ext_resource type=\"Texture2D\" path=\"res://hero.png\" id=\"1\"]\n[ext_resource type=\"Texture2D\" path=\"res://hero.png\" id=\"2\"]\n",
+        )
+        .unwrap();
+        fs::write(root.join("boot.gd"), "extends Node\n").unwrap();
+        fs::write(root.join("hero.png"), "x").unwrap();
+        fs::write(root.join("orphan.png"), "x").unwrap();
+
+        let mk = |name: &str, ext: &str| AssetInfo {
+            path: root.join(name).to_string_lossy().to_string(),
+            name: name.to_string(),
+            extension: ext.to_string(),
+            asset_type: AssetType::Other,
+            size: 1,
+            modified: 0,
+            metadata: None,
+            unity_guid: None,
+        };
+        let assets = vec![
+            mk("main.tscn", "tscn"),
+            mk("boot.gd", "gd"),
+            mk("hero.png", "png"),
+            mk("orphan.png", "png"),
+        ];
+
+        let targets: Vec<String> = ["hero.png", "main.tscn", "boot.gd", "orphan.png"]
+            .iter()
+            .map(|n| root.join(n).to_string_lossy().to_string())
+            .collect();
+        let refs = referencing_files(root, &assets, &targets);
+
+        // hero.png ← main.tscn, once despite the double mention.
+        assert_eq!(refs.get(&targets[0]).map(Vec::len), Some(1));
+        assert!(refs[&targets[0]][0].ends_with("main.tscn"));
+        // main.tscn ← project.godot (main scene).
+        assert_eq!(refs.get(&targets[1]), Some(&vec!["project.godot".to_string()]));
+        // boot.gd ← project.godot (autoload, `*`-prefixed value).
+        assert_eq!(refs.get(&targets[2]), Some(&vec!["project.godot".to_string()]));
+        // orphan.png ← nobody: absent, not an empty entry.
+        assert!(!refs.contains_key(&targets[3]));
     }
 
     #[test]

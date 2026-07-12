@@ -100,11 +100,11 @@ pub struct AssetMetadata {
     // (`.blend` / `.ma` / `.psd` / `.spp` / etc). Values are the stable
     // strings returned by `dcc_source_kind_for` — see that function for
     // the canonical list. None for runtime exports (`.fbx` / `.png` / ...)
-    // and non-asset files. Informational only: nothing consumes it today —
-    // the dcc_source analyzer matches on file extensions from its own
-    // config, NOT on this field (a long-standing comment claiming otherwise
-    // was wrong). Kept because it's already on the wire (types/asset.ts
-    // mirrors it) and a UI "source app" badge is a plausible consumer.
+    // and non-asset files. Consumers: the naming rule exempts sources from
+    // type-prefix checks, and the frontend renders a source badge
+    // (list/grid/preview — `dccSourceLabel` in src/lib/dccSource.ts maps
+    // kind → display name). The dcc_source analyzer still matches on file
+    // extensions from its own config, NOT on this field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dcc_source_kind: Option<String>,
 }
@@ -281,11 +281,11 @@ fn get_asset_type(extension: &str) -> AssetType {
 /// authoring/source format. Returns `None` for runtime exports
 /// (`.fbx` / `.png` / ...) and non-asset files. The string returned is
 /// the wire-format value persisted into `AssetMetadata.dcc_source_kind`,
-/// which is informational-only (mirrored to the frontend, read by nothing
-/// today — the dcc_source analyzer matches extensions from its own config).
-/// Keep values stable anyway: they're serialized into scan caches, so a
-/// rename would surface as inconsistent metadata across cached vs fresh
-/// entries until the cache version is bumped.
+/// consumed by the naming rule's prefix exemption and the frontend's
+/// source badge (the dcc_source analyzer still matches extensions from
+/// its own config). Keep values stable: they're serialized into scan
+/// caches AND mapped to display names in src/lib/dccSource.ts, so a
+/// rename would break both until cache bump + frontend sync.
 ///
 /// Why a separate function (not just `get_asset_type` returning a
 /// richer enum): asset_type is the user-visible category (Texture /

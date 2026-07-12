@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { X, GitBranch, Palette, Wrench, Trash2, Image as ImageIcon, FileCode, ExternalLink, Sparkles, AlertTriangle, Filter } from "lucide-react";
+import { X, GitBranch, Palette, Wrench, Trash2, Image as ImageIcon, FileCode, ExternalLink, Sparkles, AlertTriangle, Filter, FileDown } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
@@ -592,6 +592,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     setShowAheadBehind,
     respectGitignore,
     setRespectGitignore,
+    htmlReportIssueLimit,
+    htmlReportAssetLimit,
+    setHtmlReportIssueLimit,
+    setHtmlReportAssetLimit,
   } = useSettingsStore();
   const preference = useThemeStore((s) => s.preference);
   const setPreference = useThemeStore((s) => s.setPreference);
@@ -867,6 +871,49 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 label={t("settings.respectGitignore")}
                 description={t("settings.respectGitignoreDesc")}
               />
+            </div>
+          </div>
+
+          {/* Export Section — HTML report row caps (0 = unlimited). The
+              JSON/CSV exports are always complete; only the single-file
+              HTML report truncates. */}
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <FileDown size={16} className="text-primary" />
+              <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wide">
+                {t("settings.exportSection")}
+              </h3>
+            </div>
+            <div className="space-y-3 pl-6">
+              {(
+                [
+                  {
+                    label: t("settings.exportHtmlIssueLimit"),
+                    value: htmlReportIssueLimit,
+                    onChange: setHtmlReportIssueLimit,
+                  },
+                  {
+                    label: t("settings.exportHtmlAssetLimit"),
+                    value: htmlReportAssetLimit,
+                    onChange: setHtmlReportAssetLimit,
+                  },
+                ] as const
+              ).map((row) => (
+                <div key={row.label} className="flex items-center justify-between gap-3">
+                  <span className="text-sm text-text-primary">{row.label}</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={50}
+                    value={row.value}
+                    onChange={(e) => row.onChange(Number(e.target.value))}
+                    className="w-24 h-8 px-2 text-sm text-right bg-background border border-border rounded text-text-primary focus:outline-none focus:border-primary"
+                  />
+                </div>
+              ))}
+              <p className="text-xs text-text-secondary">
+                {t("settings.exportLimitHint")}
+              </p>
             </div>
           </div>
 

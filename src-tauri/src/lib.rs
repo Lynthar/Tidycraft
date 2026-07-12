@@ -1212,6 +1212,68 @@ fn get_godot_dependencies(project_id: String) -> Result<DependencyGraph, String>
     })
 }
 
+/// Rename guardrail: for each of `paths` (absolute), the project files that
+/// reference it by `res://` path — root-relative names, `project.godot`
+/// included. Godot-only: Unity references are GUID-based and survive renames
+/// (the `.meta` sidecar moves with the file), so the frontend never calls
+/// this for other project types.
+// `(async)`: re-reads every scene/resource/script under the lock — off the
+// main thread (same shape as get_godot_dependencies).
+#[tauri::command(async)]
+fn godot_asset_references(
+    project_id: String,
+    paths: Vec<String>,
+) -> Result<HashMap<String, Vec<String>>, String> {
+    project::with_ref(&project_id, |state| {
+        let scan_result = state.require_scan()?;
+        if !matches!(scan_result.project_type, Some(scanner::ProjectType::Godot)) {
+            return Err("Not a Godot project".to_string());
+        }
+        Ok(godot::referencing_files(
+            Path::new(&state.root_path),
+            &scan_result.assets,
+            &paths,
+        ))
+    })
+}
+
+// ============ Engine Info Commands ============
+//
+// Path-only commands (no project_id): they re-read small marker/config files
+// fresh on every call, so there's no per-project state to consult. Each
+// returns `None` instead of an error when the info isn't there — an absent
+// card is the correct UI for a project without the marker file.
+
+/// On-demand parse of a single Unity YAML asset for the preview panel:
+/// component list (prefab/scene only, sorted) + GUID references.
+// `(async)`: reads + line-scans a potentially multi-MB scene file — off the
+// main thread.
+#[tauri::command(async)]
+fn get_unity_file_info(path: String) -> Option<unity::UnityFileInfo> {
+    unity::parse_unity_file(Path::new(&path))
+}
+
+/// Unity engine card: editor version from `ProjectSettings/ProjectVersion.txt`.
+#[tauri::command(async)]
+fn get_unity_project_info(root_path: String) -> Option<unity::UnityProjectInfo> {
+    unity::parse_project_version(Path::new(&root_path))
+}
+
+/// Godot engine card: name / version / main scene / renderer / autoloads
+/// parsed from `<root>/project.godot`.
+#[tauri::command(async)]
+fn get_godot_project_info(root_path: String) -> Option<godot::GodotProjectInfo> {
+    godot::parse_project_godot(&Path::new(&root_path).join("project.godot"))
+}
+
+/// Unreal engine card: engine association / modules / plugins / target
+/// platforms parsed from the root `.uproject` (JSON).
+#[tauri::command(async)]
+fn get_unreal_project_info(root_path: String) -> Option<unreal::UnrealProjectInfo> {
+    let uproject = unreal::find_uproject_file(Path::new(&root_path))?;
+    unreal::parse_uproject(&uproject)
+}
+
 // ============ Statistics Commands ============
 
 #[derive(Serialize)]
@@ -1359,9 +1421,25 @@ fn export_issues_to_json(project_id: String) -> Result<String, String> {
     })
 }
 
+/// `issue_limit` / `asset_limit` cap the report's table rows (Settings →
+/// Export). `None` keeps the historical defaults (100 / 500); `Some(0)`
+/// means unlimited — a 100k-file project then produces a very large file,
+/// which is the user's explicit choice.
 // `(async)`: runs a full analysis (incl. duplicate re-hashing) under the lock.
 #[tauri::command(async)]
-fn export_to_html(project_id: String) -> Result<String, String> {
+fn export_to_html(
+    project_id: String,
+    issue_limit: Option<usize>,
+    asset_limit: Option<usize>,
+) -> Result<String, String> {
+    let cap = |limit: Option<usize>, default: usize| match limit {
+        Some(0) => usize::MAX,
+        Some(n) => n,
+        None => default,
+    };
+    let issue_cap = cap(issue_limit, 100);
+    let asset_cap = cap(asset_limit, 500);
+
     project::with_ref(&project_id, |state| {
         let scan_result = state.require_scan()?;
 
@@ -1547,7 +1625,7 @@ fn export_to_html(project_id: String) -> Result<String, String> {
                 let mut rows: Vec<String> = analysis_result
                     .issues
                     .iter()
-                    .take(100)
+                    .take(issue_cap)
                     .map(|issue| {
                         let severity_class = match issue.severity {
                             analyzer::Severity::Error => "severity-error",
@@ -1569,10 +1647,10 @@ fn export_to_html(project_id: String) -> Result<String, String> {
                         )
                     })
                     .collect();
-                if total > 100 {
+                if total > issue_cap {
                     rows.push(format!(
-                        r#"<tr><td colspan="4" style="text-align:center;color:#9ca3af;font-style:italic;">Showing first 100 of {} issues — export to JSON for the complete list.</td></tr>"#,
-                        total
+                        r#"<tr><td colspan="4" style="text-align:center;color:#9ca3af;font-style:italic;">Showing first {} of {} issues — export to JSON for the complete list, or raise the limit in Settings → Export.</td></tr>"#,
+                        issue_cap, total
                     ));
                 }
                 rows.join("\n")
@@ -1582,7 +1660,7 @@ fn export_to_html(project_id: String) -> Result<String, String> {
                 let mut rows: Vec<String> = scan_result
                     .assets
                     .iter()
-                    .take(500)
+                    .take(asset_cap)
                     .map(|asset| {
                         let type_class = match asset.asset_type {
                             scanner::AssetType::Texture => "texture",
@@ -1613,10 +1691,10 @@ fn export_to_html(project_id: String) -> Result<String, String> {
                         )
                     })
                     .collect();
-                if total > 500 {
+                if total > asset_cap {
                     rows.push(format!(
-                        r#"<tr><td colspan="4" style="text-align:center;color:#9ca3af;font-style:italic;">Showing first 500 of {} assets — export to CSV or JSON for the complete list.</td></tr>"#,
-                        total
+                        r#"<tr><td colspan="4" style="text-align:center;color:#9ca3af;font-style:italic;">Showing first {} of {} assets — export to CSV or JSON for the complete list, or raise the limit in Settings → Export.</td></tr>"#,
+                        asset_cap, total
                     ));
                 }
                 rows.join("\n")
@@ -2303,7 +2381,10 @@ fn duplicate_assets(paths: Vec<String>) -> FileOpResult {
 ///
 /// No `project_id` parameter: the filesystem watcher will pick up the resulting
 /// remove events and update `scanResult.assets` automatically.
-#[tauri::command]
+// `(async)`: each trash operation is an OS call; the duplicate-group cleanup
+// can submit thousands of paths at once (Kenney-scale groups), which would
+// freeze the window if run on the main thread.
+#[tauri::command(async)]
 fn delete_assets(paths: Vec<String>) -> DeleteResult {
     let mut success_paths = Vec::new();
     let mut errors = Vec::new();
@@ -2607,6 +2688,7 @@ pub fn run() {
             get_unity_dependencies,
             find_unused_assets,
             get_godot_dependencies,
+            godot_asset_references,
             // Stats / export
             get_project_stats,
             export_to_json,
@@ -2618,6 +2700,10 @@ pub fn run() {
             preview_batch_rename,
             execute_batch_rename,
             // Engine info
+            get_unity_file_info,
+            get_unity_project_info,
+            get_godot_project_info,
+            get_unreal_project_info,
             // Undo
             get_undo_history,
             undo_last_operation,

@@ -26,6 +26,7 @@ import { useProjectStore } from "../stores/projectStore";
 import type { SortField, SortDirection } from "../stores/projectStore";
 import { TagBadge } from "./TagSelector";
 import { GitStatusBadge } from "./GitStatusBadge";
+import { DccSourceBadge } from "./DccSourceBadge";
 
 const ROW_HEIGHT = 40; // matches .tc-row + 22px glyph + padding
 const MIN_COL_WIDTH = 60;
@@ -203,6 +204,9 @@ function AssetRow({
         <div className="tc-name-cell">
           <AssetIcon type={asset.asset_type} />
           <span className="tc-name">{asset.name}</span>
+          {asset.metadata?.dcc_source_kind && (
+            <DccSourceBadge kind={asset.metadata.dcc_source_kind} t={t} />
+          )}
           {showGitStatusIndicators && gitStatus && gitStatus !== "unchanged" && (
             <GitStatusBadge status={gitStatus} t={t} />
           )}

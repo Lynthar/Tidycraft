@@ -20,6 +20,7 @@ import { LearnReviewPanel } from "./components/LearnReviewPanel";
 import { DependencyGraphModal } from "./components/DependencyGraphModal";
 import { useProjectStore } from "./stores/projectStore";
 import { useUiStore } from "./stores/uiStore";
+import { useSettingsStore } from "./stores/settingsStore";
 import { restoreSession } from "./stores/sessionStore";
 import { Toasts } from "./components/Toasts";
 import { exportTextFile } from "./lib/exportFile";
@@ -155,11 +156,20 @@ function App() {
 
   const handleExportHtml = () => {
     if (!activeProjectId) return;
+    // Row caps come from Settings → Export (0 = unlimited). Read at click
+    // time via getState() — App doesn't need to re-render on settings edits.
+    const { htmlReportIssueLimit, htmlReportAssetLimit } =
+      useSettingsStore.getState();
     exportTextFile({
       defaultName: "tidycraft-report.html",
       filterName: "HTML",
       extensions: ["html"],
-      fetchContents: () => invoke<string>("export_to_html", { projectId: activeProjectId }),
+      fetchContents: () =>
+        invoke<string>("export_to_html", {
+          projectId: activeProjectId,
+          issueLimit: htmlReportIssueLimit,
+          assetLimit: htmlReportAssetLimit,
+        }),
     });
   };
 

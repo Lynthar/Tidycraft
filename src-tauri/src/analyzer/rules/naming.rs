@@ -211,18 +211,30 @@ impl Rule for NamingRule {
             });
         }
 
-        // Check prefix
-        if let Some(prefix) = self.check_prefix(name, &asset.asset_type) {
-            return Some(Issue {
-                rule_id: "naming.prefix".to_string(),
-                rule_name: "Missing Prefix".to_string(),
-                severity: Severity::Warning,
-                message: format!("File name should start with '{}'", prefix),
-                asset_path: asset.path.clone(),
-                suggestion: Some(format!("Rename to {}{}", prefix, name)),
-                auto_fixable: true,
-            related_paths: None,
-            });
+        // Check prefix. DCC authoring sources (`.blend` / `.psd` / `.spp` /
+        // ...) are exempt: type-prefix conventions (`SM_` / `T_`) target the
+        // engine-runtime exports, while source files follow the DCC's own
+        // naming habits — flagging every `.blend` for a missing `SM_` is
+        // noise, not a finding (UX audit P2-9). The other naming checks
+        // (forbidden chars / length / case) still apply to sources.
+        let is_dcc_source = asset
+            .metadata
+            .as_ref()
+            .and_then(|m| m.dcc_source_kind.as_ref())
+            .is_some();
+        if !is_dcc_source {
+            if let Some(prefix) = self.check_prefix(name, &asset.asset_type) {
+                return Some(Issue {
+                    rule_id: "naming.prefix".to_string(),
+                    rule_name: "Missing Prefix".to_string(),
+                    severity: Severity::Warning,
+                    message: format!("File name should start with '{}'", prefix),
+                    asset_path: asset.path.clone(),
+                    suggestion: Some(format!("Rename to {}{}", prefix, name)),
+                    auto_fixable: true,
+                    related_paths: None,
+                });
+            }
         }
 
         // Check case style
@@ -269,4 +281,72 @@ fn is_camel_case(s: &str) -> bool {
 fn is_kebab_case(s: &str) -> bool {
     // Same leniency level as is_snake_case, with `-` as the separator.
     s.chars().all(|c| c.is_lowercase() || c.is_numeric() || c == '-')
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scanner::AssetMetadata;
+
+    fn asset(name: &str, ext: &str, asset_type: AssetType, dcc_kind: Option<&str>) -> AssetInfo {
+        AssetInfo {
+            path: format!("/proj/{}", name),
+            name: name.to_string(),
+            extension: ext.to_string(),
+            asset_type,
+            size: 1,
+            modified: 0,
+            metadata: dcc_kind.map(|kind| AssetMetadata {
+                dcc_source_kind: Some(kind.to_string()),
+                ..Default::default()
+            }),
+            unity_guid: None,
+        }
+    }
+
+    fn prefix_rule() -> NamingRule {
+        NamingRule::new(NamingConfig {
+            model_prefix: Some("SM_".to_string()),
+            texture_prefix: Some("T_".to_string()),
+            ..Default::default()
+        })
+    }
+
+    #[test]
+    fn prefix_check_fires_for_runtime_assets() {
+        let rule = prefix_rule();
+        let issue = rule
+            .check(&asset("rock.fbx", "fbx", AssetType::Model, None))
+            .expect("unprefixed runtime model should be flagged");
+        assert_eq!(issue.rule_id, "naming.prefix");
+    }
+
+    #[test]
+    fn prefix_check_skips_dcc_sources() {
+        let rule = prefix_rule();
+        // .blend is AssetType::Model and .psd is AssetType::Texture, but both
+        // carry dcc_source_kind — the prefix convention must not apply.
+        assert!(rule
+            .check(&asset("rock.blend", "blend", AssetType::Model, Some("blender")))
+            .is_none());
+        assert!(rule
+            .check(&asset("rock.psd", "psd", AssetType::Texture, Some("photoshop")))
+            .is_none());
+    }
+
+    #[test]
+    fn other_naming_checks_still_apply_to_dcc_sources() {
+        // The exemption is prefix-only: a source file with a forbidden
+        // character is still a real finding.
+        let rule = prefix_rule();
+        let issue = rule
+            .check(&asset(
+                "my rock.blend",
+                "blend",
+                AssetType::Model,
+                Some("blender"),
+            ))
+            .expect("forbidden space should still be flagged on a source file");
+        assert_eq!(issue.rule_id, "naming.forbidden_char");
+    }
 }

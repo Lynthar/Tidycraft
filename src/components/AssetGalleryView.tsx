@@ -33,6 +33,7 @@ import type {
   GitStatusMap,
 } from "../types/asset";
 import { GitStatusBadge } from "./GitStatusBadge";
+import { DccSourceBadge } from "./DccSourceBadge";
 import { peekThumb, hasThumb, putThumb } from "../lib/thumbnailCache";
 
 const CARD_MIN_WIDTH = 168;
@@ -182,7 +183,17 @@ function Card({
           <GitStatusBadge status={gitStatus} t={t} />
         </span>
       )}
-      {dim && <span className="tc-card-meta-tl">{dim}</span>}
+      {/* DCC sources never have parsed dimensions (no metadata extractor
+          for authoring formats), so the bottom-left slot is theirs. */}
+      {asset.metadata?.dcc_source_kind ? (
+        <DccSourceBadge
+          kind={asset.metadata.dcc_source_kind}
+          t={t}
+          className="tc-card-dcc"
+        />
+      ) : (
+        dim && <span className="tc-card-meta-tl">{dim}</span>
+      )}
       {verts && <span className="tc-card-meta-br">{verts}</span>}
       <div className="tc-card-foot">
         <div className="tc-card-name" title={asset.name}>

@@ -65,7 +65,8 @@
     "noSearchResults": "No matches for \"{{query}}\"",
     "searchWholeProject": "Search entire project",
     "noMatchingFilters": "No assets match the current filters",
-    "scopeShowAll": "Show entire project"
+    "scopeShowAll": "Show entire project",
+    "dccSourceFile": "Source file"
   },
   "exportToast": {
     "saved": "Exported {{name}}",
@@ -105,7 +106,8 @@
     "failed": "failed",
     "errors": "Errors",
     "fileCount": "{{count}} files",
-    "andMore": "... and {{count}} more"
+    "andMore": "... and {{count}} more",
+    "godotRefWarning": "{{files}} of the files being renamed are referenced by other files ({{refs}} referencing file(s)) — renaming will break those references."
   },
   "common": {
     "cancel": "Cancel",
@@ -152,6 +154,9 @@
     "openInEditor": "Open in {{name}}",
     "openFailed": "Open failed: {{reason}}",
     "viewDependencies": "Dependency Graph",
+    "dccSource": "Source tool",
+    "components": "Components",
+    "references": "GUID references",
     "close": "Close"
   },
   "directoryTree": {
@@ -209,7 +214,11 @@
     "dupGroupHint": "These files have identical content — keep one and remove or consolidate the rest.",
     "showAllMembers": "Show all {{count}}",
     "showFewerMembers": "Show fewer",
-    "membersTruncated": "+{{count}} more not shown — export the report for the full list"
+    "membersTruncated": "+{{count}} more not shown — export the report for the full list",
+    "dupCleanup": "Clean up group…",
+    "dupCleanupHint": "Pick the copy to keep — the rest go to the recycle bin.",
+    "dupCleanupConfirm": "Keep selected, trash {{count}} others",
+    "dupKeepThis": "Keep this copy"
   },
   "settings": {
     "title": "Settings",
@@ -268,6 +277,10 @@
     "aiPerAssetMode": "Enable per-asset AI tagging (advanced)",
     "aiPerAssetModeDesc": "Adds an \"AI Tag (directly)\" entry to multi-select and right-click that sends thumbnails to the LLM for direct tagging. Costs roughly 50× more than Learning mode; use when you need fine-grained per-image suggestions Learning rules can't capture.",
     "scanningSection": "Scanning",
+    "exportSection": "Export",
+    "exportHtmlIssueLimit": "HTML report: max issue rows",
+    "exportHtmlAssetLimit": "HTML report: max asset rows",
+    "exportLimitHint": "0 = unlimited. Very large projects produce very large report files; JSON/CSV exports are always complete.",
     "respectGitignore": "Respect .gitignore and .ignore",
     "respectGitignoreDesc": "Skip files matched by your project's .gitignore / .ignore (and hidden directories like .git/). Disable to scan everything — useful for projects whose actual assets live under gitignored paths. Toggling triggers a fresh scan on the next project open.",
     "maintenanceSection": "Maintenance",
@@ -299,7 +312,15 @@
     "scanUnused": "Scan",
     "rescanUnused": "Rescan",
     "scanningUnused": "Scanning…",
-    "noUnusedAssets": "No unused assets found."
+    "noUnusedAssets": "No unused assets found.",
+    "engineProject": "Project",
+    "engineMainScene": "Main scene",
+    "engineRenderer": "Renderer",
+    "engineAutoloads": "Autoloads",
+    "engineFeatures": "Features",
+    "engineModules": "Modules",
+    "enginePlugins": "Plugins enabled",
+    "enginePlatforms": "Target platforms"
   },
   "theme": {
     "switchToLight": "Switch to light mode",
@@ -402,7 +423,9 @@
     "enterName": "Enter new name...",
     "emptyName": "Name cannot be empty",
     "invalidChars": "Name contains invalid characters",
-    "noProject": "No active project"
+    "noProject": "No active project",
+    "godotRefWarning": "{{count}} file(s) reference this path — renaming will break them:",
+    "godotRefMore": "and {{count}} more"
   },
   "filters": {
     "advanced": "Filters",

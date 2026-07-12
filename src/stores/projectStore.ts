@@ -258,6 +258,14 @@ interface ProjectState {
   rescan: () => Promise<void>;
   clearError: () => void;
   runAnalysis: () => Promise<void>;
+  /// Optimistic prune after the duplicate-group cleanup trashed all but one
+  /// copy: drop that group's issue from `projectId`'s analysisResult so the
+  /// card disappears immediately (counts recomputed wholesale). `groupKey`
+  /// is the group's first `related_paths` member (root-relative), the same
+  /// identity the issue list collapses on. Deliberately does NOT touch
+  /// `analysisStale` — the deletions make OTHER issues stale too, and the
+  /// watcher-driven banner is the source of truth for that.
+  pruneDuplicateGroup: (projectId: string, groupKey: string) => void;
   setViewMode: (mode: ViewMode) => void;
   setHasCustomConfig: (value: boolean) => void;
   setSelectedDirectory: (path: string | null) => void;
@@ -986,6 +994,49 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         hasCustomConfig,
       });
     }
+  },
+
+  pruneDuplicateGroup: (projectId: string, groupKey: string) => {
+    set((state) => {
+      const project = state.projects.get(projectId);
+      const prev = project?.analysisResult;
+      if (!project || !prev) return {};
+
+      const issues = prev.issues.filter(
+        (i) => !(i.rule_id === "duplicate" && i.related_paths?.[0] === groupKey)
+      );
+      if (issues.length === prev.issues.length) return {};
+
+      // Recompute the summary wholesale from what's left — immune to any
+      // assumption about how many issues the group contributed or their
+      // severity, at the cost of one linear pass.
+      const by_rule: Record<string, number> = {};
+      let error_count = 0;
+      let warning_count = 0;
+      let info_count = 0;
+      for (const issue of issues) {
+        by_rule[issue.rule_id] = (by_rule[issue.rule_id] ?? 0) + 1;
+        if (issue.severity === "error") error_count++;
+        else if (issue.severity === "warning") warning_count++;
+        else info_count++;
+      }
+      const result: AnalysisResult = {
+        issues,
+        issue_count: issues.length,
+        error_count,
+        warning_count,
+        info_count,
+        by_rule,
+      };
+
+      // Patch the target project directly; mirror only when it's active
+      // (same discipline as every background-write path in this store).
+      const projects = new Map(state.projects);
+      projects.set(projectId, { ...project, analysisResult: result });
+      return state.activeProjectId === projectId
+        ? { projects, analysisResult: result }
+        : { projects };
+    });
   },
 
   setViewMode: (mode: ViewMode) => {
