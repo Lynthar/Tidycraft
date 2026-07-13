@@ -265,7 +265,9 @@ The frontend and backend communicate exclusively through two mechanisms:
   per-asset path). API keys are plaintext localStorage; first-save shows
   a warning toast reminding the user not to share their `tidycraft-settings`.
 - Other global stores: `themeStore` (dark / light / system + matchMedia
-  listener), `searchHistoryStore` (recent search queries).
+  listener), `searchHistoryStore` (recent search queries), `recentsStore`
+  (recently-opened projects, persisted per machine — feeds the
+  ProjectSwitcher's "Recent" section).
 - **`components/`** — Flat layout, one component per file, no barrel exports.
   `AssetList` is the parent shell that owns selection / dialogs and
   dispatches between `AssetListView` (virtualized list) and
@@ -591,7 +593,8 @@ tidycraft/
 │   │   ├── columnStore.ts            # Persistent list cols + viewMode (versioned)
 │   │   ├── settingsStore.ts          # Persistent user prefs (git display / external editors / AI providers / respectGitignore)
 │   │   ├── themeStore.ts             # dark / light / system + matchMedia listener
-│   │   └── searchHistoryStore.ts     # Recent search queries
+│   │   ├── searchHistoryStore.ts     # Recent search queries
+│   │   └── recentsStore.ts           # Recently-opened projects (persisted)
 │   ├── styles/                       # globals.css + redesign-tokens-v2 + redesign-components
 │   ├── types/asset.ts                # TS mirrors of Rust structs
 │   ├── lib/                          # Shared utilities (pathUtils, platform, modelUrlResolver, utils)
