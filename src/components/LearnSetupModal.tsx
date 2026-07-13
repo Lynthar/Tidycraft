@@ -305,9 +305,12 @@ export function LearnSetupModal() {
                     <Loader2 size={12} className="animate-spin" />…
                   </div>
                 ) : cost ? (
-                  <div className="text-base font-medium">
+                  <div
+                    className="text-base font-medium"
+                    style={{ color: "var(--text)" }}
+                  >
                     {provider === "ollama"
-                      ? t("aiAnalyze.continueLocal")
+                      ? t("aiAnalyze.costFree")
                       : `≈ $${dollarsString}`}
                   </div>
                 ) : null}

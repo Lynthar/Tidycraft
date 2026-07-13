@@ -7,6 +7,8 @@
     "addProject": "添加项目",
     "close": "关闭项目",
     "selectProject": "选择项目",
+    "recent": "最近打开",
+    "removeRecent": "从最近移除",
     "current": "当前",
     "issuesCount": "{{count}} 个问题",
     "empty": "没有打开的项目"
@@ -66,6 +68,7 @@
     "searchWholeProject": "在整个项目中搜索",
     "noMatchingFilters": "当前筛选条件下没有资产",
     "scopeShowAll": "显示整个项目",
+    "selectForBatch": "选择以批量操作",
     "dccSourceFile": "源文件"
   },
   "exportToast": {
@@ -599,6 +602,7 @@
     "continue": "继续",
     "continueWithCost": "继续 (~${{cost}})",
     "continueLocal": "继续（本地免费）",
+    "costFree": "免费 · 本地运行",
     "cancel": "取消",
     "analyzing": "正在分析 {{count}} 个资产…",
     "noProvider": "尚未配置 AI 提供方。打开设置 → AI 标签 选择一个。",
@@ -627,7 +631,8 @@
   },
   "emptyState": {
     "title": "打开一个项目开始",
-    "subtitle": "从左上角的项目切换器选择最近打开的项目，或打开一个文件夹开始扫描。"
+    "subtitle": "从左上角的项目切换器选择最近打开的项目，或打开一个文件夹开始扫描。",
+    "subtitleFirst": "打开一个文件夹，开始扫描你的游戏资源。"
   },
   "imageLightbox": {
     "zoomOut": "缩小 (-)",

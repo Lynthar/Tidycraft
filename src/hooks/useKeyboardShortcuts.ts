@@ -102,6 +102,16 @@ export function useKeyboardShortcuts({ onOpenFolder, onFocusSearch }: KeyboardSh
         return;
       }
 
+      // Ctrl/Cmd + , : Open Settings. Cmd+, is the macOS Preferences
+      // convention; Ctrl+, is a common settings accelerator on Windows/Linux.
+      // Sits after the input + blocking-overlay guards so a literal comma
+      // typed in a field is ignored and it never opens over another modal.
+      if (modKey && key === ",") {
+        event.preventDefault();
+        useUiStore.getState().setSettingsOpen(true);
+        return;
+      }
+
       // Ctrl/Cmd + R: Rescan (if project is open). Routes through the shared
       // `rescan` store action so it's identical to the Header button. The old
       // `openProject(projectPath)` (no force) was a no-op for the already-open
@@ -187,6 +197,7 @@ export const SHORTCUTS = {
   rescan: { key: "R", modifier: "Ctrl" },
   analyze: { key: "R", modifier: "Ctrl+Shift" },
   commandPalette: { key: "K", modifier: "Ctrl" },
+  settings: { key: ",", modifier: "Ctrl" },
   escape: { key: "Esc", modifier: "" },
   viewAssets: { key: "1", modifier: "Ctrl" },
   viewIssues: { key: "2", modifier: "Ctrl" },

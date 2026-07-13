@@ -7,6 +7,8 @@
     "addProject": "Add Project",
     "close": "Close Project",
     "selectProject": "Select project",
+    "recent": "Recent",
+    "removeRecent": "Remove from recent",
     "current": "current",
     "issuesCount": "{{count}} issues",
     "empty": "No projects open"
@@ -66,6 +68,7 @@
     "searchWholeProject": "Search entire project",
     "noMatchingFilters": "No assets match the current filters",
     "scopeShowAll": "Show entire project",
+    "selectForBatch": "Select for batch actions",
     "dccSourceFile": "Source file"
   },
   "exportToast": {
@@ -599,6 +602,7 @@
     "continue": "Continue",
     "continueWithCost": "Continue (~${{cost}})",
     "continueLocal": "Continue (local, free)",
+    "costFree": "Free — runs locally",
     "cancel": "Cancel",
     "analyzing": "Analyzing {{count}} asset(s)…",
     "noProvider": "No AI provider configured. Open Settings → AI Tagging to choose one.",
@@ -627,7 +631,8 @@
   },
   "emptyState": {
     "title": "Open a project to begin",
-    "subtitle": "Pick a recent project from the switcher in the top-left, or open a folder to begin scanning."
+    "subtitle": "Pick a recent project from the switcher in the top-left, or open a folder to begin scanning.",
+    "subtitleFirst": "Open a folder to start scanning your game assets."
   },
   "imageLightbox": {
     "zoomOut": "Zoom out (-)",

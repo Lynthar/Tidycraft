@@ -2,11 +2,13 @@ import { FolderOpen } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
+import { useRecentsStore } from "../stores/recentsStore";
 import { formatShortcut, SHORTCUTS } from "../hooks/useKeyboardShortcuts";
 
 export function EmptyState() {
   const { t } = useTranslation();
   const { openProject } = useProjectStore();
+  const recents = useRecentsStore((s) => s.recents);
 
   const handleOpenFolder = async () => {
     const selected = await open({
@@ -28,10 +30,15 @@ export function EmptyState() {
         {t("emptyState.title", "Open a project to begin")}
       </div>
       <div className="tc-empty-sub">
-        {t(
-          "emptyState.subtitle",
-          "Pick a recent project from the switcher in the top-left, or open a folder to begin scanning."
-        )}
+        {recents.length > 0
+          ? t(
+              "emptyState.subtitle",
+              "Pick a recent project from the switcher in the top-left, or open a folder to begin scanning."
+            )
+          : t(
+              "emptyState.subtitleFirst",
+              "Open a folder to start scanning your game assets."
+            )}
       </div>
       <div className="tc-empty-actions">
         <button onClick={handleOpenFolder} className="tc-cta">

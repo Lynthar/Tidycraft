@@ -33,6 +33,12 @@ export function getAssetTypeColor(type: string): string {
 }
 
 export function formatDuration(seconds: number): string {
+  // Sub-10s clips (most SFX) need sub-second precision: floor-based m:ss
+  // renders a real 0.4s sound as "0:00". Show one decimal below 10s, and
+  // the familiar m:ss above it (whole seconds read fine at that length).
+  if (seconds < 10) {
+    return `${seconds.toFixed(1)}s`;
+  }
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
   return `${mins}:${secs.toString().padStart(2, "0")}`;

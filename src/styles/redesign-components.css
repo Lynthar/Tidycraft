@@ -705,6 +705,21 @@
   background: color-mix(in oklch, var(--primary) 7%, transparent);
 }
 
+/* Batch-select checkbox lane: the 32px lane is always reserved, but the box
+   only appears on row hover, when the row is checked, while a batch selection
+   is active (data-force), or on keyboard focus — so multi-select is
+   discoverable without permanent clutter or a layout shift. */
+.tc-row-check {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.tc-row:hover .tc-row-check,
+.tc-row[data-checked="true"] .tc-row-check,
+.tc-row-check:focus-within,
+.tc-row-check[data-force="true"] {
+  opacity: 1;
+}
+
 /* Vertical column dividers in the list header. Only the header gets these
    so data rows stay clean (the design mock doesn't have grid lines between
    data cells). The rule scopes to direct-child cells so nested elements
@@ -2137,6 +2152,30 @@
   position: absolute;
   top: 8px;
   right: 8px;
+}
+/* Batch-select checkbox — top-left, revealed on hover, when the card is
+   checked, while a batch selection is active (data-selecting), or on keyboard
+   focus. It swaps in for the type chip (hidden in the same states) so the
+   corner never holds both at once. */
+.tc-card-check {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  z-index: 3;
+  display: inline-flex;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.tc-card:hover .tc-card-check,
+.tc-card[data-checked="true"] .tc-card-check,
+.tc-card[data-selecting="true"] .tc-card-check,
+.tc-card-check:focus-within {
+  opacity: 1;
+}
+.tc-card:hover .tc-card-typechip,
+.tc-card[data-checked="true"] .tc-card-typechip,
+.tc-card[data-selecting="true"] .tc-card-typechip {
+  opacity: 0;
 }
 .tc-card-meta-tl,
 .tc-card-meta-br {

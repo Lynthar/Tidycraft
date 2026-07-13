@@ -705,6 +705,24 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
   if (!isOpen) return null;
 
+  // Anchor table-of-contents for the (long) settings page. Each entry scrolls
+  // its section heading into view — the headings carry matching ids below.
+  const sections: { id: string; titleKey: string }[] = [
+    { id: "set-appearance", titleKey: "settings.appearanceSection" },
+    { id: "set-git", titleKey: "settings.gitSection" },
+    { id: "set-analysis", titleKey: "settings.analysisRulesSection" },
+    { id: "set-editors", titleKey: "settings.externalEditorsSection" },
+    { id: "set-ai", titleKey: "settings.aiTaggingSection" },
+    { id: "set-scanning", titleKey: "settings.scanningSection" },
+    { id: "set-export", titleKey: "settings.exportSection" },
+    { id: "set-maintenance", titleKey: "settings.maintenanceSection" },
+  ];
+  const scrollToSection = (id: string) => {
+    document
+      .getElementById(id)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   return (
     <ModalShell onClose={onClose} ariaLabel={t("settings.title")}>
       {/* `max-h-[90vh]` + flex column lets the body scroll when content
@@ -712,7 +730,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           this, opening Settings on a non-fullscreen window (or after we
           add more sections) clips the bottom (Maintenance / Done button
           becomes unreachable). */}
-      <div className="bg-card-bg border border-border rounded-lg shadow-xl w-full max-w-md flex flex-col max-h-[90vh]">
+      <div className="bg-card-bg border border-border rounded-lg shadow-xl w-full max-w-2xl flex flex-col max-h-[90vh]">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
           <h2 className="text-lg font-semibold">{t("settings.title")}</h2>
@@ -724,13 +742,29 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           </button>
         </div>
 
-        {/* Content — scrolls when overflowing the viewport-bound modal. */}
-        <div className="p-4 space-y-6 overflow-y-auto flex-1 min-h-0">
+        {/* Body: a left anchor nav (jump between sections) + the scrolling
+            content, so the long settings page is navigable instead of one
+            endless scroll. */}
+        <div className="flex flex-1 min-h-0">
+          <nav className="shrink-0 w-40 border-r border-border p-3 space-y-1 overflow-y-auto">
+            {sections.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => scrollToSection(s.id)}
+                className="block w-full text-left text-xs px-2 py-1.5 rounded text-text-secondary hover:bg-background hover:text-text-primary transition-colors"
+              >
+                {t(s.titleKey)}
+              </button>
+            ))}
+          </nav>
+          {/* Content — scrolls when overflowing the viewport-bound modal. */}
+          <div className="p-4 space-y-6 overflow-y-auto flex-1 min-h-0">
           {/* Appearance Section */}
           <div>
             <div className="flex items-center gap-2 mb-3">
               <Palette size={16} className="text-primary" />
-              <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wide">
+              <h3 id="set-appearance" className="text-sm font-semibold text-text-primary uppercase tracking-wide scroll-mt-4">
                 {t("settings.appearanceSection")}
               </h3>
             </div>
@@ -761,7 +795,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           <div>
             <div className="flex items-center gap-2 mb-3">
               <GitBranch size={16} className="text-primary" />
-              <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wide">
+              <h3 id="set-git" className="text-sm font-semibold text-text-primary uppercase tracking-wide scroll-mt-4">
                 {t("settings.gitSection")}
               </h3>
             </div>
@@ -791,7 +825,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           <div>
             <div className="flex items-center gap-2 mb-3">
               <FileCode size={16} className="text-primary" />
-              <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wide">
+              <h3 id="set-analysis" className="text-sm font-semibold text-text-primary uppercase tracking-wide scroll-mt-4">
                 {t("settings.analysisRulesSection")}
               </h3>
             </div>
@@ -830,7 +864,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           <div>
             <div className="flex items-center gap-2 mb-3">
               <ExternalLink size={16} className="text-primary" />
-              <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wide">
+              <h3 id="set-editors" className="text-sm font-semibold text-text-primary uppercase tracking-wide scroll-mt-4">
                 {t("settings.externalEditorsSection")}
               </h3>
             </div>
@@ -847,7 +881,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           <div>
             <div className="flex items-center gap-2 mb-3">
               <Sparkles size={16} className="text-primary" />
-              <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wide">
+              <h3 id="set-ai" className="text-sm font-semibold text-text-primary uppercase tracking-wide scroll-mt-4">
                 {t("settings.aiTaggingSection")}
               </h3>
             </div>
@@ -860,7 +894,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           <div>
             <div className="flex items-center gap-2 mb-3">
               <Filter size={16} className="text-primary" />
-              <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wide">
+              <h3 id="set-scanning" className="text-sm font-semibold text-text-primary uppercase tracking-wide scroll-mt-4">
                 {t("settings.scanningSection")}
               </h3>
             </div>
@@ -880,7 +914,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           <div>
             <div className="flex items-center gap-2 mb-3">
               <FileDown size={16} className="text-primary" />
-              <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wide">
+              <h3 id="set-export" className="text-sm font-semibold text-text-primary uppercase tracking-wide scroll-mt-4">
                 {t("settings.exportSection")}
               </h3>
             </div>
@@ -921,7 +955,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           <div>
             <div className="flex items-center gap-2 mb-3">
               <Wrench size={16} className="text-primary" />
-              <h3 className="text-sm font-semibold text-text-primary uppercase tracking-wide">
+              <h3 id="set-maintenance" className="text-sm font-semibold text-text-primary uppercase tracking-wide scroll-mt-4">
                 {t("settings.maintenanceSection")}
               </h3>
             </div>
@@ -1028,6 +1062,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 </button>
               </div>
             </div>
+          </div>
           </div>
         </div>
 

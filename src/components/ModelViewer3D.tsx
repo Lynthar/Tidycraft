@@ -21,6 +21,13 @@ const SUPPORTED_FORMATS = ["gltf", "glb", "fbx", "obj", "dae", "3ds", "blend", "
 interface ModelViewer3DProps {
   filePath: string;
   extension: string;
+  /// Backend's canonical unique-vertex count (from Rust scan metadata).
+  /// When present it's shown in the footer instead of three.js's own
+  /// count, which inflates for non-indexed OBJ/FBX (the loader expands
+  /// vertices per-face) and so wouldn't match the preview card / analyzer.
+  /// Undefined for formats the backend doesn't parse (dae/3ds/vox) — the
+  /// footer then falls back to the three.js count.
+  vertexCount?: number;
   onFullscreen?: () => void;
 }
 
@@ -40,7 +47,7 @@ interface ModelError {
   fallback?: string;
 }
 
-export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer3DProps) {
+export function ModelViewer3D({ filePath, extension, vertexCount, onFullscreen }: ModelViewer3DProps) {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -600,7 +607,7 @@ export function ModelViewer3D({ filePath, extension, onFullscreen }: ModelViewer
           <div>{t("modelViewer.controls", "Drag to rotate • Scroll to zoom")}</div>
           {stats && (
             <div className="text-[10px] text-text-secondary/70">
-              {stats.format} • {(stats.vertexCount / 1000).toFixed(1)}K vertices • {stats.meshCount} meshes
+              {stats.format} • {(vertexCount ?? stats.vertexCount).toLocaleString()} vertices • {stats.meshCount} meshes
             </div>
           )}
         </div>

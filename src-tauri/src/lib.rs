@@ -1144,6 +1144,14 @@ fn find_unused_assets(project_id: String) -> Result<Vec<String>, String> {
         let mut all_guids: HashMap<String, String> = HashMap::new();
 
         for asset in &scan_result.assets {
+            // Scenes are graph roots (loaded via build settings / the editor /
+            // SceneManager.LoadScene by name), so having no incoming GUID
+            // reference doesn't make a scene unused — drop them as candidates.
+            // They're still parsed as reference *sources* below, so assets a
+            // scene references aren't falsely flagged.
+            if matches!(asset.asset_type, scanner::AssetType::Scene) {
+                continue;
+            }
             if let Some(ref guid) = asset.unity_guid {
                 all_guids.insert(guid.clone(), asset.path.clone());
             }
