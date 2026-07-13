@@ -606,10 +606,12 @@ export function AssetList() {
             assets={assets}
             selectedAsset={selectedAsset}
             selectedPaths={selectedPaths}
+            showCheckbox={showCheckbox}
             gitStatuses={gitStatuses}
             allAssetTags={allAssetTags}
             onAssetClick={handleAssetClick}
             onContextMenu={handleContextMenu}
+            onCheckChange={handleCheckChange}
             getTypeLabel={getTypeLabel}
           />
         )}

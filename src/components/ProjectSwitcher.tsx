@@ -3,6 +3,7 @@ import { ChevronDown, FolderOpen, X } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
+import { useRecentsStore } from "../stores/recentsStore";
 import { formatShortcut, SHORTCUTS } from "../hooks/useKeyboardShortcuts";
 import type { ProjectType } from "../types/asset";
 
@@ -29,6 +30,11 @@ export function ProjectSwitcher() {
 
   const projects = getProjectList();
   const activeProject = projects.find((p) => p.isActive);
+  const recents = useRecentsStore((s) => s.recents);
+  const removeRecent = useRecentsStore((s) => s.remove);
+  // Recents that aren't already open — offer them for reopening.
+  const openPaths = new Set(projects.map((p) => p.path));
+  const recentClosed = recents.filter((r) => !openPaths.has(r.path));
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   // Default-open as onboarding when there is no active project on mount.
@@ -89,6 +95,14 @@ export function ProjectSwitcher() {
       closeProject(projectId);
     },
     [closeProject]
+  );
+
+  const handleOpenRecent = useCallback(
+    (path: string) => {
+      setIsOpen(false);
+      openProject(path);
+    },
+    [openProject]
   );
 
   // Each entry's engine now comes from its own scanResult via getProjectList;
@@ -215,6 +229,77 @@ export function ProjectSwitcher() {
             <div className="tc-projmenu-empty">
               {t("projects.empty", "No projects open")}
             </div>
+          )}
+
+          {recentClosed.length > 0 && (
+            <>
+              <div className="tc-projmenu-divider" />
+              <div className="tc-projmenu-head">
+                <span className="tc-projmenu-title">
+                  {t("projects.recent", "Recent")}
+                </span>
+              </div>
+              <div className="tc-projmenu-list">
+                {recentClosed.map((r) => {
+                  const engine = r.engine ?? undefined;
+                  const engineKey = (engine ?? "generic") as
+                    | "unity"
+                    | "unreal"
+                    | "godot"
+                    | "generic";
+                  return (
+                    <div
+                      key={r.path}
+                      className="tc-projmenu-item"
+                      onClick={() => handleOpenRecent(r.path)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          handleOpenRecent(r.path);
+                        }
+                      }}
+                      role="button"
+                      tabIndex={0}
+                      title={r.path}
+                    >
+                      <span className="tc-projmenu-glyph" data-engine={engineKey}>
+                        {glyphLetter(r.name, engine)}
+                      </span>
+                      <span className="tc-projmenu-body">
+                        <span className="tc-projmenu-name">
+                          <span style={{
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}>
+                            {r.name}
+                          </span>
+                        </span>
+                        <span className="tc-projmenu-path">{r.path}</span>
+                      </span>
+                      <span className="tc-projmenu-meta">
+                        {engine && engine !== "generic" && (
+                          <span className="tc-proj-type" data-engine={engine}>
+                            {engine.toUpperCase()}
+                          </span>
+                        )}
+                        <button
+                          className="tc-projmenu-close"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeRecent(r.path);
+                          }}
+                          title={t("projects.removeRecent", "Remove from recent")}
+                          aria-label={t("projects.removeRecent", "Remove from recent")}
+                        >
+                          <X size={12} />
+                        </button>
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
           )}
 
           <div className="tc-projmenu-divider" />

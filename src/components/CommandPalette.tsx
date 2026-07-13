@@ -29,6 +29,7 @@ import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
 import { useThemeStore } from "../stores/themeStore";
 import { useUiStore } from "../stores/uiStore";
+import { formatShortcut, SHORTCUTS } from "../hooks/useKeyboardShortcuts";
 import { basename } from "../lib/pathUtils";
 import type { AssetType } from "../types/asset";
 
@@ -132,7 +133,7 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
         section: t("commandPalette.section.suggestions"),
         label: t("commandPalette.items.runAnalysis"),
         sub: t("commandPalette.items.runAnalysisSub"),
-        shortcut: "⌘⇧R",
+        shortcut: formatShortcut(SHORTCUTS.analyze),
         icon: <Play size={13} />,
         onSelect: () => {
           runAnalysis();
@@ -158,7 +159,7 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
         id: "rescan",
         section: t("commandPalette.section.suggestions"),
         label: t("commandPalette.items.rescan"),
-        shortcut: "⌘R",
+        shortcut: formatShortcut(SHORTCUTS.rescan),
         icon: <RefreshCw size={13} />,
         onSelect: () => {
           // Same contract as the ⌘R it advertises: rescan() clears the
@@ -193,7 +194,7 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
         id: "go-assets",
         section: t("commandPalette.section.navigate"),
         label: t("commandPalette.items.goAssets"),
-        shortcut: "⌘1",
+        shortcut: formatShortcut(SHORTCUTS.viewAssets),
         icon: <Files size={13} />,
         onSelect: () => {
           setViewMode("assets");
@@ -204,7 +205,7 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
         id: "go-issues",
         section: t("commandPalette.section.navigate"),
         label: t("commandPalette.items.goIssues"),
-        shortcut: "⌘2",
+        shortcut: formatShortcut(SHORTCUTS.viewIssues),
         icon: <AlertTriangle size={13} />,
         onSelect: () => {
           setViewMode("issues");
@@ -215,7 +216,7 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
         id: "go-stats",
         section: t("commandPalette.section.navigate"),
         label: t("commandPalette.items.goStats"),
-        shortcut: "⌘3",
+        shortcut: formatShortcut(SHORTCUTS.viewStats),
         icon: <BarChart3 size={13} />,
         onSelect: () => {
           setViewMode("stats");
@@ -432,7 +433,7 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
       id: "settings",
       section: t("commandPalette.section.actions"),
       label: t("commandPalette.items.settings"),
-      shortcut: "⌘,",
+      shortcut: formatShortcut(SHORTCUTS.settings),
       icon: <Settings size={13} />,
       onSelect: () => {
         setSettingsOpen(true);

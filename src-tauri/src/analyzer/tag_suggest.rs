@@ -51,6 +51,52 @@ const MIN_PATH_HITS: usize = 3;
 const MAX_GROUPS: usize = 12;
 const SAMPLE_FILENAMES: usize = 3;
 
+/// Two suggestion groups whose file sets overlap by more than this Jaccard
+/// ratio *and* whose names are prefix-related are the same pile shown under
+/// two near-synonym labels — merge them.
+const JACCARD_MERGE_THRESHOLD: f32 = 0.8;
+
+/// Jaccard similarity of two file-path lists: |A∩B| / |A∪B|.
+fn jaccard(a: &[String], b: &[String]) -> f32 {
+    if a.is_empty() && b.is_empty() {
+        return 1.0;
+    }
+    let set: HashSet<&String> = a.iter().collect();
+    let inter = b.iter().filter(|p| set.contains(*p)).count();
+    let union = a.len() + b.len() - inter;
+    if union == 0 {
+        0.0
+    } else {
+        inter as f32 / union as f32
+    }
+}
+
+/// First `SAMPLE_FILENAMES` filenames (stems) from a sorted path list — the
+/// preview the UI shows without making the user open the group. Filename only:
+/// full paths are noisy in the tight UI.
+fn samples_from(file_paths: &[String]) -> Vec<String> {
+    file_paths
+        .iter()
+        .take(SAMPLE_FILENAMES)
+        .map(|p| {
+            Path::new(p)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(p)
+                .to_string()
+        })
+        .collect()
+}
+
+/// Suggestion ordering: highest confidence first, then larger group, then name.
+fn by_confidence(a: &TagGroup, b: &TagGroup) -> std::cmp::Ordering {
+    b.confidence
+        .partial_cmp(&a.confidence)
+        .unwrap_or(std::cmp::Ordering::Equal)
+        .then_with(|| b.file_paths.len().cmp(&a.file_paths.len()))
+        .then_with(|| a.name.cmp(&b.name))
+}
+
 const HINT_FILENAME: &str = "filename token";
 const HINT_DIMENSION: &str = "dimension";
 const HINT_PATH: &str = "path segment";
@@ -412,18 +458,7 @@ impl TagSuggester for HeuristicSuggester {
                 let count = paths.len();
                 let mut file_paths: Vec<String> = paths.into_iter().collect();
                 file_paths.sort();
-                let samples: Vec<String> = file_paths
-                    .iter()
-                    .take(SAMPLE_FILENAMES)
-                    .map(|p| {
-                        // Filename only — full paths are noisy in tight UI.
-                        Path::new(p)
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or(p)
-                            .to_string()
-                    })
-                    .collect();
+                let samples = samples_from(&file_paths);
                 let confidence = ((count as f32) / total).min(1.0);
                 let color = pick_color(&name);
                 TagGroup {
@@ -437,16 +472,52 @@ impl TagSuggester for HeuristicSuggester {
             })
             .collect();
 
-        out.sort_by(|a, b| {
-            // Higher confidence first; tie-break by larger group, then by name.
-            b.confidence
-                .partial_cmp(&a.confidence)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| b.file_paths.len().cmp(&a.file_paths.len()))
-                .then_with(|| a.name.cmp(&b.name))
-        });
-        out.truncate(MAX_GROUPS);
-        out
+        // Highest confidence first so the merge below folds any near-duplicate
+        // into the *stronger* label.
+        out.sort_by(by_confidence);
+
+        // Fold near-duplicate groups into one. Different heuristics can surface
+        // the same pile of files under two near-synonym labels — a filename
+        // token ("Generated") and the directory it sits in ("Gen"), say. Two
+        // groups merge only when their file sets overlap past
+        // JACCARD_MERGE_THRESHOLD *and* one name is a prefix of the other, so
+        // genuinely-distinct tags that merely co-occur in the same files
+        // ("Hero" + "Knight" on hero_knight_*.png) are left alone.
+        let mut merged: Vec<TagGroup> = Vec::with_capacity(out.len());
+        for group in out {
+            let dup = merged.iter().position(|kept| {
+                let (a, b) = (group.name.to_lowercase(), kept.name.to_lowercase());
+                if !a.starts_with(&b) && !b.starts_with(&a) {
+                    return false;
+                }
+                // Size-ratio prune: Jaccard can't exceed min/max set size, so
+                // skip the intersection scan when the piles are far apart.
+                let (lo, hi) = (
+                    group.file_paths.len().min(kept.file_paths.len()),
+                    group.file_paths.len().max(kept.file_paths.len()),
+                );
+                hi > 0
+                    && (lo as f32 / hi as f32) > JACCARD_MERGE_THRESHOLD
+                    && jaccard(&group.file_paths, &kept.file_paths) > JACCARD_MERGE_THRESHOLD
+            });
+            match dup {
+                Some(i) => {
+                    let kept = &mut merged[i];
+                    let mut paths: HashSet<String> = kept.file_paths.drain(..).collect();
+                    paths.extend(group.file_paths);
+                    kept.file_paths = paths.into_iter().collect();
+                    kept.file_paths.sort();
+                    kept.confidence = (kept.file_paths.len() as f32 / total).min(1.0);
+                    kept.samples = samples_from(&kept.file_paths);
+                }
+                None => merged.push(group),
+            }
+        }
+
+        // The unions may have nudged confidences; re-sort then cap.
+        merged.sort_by(by_confidence);
+        merged.truncate(MAX_GROUPS);
+        merged
     }
 }
 
@@ -581,6 +652,42 @@ mod tests {
         // "hero" hits 3 → in. "villain" hits 1 → below MIN_TOKEN_HITS.
         assert!(names.contains(&"Hero"));
         assert!(!names.contains(&"Villain"));
+    }
+
+    #[test]
+    fn near_synonym_groups_merge_but_cooccurring_distinct_ones_dont() {
+        // A "Trees/" dir of "tree_*.png" surfaces a path group "Trees" and a
+        // token group "Tree" over the SAME files — one pile, two near-synonym
+        // labels. They must collapse into a single suggestion.
+        let scan = fixture_scan(vec![
+            asset("/proj/Trees/tree_oak.png", "tree_oak.png", AssetType::Texture),
+            asset("/proj/Trees/tree_pine.png", "tree_pine.png", AssetType::Texture),
+            asset("/proj/Trees/tree_birch.png", "tree_birch.png", AssetType::Texture),
+        ]);
+        let groups = HeuristicSuggester.suggest(&scan);
+        let over_all_three = groups.iter().filter(|g| g.file_paths.len() == 3).count();
+        assert_eq!(
+            over_all_three,
+            1,
+            "Tree/Trees near-synonyms over the same files must merge, got {:?}",
+            groups.iter().map(|g| g.name.as_str()).collect::<Vec<_>>()
+        );
+
+        // But two DISTINCT tokens that merely co-occur ("hero" + "knight" on
+        // every hero_knight_*.png) are two useful tags — identical file sets
+        // must NOT collapse them, since neither name is a prefix of the other.
+        let scan2 = fixture_scan(vec![
+            asset("/proj/aa/hero_knight_a.png", "hero_knight_a.png", AssetType::Texture),
+            asset("/proj/bb/hero_knight_b.png", "hero_knight_b.png", AssetType::Texture),
+            asset("/proj/cc/hero_knight_c.png", "hero_knight_c.png", AssetType::Texture),
+        ]);
+        let groups2 = HeuristicSuggester.suggest(&scan2);
+        let names: Vec<&str> = groups2.iter().map(|g| g.name.as_str()).collect();
+        assert!(
+            names.contains(&"Hero") && names.contains(&"Knight"),
+            "distinct co-occurring tokens must stay separate, got {:?}",
+            names
+        );
     }
 
     #[test]

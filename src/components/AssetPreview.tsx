@@ -324,6 +324,7 @@ export function AssetPreview() {
           <ModelViewer3D
             filePath={selectedAsset.path}
             extension={selectedAsset.extension}
+            vertexCount={selectedAsset.metadata?.vertex_count}
             onFullscreen={() => setModelLightboxOpen(true)}
           />
         );
@@ -865,6 +866,7 @@ export function AssetPreview() {
           isOpen={modelLightboxOpen}
           filePath={selectedAsset.path}
           extension={selectedAsset.extension}
+          vertexCount={selectedAsset.metadata?.vertex_count}
           modelName={selectedAsset.name}
           onClose={() => setModelLightboxOpen(false)}
         />

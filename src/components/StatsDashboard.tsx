@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
+import { useThemeStore } from "../stores/themeStore";
 import {
   PieChart,
   Pie,
@@ -38,19 +39,51 @@ interface ProjectStats {
   directory_sizes: Record<string, number>;
 }
 
-const TYPE_COLORS: Record<string, string> = {
-  texture: "#4ade80",
-  model: "#60a5fa",
-  audio: "#facc15",
-  video: "#fb7185",
-  animation: "#a78bfa",
-  material: "#f472b6",
-  prefab: "#22d3d1",
-  scene: "#fb923c",
-  script: "#ef4444",
-  data: "#94a3b8",
-  other: "#6b7280",
+// Asset-type palette keys — mirror the `--c-<type>` design tokens
+// (src/styles/redesign-tokens-v2.css) so the charts share the app's colors
+// instead of a private hex set.
+const ASSET_TYPE_KEYS = [
+  "texture", "model", "audio", "video", "animation", "material",
+  "prefab", "scene", "script", "data", "other",
+] as const;
+
+interface ChartColors {
+  /// `--c-<type>` resolved to a concrete value, keyed by asset type.
+  types: Record<string, string>;
+  primary: string;
+  accent: string;
+  fallback: string;
+}
+
+/// Resolve the design tokens the charts need into concrete color strings.
+/// recharts writes `fill` as an SVG presentation attribute, which — unlike an
+/// inline `style` — does NOT resolve CSS `var()`, so we hand it the computed
+/// `oklch(...)` literals instead. data-theme lives on <html> and custom
+/// properties inherit, so reading documentElement is correct in both themes.
+function resolveChartColors(): ChartColors {
+  const cs = getComputedStyle(document.documentElement);
+  const read = (name: string) => cs.getPropertyValue(name).trim();
+  const types: Record<string, string> = {};
+  for (const k of ASSET_TYPE_KEYS) types[k] = read(`--c-${k}`);
+  return {
+    types,
+    primary: read("--primary"),
+    accent: read("--accent"),
+    fallback: read("--c-other"),
+  };
+}
+
+// Shared recharts tooltip styling — token-driven so it theme-flips (these are
+// inline styles, where `var()` DOES resolve). Replaces the hardcoded dark
+// `#1e1e2e` box that read as a patch in light mode.
+const TOOLTIP_CONTENT_STYLE = {
+  backgroundColor: "var(--panel-2)",
+  border: "1px solid var(--line)",
+  borderRadius: "8px",
+  color: "var(--text)",
 };
+const TOOLTIP_LABEL_STYLE = { color: "var(--text)" };
+const TOOLTIP_ITEM_STYLE = { color: "var(--text-2)" };
 
 const SIZE_ORDER = ["< 1 KB", "1-10 KB", "10-100 KB", "100 KB - 1 MB", "1-10 MB", "> 10 MB"];
 
@@ -105,6 +138,13 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
   const [unused, setUnused] = useState<string[] | null>(null);
   const [unusedLoading, setUnusedLoading] = useState(false);
   const [unusedError, setUnusedError] = useState<string | null>(null);
+
+  // Chart palette resolved from the design tokens, recomputed on theme flip
+  // so the charts share the app's colors (recharts SVG fills can't consume
+  // var(); see resolveChartColors). applyTheme sets data-theme before the
+  // store updates, so this reads the new theme's values on re-render.
+  const theme = useThemeStore((s) => s.theme);
+  const chartColors = useMemo(() => resolveChartColors(), [theme]);
 
   // Engine info card: cheap marker-file parse backend-side
   // (ProjectVersion.txt / project.godot / *.uproject). `null` hides the
@@ -233,7 +273,7 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
   const typeData = Object.entries(stats.type_distribution).map(([name, value]) => ({
     name: t(`assetTypes.${name}`),
     value,
-    color: TYPE_COLORS[name] || "#6b7280",
+    color: chartColors.types[name] || chartColors.fallback,
   }));
 
   const sizeData = SIZE_ORDER
@@ -400,11 +440,9 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
                 ))}
               </Pie>
               <Tooltip
-                contentStyle={{
-                  backgroundColor: "#1e1e2e",
-                  border: "1px solid #313244",
-                  borderRadius: "8px",
-                }}
+                contentStyle={TOOLTIP_CONTENT_STYLE}
+                labelStyle={TOOLTIP_LABEL_STYLE}
+                itemStyle={TOOLTIP_ITEM_STYLE}
                 formatter={(value) => [value, t("stats.count")]}
               />
               <Legend />
@@ -420,13 +458,11 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
               <XAxis dataKey="name" tick={{ fontSize: 10 }} />
               <YAxis tick={{ fontSize: 10 }} />
               <Tooltip
-                contentStyle={{
-                  backgroundColor: "#1e1e2e",
-                  border: "1px solid #313244",
-                  borderRadius: "8px",
-                }}
+                contentStyle={TOOLTIP_CONTENT_STYLE}
+                labelStyle={TOOLTIP_LABEL_STYLE}
+                itemStyle={TOOLTIP_ITEM_STYLE}
               />
-              <Bar dataKey="count" fill="#60a5fa" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="count" fill={chartColors.primary} radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -436,17 +472,15 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
       <div className="bg-card-bg border border-border rounded-lg p-4">
         <h3 className="text-sm font-medium mb-4">{t("stats.topExtensions")}</h3>
         <ResponsiveContainer width="100%" height={150}>
-          <BarChart data={extensionData} layout="vertical">
+          <BarChart data={extensionData} layout="vertical" margin={{ top: 8, right: 12, bottom: 2, left: 0 }}>
             <XAxis type="number" tick={{ fontSize: 10 }} />
-            <YAxis dataKey="name" type="category" tick={{ fontSize: 10 }} width={50} />
+            <YAxis dataKey="name" type="category" tick={{ fontSize: 10 }} width={50} interval={0} />
             <Tooltip
-              contentStyle={{
-                backgroundColor: "#1e1e2e",
-                border: "1px solid #313244",
-                borderRadius: "8px",
-              }}
+              contentStyle={TOOLTIP_CONTENT_STYLE}
+              labelStyle={TOOLTIP_LABEL_STYLE}
+              itemStyle={TOOLTIP_ITEM_STYLE}
             />
-            <Bar dataKey="count" fill="#a78bfa" radius={[0, 4, 4, 0]} />
+            <Bar dataKey="count" fill={chartColors.accent} radius={[0, 4, 4, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -462,7 +496,10 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
                 <span className="truncate">{file.name}</span>
                 <span
                   className="px-1.5 py-0.5 text-[10px] rounded"
-                  style={{ backgroundColor: `${TYPE_COLORS[file.asset_type]}20`, color: TYPE_COLORS[file.asset_type] }}
+                  style={{
+                    backgroundColor: `color-mix(in oklab, var(--c-${file.asset_type}, var(--c-other)) 15%, transparent)`,
+                    color: `var(--c-${file.asset_type}, var(--c-other))`,
+                  }}
                 >
                   {file.asset_type}
                 </span>

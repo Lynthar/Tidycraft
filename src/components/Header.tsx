@@ -60,14 +60,22 @@ export function Header({ searchInputRef }: HeaderProps) {
   const [refreshingGit, setRefreshingGit] = useState(false);
   const langDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Manual git-status refresh. The spinner is decoupled from the actual IO
-  // (a fixed 600ms) so users see immediate feedback even on small repos
-  // where the refresh completes near-instantly. Errors are swallowed by
-  // refreshGitInfo's own try/catch.
-  const handleGitRefresh = () => {
+  // Manual git-status refresh. The spinner stays up until the git IO actually
+  // settles, but for at least 600ms so tiny repos (near-instant refresh) still
+  // show clear feedback instead of a flicker — the old fixed 600ms timeout
+  // could stop the spinner while a slower refresh was still running. Errors
+  // are swallowed by refreshGitInfo's own try/catch.
+  const handleGitRefresh = async () => {
+    if (refreshingGit) return;
     setRefreshingGit(true);
-    refreshGitInfo();
-    setTimeout(() => setRefreshingGit(false), 600);
+    try {
+      await Promise.all([
+        refreshGitInfo(),
+        new Promise((resolve) => setTimeout(resolve, 600)),
+      ]);
+    } finally {
+      setRefreshingGit(false);
+    }
   };
 
   // Rescan = clear the scan cache + force re-open, via the shared store action

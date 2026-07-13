@@ -20,6 +20,9 @@ interface ModelLightboxProps {
   isOpen: boolean;
   filePath: string;
   extension: string;
+  /// Canonical unique-vertex count from backend metadata; preferred over
+  /// three.js's loader-dependent count in the footer. See ModelViewer3D.
+  vertexCount?: number;
   modelName: string;
   onClose: () => void;
 }
@@ -40,7 +43,7 @@ interface ModelError {
   fallback?: string;
 }
 
-export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose }: ModelLightboxProps) {
+export function ModelLightbox({ isOpen, filePath, extension, vertexCount, modelName, onClose }: ModelLightboxProps) {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -605,7 +608,7 @@ export function ModelLightbox({ isOpen, filePath, extension, modelName, onClose 
         <div className="flex items-center gap-1">
           {stats && (
             <span className="text-xs text-white/60 mr-4">
-              {stats.format} • {(stats.vertexCount / 1000).toFixed(1)}K vertices • {stats.meshCount} meshes
+              {stats.format} • {(vertexCount ?? stats.vertexCount).toLocaleString()} vertices • {stats.meshCount} meshes
             </span>
           )}
           <button

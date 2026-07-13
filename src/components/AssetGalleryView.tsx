@@ -132,11 +132,14 @@ interface CardProps {
   asset: AssetInfo;
   index: number;
   isSelected: boolean;
+  isChecked: boolean;
+  showCheckbox: boolean;
   gitStatus?: GitFileStatus;
   showGitStatusIndicators: boolean;
   assetTags: AssetTagsMap[string];
   onClick: (asset: AssetInfo, index: number, e: React.MouseEvent) => void;
   onContextMenu: (e: React.MouseEvent, asset: AssetInfo) => void;
+  onCheckChange: (checked: boolean) => void;
   typeLabel: string;
   t: (key: string) => string;
 }
@@ -145,11 +148,14 @@ function Card({
   asset,
   index,
   isSelected,
+  isChecked,
+  showCheckbox,
   gitStatus,
   showGitStatusIndicators,
   assetTags,
   onClick,
   onContextMenu,
+  onCheckChange,
   typeLabel,
   t,
 }: CardProps) {
@@ -170,9 +176,28 @@ function Card({
     <div
       className="tc-card"
       data-selected={isSelected ? "true" : undefined}
+      data-checked={isChecked ? "true" : undefined}
+      data-selecting={showCheckbox ? "true" : undefined}
       onClick={(e) => onClick(asset, index, e)}
       onContextMenu={(e) => onContextMenu(e, asset)}
     >
+      {/* Batch-select checkbox — top-left, revealed on hover / when checked /
+          while a batch selection is active. Swaps in for the type chip so the
+          corner isn't crowded. Clicking it toggles batch selection only, not
+          the single-click preview. */}
+      <span className="tc-card-check">
+        <input
+          type="checkbox"
+          checked={isChecked}
+          onChange={(e) => {
+            e.stopPropagation();
+            onCheckChange(e.target.checked);
+          }}
+          onClick={(e) => e.stopPropagation()}
+          className="w-4 h-4 accent-primary cursor-pointer"
+          aria-label={t("assetList.selectForBatch")}
+        />
+      </span>
       <CardThumb asset={asset} />
       <span className="tc-card-typechip" data-type={asset.asset_type}>
         <span className="tc-card-typedot" />
@@ -229,10 +254,12 @@ export interface AssetGalleryViewProps {
   assets: AssetInfo[];
   selectedAsset: AssetInfo | null;
   selectedPaths: Set<string>;
+  showCheckbox: boolean;
   gitStatuses: GitStatusMap;
   allAssetTags: AssetTagsMap;
   onAssetClick: (asset: AssetInfo, index: number, e: React.MouseEvent) => void;
   onContextMenu: (e: React.MouseEvent, asset: AssetInfo) => void;
+  onCheckChange: (path: string, checked: boolean) => void;
   getTypeLabel: (type: AssetType) => string;
 }
 
@@ -240,10 +267,12 @@ export function AssetGalleryView({
   assets,
   selectedAsset,
   selectedPaths,
+  showCheckbox,
   gitStatuses,
   allAssetTags,
   onAssetClick,
   onContextMenu,
+  onCheckChange,
   getTypeLabel,
 }: AssetGalleryViewProps) {
   const { t } = useTranslation();
@@ -341,20 +370,25 @@ export function AssetGalleryView({
             >
               {assets.slice(startIdx, endIdx).map((asset, i) => {
                 const idx = startIdx + i;
-                const isSelected =
-                  selectedAsset?.path === asset.path ||
-                  selectedPaths.has(asset.path);
+                // Preview highlight (single-click) and batch membership
+                // (checkbox) are now distinct: the ring means "previewed", the
+                // checkbox means "selected for a batch action".
+                const isSelected = selectedAsset?.path === asset.path;
+                const isChecked = selectedPaths.has(asset.path);
                 return (
                   <Card
                     key={asset.path}
                     asset={asset}
                     index={idx}
                     isSelected={isSelected}
+                    isChecked={isChecked}
+                    showCheckbox={showCheckbox}
                     gitStatus={gitStatuses[asset.path]}
                     showGitStatusIndicators={showGitStatusIndicators}
                     assetTags={allAssetTags[asset.path] || []}
                     onClick={onAssetClick}
                     onContextMenu={onContextMenu}
+                    onCheckChange={(checked) => onCheckChange(asset.path, checked)}
                     typeLabel={getTypeLabel(asset.asset_type)}
                     t={t}
                   />

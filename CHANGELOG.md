@@ -13,6 +13,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **Exports go through the native save dialog** and report the outcome as a toast (with a "Show in folder" action) instead of silently dropping files into Downloads and swallowing failures.
 - **The HTML report's row caps are configurable** (Settings → Export; 0 = unlimited). The report used to hard-truncate at 100 issues / 500 assets with no recourse on large projects; the truncation footer now names the active limit and points at the setting.
 - **Naming-prefix rules skip DCC source files.** A `.blend` isn't a runtime mesh and a `.psd` isn't a shipped texture: `model_prefix` / `texture_prefix` conventions (`SM_` / `T_`) no longer flag authoring sources, which strict configs used to flood with false "Missing Prefix" warnings. The other naming checks (forbidden characters, length, case) still apply to sources.
+- **Command-palette shortcuts are platform-native.** They printed macOS glyphs (`⌘⇧R`) on every OS; Windows / Linux now read `Ctrl+Shift+R`, and `Cmd` / `Ctrl` + `,` opens Settings (it was labelled but bound to nothing).
+- **Stat charts use the app's palette and theme.** The pie and bars pull the same asset-type colours as the rest of the UI instead of a private hex set, the tooltip follows the light / dark theme instead of a hardcoded dark box, and the Top Extensions chart no longer drops its first row's axis label.
+- **Batch-select checkboxes are discoverable.** A selection checkbox now reveals on row / card hover (and stays while a selection is active) instead of only appearing after the first Ctrl-click, so multi-select isn't a hidden gesture — clicking a row still previews, the checkbox is a separate visible affordance.
 
 ### Added
 - **Duplicate groups have a "Clean up" action.** Pick the copy to keep right on the group card — every other member goes to the system recycle bin (Unity `.meta` sidecars follow), the resolved card disappears, and the shared delete confirmation reports any per-file failures inline. Duplicate detection graduates from reporting to actually tidying.
@@ -23,9 +26,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **A directory-scope bar** above the asset list whenever a folder scope is active (set by the tree or issue-list Locate): scoped folder, asset count, and one-click "Show entire project". Empty states now say why the list is empty — no search matches, no filter matches, or an empty folder — and offer the same escape hatch.
 - **Escape, focus trapping, initial focus, and `aria-modal` on every blocking dialog** via a shared modal shell; focus returns to the opener on close, and the delete confirmation starts on Cancel instead of the destructive button.
 - **A "Manage Tags" entry in the asset-preview tag picker**, so an empty tag library is no longer a dead end.
+- **Recent projects in the switcher.** Projects you've opened are remembered per machine and offered under a "Recent" section, so reopening one doesn't mean re-navigating the folder picker; the first-launch copy no longer points at a "recent project" that doesn't exist yet.
+- **A section nav in Settings.** The settings panel had grown into one long scroll — it now has a left-hand table of contents that jumps to each section.
+- **First launch follows the OS language.** With no saved preference, a `zh-*` system starts in Chinese instead of always defaulting to English; an explicit choice still wins.
 
 ### Fixed
 - **Selecting the project root in the tree truly means "entire project"** — the root path and "no scope" used to be two distinct states, so the tree highlight, the type-pill counts, and the visible list could disagree after a Locate jump.
+- **Scenes aren't flagged as unused.** A `.unity` / `.tscn` scene is a graph root — loaded from build settings, by name at runtime, or the editor — so having no incoming reference no longer marks it "unused". Scenes still count as references to the assets *they* use.
+- **A model's vertex count is consistent.** The preview panel and the 3D viewer disagreed for the same mesh (the viewer counted three.js's per-face-expanded vertices); the viewer now shows the same canonical count as everywhere else.
+- **Short audio clips show a real duration.** Sub-10-second SFX rendered as `0:00` under floor-rounded `m:ss`; they now show one decimal (`0.4s`).
+- **Near-synonym tag suggestions merge.** The heuristic suggester surfaced the same pile of files under two labels (a filename token and the directory it sits in); groups that overlap heavily and share a name prefix now collapse into one.
+- **The manual git-refresh spinner tracks the actual refresh** instead of a fixed 600 ms, so it can't report "done" while a slow refresh is still running.
+- **The learning cost card shows the cost, not a button label.** For local (Ollama) providers it read "Continue (local, free)" — the button's own text — where a cost belongs; it now says "Free — runs locally".
 
 ## [0.7.0] - 2026-07-05
 

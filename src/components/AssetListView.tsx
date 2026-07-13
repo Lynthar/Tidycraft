@@ -13,7 +13,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { useColumnStore, type ColumnId } from "../stores/columnStore";
 import { useSettingsStore } from "../stores/settingsStore";
-import { cn, formatFileSize } from "../lib/utils";
+import { cn, formatFileSize, formatDuration } from "../lib/utils";
 import type {
   AssetInfo,
   AssetType,
@@ -157,13 +157,9 @@ function AssetRow({
       case "faces":
         return asset.metadata?.face_count?.toLocaleString() ?? "-";
       case "duration":
-        if (asset.metadata?.duration_secs) {
-          const sec = asset.metadata.duration_secs;
-          const min = Math.floor(sec / 60);
-          const s = Math.floor(sec % 60);
-          return `${min}:${s.toString().padStart(2, "0")}`;
-        }
-        return "-";
+        return asset.metadata?.duration_secs
+          ? formatDuration(asset.metadata.duration_secs)
+          : "-";
       case "sampleRate":
         return asset.metadata?.sample_rate
           ? `${(asset.metadata.sample_rate / 1000).toFixed(1)} kHz`
@@ -184,19 +180,27 @@ function AssetRow({
       onClick={onClick}
       onContextMenu={onContextMenu}
     >
-      {showCheckbox && (
-        <div className="w-8 py-2 px-2 shrink-0">
-          <input
-            type="checkbox"
-            checked={isChecked}
-            onChange={(e) => {
-              e.stopPropagation();
-              onCheckChange(e.target.checked);
-            }}
-            className="w-4 h-4 accent-primary cursor-pointer"
-          />
-        </div>
-      )}
+      {/* Batch-select checkbox. The 32px lane is always reserved (no layout
+          shift); the box is revealed on row hover, when the row is checked, or
+          while a batch selection is active (data-force) — see `.tc-row-check`
+          in redesign-components.css. Clicking it toggles batch selection only,
+          not the single-click preview. */}
+      <div
+        className="tc-row-check w-8 py-2 px-2 shrink-0"
+        data-force={showCheckbox ? "true" : undefined}
+      >
+        <input
+          type="checkbox"
+          checked={isChecked}
+          onChange={(e) => {
+            e.stopPropagation();
+            onCheckChange(e.target.checked);
+          }}
+          onClick={(e) => e.stopPropagation()}
+          className="w-4 h-4 accent-primary cursor-pointer"
+          aria-label={t("assetList.selectForBatch")}
+        />
+      </div>
       <div
         className="py-2 px-3 shrink-0 min-w-0 overflow-hidden"
         style={{ width: columnWidths.name }}
@@ -392,19 +396,18 @@ export function AssetListView({
     return map;
   }, [columns]);
 
-  // Total intrinsic row width = sum of all visible columns + checkbox lane
-  // (when active) + the trailing ColumnConfigDropdown wrapper (~36px).
-  // Used to size the header and the virtualizer's spacer so the row can
-  // exceed the viewport horizontally — critical for column resize: with a
-  // shrink-0 layout, growing one column has to make total content wider,
-  // not push siblings around.
+  // Total intrinsic row width = sum of all visible columns + the batch-select
+  // checkbox lane (always reserved, 32px) + the trailing ColumnConfigDropdown
+  // wrapper (~36px). Used to size the header and the virtualizer's spacer so
+  // the row can exceed the viewport horizontally — critical for column resize:
+  // with a shrink-0 layout, growing one column has to make total content
+  // wider, not push siblings around.
   const totalRowWidth = useMemo(() => {
-    let sum = 0;
-    if (showCheckbox) sum += 32;
+    let sum = 32; // batch-select checkbox lane (always reserved)
     for (const id of visibleColumns) sum += columnWidths[id] ?? 0;
     sum += 36; // ColumnConfigDropdown trailing slot
     return sum;
-  }, [visibleColumns, columnWidths, showCheckbox]);
+  }, [visibleColumns, columnWidths]);
 
   // Max vertex count across the dataset for the inline `.tc-bar` viz.
   // Recomputed when assets change; for 10k+ rows this is a single pass
@@ -447,7 +450,8 @@ export function AssetListView({
         className="tc-list-header"
         style={{ width: totalRowWidth, minWidth: "100%" }}
       >
-        {showCheckbox && <div className="w-8 py-2 px-2 shrink-0" />}
+        {/* Header spacer for the always-reserved checkbox lane. */}
+        <div className="w-8 py-2 px-2 shrink-0" />
         <div
           className="py-2 px-3 shrink-0 flex items-center gap-1 cursor-pointer hover:text-text-primary transition-colors select-none relative overflow-hidden"
           style={{ width: columnWidths.name }}

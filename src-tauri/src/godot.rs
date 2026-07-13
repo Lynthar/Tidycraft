@@ -391,10 +391,16 @@ pub fn find_unused_godot_assets(root_path: &str, assets: &[AssetInfo]) -> Vec<St
         }
     }
 
-    // 3. Assets whose res:// path nobody referenced (skipping Godot metadata).
+    // 3. Assets whose res:// path nobody referenced (skipping Godot metadata
+    //    and scenes). Scenes are graph roots — the main scene, scenes loaded
+    //    via (often dynamic) change_scene_to_file()/load(), or opened straight
+    //    from the editor — so "no incoming res:// reference" doesn't make a
+    //    scene unused. They still count as reference *sources* in step 2, so
+    //    assets a scene references aren't falsely flagged.
     assets
         .iter()
         .filter(|a| !is_godot_metadata(&a.extension))
+        .filter(|a| !matches!(a.asset_type, crate::scanner::AssetType::Scene))
         .filter(|a| match asset_to_res_path(&a.path, root) {
             Some(res) => !referenced.contains(&res),
             None => false, // outside the project root — not res://-addressable
@@ -745,6 +751,7 @@ config/name="Minimal"
             mk("main.tscn", "tscn"),
             mk("hero.png", "png"),
             mk("orphan.png", "png"),
+            AssetInfo { asset_type: AssetType::Scene, ..mk("level_2.tscn", "tscn") },
         ];
 
         let unused = find_unused_godot_assets(&root.to_string_lossy(), &assets);
@@ -754,6 +761,10 @@ config/name="Minimal"
         assert!(!unused.iter().any(|p| p.ends_with("hero.png")));
         // main.tscn is the entry point -> not unused.
         assert!(!unused.iter().any(|p| p.ends_with("main.tscn")));
+        // level_2.tscn is a scene nobody references, but scenes are graph
+        // roots (loaded dynamically / from the editor), so it must NOT be
+        // flagged unused.
+        assert!(!unused.iter().any(|p| p.ends_with("level_2.tscn")));
     }
 
     #[test]
