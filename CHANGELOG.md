@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-14
+
 ### Changed
 - **Duplicate findings are one issue per content group** — every member is listed on the issue (original first) instead of one issue per extra copy. A real library with a 3,178-file identical group used to balloon the analysis payload past a gigabyte and freeze the app to a black screen; the same run now completes in seconds, and the issue list shows one collapsible group card with per-member Locate actions (rendered members capped at 200).
 - **The preview panel is permanently mounted**, collapsing to zero width outside the assets view instead of mounting on selection. First selection used to land it at near-zero width (react-resizable-panels doesn't re-apply `defaultSize` to late-mounted panels) and every deselect→reselect reshuffled all three panels.
@@ -16,6 +18,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **Command-palette shortcuts are platform-native.** They printed macOS glyphs (`⌘⇧R`) on every OS; Windows / Linux now read `Ctrl+Shift+R`, and `Cmd` / `Ctrl` + `,` opens Settings (it was labelled but bound to nothing).
 - **Stat charts use the app's palette and theme.** The pie and bars pull the same asset-type colours as the rest of the UI instead of a private hex set, the tooltip follows the light / dark theme instead of a hardcoded dark box, and the Top Extensions chart no longer drops its first row's axis label.
 - **Batch-select checkboxes are discoverable.** A selection checkbox now reveals on row / card hover (and stays while a selection is active) instead of only appearing after the first Ctrl-click, so multi-select isn't a hidden gesture — clicking a row still previews, the checkbox is a separate visible affordance.
+- **The dependency graph shows direction and broken references.** Edges now carry arrowheads (an asset points at what it uses), and a reference whose target isn't in the project renders as a red "missing" node instead of being silently dropped — so a dangling GUID / `res://` link is visible in the graph, not only in the issues list.
+- **Model rows surface their vertex count where dimensions go.** The list's Dimensions column showed a bare "—" for meshes (which have no pixel width/height); it now shows their vertex count there (`1,234 v`) while images keep their W×H, and the dedicated Vertices column stays available (off by default).
+- **The type-filter pill row hints that it scrolls.** When the pills overflow a narrow window the right edge fades instead of hard-clipping the last one, so it's clear there are more to reach (the scrollbar is deliberately hidden).
+- **The delete dialog notes that trashing isn't undoable in-app.** Moving files to the recycle bin was never part of the undo history; the confirmation now says to restore from the recycle bin rather than expecting Ctrl+Z.
 
 ### Added
 - **Duplicate groups have a "Clean up" action.** Pick the copy to keep right on the group card — every other member goes to the system recycle bin (Unity `.meta` sidecars follow), the resolved card disappears, and the shared delete confirmation reports any per-file failures inline. Duplicate detection graduates from reporting to actually tidying.
