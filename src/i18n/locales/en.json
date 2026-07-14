@@ -61,7 +61,6 @@
     "clearSelection": "Clear selection",
     "viewList": "List view",
     "viewGrid": "Grid view",
-    "galleryPending": "Gallery view coming next — {{count}} items will appear here.",
     "sortLabel": "Sort",
     "sortToggle": "Toggle sort direction",
     "noSearchResults": "No matches for \"{{query}}\"",
@@ -69,7 +68,8 @@
     "noMatchingFilters": "No assets match the current filters",
     "scopeShowAll": "Show entire project",
     "selectForBatch": "Select for batch actions",
-    "dccSourceFile": "Source file"
+    "dccSourceFile": "Source file",
+    "vertsInline": "{{n}} v"
   },
   "exportToast": {
     "saved": "Exported {{name}}",
@@ -173,7 +173,8 @@
     "close": "Close",
     "loading": "Loading dependency graph…",
     "empty": "No dependency relationships found for this asset.",
-    "hint": "Click a node to jump to that asset. Up to 2 hops; heuristic — some dynamic / code references may be missing."
+    "hint": "Click a node to jump to that asset. Up to 2 hops; heuristic — some dynamic / code references may be missing. Broken references show in red.",
+    "missingRef": "Missing reference"
   },
   "statusBar": {
     "ready": "Ready",
@@ -400,7 +401,7 @@
   "deleteConfirm": {
     "titleSingle": "Move file to trash?",
     "titleBatch": "Move {{count}} files to trash?",
-    "hint": "Files are sent to your system recycle bin. You can restore them from there.",
+    "hint": "Files are sent to your system recycle bin — restore them from there. This isn't part of the in-app undo history (Ctrl+Z won't bring them back).",
     "andMore": "and {{count}} more",
     "confirm": "Move to Trash",
     "deleting": "Deleting...",

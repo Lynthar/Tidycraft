@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { ModalShell } from "./ModalShell";
 import { X } from "lucide-react";
-import { ReactFlow, Background, Controls, type Node, type Edge } from "@xyflow/react";
+import { ReactFlow, Background, Controls, MarkerType, type Node, type Edge } from "@xyflow/react";
 import dagre from "@dagrejs/dagre";
 import "@xyflow/react/dist/style.css";
 import { useUiStore } from "../stores/uiStore";
@@ -109,25 +109,40 @@ export function DependencyGraphModal() {
     const rfNodes: Node[] = Array.from(nodeIds)
       .map((id) => byId.get(id))
       .filter((n): n is DependencyNode => !!n)
-      .map((n) => ({
-        id: n.id,
-        position: { x: 0, y: 0 },
-        data: { label: n.name, path: n.path },
-        style: {
-          width: NODE_W,
-          fontSize: 11,
-          padding: 6,
-          borderRadius: 6,
-          background: "var(--panel-2)",
-          color: "var(--text-3)",
-          border: `1px solid ${n.id === center.id ? "var(--primary)" : "var(--line)"}`,
-        },
-      }));
+      .map((n) => {
+        const isCenter = n.id === center.id;
+        return {
+          id: n.id,
+          position: { x: 0, y: 0 },
+          data: { label: n.missing ? t("depGraph.missingRef") : n.name, path: n.path },
+          style: {
+            width: NODE_W,
+            fontSize: 11,
+            padding: 6,
+            borderRadius: 6,
+            // A missing (dangling) reference reads red; div style resolves CSS
+            // var() fine (unlike the SVG edge marker). Center node keeps the
+            // primary ring, everything else the neutral line.
+            background: n.missing
+              ? "color-mix(in oklab, var(--err) 14%, var(--panel-2))"
+              : "var(--panel-2)",
+            color: n.missing ? "var(--err)" : "var(--text-3)",
+            border: `1px solid ${
+              n.missing ? "var(--err)" : isCenter ? "var(--primary)" : "var(--line)"
+            }`,
+          },
+        };
+      });
 
     const rfEdges: Edge[] = subEdges.map((e, i) => ({
       id: `e${i}`,
       source: e.from,
       target: e.to,
+      // Arrowhead at the target: an edge means "source uses target", so the
+      // graph now reads directionally. No custom colour — the SVG marker
+      // attribute wouldn't resolve a CSS var() (same gotcha as recharts fills),
+      // and React Flow's default grey already matches the edge line.
+      markerEnd: { type: MarkerType.ArrowClosed },
     }));
 
     return { nodes: layoutLR(rfNodes, rfEdges), edges: rfEdges };

@@ -1038,6 +1038,10 @@ pub struct DependencyNode {
     pub path: String,
     pub name: String,
     pub file_type: String,
+    /// True for a dangling reference — a Unity GUID / Godot `res://` target that
+    /// no asset in the project provides. The graph renders these red; `path` is
+    /// empty (there is nothing to locate).
+    pub missing: bool,
 }
 
 #[derive(Serialize)]
@@ -1089,22 +1093,38 @@ fn get_unity_dependencies(project_id: String) -> Result<DependencyGraph, String>
                     path: asset.path.clone(),
                     name: asset.name.clone(),
                     file_type: format!("{:?}", asset.asset_type).to_lowercase(),
+                    missing: false,
                 });
             }
         }
 
+        // Dangling references: a referenced GUID with no asset in the project.
+        // Previously these edges were dropped, which hid the break; now each
+        // distinct missing GUID becomes one node (deduped) flagged `missing`, so
+        // the graph renders it in red with its incoming edge intact.
+        let mut missing_guids: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
         for asset in &scan_result.assets {
             let ext = asset.extension.to_lowercase();
             if UNITY_REFERENCEABLE_EXTS.contains(&ext.as_str()) {
                 if let Some(unity_info) = unity::parse_unity_file(Path::new(&asset.path)) {
                     if let Some(ref from_guid) = asset.unity_guid {
                         for reference in &unity_info.references {
-                            if guid_to_path.contains_key(&reference.guid) {
-                                edges.push(DependencyEdge {
-                                    from: from_guid.clone(),
-                                    to: reference.guid.clone(),
+                            if !guid_to_path.contains_key(&reference.guid)
+                                && missing_guids.insert(reference.guid.clone())
+                            {
+                                nodes.push(DependencyNode {
+                                    id: reference.guid.clone(),
+                                    path: String::new(),
+                                    name: reference.guid.clone(),
+                                    file_type: "missing".to_string(),
+                                    missing: true,
                                 });
                             }
+                            edges.push(DependencyEdge {
+                                from: from_guid.clone(),
+                                to: reference.guid.clone(),
+                            });
                         }
                     }
                 }
@@ -1206,15 +1226,28 @@ fn get_godot_dependencies(project_id: String) -> Result<DependencyGraph, String>
                     path: asset.path.clone(),
                     name: asset.name.clone(),
                     file_type: format!("{:?}", asset.asset_type).to_lowercase(),
+                    missing: false,
                 });
             }
         }
 
-        let edges: Vec<DependencyEdge> = godot::godot_dependency_edges(root, &scan_result.assets)
-            .into_iter()
-            .filter(|(_from, to)| known.contains(to))
-            .map(|(from, to)| DependencyEdge { from, to })
-            .collect();
+        // Keep every edge; a `res://` target with no known asset is a dangling
+        // reference — surface it as one `missing` node (deduped) instead of
+        // dropping the edge, so a broken scene / resource ref shows in the graph.
+        let mut edges: Vec<DependencyEdge> = Vec::new();
+        let mut missing: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for (from, to) in godot::godot_dependency_edges(root, &scan_result.assets) {
+            if !known.contains(&to) && missing.insert(to.clone()) {
+                nodes.push(DependencyNode {
+                    id: to.clone(),
+                    path: String::new(),
+                    name: to.clone(),
+                    file_type: "missing".to_string(),
+                    missing: true,
+                });
+            }
+            edges.push(DependencyEdge { from, to });
+        }
 
         Ok(DependencyGraph { nodes, edges })
     })
