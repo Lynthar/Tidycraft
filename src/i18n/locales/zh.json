@@ -61,7 +61,6 @@
     "clearSelection": "清除选择",
     "viewList": "列表视图",
     "viewGrid": "网格视图",
-    "galleryPending": "网格视图即将上线 — 这里会显示 {{count}} 个资产。",
     "sortLabel": "排序",
     "sortToggle": "切换排序方向",
     "noSearchResults": "没有匹配 “{{query}}” 的资产",
@@ -69,7 +68,8 @@
     "noMatchingFilters": "当前筛选条件下没有资产",
     "scopeShowAll": "显示整个项目",
     "selectForBatch": "选择以批量操作",
-    "dccSourceFile": "源文件"
+    "dccSourceFile": "源文件",
+    "vertsInline": "{{n}} 顶点"
   },
   "exportToast": {
     "saved": "已导出 {{name}}",
@@ -173,7 +173,8 @@
     "close": "关闭",
     "loading": "正在加载依赖图…",
     "empty": "未找到该资源的依赖关系。",
-    "hint": "点击节点跳转到对应资源。最多 2 跳；启发式——部分动态 / 代码引用可能缺失。"
+    "hint": "点击节点跳转到对应资源。最多 2 跳；启发式——部分动态 / 代码引用可能缺失。断链引用以红色显示。",
+    "missingRef": "引用缺失"
   },
   "statusBar": {
     "ready": "就绪",
@@ -400,7 +401,7 @@
   "deleteConfirm": {
     "titleSingle": "移至回收站?",
     "titleBatch": "移动 {{count}} 个文件至回收站?",
-    "hint": "文件将发送到系统回收站,可从回收站恢复。",
+    "hint": "文件将移入系统回收站,可从回收站恢复。此操作不在应用的撤销历史内(Ctrl+Z 无法撤销)。",
     "andMore": "以及另外 {{count}} 个",
     "confirm": "移至回收站",
     "deleting": "删除中...",

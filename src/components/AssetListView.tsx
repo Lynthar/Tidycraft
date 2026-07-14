@@ -118,7 +118,7 @@ interface AssetRowProps {
   /// `.tc-bar` viz for each row. 1 acts as a safe divisor when the column
   /// has no models or no vertex data.
   maxVertices: number;
-  t: (key: string) => string;
+  t: (key: string, opts?: Record<string, unknown>) => string;
 }
 
 function AssetRow({
@@ -139,10 +139,15 @@ function AssetRow({
   maxVertices,
   t,
 }: AssetRowProps) {
+  // Models carry no width/height; surface their vertex count here instead of a
+  // bare "-" (the dedicated vertices column is off by default). Images keep the
+  // W×H they already had; anything with neither stays "-".
   const dimensions =
     asset.metadata?.width && asset.metadata?.height
       ? `${asset.metadata.width} x ${asset.metadata.height}`
-      : "-";
+      : asset.metadata?.vertex_count != null
+        ? t("assetList.vertsInline", { n: asset.metadata.vertex_count.toLocaleString() })
+        : "-";
 
   const getColumnValue = (columnId: ColumnId): string => {
     switch (columnId) {

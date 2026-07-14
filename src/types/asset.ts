@@ -204,6 +204,9 @@ export interface DependencyNode {
   path: string;
   name: string;
   file_type: string;
+  /** True for a dangling reference (Unity GUID / Godot res:// target with no
+   *  asset in the project). Rendered red in the graph; `path` is empty. */
+  missing: boolean;
 }
 
 export interface DependencyEdge {

@@ -1990,6 +1990,11 @@
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;        /* Firefox: hide the horizontal scrollbar */
+  /* Fade the right edge as a hint that pills scroll horizontally (the scrollbar
+     is hidden). It only visibly bites when the pills overflow — otherwise the
+     faded strip is empty trailing space, so nothing important dims at rest. */
+  -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 22px), transparent);
+  mask-image: linear-gradient(90deg, #000 calc(100% - 22px), transparent);
 }
 .tc-toolbar-pills::-webkit-scrollbar { display: none; }   /* WebView2 / WebKit */
 .tc-toolbar-pills .tc-pill { flex-shrink: 0; }            /* pills keep size → container scrolls */
