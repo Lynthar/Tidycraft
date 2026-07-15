@@ -112,6 +112,22 @@
     "andMore": "……以及另外 {{count}} 个",
     "godotRefWarning": "待改名文件中有 {{files}} 个被其他文件引用（共 {{refs}} 个引用方）——重命名会破坏这些引用。"
   },
+  "namingFix": {
+    "title": "修复命名",
+    "desc": "重命名文件以符合命名规则。应用前可取消勾选或编辑任意目标名——整批可一次撤销。",
+    "loading": "正在查找可修复项…",
+    "nothingToFix": "这里没有可自动修复的命名问题。",
+    "original": "当前",
+    "newName": "新名称",
+    "collision": "两个修复目标同名",
+    "apply": "修复 {{count}} 项",
+    "applying": "修复中…",
+    "renamed": "{{count}} 个已重命名",
+    "failed": "{{count}} 个失败",
+    "errors": "错误",
+    "fixedToast": "已重命名 {{count}} 个文件",
+    "truncated": "仅显示前 {{shown}} 条（共 {{total}} 条）——应用会修复全部。"
+  },
   "common": {
     "cancel": "取消",
     "undo": "撤销",
@@ -222,7 +238,9 @@
     "dupCleanup": "清理此组…",
     "dupCleanupHint": "选择要保留的一份，其余移入系统回收站。",
     "dupCleanupConfirm": "保留选中，其余 {{count}} 个移入回收站",
-    "dupKeepThis": "保留这份"
+    "dupKeepThis": "保留这份",
+    "fix": "修复",
+    "fixAll": "修复全部命名 ({{count}})"
   },
   "settings": {
     "title": "设置",

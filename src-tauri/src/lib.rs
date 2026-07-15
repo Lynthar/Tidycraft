@@ -1869,12 +1869,40 @@ fn execute_batch_rename(
     paths: Vec<String>,
     operation: RenameOperation,
 ) -> BatchRenameResult {
+    // Every path gets the SAME operation applied to derive its new file name;
+    // the shared heterogeneous engine below does validation, the rename, .meta
+    // carry, undo, and tag migration.
+    let planned: Vec<(String, String)> = paths
+        .into_iter()
+        .map(|path| {
+            let name = Path::new(&path)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let new_name = apply_rename_operation(&name, &operation);
+            (path, new_name)
+        })
+        .collect();
+
+    commit_renames(&project_id, planned, "Batch rename")
+}
+
+/// Rename a heterogeneous batch — each file to its own new *file name* within
+/// its current directory: validate → same-file guard → fs::rename → carry the
+/// Unity .meta sidecar. Returns the successes as `(old_path, normalized new
+/// path)` alongside the tallied result. Deliberately free of project-state
+/// side effects (no undo, no tags) so it's unit-testable with a tempdir and
+/// shared by both batch-rename entry points; `commit_renames` layers undo +
+/// tag migration on top.
+fn rename_batch_on_disk(
+    planned: Vec<(String, String)>,
+) -> (Vec<(String, String)>, BatchRenameResult) {
     let mut success_count = 0;
     let mut error_count = 0;
     let mut errors = Vec::new();
-    let mut paths_to_record: Vec<(String, String)> = Vec::new();
+    let mut done: Vec<(String, String)> = Vec::new();
 
-    for path in paths {
+    for (path, new_name) in planned {
         let path_obj = Path::new(&path);
         let name = match path_obj.file_name() {
             Some(n) => n.to_string_lossy().to_string(),
@@ -1885,10 +1913,8 @@ fn execute_batch_rename(
             }
         };
 
-        let new_name = apply_rename_operation(&name, &operation);
-
         if name == new_name {
-            continue;
+            continue; // no-op — nothing to rename
         }
 
         if let Err(e) = validate_new_name(&new_name) {
@@ -1922,10 +1948,10 @@ fn execute_batch_rename(
                 }
                 success_count += 1;
                 // Normalize the new path to forward slashes (scanner::path_to_string)
-                // so the undo record and the tag binding below key off the same
-                // string the next scan will produce — a raw to_string_lossy() keeps
+                // so the undo record and the tag binding key off the same string
+                // the next scan will produce — a raw to_string_lossy() keeps
                 // Windows backslashes and the tag key would never match.
-                paths_to_record.push((path.clone(), scanner::path_to_string(&new_path)));
+                done.push((path.clone(), scanner::path_to_string(&new_path)));
             }
             Err(e) => {
                 errors.push(format!("Failed to rename {}: {}", name, e));
@@ -1934,9 +1960,28 @@ fn execute_batch_rename(
         }
     }
 
-    if success_count > 0 && !paths_to_record.is_empty() {
+    (
+        done,
+        BatchRenameResult {
+            success_count,
+            error_count,
+            errors,
+        },
+    )
+}
+
+/// Rename a heterogeneous batch on disk, then — if anything moved — record ONE
+/// undo batch (so the whole set reverts with a single Ctrl+Z) and migrate tag
+/// bindings to the new paths. `label` names the undo entry ("Batch rename" /
+/// "Fix naming"); the recorded description is `"{label}: {N} files"` with N =
+/// the number of files actually renamed. Shared by execute_batch_rename and
+/// apply_naming_fixes.
+fn commit_renames(project_id: &str, planned: Vec<(String, String)>, label: &str) -> BatchRenameResult {
+    let (done, result) = rename_batch_on_disk(planned);
+
+    if !done.is_empty() {
         let ts = unix_timestamp();
-        let file_ops: Vec<undo::FileOperation> = paths_to_record
+        let file_ops: Vec<undo::FileOperation> = done
             .iter()
             .map(|(original, new_path)| undo::FileOperation {
                 operation_type: undo::OperationType::Rename,
@@ -1946,11 +1991,10 @@ fn execute_batch_rename(
             })
             .collect();
 
-        let _ = project::with_mut(&project_id, |state| {
-            state.undo_manager.record_batch(
-                format!("Batch rename: {} files", file_ops.len()),
-                file_ops,
-            );
+        let _ = project::with_mut(project_id, |state| {
+            state
+                .undo_manager
+                .record_batch(format!("{}: {} files", label, file_ops.len()), file_ops);
 
             // Tags follow the file across renames — same as move_assets /
             // rename_file. Without this, the watcher's later orphan cleanup
@@ -1959,7 +2003,7 @@ fn execute_batch_rename(
             // matches what the next scan produces for the renamed file.
             if state.tags_data.is_some() {
                 let tags = state.ensure_tags();
-                for (original, new_path) in &paths_to_record {
+                for (original, new_path) in &done {
                     tags.rename_path(original, new_path);
                 }
                 let _ = state.save_tags();
@@ -1968,11 +2012,103 @@ fn execute_batch_rename(
         });
     }
 
-    BatchRenameResult {
-        success_count,
-        error_count,
-        errors,
+    result
+}
+
+// ============ Fix-it (auto-fixable naming) Commands ============
+
+/// One proposed naming fix surfaced to the Fix-it review dialog. Only assets
+/// that actually carry an auto-fixable naming violation are emitted, so
+/// `suggested_name` always differs from `original_name`.
+#[derive(Serialize)]
+pub struct NamingFixPreview {
+    /// Absolute, forward-slash-normalized path of the asset to rename.
+    pub path: String,
+    pub original_name: String,
+    pub suggested_name: String,
+    /// True when another proposed fix in the same directory targets the same
+    /// name — applying both would collide. Advisory for the UI; the fs guard in
+    /// `rename_batch_on_disk` is the real backstop.
+    pub collides: bool,
+}
+
+/// A single rename the user accepted from the Fix-it dialog. `new_name` may have
+/// been hand-edited, so it runs through the same validation + same-file guards
+/// as every other rename entry point (see `rename_file`).
+#[derive(serde::Deserialize)]
+pub struct NamingFix {
+    pub path: String,
+    pub new_name: String,
+}
+
+/// Compute compliant-name suggestions for every asset with an auto-fixable
+/// naming violation, using the same `tidycraft.toml` the analysis ran with.
+/// Read-only — nothing is renamed until `apply_naming_fixes`.
+#[tauri::command]
+fn preview_naming_fixes(
+    project_id: String,
+    config_toml: Option<String>,
+) -> Result<Vec<NamingFixPreview>, String> {
+    let config = match config_toml {
+        Some(toml_str) => {
+            RuleConfig::from_toml(&toml_str).map_err(|e| format!("Invalid config: {}", e))?
+        }
+        None => RuleConfig::default(),
+    };
+    let rule = analyzer::rules::naming::NamingRule::new(config.naming);
+
+    project::with_ref(&project_id, |state| {
+        let scan = state.require_scan()?;
+        let mut previews: Vec<NamingFixPreview> = scan
+            .assets
+            .iter()
+            .filter_map(|asset| {
+                rule.suggest_compliant_name(asset)
+                    .map(|suggested| NamingFixPreview {
+                        path: asset.path.clone(),
+                        original_name: asset.name.clone(),
+                        suggested_name: suggested,
+                        collides: false,
+                    })
+            })
+            .collect();
+        mark_naming_fix_collisions(&mut previews);
+        Ok(previews)
+    })
+}
+
+/// Flag proposals whose target (parent directory + suggested name) is shared by
+/// more than one file in the batch — only the first would land, the rest would
+/// hit "target already exists". Keyed case-insensitively so it also catches
+/// collisions that only surface on case-insensitive filesystems.
+fn mark_naming_fix_collisions(previews: &mut [NamingFixPreview]) {
+    use std::collections::HashMap;
+    let key = |p: &NamingFixPreview| -> String {
+        let parent = Path::new(&p.path)
+            .parent()
+            .map(|d| d.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        format!("{}\u{0}{}", parent, p.suggested_name.to_lowercase())
+    };
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for p in previews.iter() {
+        *counts.entry(key(p)).or_insert(0) += 1;
     }
+    for p in previews.iter_mut() {
+        if counts.get(&key(p)).copied().unwrap_or(0) > 1 {
+            p.collides = true;
+        }
+    }
+}
+
+/// Apply the renames the user accepted from the Fix-it dialog. Routes through
+/// the shared batch engine, so it validates each target, guards against
+/// clobbering a different file, carries Unity .meta sidecars, records ONE undo
+/// batch, and migrates tags — identical guarantees to Batch Rename.
+#[tauri::command]
+fn apply_naming_fixes(project_id: String, fixes: Vec<NamingFix>) -> BatchRenameResult {
+    let planned: Vec<(String, String)> = fixes.into_iter().map(|f| (f.path, f.new_name)).collect();
+    commit_renames(&project_id, planned, "Fix naming")
 }
 
 // ============ Unreal Engine Commands ============
@@ -2740,6 +2876,9 @@ pub fn run() {
             // Batch ops
             preview_batch_rename,
             execute_batch_rename,
+            // Fix-it (auto-fixable naming)
+            preview_naming_fixes,
+            apply_naming_fixes,
             // Engine info
             get_unity_file_info,
             get_unity_project_info,
@@ -2804,6 +2943,84 @@ mod tests {
         assert!(validate_new_name("normal_name.png").is_ok());
         // Dotfiles are odd but legal targets.
         assert!(validate_new_name(".hidden").is_ok());
+    }
+
+    #[test]
+    fn rename_batch_on_disk_renames_heterogeneous_targets() {
+        // The Fix-it engine's differentiator vs. execute_batch_rename: each
+        // file gets its OWN target name in one batch.
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let a = dir.path().join("my file.png");
+        let b = dir.path().join("rock.fbx");
+        std::fs::write(&a, "a").unwrap();
+        std::fs::write(&b, "b").unwrap();
+
+        let planned = vec![
+            (a.to_string_lossy().to_string(), "my_file.png".to_string()),
+            (b.to_string_lossy().to_string(), "SM_rock.fbx".to_string()),
+        ];
+        let (done, result) = rename_batch_on_disk(planned);
+
+        assert_eq!(result.success_count, 2);
+        assert_eq!(result.error_count, 0);
+        assert!(result.errors.is_empty());
+        assert_eq!(done.len(), 2);
+        assert!(dir.path().join("my_file.png").exists());
+        assert!(dir.path().join("SM_rock.fbx").exists());
+        assert!(!a.exists() && !b.exists());
+        // Successes report forward-slash-normalized new paths so the undo /
+        // tag keys match what the next scan produces.
+        assert!(done.iter().all(|(_, np)| !np.contains('\\')));
+    }
+
+    #[test]
+    fn rename_batch_on_disk_skips_noops_and_rejects_bad_names() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let same = dir.path().join("keep.png");
+        let bad = dir.path().join("bad.png");
+        std::fs::write(&same, "x").unwrap();
+        std::fs::write(&bad, "y").unwrap();
+
+        let planned = vec![
+            // no-op: target equals current name → neither success nor error
+            (same.to_string_lossy().to_string(), "keep.png".to_string()),
+            // path separator in the target → rejected at the IPC-safety guard
+            (bad.to_string_lossy().to_string(), "sub/evil.png".to_string()),
+        ];
+        let (done, result) = rename_batch_on_disk(planned);
+
+        assert_eq!(result.success_count, 0);
+        assert_eq!(result.error_count, 1); // only the bad name counts
+        assert!(done.is_empty());
+        assert!(bad.exists() && same.exists()); // both untouched on disk
+    }
+
+    #[test]
+    fn rename_batch_on_disk_reports_intra_batch_collision() {
+        // Two proposals resolving to the same name in the same directory:
+        // the first lands, the second must fail with "target already exists"
+        // (the fs guard is the backstop behind the preview's `collides` flag).
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let a = dir.path().join("a b.png");
+        let b = dir.path().join("a+b.png");
+        std::fs::write(&a, "1").unwrap();
+        std::fs::write(&b, "2").unwrap();
+
+        let planned = vec![
+            (a.to_string_lossy().to_string(), "a_b.png".to_string()),
+            (b.to_string_lossy().to_string(), "a_b.png".to_string()),
+        ];
+        let (done, result) = rename_batch_on_disk(planned);
+
+        assert_eq!(result.success_count, 1);
+        assert_eq!(result.error_count, 1);
+        assert_eq!(done.len(), 1);
+        assert!(dir.path().join("a_b.png").exists());
+        // Exactly one original survives (the one that lost the race).
+        assert_eq!(a.exists() as u8 + b.exists() as u8, 1);
     }
 
     #[test]

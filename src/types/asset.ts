@@ -115,6 +115,37 @@ export interface AnalysisResult {
   by_rule: Record<string, number>;
 }
 
+// ============ Fix-it (auto-fixable naming) Types ============
+
+/** Mirrors Rust `NamingFixPreview` — one proposed auto-fix from
+ *  `preview_naming_fixes`. Only assets with an auto-fixable naming violation
+ *  are returned, so `suggested_name` always differs from `original_name`.
+ *  `collides` flags two proposals whose target name + directory clash (only
+ *  the first would land; the second hits "target already exists"). */
+export interface NamingFixPreview {
+  path: string;
+  original_name: string;
+  suggested_name: string;
+  collides: boolean;
+}
+
+/** Mirrors Rust `NamingFix` — one accepted rename sent to
+ *  `apply_naming_fixes`. `new_name` may be hand-edited in the dialog; the
+ *  backend re-validates it (path-separator guard + same-file guard). */
+export interface NamingFix {
+  path: string;
+  new_name: string;
+}
+
+/** Mirrors Rust `BatchRenameResult` — the outcome of `execute_batch_rename`
+ *  and `apply_naming_fixes`. `success_count` counts renamed files; `errors`
+ *  are per-file failures (the dialog stays open to surface them). */
+export interface BatchRenameResult {
+  success_count: number;
+  error_count: number;
+  errors: string[];
+}
+
 // ============ Unity Types ============
 
 /** Mirrors Rust `unity::UnityReference` (one GUID reference inside a

@@ -382,11 +382,13 @@ Shipped:
 - [x] DCC source-file linking (`.blend` / `.psd` / `.spp` / `.ma` / `.ztl` / `.max` / `.lxo` / `.hip` / `.c4d` / `.zprj` / `.sbs` / `.psb` → "source newer than export" warnings, opt-in)
 - [x] AI Tagging — Learning mode (project sampling → local rules persisted to `tidycraft.ai.toml`; zero per-asset LLM cost after the one-time run) + advanced per-asset mode (multi-provider LLM with cost preview + per-provider consent; opt-in)
 - [x] Scanner respects `.gitignore` / `.ignore` by default via `ignore::WalkBuilder` (toggleable in Settings → Scanning)
+- [x] One-click naming fixes (auto-fix forbidden characters / missing prefix / case; per-issue or whole-project batch, editable, undo-backed)
 
 Backlog:
 
 - [ ] VRAM budget estimates (per texture, per directory)
 - [ ] Cross-engine reverse-reference graph (extend Unity GUID graph to UE / Godot)
+- [ ] Multi-select / saved asset filters (e.g. an "art assets only" view that hides scripts and data)
 
 ---
 

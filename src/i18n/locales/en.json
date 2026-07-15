@@ -112,6 +112,22 @@
     "andMore": "... and {{count}} more",
     "godotRefWarning": "{{files}} of the files being renamed are referenced by other files ({{refs}} referencing file(s)) — renaming will break those references."
   },
+  "namingFix": {
+    "title": "Fix Naming",
+    "desc": "Rename files to satisfy the naming rules. Uncheck or edit any target before applying — the whole batch reverts as one undo.",
+    "loading": "Finding fixes…",
+    "nothingToFix": "No auto-fixable naming issues here.",
+    "original": "Current",
+    "newName": "New name",
+    "collision": "Two fixes target this name",
+    "apply": "Fix {{count}}",
+    "applying": "Fixing…",
+    "renamed": "{{count}} renamed",
+    "failed": "{{count}} failed",
+    "errors": "Errors",
+    "fixedToast": "Renamed {{count}} file(s)",
+    "truncated": "Showing the first {{shown}} of {{total}} — Apply fixes all of them."
+  },
   "common": {
     "cancel": "Cancel",
     "undo": "Undo",
@@ -222,7 +238,9 @@
     "dupCleanup": "Clean up group…",
     "dupCleanupHint": "Pick the copy to keep — the rest go to the recycle bin.",
     "dupCleanupConfirm": "Keep selected, trash {{count}} others",
-    "dupKeepThis": "Keep this copy"
+    "dupKeepThis": "Keep this copy",
+    "fix": "Fix",
+    "fixAll": "Fix all naming ({{count}})"
   },
   "settings": {
     "title": "Settings",
