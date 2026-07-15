@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, AlertTriangle, ChevronRight, Info, FileWarning, Layers, Download, Trash2 } from "lucide-react";
+import { AlertCircle, AlertTriangle, ChevronRight, Info, FileWarning, Layers, Download, Trash2, Wand2 } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
 import { useSelectionStore } from "../stores/selectionStore";
+import { useToastStore } from "../stores/toastStore";
 import { basename, relativeToRoot } from "../lib/pathUtils";
 import { exportTextFile } from "../lib/exportFile";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
+import { NamingFixDialog } from "./NamingFixDialog";
 import type { Issue, Severity, AnalysisResult } from "../types/asset";
 
 const SEV_TO_TONE: Record<Severity, "err" | "warn" | "info"> = {
@@ -35,13 +37,17 @@ interface IssueRowProps {
   expanded: boolean;
   onToggle: () => void;
   onLocate?: (path: string) => void;
+  /** Present only on auto-fixable issues — opens the Fix-it dialog scoped to
+   *  this one asset. */
+  onFix?: () => void;
   suggestionLabel: string;
   locateLabel: string;
+  fixLabel: string;
 }
 
 /// `expanded` lives on the parent so virtualization (which unmounts rows
 /// outside the overscan window) doesn't lose user state on scroll.
-function IssueRow({ issue, displayPath, expanded, onToggle, onLocate, suggestionLabel, locateLabel }: IssueRowProps) {
+function IssueRow({ issue, displayPath, expanded, onToggle, onLocate, onFix, suggestionLabel, locateLabel, fixLabel }: IssueRowProps) {
   const fileName = basename(issue.asset_path);
   const tone = SEV_TO_TONE[issue.severity];
 
@@ -79,16 +85,33 @@ function IssueRow({ issue, displayPath, expanded, onToggle, onLocate, suggestion
           </div>
         )}
       </div>
-      {onLocate && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onLocate(issue.asset_path);
-          }}
-          className="tc-issue-fix"
-        >
-          {locateLabel}
-        </button>
+      {(onFix || onLocate) && (
+        <div className="tc-issue-actions">
+          {onFix && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onFix();
+              }}
+              className="tc-issue-fix"
+              title={fixLabel}
+            >
+              <Wand2 size={11} />
+              {fixLabel}
+            </button>
+          )}
+          {onLocate && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onLocate(issue.asset_path);
+              }}
+              className="tc-issue-fix"
+            >
+              {locateLabel}
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
@@ -300,6 +323,10 @@ export function IssueList({ result, stale, isAnalyzing, onAnalyze, onLocate }: I
   const projectPath = useProjectStore((s) => s.projectPath);
   const pruneDuplicateGroup = useProjectStore((s) => s.pruneDuplicateGroup);
   const removePaths = useSelectionStore((s) => s.removePaths);
+  const pushToast = useToastStore((s) => s.push);
+  /// Fix-it (auto-fixable naming) dialog. `null` = closed; `{ scope: null }` =
+  /// every fixable asset (toolbar); `{ scope: [path] }` = one row's Fix action.
+  const [namingFix, setNamingFix] = useState<{ scope: string[] | null } | null>(null);
   const [filter, setFilter] = useState<Severity | "all">("all");
   const [groupByRule, setGroupByRule] = useState(false);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -451,6 +478,26 @@ export function IssueList({ result, stale, isAnalyzing, onAnalyze, onLocate }: I
     });
   };
 
+  // Auto-fixable issues are the naming rules (forbidden char / prefix / case);
+  // their count drives the "Fix all naming" toolbar action.
+  const fixableCount = result.issues.filter((i) => i.auto_fixable).length;
+
+  /// After Fix-it renames land, the watcher flags the analysis stale and
+  /// refreshes the asset list on its own. Confirm with a toast that offers a
+  /// one-tap undo of the whole batch (only on full success — a partial failure
+  /// keeps the dialog open with its per-file errors).
+  const handleFixComplete = (fullySucceeded: boolean, count: number) => {
+    if (!fullySucceeded) return;
+    pushToast({
+      kind: "success",
+      message: t("namingFix.fixedToast", { count }),
+      actionLabel: t("common.undo"),
+      onAction: () => {
+        if (activeProjectId) invoke("undo_last_operation", { projectId: activeProjectId });
+      },
+    });
+  };
+
   const filterPill = (
     key: typeof filter,
     tone: "all" | "err" | "warn" | "info",
@@ -545,6 +592,18 @@ export function IssueList({ result, stale, isAnalyzing, onAnalyze, onLocate }: I
         )}
 
         <span style={{ flex: 1 }} />
+
+        {fixableCount > 0 && (
+          <button
+            onClick={() => setNamingFix({ scope: null })}
+            className="tc-issues-pill"
+            data-tone="all"
+            style={{ color: "var(--primary)", fontWeight: 500 }}
+          >
+            <Wand2 size={11} />
+            {t("issues.fixAll", { count: fixableCount })}
+          </button>
+        )}
 
         <button
           onClick={() => setGroupByRule((v) => !v)}
@@ -648,8 +707,14 @@ export function IssueList({ result, stale, isAnalyzing, onAnalyze, onLocate }: I
                       expanded={expandedIds.has(row.key)}
                       onToggle={() => toggleExpanded(row.key)}
                       onLocate={onLocate}
+                      onFix={
+                        row.issue.auto_fixable
+                          ? () => setNamingFix({ scope: [row.issue.asset_path] })
+                          : undefined
+                      }
                       suggestionLabel={t("issues.suggestion")}
                       locateLabel={t("issues.locate")}
+                      fixLabel={t("issues.fix")}
                     />
                   )}
                 </div>
@@ -676,6 +741,15 @@ export function IssueList({ result, stale, isAnalyzing, onAnalyze, onLocate }: I
             setCleanup(null);
           }
         }}
+      />
+
+      {/* Fix-it: review + apply auto-fixable naming renames. Scoped to one
+          asset (row Fix) or every fixable asset (toolbar Fix all). */}
+      <NamingFixDialog
+        isOpen={namingFix !== null}
+        scopePaths={namingFix?.scope ?? null}
+        onClose={() => setNamingFix(null)}
+        onComplete={handleFixComplete}
       />
     </div>
   );

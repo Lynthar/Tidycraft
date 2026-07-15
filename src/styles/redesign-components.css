@@ -1244,7 +1244,20 @@
   font-weight: 500;
 }
 
+/* Action cell: keeps the row a clean 3-column grid (icon | body | actions).
+   Both the Fix and Locate buttons live inside this one cell — placing them as
+   separate grid children spilled the second into a starved implicit column,
+   clipping its label. */
+.tc-issue-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  align-self: center;
+}
 .tc-issue-fix {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 11.5px;
   font-weight: 500;
   color: var(--primary);

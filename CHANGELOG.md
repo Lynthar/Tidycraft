@@ -6,6 +6,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+- **One-click naming fixes.** Auto-fixable naming issues — forbidden characters, missing type prefix, and case style — now carry a **Fix** button, and the issue toolbar a **Fix all naming** action. Both open a review dialog with the proposed compliant name for every file (editable before applying, with an intra-batch collision warning and the same Godot `res://` reference warning as Rename). Fixes run through the existing rename engine, so they carry Unity `.meta` sidecars, migrate tags, and land as a single undo. Suggestions come from the project's `tidycraft.toml` naming rules; a strict library with tens of thousands of fixable files renders a capped preview (the batch still applies to all of them). Overlong and non-ASCII names stay manual — auto-fixing them would be lossy.
+
 ## [0.8.0] - 2026-07-14
 
 ### Changed
