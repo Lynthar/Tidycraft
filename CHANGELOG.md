@@ -6,9 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-07-17
+
 ### Added
 - **One-click naming fixes.** Auto-fixable naming issues — forbidden characters, missing type prefix, and case style — now carry a **Fix** button, and the issue toolbar a **Fix all naming** action. Both open a review dialog with the proposed compliant name for every file (editable before applying, with an intra-batch collision warning and the same Godot `res://` reference warning as Rename). Fixes run through the existing rename engine, so they carry Unity `.meta` sidecars, migrate tags, and land as a single undo. Suggestions come from the project's `tidycraft.toml` naming rules; a strict library with tens of thousands of fixable files renders a capped preview (the batch still applies to all of them). Overlong and non-ASCII names stay manual — auto-fixing them would be lossy.
-
 - **Multi-select type filtering with an "Art assets" quick group.** Type pills keep their single-select click (re-clicking the sole active type clears back to All), and Ctrl/Cmd+click now composes a union — several types at once, or everything except code and data. An "Art assets" pill applies that most-wanted union in one click (textures / models / audio / video / animation / materials / prefabs / scenes) and only appears when the project actually has non-art files to hide. The advanced panel's type chips and the command palette's filter entries toggle membership in the same set.
 - **Unity package references resolve by name.** With a local `Library/PackageCache` present, the dependency graph and the missing-reference rule now read the packages' own `.meta` files: a reference into a package renders as a neutral "package asset" node carrying its file and package name instead of an amber unresolved warning, and the missing-reference rule stops flagging it entirely. Without a local cache (fresh clone, CI) everything degrades to the previous unresolved treatment.
 
