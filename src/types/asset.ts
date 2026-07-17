@@ -235,9 +235,14 @@ export interface DependencyNode {
   path: string;
   name: string;
   file_type: string;
-  /** True for a dangling reference (Unity GUID / Godot res:// target with no
-   *  asset in the project). Rendered red in the graph; `path` is empty. */
-  missing: boolean;
+  /** Mirrors Rust `DependencyNodeKind` — how firmly the node's identity
+   *  resolves. `asset` is a scanned project asset (real `path`, clickable).
+   *  The rest carry an empty `path` and are BFS terminals in the modal:
+   *  `unresolved` (Unity GUID outside the scan — package asset, ignored
+   *  file, or breakage; ambiguous by construction), `unscanned` (Godot
+   *  res:// target that exists on disk but is outside the scan), `missing`
+   *  (Godot res:// target absent from disk — confirmed broken). */
+  kind: "asset" | "unresolved" | "unscanned" | "missing";
 }
 
 export interface DependencyEdge {

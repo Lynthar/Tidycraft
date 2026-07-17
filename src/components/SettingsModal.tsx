@@ -581,6 +581,31 @@ function AiTaggingSection() {
   );
 }
 
+/// Number field for the HTML report row caps. Edits commit live, but only
+/// when the field holds a real number: a cleared box reads as NaN (or ""),
+/// and committing that would persist 0 — which means UNLIMITED here, the
+/// most expensive possible misreading of "empty". The draft state lets the
+/// box actually go empty while typing; blur snaps it back to the committed
+/// value.
+function LimitInput({ value, onCommit }: { value: number; onCommit: (n: number) => void }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  return (
+    <input
+      type="number"
+      min={0}
+      step={50}
+      value={draft ?? String(value)}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        const n = e.target.valueAsNumber;
+        if (Number.isFinite(n)) onCommit(n);
+      }}
+      onBlur={() => setDraft(null)}
+      className="w-24 h-8 px-2 text-sm text-right bg-background border border-border rounded text-text-primary focus:outline-none focus:border-primary"
+    />
+  );
+}
+
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const { t, i18n } = useTranslation();
   const {
@@ -935,14 +960,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               ).map((row) => (
                 <div key={row.label} className="flex items-center justify-between gap-3">
                   <span className="text-sm text-text-primary">{row.label}</span>
-                  <input
-                    type="number"
-                    min={0}
-                    step={50}
-                    value={row.value}
-                    onChange={(e) => row.onChange(Number(e.target.value))}
-                    className="w-24 h-8 px-2 text-sm text-right bg-background border border-border rounded text-text-primary focus:outline-none focus:border-primary"
-                  />
+                  <LimitInput value={row.value} onCommit={row.onChange} />
                 </div>
               ))}
               <p className="text-xs text-text-secondary">

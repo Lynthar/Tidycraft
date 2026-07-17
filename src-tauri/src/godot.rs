@@ -331,6 +331,19 @@ pub fn asset_to_res_path(abs: &str, root: &Path) -> Option<String> {
     Some(format!("res://{}", rel.to_string_lossy().replace('\\', "/")))
 }
 
+/// Inverse of `asset_to_res_path`: the absolute filesystem path a `res://`
+/// reference points at under `root`. `None` for non-`res://` strings
+/// (`user://`, `uid://`, plain paths) and the bare `res://` root. Used by the
+/// dependency graph to tell "outside the scan but on disk" (gitignored) from
+/// "genuinely missing".
+pub fn res_path_to_abs(res: &str, root: &Path) -> Option<std::path::PathBuf> {
+    let rel = res.strip_prefix("res://")?;
+    if rel.is_empty() {
+        return None;
+    }
+    Some(root.join(rel))
+}
+
 /// Pull every `res://` reference out of a scene / resource / script's text:
 /// `ext_resource ... path="res://..."`, `preload("res://...")`,
 /// `load("res://...")`. All such refs sit inside double quotes, so one
@@ -765,6 +778,23 @@ config/name="Minimal"
         // roots (loaded dynamically / from the editor), so it must NOT be
         // flagged unused.
         assert!(!unused.iter().any(|p| p.ends_with("level_2.tscn")));
+    }
+
+    #[test]
+    fn test_res_path_to_abs() {
+        let root = Path::new("/proj");
+        assert_eq!(
+            res_path_to_abs("res://textures/hero.png", root),
+            Some(root.join("textures/hero.png"))
+        );
+        // Non-res schemes and the bare root resolve to nothing.
+        assert_eq!(res_path_to_abs("res://", root), None);
+        assert_eq!(res_path_to_abs("user://save.dat", root), None);
+        assert_eq!(res_path_to_abs("uid://c3xyz", root), None);
+        // Round-trips with asset_to_res_path.
+        let abs = root.join("a/b.png");
+        let res = asset_to_res_path(&abs.to_string_lossy(), root).unwrap();
+        assert_eq!(res_path_to_abs(&res, root), Some(abs));
     }
 
     #[test]

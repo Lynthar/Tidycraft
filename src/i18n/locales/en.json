@@ -126,7 +126,8 @@
     "failed": "{{count}} failed",
     "errors": "Errors",
     "fixedToast": "Renamed {{count}} file(s)",
-    "truncated": "Showing the first {{shown}} of {{total}} — Apply fixes all of them."
+    "truncated": "Showing the first {{shown}} of {{total}} — Apply fixes all of them.",
+    "reopenToRetry": "Close and reopen this dialog to retry the remaining files with a fresh preview."
   },
   "common": {
     "cancel": "Cancel",
@@ -189,8 +190,13 @@
     "close": "Close",
     "loading": "Loading dependency graph…",
     "empty": "No dependency relationships found for this asset.",
-    "hint": "Click a node to jump to that asset. Up to 2 hops; heuristic — some dynamic / code references may be missing. Broken references show in red.",
-    "missingRef": "Missing reference"
+    "hint": "Click a node to jump to that asset. Up to 2 hops; heuristic — some dynamic / code references may be missing.",
+    "legendUnresolved": "Unresolved reference",
+    "legendUnscanned": "Exists, not scanned",
+    "legendMissing": "Missing on disk",
+    "unresolvedTip": "This GUID is not in the scan — a package asset (Library/ is usually gitignored), an ignored file, or a broken reference.",
+    "unscannedTip": "The file exists on disk but is outside the scan (gitignored or in a hidden directory).",
+    "missingTip": "The target does not exist on disk — this reference is broken."
   },
   "statusBar": {
     "ready": "Ready",

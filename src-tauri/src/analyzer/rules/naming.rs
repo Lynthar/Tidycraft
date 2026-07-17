@@ -187,6 +187,9 @@ impl NamingRule {
         }
 
         // Missing prefix — DCC authoring sources are exempt (same as `check`).
+        // Prepending can lengthen a name that sat just under the limit; a fix
+        // must never mint a NEW violation — least of all naming.length, which
+        // isn't auto-fixable — so over-long candidates fall through to `None`.
         let is_dcc_source = asset
             .metadata
             .as_ref()
@@ -195,15 +198,22 @@ impl NamingRule {
         if !is_dcc_source {
             if let Some(prefix) = self.check_prefix(name, &asset.asset_type) {
                 let candidate = format!("{}{}", prefix, name);
-                return (candidate != *name && candidate.starts_with(&prefix)).then_some(candidate);
+                return (candidate != *name
+                    && candidate.starts_with(&prefix)
+                    && candidate.chars().count() <= self.config.max_length)
+                    .then_some(candidate);
             }
         }
 
-        // Case style.
+        // Case style. Conversion can lengthen too (snake_case inserts a `_`
+        // at each camel hump), so the same length gate applies.
         if !self.check_case_style(stem) {
             let fixed_stem = to_case_style(stem, &self.config.case_style)?;
             let candidate = reattach_ext(&fixed_stem, ext);
-            return (candidate != *name && self.check_case_style(&fixed_stem)).then_some(candidate);
+            return (candidate != *name
+                && self.check_case_style(&fixed_stem)
+                && candidate.chars().count() <= self.config.max_length)
+                .then_some(candidate);
         }
 
         None
@@ -721,6 +731,43 @@ mod tests {
         assert_eq!(
             rule.suggest_compliant_name(&asset("my Texture.png", "png", AssetType::Texture, None)),
             Some("my_Texture.png".to_string())
+        );
+    }
+
+    #[test]
+    fn fix_never_pushes_a_name_over_max_length() {
+        // "123456.png" is 10 chars — inside a 10-char limit, so the prefix
+        // violation is what fires; but "T_123456.png" would be 12 and trade
+        // an auto-fixable issue for a non-fixable naming.length one.
+        let tight = NamingRule::new(NamingConfig {
+            texture_prefix: Some("T_".to_string()),
+            max_length: 10,
+            ..Default::default()
+        });
+        assert_eq!(
+            tight.suggest_compliant_name(&asset("123456.png", "png", AssetType::Texture, None)),
+            None
+        );
+        // Same name under a roomy limit fixes normally.
+        assert_eq!(
+            prefix_rule().suggest_compliant_name(&asset("123456.png", "png", AssetType::Texture, None)),
+            Some("T_123456.png".to_string())
+        );
+
+        // Case conversion grows "MyFiles.png" (11) to "my_files.png" (12) —
+        // over an 11-char limit the fix must abstain, not overflow.
+        let tight_case = NamingRule::new(NamingConfig {
+            case_style: "snake_case".to_string(),
+            max_length: 11,
+            ..Default::default()
+        });
+        assert_eq!(
+            tight_case.suggest_compliant_name(&asset("MyFiles.png", "png", AssetType::Texture, None)),
+            None
+        );
+        assert_eq!(
+            cased_rule("snake_case").suggest_compliant_name(&asset("MyFiles.png", "png", AssetType::Texture, None)),
+            Some("my_files.png".to_string())
         );
     }
 

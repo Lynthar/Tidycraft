@@ -16,23 +16,6 @@ use crate::unity;
 /// Extensions that Unity stores as YAML with GUID references.
 const REFERENCEABLE_EXTS: &[&str] = &["prefab", "unity", "mat", "controller", "asset"];
 
-/// The two GUIDs Unity reserves for editor-shipped asset bundles:
-/// `0000000000000000e000000000000000` ("unity default resources") and
-/// `0000000000000000f000000000000000` ("unity_builtin_extra"). Any project
-/// that touches a built-in shader, material, or UI sprite references them,
-/// and they never correspond to a scanned .meta — so they must not count
-/// as missing. NOTE: do not try to detect built-ins via the reference's
-/// `type:` field instead — real project asset references (e.g. a .mat's
-/// texture) are `type: 3` while built-ins are `type: 0`; filtering on type
-/// would suppress true positives.
-fn is_unity_builtin_guid(guid: &str) -> bool {
-    let bytes = guid.as_bytes();
-    bytes.len() == 32
-        && bytes[..16].iter().all(|&b| b == b'0')
-        && (bytes[16] == b'e' || bytes[16] == b'f')
-        && bytes[17..].iter().all(|&b| b == b'0')
-}
-
 pub fn find_missing_references(
     assets: &[AssetInfo],
     project_type: &Option<ProjectType>,
@@ -71,12 +54,11 @@ pub fn find_missing_references(
         // five places is still one broken link.
         let mut reported: HashSet<String> = HashSet::new();
         for r in &info.references {
-            // Unity uses all-zero GUID as "no reference"; skip these.
-            if r.guid.is_empty() || r.guid.chars().all(|c| c == '0') {
-                continue;
-            }
-            // Editor-shipped built-ins are never in the scan set by design.
-            if is_unity_builtin_guid(&r.guid) {
+            // Unity uses all-zero GUID as "no reference"; skip these. The
+            // editor-shipped built-in bundles are never in the scan set by
+            // design. Both classifiers live in `unity.rs` (shared with the
+            // dependency graph, which applies the same exemptions).
+            if unity::is_null_guid(&r.guid) || unity::is_builtin_guid(&r.guid) {
                 continue;
             }
             if known_guids.contains(&r.guid) {

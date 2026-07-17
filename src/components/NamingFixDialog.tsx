@@ -356,6 +356,10 @@ export function NamingFixDialog({ isOpen, onClose, scopePaths, onComplete }: Nam
               </ul>
             </div>
           )}
+
+          {result && (
+            <p className="text-xs text-text-secondary">{t("namingFix.reopenToRetry")}</p>
+          )}
         </div>
 
         {/* Footer */}
@@ -366,9 +370,13 @@ export function NamingFixDialog({ isOpen, onClose, scopePaths, onComplete }: Nam
           >
             {t("common.cancel")}
           </button>
+          {/* `result` lingers only after a partial failure (full success closes
+              the dialog) — and by then the table is stale: renamed rows would
+              error again if re-sent. Apply locks; reopening refetches a truthful
+              preview (fixed files gone, failed ones back with suggestions). */}
           <button
             onClick={handleApply}
-            disabled={isApplying || changedCount === 0}
+            disabled={isApplying || changedCount === 0 || result !== null}
             className="flex items-center gap-2 px-4 py-2 text-sm bg-primary text-[var(--on-primary)] rounded hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isApplying ? (
