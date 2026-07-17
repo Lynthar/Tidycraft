@@ -119,6 +119,31 @@ pub fn parse_project_version(root_path: &Path) -> Option<UnityProjectInfo> {
     })
 }
 
+/// The all-zero GUID Unity writes as a "no reference" sentinel. The empty
+/// string counts as null too (vacuously all-zero), so raw parse output can be
+/// fed straight in.
+pub fn is_null_guid(guid: &str) -> bool {
+    guid.chars().all(|c| c == '0')
+}
+
+/// The two GUIDs Unity reserves for editor-shipped asset bundles:
+/// `0000000000000000e000000000000000` ("unity default resources") and
+/// `0000000000000000f000000000000000` ("unity_builtin_extra"). Any project
+/// that touches a built-in shader, material, or UI sprite references them,
+/// and they never correspond to a scanned .meta — so neither the
+/// missing-reference rule nor the dependency graph may treat them as
+/// dangling. NOTE: do not try to detect built-ins via the reference's
+/// `type:` field instead — real project asset references (e.g. a .mat's
+/// texture) are `type: 3` while built-ins are `type: 0`; filtering on type
+/// would suppress true positives.
+pub fn is_builtin_guid(guid: &str) -> bool {
+    let bytes = guid.as_bytes();
+    bytes.len() == 32
+        && bytes[..16].iter().all(|&b| b == b'0')
+        && (bytes[16] == b'e' || bytes[16] == b'f')
+        && bytes[17..].iter().all(|&b| b == b'0')
+}
+
 /// Extract all GUID references from Unity YAML content
 fn extract_references(content: &str) -> Vec<UnityReference> {
     let mut refs = HashSet::new();
@@ -328,6 +353,24 @@ mod tests {
             "path must be forward-slash normalized: {}",
             info.path
         );
+    }
+
+    #[test]
+    fn null_and_builtin_guid_classifiers() {
+        assert!(is_null_guid("00000000000000000000000000000000"));
+        assert!(is_null_guid("")); // vacuous all-zero — see the doc comment
+        assert!(!is_null_guid("00000000000000000000000000000001"));
+
+        // The exact two editor-shipped bundles…
+        assert!(is_builtin_guid("0000000000000000e000000000000000"));
+        assert!(is_builtin_guid("0000000000000000f000000000000000"));
+        // …and nothing that merely resembles them (those are genuine
+        // dangling references — see the missing_reference rule tests).
+        assert!(!is_builtin_guid("0000000000000000a000000000000000")); // wrong marker
+        assert!(!is_builtin_guid("0000000000000000e000000000000001")); // non-zero tail
+        assert!(!is_builtin_guid("e0000000000000000000000000000000")); // marker misplaced
+        assert!(!is_builtin_guid("0000000000000000e00000000000000")); // 31 chars
+        assert!(!is_builtin_guid("00000000000000000000000000000000")); // null, not builtin
     }
 
     #[test]

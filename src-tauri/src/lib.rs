@@ -1032,16 +1032,40 @@ pub struct DependencyGraph {
 /// One node in a project's dependency graph. `id` is the engine-neutral graph
 /// identifier edges reference — a Unity GUID or a Godot `res://` path — while
 /// `path` is the absolute filesystem path the frontend uses to locate the asset.
+/// How firmly a graph node's identity resolves. From a disk scan this is a
+/// spectrum, not a boolean — the scan set undercounts what a project can
+/// legitimately reference (engine built-ins, package caches, gitignored
+/// files), so each variant asserts only what the evidence supports. Same
+/// doctrine as `missing_reference.rs`: "a miss is strong signal, not proof".
+#[derive(Serialize, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum DependencyNodeKind {
+    /// A scanned project asset — has a real `path`, clickable in the UI.
+    Asset,
+    /// Unity: a referenced GUID with no scanned asset behind it. Ambiguous by
+    /// construction — package assets (gitignored `Library/PackageCache`),
+    /// ignore-excluded files, and genuinely broken references are
+    /// indistinguishable from a disk scan. Rendered as a warning, never
+    /// asserted broken.
+    Unresolved,
+    /// Godot: a `res://` target that exists on disk but sits outside the scan
+    /// set (gitignored / hidden directory). Not breakage.
+    Unscanned,
+    /// Godot: a `res://` target that does not exist on disk — confirmed broken.
+    Missing,
+}
+
 #[derive(Serialize)]
 pub struct DependencyNode {
     pub id: String,
     pub path: String,
     pub name: String,
     pub file_type: String,
-    /// True for a dangling reference — a Unity GUID / Godot `res://` target that
-    /// no asset in the project provides. The graph renders these red; `path` is
-    /// empty (there is nothing to locate).
-    pub missing: bool,
+    /// See `DependencyNodeKind`. Non-`asset` nodes carry an empty `path`
+    /// (nothing to locate) and are treated as BFS terminals by the frontend,
+    /// so a widely-shared unresolved GUID can't hub-connect its unrelated
+    /// referrers in the 2-hop view.
+    pub kind: DependencyNodeKind,
 }
 
 #[derive(Serialize)]
@@ -1093,16 +1117,24 @@ fn get_unity_dependencies(project_id: String) -> Result<DependencyGraph, String>
                     path: asset.path.clone(),
                     name: asset.name.clone(),
                     file_type: format!("{:?}", asset.asset_type).to_lowercase(),
-                    missing: false,
+                    kind: DependencyNodeKind::Asset,
                 });
             }
         }
 
-        // Dangling references: a referenced GUID with no asset in the project.
-        // Previously these edges were dropped, which hid the break; now each
-        // distinct missing GUID becomes one node (deduped) flagged `missing`, so
-        // the graph renders it in red with its incoming edge intact.
-        let mut missing_guids: std::collections::HashSet<String> =
+        // References the scan can't resolve. Two classes never enter the
+        // graph at all — the all-zero "no reference" sentinel and the
+        // editor-shipped built-in bundles (`unity default resources` /
+        // `unity_builtin_extra`), the same exemptions the missing_reference
+        // rule applies: they aren't project assets, and the built-ins are
+        // exactly the GUIDs every material / UI element shares, so one node
+        // for them would hub-connect the whole project in the 2-hop view.
+        // Everything else unknown is genuinely ambiguous from a disk scan
+        // (a package asset under gitignored Library/PackageCache looks
+        // identical to a deleted asset), so it becomes one deduped
+        // `unresolved` node — a warning with its edge intact, not an
+        // asserted breakage.
+        let mut unresolved_guids: std::collections::HashSet<String> =
             std::collections::HashSet::new();
         for asset in &scan_result.assets {
             let ext = asset.extension.to_lowercase();
@@ -1110,15 +1142,20 @@ fn get_unity_dependencies(project_id: String) -> Result<DependencyGraph, String>
                 if let Some(unity_info) = unity::parse_unity_file(Path::new(&asset.path)) {
                     if let Some(ref from_guid) = asset.unity_guid {
                         for reference in &unity_info.references {
+                            if unity::is_null_guid(&reference.guid)
+                                || unity::is_builtin_guid(&reference.guid)
+                            {
+                                continue;
+                            }
                             if !guid_to_path.contains_key(&reference.guid)
-                                && missing_guids.insert(reference.guid.clone())
+                                && unresolved_guids.insert(reference.guid.clone())
                             {
                                 nodes.push(DependencyNode {
                                     id: reference.guid.clone(),
                                     path: String::new(),
                                     name: reference.guid.clone(),
-                                    file_type: "missing".to_string(),
-                                    missing: true,
+                                    file_type: "unresolved".to_string(),
+                                    kind: DependencyNodeKind::Unresolved,
                                 });
                             }
                             edges.push(DependencyEdge {
@@ -1226,24 +1263,34 @@ fn get_godot_dependencies(project_id: String) -> Result<DependencyGraph, String>
                     path: asset.path.clone(),
                     name: asset.name.clone(),
                     file_type: format!("{:?}", asset.asset_type).to_lowercase(),
-                    missing: false,
+                    kind: DependencyNodeKind::Asset,
                 });
             }
         }
 
-        // Keep every edge; a `res://` target with no known asset is a dangling
-        // reference — surface it as one `missing` node (deduped) instead of
-        // dropping the edge, so a broken scene / resource ref shows in the graph.
+        // Keep every edge, but classify unknown `res://` targets honestly:
+        // unlike Unity GUIDs, a res path can be checked against the disk, so
+        // "outside the scan but present" (gitignored addons/, hidden dirs —
+        // not breakage) and "genuinely gone" (a broken reference) get
+        // different nodes instead of one scary bucket. One deduped node per
+        // distinct target either way.
         let mut edges: Vec<DependencyEdge> = Vec::new();
-        let mut missing: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut unknown: std::collections::HashSet<String> = std::collections::HashSet::new();
         for (from, to) in godot::godot_dependency_edges(root, &scan_result.assets) {
-            if !known.contains(&to) && missing.insert(to.clone()) {
+            if !known.contains(&to) && unknown.insert(to.clone()) {
+                let on_disk = godot::res_path_to_abs(&to, root)
+                    .map(|p| p.exists())
+                    .unwrap_or(false);
                 nodes.push(DependencyNode {
                     id: to.clone(),
                     path: String::new(),
                     name: to.clone(),
-                    file_type: "missing".to_string(),
-                    missing: true,
+                    file_type: if on_disk { "unscanned" } else { "missing" }.to_string(),
+                    kind: if on_disk {
+                        DependencyNodeKind::Unscanned
+                    } else {
+                        DependencyNodeKind::Missing
+                    },
                 });
             }
             edges.push(DependencyEdge { from, to });
@@ -2044,7 +2091,10 @@ pub struct NamingFix {
 /// Compute compliant-name suggestions for every asset with an auto-fixable
 /// naming violation, using the same `tidycraft.toml` the analysis ran with.
 /// Read-only — nothing is renamed until `apply_naming_fixes`.
-#[tauri::command]
+// `(async)`: iterates the whole scan under the project lock — and that lock
+// may be held by an in-flight analysis for seconds, which a main-thread
+// command would turn into a whole-window freeze.
+#[tauri::command(async)]
 fn preview_naming_fixes(
     project_id: String,
     config_toml: Option<String>,
@@ -2105,7 +2155,10 @@ fn mark_naming_fix_collisions(previews: &mut [NamingFixPreview]) {
 /// the shared batch engine, so it validates each target, guards against
 /// clobbering a different file, carries Unity .meta sidecars, records ONE undo
 /// batch, and migrates tags — identical guarantees to Batch Rename.
-#[tauri::command]
+// `(async)`: "Fix all naming" can submit thousands of renames (plus .meta
+// probes and the undo/tags write-back) in one batch — off the main thread,
+// same rationale as delete_assets.
+#[tauri::command(async)]
 fn apply_naming_fixes(project_id: String, fixes: Vec<NamingFix>) -> BatchRenameResult {
     let planned: Vec<(String, String)> = fixes.into_iter().map(|f| (f.path, f.new_name)).collect();
     commit_renames(&project_id, planned, "Fix naming")

@@ -18,11 +18,21 @@ const HOPS = 2;
 /// BFS outward from `centerId` up to `hops`, following edges in BOTH directions
 /// (we want both what the asset uses and what uses it). Returns the reachable
 /// node ids plus the edges that stay within that set.
+///
+/// Non-`asset` nodes (unresolved / unscanned / missing) are TERMINALS: they
+/// may join the neighborhood, but expansion never continues through them.
+/// Without this, one widely-shared unresolved reference — every URP
+/// material's shader GUID, say — acts as a phantom hub whose second hop
+/// drags all of its other referrers (the entire project's materials) into
+/// the view.
 function extractSubgraph(
   graph: DependencyGraph,
   centerId: string,
   hops: number
 ): { nodeIds: Set<string>; edges: DependencyGraph["edges"] } {
+  const terminals = new Set(
+    graph.nodes.filter((n) => n.kind !== "asset").map((n) => n.id)
+  );
   const adj = new Map<string, Set<string>>();
   for (const e of graph.edges) {
     (adj.get(e.from) ?? adj.set(e.from, new Set()).get(e.from)!).add(e.to);
@@ -33,6 +43,7 @@ function extractSubgraph(
   for (let h = 0; h < hops; h++) {
     const next: string[] = [];
     for (const id of frontier) {
+      if (terminals.has(id)) continue;
       for (const nb of adj.get(id) ?? []) {
         if (!nodeIds.has(nb)) {
           nodeIds.add(nb);
@@ -44,6 +55,34 @@ function extractSubgraph(
   }
   const edges = graph.edges.filter((e) => nodeIds.has(e.from) && nodeIds.has(e.to));
   return { nodeIds, edges };
+}
+
+/// i18n keys per non-asset node kind: the hover explanation and the footer
+/// legend label. Colors: unresolved reads as a warning (ambiguous, not
+/// asserted broken), missing as an error (confirmed absent from disk),
+/// unscanned stays neutral with a dashed border (present, just not indexed).
+const KIND_TIP = {
+  unresolved: "depGraph.unresolvedTip",
+  unscanned: "depGraph.unscannedTip",
+  missing: "depGraph.missingTip",
+} as const;
+const KIND_LEGEND = {
+  unresolved: "depGraph.legendUnresolved",
+  unscanned: "depGraph.legendUnscanned",
+  missing: "depGraph.legendMissing",
+} as const;
+type SpecialKind = keyof typeof KIND_TIP;
+
+function kindTone(kind: SpecialKind): string | null {
+  return kind === "unresolved" ? "var(--warn)" : kind === "missing" ? "var(--err)" : null;
+}
+function kindBackground(kind: SpecialKind): string {
+  const tone = kindTone(kind);
+  return tone ? `color-mix(in oklab, ${tone} 14%, var(--panel-2))` : "var(--panel-2)";
+}
+function kindBorder(kind: SpecialKind): string {
+  const tone = kindTone(kind);
+  return kind === "unscanned" ? "1px dashed var(--line)" : `1px solid ${tone}`;
 }
 
 /// dagre left→right layout: ranks nodes by dependency direction so the graph
@@ -111,25 +150,54 @@ export function DependencyGraphModal() {
       .filter((n): n is DependencyNode => !!n)
       .map((n) => {
         const isCenter = n.id === center.id;
+        if (n.kind !== "asset") {
+          // Identity stays visible — a Godot res:// path is actionable as-is,
+          // a Unity GUID shortens to a searchable 8-char prefix — and the
+          // full string plus the kind explanation live in the hover title.
+          // (div styles resolve CSS var() fine, unlike SVG edge markers.)
+          const label = (
+            <span
+              title={t(KIND_TIP[n.kind]) + "\n" + n.name}
+              style={{
+                display: "block",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                fontFamily: n.kind === "unresolved" ? "monospace" : undefined,
+              }}
+            >
+              {n.kind === "unresolved" ? `${n.name.slice(0, 8)}…` : n.name}
+            </span>
+          );
+          return {
+            id: n.id,
+            position: { x: 0, y: 0 },
+            data: { label, path: n.path, kind: n.kind },
+            style: {
+              width: NODE_W,
+              fontSize: 11,
+              padding: 6,
+              borderRadius: 6,
+              background: kindBackground(n.kind),
+              color: kindTone(n.kind) ?? "var(--text-3)",
+              border: kindBorder(n.kind),
+              cursor: "default", // path is empty — nothing to locate
+            },
+          };
+        }
         return {
           id: n.id,
           position: { x: 0, y: 0 },
-          data: { label: n.missing ? t("depGraph.missingRef") : n.name, path: n.path },
+          data: { label: n.name, path: n.path, kind: n.kind },
           style: {
             width: NODE_W,
             fontSize: 11,
             padding: 6,
             borderRadius: 6,
-            // A missing (dangling) reference reads red; div style resolves CSS
-            // var() fine (unlike the SVG edge marker). Center node keeps the
-            // primary ring, everything else the neutral line.
-            background: n.missing
-              ? "color-mix(in oklab, var(--err) 14%, var(--panel-2))"
-              : "var(--panel-2)",
-            color: n.missing ? "var(--err)" : "var(--text-3)",
-            border: `1px solid ${
-              n.missing ? "var(--err)" : isCenter ? "var(--primary)" : "var(--line)"
-            }`,
+            background: "var(--panel-2)",
+            color: "var(--text-3)",
+            border: `1px solid ${isCenter ? "var(--primary)" : "var(--line)"}`,
+            cursor: "pointer",
           },
         };
       });
@@ -146,11 +214,17 @@ export function DependencyGraphModal() {
     }));
 
     return { nodes: layoutLR(rfNodes, rfEdges), edges: rfEdges };
-  }, [graph, assetPath]);
+  }, [graph, assetPath, t]);
 
   if (!open) return null;
 
   const centerName = assetPath ? basename(assetPath) : "";
+
+  // Footer legend, limited to the special kinds actually on screen — no
+  // dead swatches, and an all-asset neighborhood shows none at all.
+  const specialKinds = (["unresolved", "unscanned", "missing"] as const).filter((k) =>
+    nodes.some((n) => (n.data as { kind?: string }).kind === k)
+  );
 
   return (
     <ModalShell
@@ -208,9 +282,25 @@ export function DependencyGraphModal() {
           )}
         </div>
 
-        <p className="px-4 py-2 text-[11px] text-text-secondary border-t border-border">
-          {t("depGraph.hint")}
-        </p>
+        <div className="px-4 py-2 text-[11px] text-text-secondary border-t border-border flex items-center gap-4 flex-wrap">
+          <span>{t("depGraph.hint")}</span>
+          <span style={{ flex: 1 }} />
+          {specialKinds.map((k) => (
+            <span key={k} className="inline-flex items-center gap-1.5" title={t(KIND_TIP[k])}>
+              <span
+                style={{
+                  width: 10,
+                  height: 10,
+                  borderRadius: 3,
+                  display: "inline-block",
+                  background: kindBackground(k),
+                  border: kindBorder(k),
+                }}
+              />
+              {t(KIND_LEGEND[k])}
+            </span>
+          ))}
+        </div>
       </div>
     </ModalShell>
   );

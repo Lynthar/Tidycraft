@@ -333,14 +333,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
     },
 
     setHtmlReportIssueLimit: (limit: number) => {
-      // Number inputs can produce NaN / negatives — clamp to a whole ≥ 0
-      // (0 = unlimited by contract with export_to_html).
-      set({ htmlReportIssueLimit: Math.max(0, Math.floor(limit) || 0) });
+      // Non-finite input (NaN from a cleared/garbled field) is "no edit",
+      // NOT zero — 0 means unlimited by contract with export_to_html, and
+      // silently persisting it would arm an unbounded report. Negatives
+      // clamp to 0.
+      if (!Number.isFinite(limit)) return;
+      set({ htmlReportIssueLimit: Math.max(0, Math.floor(limit)) });
       saveSettings(snapshot());
     },
 
     setHtmlReportAssetLimit: (limit: number) => {
-      set({ htmlReportAssetLimit: Math.max(0, Math.floor(limit) || 0) });
+      if (!Number.isFinite(limit)) return;
+      set({ htmlReportAssetLimit: Math.max(0, Math.floor(limit)) });
       saveSettings(snapshot());
     },
   };
