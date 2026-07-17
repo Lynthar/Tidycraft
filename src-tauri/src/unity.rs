@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -117,6 +117,133 @@ pub fn parse_project_version(root_path: &Path) -> Option<UnityProjectInfo> {
         editor_version: editor_version?,
         editor_version_with_revision: with_revision,
     })
+}
+
+/// One package asset resolved from `Library/PackageCache`.
+#[derive(Debug, Clone)]
+pub struct PackageAssetRef {
+    /// Package id without the `@suffix` — e.g. "com.unity.render-pipelines.universal".
+    pub package: String,
+    /// The asset's file name (`.meta` stripped) — e.g. "Lit.shader".
+    pub file_name: String,
+}
+
+/// GUID → package-asset map harvested from `Library/PackageCache`. UPM
+/// extracts every non-embedded package there as an immutable
+/// `<name>@<suffix>` directory (suffix is a version or, in newer editors, a
+/// content hash — opaque either way), shipping the same `.meta` sidecars a
+/// project asset would have. Scenes / materials reference package shaders,
+/// scripts and sprites by those GUIDs, but `Library/` is gitignored by
+/// convention so the scan never resolves them — this index is what lets the
+/// dependency graph and the missing-reference rule tell "package asset"
+/// apart from "genuinely dangling". Absent `Library/` (fresh clone, CI)
+/// yields an empty index and everything degrades to the unresolved
+/// treatment.
+#[derive(Debug, Default)]
+pub struct PackageGuidIndex {
+    map: HashMap<String, PackageAssetRef>,
+}
+
+impl PackageGuidIndex {
+    pub fn get(&self, guid: &str) -> Option<&PackageAssetRef> {
+        self.map.get(guid)
+    }
+}
+
+/// The package directories currently extracted into `Library/PackageCache`,
+/// as a sorted list of dir names. Package dirs are immutable (editing one
+/// requires embedding it under `Packages/`), so this listing changing is the
+/// only way the index goes stale — it serves as the cache key in
+/// `ProjectState`. Missing cache dir → empty list.
+pub fn package_cache_key(root: &Path) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(root.join("Library").join("PackageCache"))
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    names
+}
+
+/// Build the index by walking every package dir's `.meta` files. A .meta
+/// carries its guid in the first lines, so only each file's head is read —
+/// cost stays proportional to the package-asset count (tens of thousands of
+/// small reads on a render-pipeline-scale cache; around a second cold, and
+/// the `ProjectState` cache makes it once per session).
+pub fn build_package_guid_index(root: &Path) -> PackageGuidIndex {
+    let mut map = HashMap::new();
+    let Ok(packages) = fs::read_dir(root.join("Library").join("PackageCache")) else {
+        return PackageGuidIndex::default();
+    };
+    for pkg in packages.filter_map(|e| e.ok()) {
+        if !pkg.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let dir_name = pkg.file_name().to_string_lossy().to_string();
+        let package = dir_name
+            .split('@')
+            .next()
+            .unwrap_or(dir_name.as_str())
+            .to_string();
+        collect_package_metas(&pkg.path(), &package, &mut map);
+    }
+    PackageGuidIndex { map }
+}
+
+/// Recurse a package directory collecting `.meta` guids. File types come
+/// from the dir entry (no symlink following — a cycle inside a cache dir
+/// would otherwise hang the walk).
+fn collect_package_metas(dir: &Path, package: &str, map: &mut HashMap<String, PackageAssetRef>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.filter_map(|e| e.ok()) {
+        let Ok(ft) = entry.file_type() else { continue };
+        let path = entry.path();
+        if ft.is_dir() {
+            collect_package_metas(&path, package, map);
+        } else if ft.is_file()
+            && path.extension().and_then(|e| e.to_str()) == Some("meta")
+        {
+            if let Some(guid) = read_meta_guid_head(&path) {
+                // file_stem of "Lit.shader.meta" is "Lit.shader" — the asset
+                // the sidecar describes.
+                let file_name = path
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                map.insert(
+                    guid,
+                    PackageAssetRef {
+                        package: package.to_string(),
+                        file_name,
+                    },
+                );
+            }
+        }
+    }
+}
+
+/// Pull the `guid:` line out of a .meta file reading only its head (the
+/// field sits on line 2 by format; 256 bytes covers it with room to spare).
+fn read_meta_guid_head(path: &Path) -> Option<String> {
+    use std::io::Read;
+    let mut buf = [0u8; 256];
+    let mut file = fs::File::open(path).ok()?;
+    let n = file.read(&mut buf).ok()?;
+    let head = String::from_utf8_lossy(&buf[..n]);
+    for line in head.lines() {
+        if let Some(v) = line.strip_prefix("guid:") {
+            let guid = v.trim().to_string();
+            if guid.len() == 32 && guid.chars().all(|c| c.is_ascii_hexdigit()) {
+                return Some(guid);
+            }
+        }
+    }
+    None
 }
 
 /// The all-zero GUID Unity writes as a "no reference" sentinel. The empty
@@ -353,6 +480,55 @@ mod tests {
             "path must be forward-slash normalized: {}",
             info.path
         );
+    }
+
+    #[test]
+    fn package_guid_index_walks_the_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = dir.path().join("Library").join("PackageCache");
+        // Registry package with a versioned suffix, nested asset dirs.
+        let urp = cache.join("com.example.renderpipe@14.0.8").join("Shaders");
+        fs::create_dir_all(&urp).unwrap();
+        fs::write(urp.join("Lit.shader"), "Shader \"Lit\" {}").unwrap();
+        fs::write(
+            urp.join("Lit.shader.meta"),
+            "fileFormatVersion: 2\nguid: dddddddddddddddddddddddddddddd01\n",
+        )
+        .unwrap();
+        // Newer editors suffix with a content hash — must parse the same.
+        let tmp = cache.join("com.example.tools@f00dbeefcafe");
+        fs::create_dir_all(&tmp).unwrap();
+        fs::write(
+            tmp.join("Runner.cs.meta"),
+            "fileFormatVersion: 2\nguid: dddddddddddddddddddddddddddddd02\n",
+        )
+        .unwrap();
+        // Malformed guid line → skipped, not indexed.
+        fs::write(tmp.join("Broken.cs.meta"), "fileFormatVersion: 2\nguid: nope\n").unwrap();
+
+        let index = build_package_guid_index(dir.path());
+        let lit = index.get("dddddddddddddddddddddddddddddd01").expect("indexed");
+        assert_eq!(lit.package, "com.example.renderpipe");
+        assert_eq!(lit.file_name, "Lit.shader");
+        let runner = index.get("dddddddddddddddddddddddddddddd02").expect("indexed");
+        assert_eq!(runner.package, "com.example.tools");
+        assert_eq!(runner.file_name, "Runner.cs");
+        // The malformed guid line was skipped, not indexed under garbage.
+        assert!(index.get("nope").is_none());
+
+        // The cache key is the sorted dir listing; absent cache → empty both.
+        assert_eq!(
+            package_cache_key(dir.path()),
+            vec![
+                "com.example.renderpipe@14.0.8".to_string(),
+                "com.example.tools@f00dbeefcafe".to_string(),
+            ]
+        );
+        let bare = tempfile::tempdir().unwrap();
+        assert!(build_package_guid_index(bare.path())
+            .get("dddddddddddddddddddddddddddddd01")
+            .is_none());
+        assert!(package_cache_key(bare.path()).is_empty());
     }
 
     #[test]

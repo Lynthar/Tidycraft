@@ -96,6 +96,7 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
   const closeProject = useProjectStore((s) => s.closeProject);
   const typeFilter = useProjectStore((s) => s.typeFilter);
   const setTypeFilter = useProjectStore((s) => s.setTypeFilter);
+  const toggleTypeFilter = useProjectStore((s) => s.toggleTypeFilter);
 
   const { theme, toggleTheme } = useThemeStore();
 
@@ -251,7 +252,7 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
       for (const type of FILTER_TYPE_ORDER) {
         const count = counts[type];
         if (!count) continue;
-        const isActive = typeFilter === type;
+        const isActive = typeFilter?.includes(type) ?? false;
         list.push({
           id: `filter-${type}`,
           section: t("commandPalette.section.filter"),
@@ -274,8 +275,9 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
             />
           ),
           onSelect: () => {
-            // Toggle: clicking the active filter clears it.
-            setTypeFilter(isActive ? null : type);
+            // Membership toggle: repeated invocations compose a multi-type
+            // union (the pills' Ctrl+click, without the modifier).
+            toggleTypeFilter(type);
             setViewMode("assets");
             close();
           },

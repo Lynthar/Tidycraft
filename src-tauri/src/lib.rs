@@ -817,6 +817,7 @@ fn run_full_analysis(
     root_path: &str,
     config: &RuleConfig,
     ignore_set: Option<&globset::GlobSet>,
+    package_index: &unity::PackageGuidIndex,
 ) -> AnalysisResult {
     // Only clone the scan when there are patterns to apply; most projects
     // have none and analyze the cached scan reference in place.
@@ -848,7 +849,7 @@ fn run_full_analysis(
     let mut result = analyzer.analyze(scan_to_analyze);
     let duplicates = analyzer.find_duplicates(scan_to_analyze);
     result.merge(duplicates);
-    let missing = analyzer.find_missing_references(scan_to_analyze);
+    let missing = analyzer.find_missing_references(scan_to_analyze, package_index);
     result.merge(missing);
     let pbr = analyzer.find_pbr_set_issues(scan_to_analyze, &config.pbr_set);
     result.merge(pbr);
@@ -872,6 +873,8 @@ fn analyze_assets(project_id: String, config_toml: Option<String>) -> Result<Ana
     // Build the ignore matcher up-front so a malformed pattern surfaces as
     // an error before we touch the per-project lock.
     let ignore_set = build_ignore_set(&config)?;
+    // Fetched before the lock below — see package_index_for.
+    let package_index = package_index_for(&project_id);
 
     project::with_ref(&project_id, |state| {
         let scan_result = state.require_scan()?;
@@ -880,6 +883,7 @@ fn analyze_assets(project_id: String, config_toml: Option<String>) -> Result<Ana
             &state.root_path,
             &config,
             ignore_set.as_ref(),
+            &package_index,
         ))
     })
 }
@@ -1042,11 +1046,15 @@ pub struct DependencyGraph {
 pub enum DependencyNodeKind {
     /// A scanned project asset — has a real `path`, clickable in the UI.
     Asset,
-    /// Unity: a referenced GUID with no scanned asset behind it. Ambiguous by
-    /// construction — package assets (gitignored `Library/PackageCache`),
-    /// ignore-excluded files, and genuinely broken references are
-    /// indistinguishable from a disk scan. Rendered as a warning, never
-    /// asserted broken.
+    /// Unity: a referenced GUID resolved through the `Library/PackageCache`
+    /// index — a package asset installed by the package manager. Known to
+    /// exist; simply not part of the project's own assets.
+    Package,
+    /// Unity: a referenced GUID with no scanned asset behind it and no
+    /// package-index hit. Ambiguous by construction — a package asset (when
+    /// no local `Library/` cache exists to resolve it), an ignore-excluded
+    /// file, and a genuinely broken reference are indistinguishable from a
+    /// disk scan. Rendered as a warning, never asserted broken.
     Unresolved,
     /// Godot: a `res://` target that exists on disk but sits outside the scan
     /// set (gitignored / hidden directory). Not breakage.
@@ -1066,6 +1074,33 @@ pub struct DependencyNode {
     /// so a widely-shared unresolved GUID can't hub-connect its unrelated
     /// referrers in the 2-hop view.
     pub kind: DependencyNodeKind,
+    /// Secondary identity line for the tooltip — the package id for
+    /// `package` nodes ("com.unity.render-pipelines.universal"). Absent
+    /// elsewhere.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+/// Cached GUID→package index for this project, built lazily and rebuilt only
+/// when `Library/PackageCache`'s directory listing changes. Takes the project
+/// lock briefly — callers grab the Arc BEFORE their own `with_ref` block
+/// (`with_mut` inside `with_ref` would self-deadlock on the project mutex).
+/// Unknown project / no cache dir both yield an empty index, which every
+/// consumer treats as "resolve nothing".
+fn package_index_for(project_id: &str) -> std::sync::Arc<unity::PackageGuidIndex> {
+    project::with_mut(project_id, |state| {
+        let root = Path::new(&state.root_path);
+        let key = unity::package_cache_key(root);
+        if let Some((cached_key, index)) = &state.package_index {
+            if *cached_key == key {
+                return Ok(index.clone());
+            }
+        }
+        let index = std::sync::Arc::new(unity::build_package_guid_index(root));
+        state.package_index = Some((key, index.clone()));
+        Ok(index)
+    })
+    .unwrap_or_default()
 }
 
 #[derive(Serialize)]
@@ -1098,6 +1133,8 @@ const UNITY_REFERENCEABLE_EXTS: &[&str] = &[
 // off the main thread so a 10k-asset project doesn't freeze the window.
 #[tauri::command(async)]
 fn get_unity_dependencies(project_id: String) -> Result<DependencyGraph, String> {
+    // Fetched before the lock below — see package_index_for.
+    let package_index = package_index_for(&project_id);
     project::with_ref(&project_id, |state| {
         let scan_result = state.require_scan()?;
 
@@ -1118,6 +1155,7 @@ fn get_unity_dependencies(project_id: String) -> Result<DependencyGraph, String>
                     name: asset.name.clone(),
                     file_type: format!("{:?}", asset.asset_type).to_lowercase(),
                     kind: DependencyNodeKind::Asset,
+                    detail: None,
                 });
             }
         }
@@ -1129,11 +1167,11 @@ fn get_unity_dependencies(project_id: String) -> Result<DependencyGraph, String>
         // rule applies: they aren't project assets, and the built-ins are
         // exactly the GUIDs every material / UI element shares, so one node
         // for them would hub-connect the whole project in the 2-hop view.
-        // Everything else unknown is genuinely ambiguous from a disk scan
-        // (a package asset under gitignored Library/PackageCache looks
-        // identical to a deleted asset), so it becomes one deduped
-        // `unresolved` node — a warning with its edge intact, not an
-        // asserted breakage.
+        // The rest resolves through the PackageCache index when a local
+        // Library/ exists — a `package` node with its file and package name
+        // — and only what's left is genuinely ambiguous (no cache to check,
+        // ignore-excluded, or truly deleted): one deduped `unresolved` node,
+        // a warning with its edge intact, not an asserted breakage.
         let mut unresolved_guids: std::collections::HashSet<String> =
             std::collections::HashSet::new();
         for asset in &scan_result.assets {
@@ -1150,12 +1188,23 @@ fn get_unity_dependencies(project_id: String) -> Result<DependencyGraph, String>
                             if !guid_to_path.contains_key(&reference.guid)
                                 && unresolved_guids.insert(reference.guid.clone())
                             {
-                                nodes.push(DependencyNode {
-                                    id: reference.guid.clone(),
-                                    path: String::new(),
-                                    name: reference.guid.clone(),
-                                    file_type: "unresolved".to_string(),
-                                    kind: DependencyNodeKind::Unresolved,
+                                nodes.push(match package_index.get(&reference.guid) {
+                                    Some(pkg) => DependencyNode {
+                                        id: reference.guid.clone(),
+                                        path: String::new(),
+                                        name: pkg.file_name.clone(),
+                                        file_type: "package".to_string(),
+                                        kind: DependencyNodeKind::Package,
+                                        detail: Some(pkg.package.clone()),
+                                    },
+                                    None => DependencyNode {
+                                        id: reference.guid.clone(),
+                                        path: String::new(),
+                                        name: reference.guid.clone(),
+                                        file_type: "unresolved".to_string(),
+                                        kind: DependencyNodeKind::Unresolved,
+                                        detail: None,
+                                    },
                                 });
                             }
                             edges.push(DependencyEdge {
@@ -1264,6 +1313,7 @@ fn get_godot_dependencies(project_id: String) -> Result<DependencyGraph, String>
                     name: asset.name.clone(),
                     file_type: format!("{:?}", asset.asset_type).to_lowercase(),
                     kind: DependencyNodeKind::Asset,
+                    detail: None,
                 });
             }
         }
@@ -1291,6 +1341,7 @@ fn get_godot_dependencies(project_id: String) -> Result<DependencyGraph, String>
                     } else {
                         DependencyNodeKind::Missing
                     },
+                    detail: None,
                 });
             }
             edges.push(DependencyEdge { from, to });
@@ -1493,6 +1544,8 @@ fn export_to_csv(project_id: String) -> Result<String, String> {
 // `(async)`: runs a full analysis (incl. duplicate re-hashing) under the lock.
 #[tauri::command(async)]
 fn export_issues_to_json(project_id: String) -> Result<String, String> {
+    // Fetched before the lock below — see package_index_for.
+    let package_index = package_index_for(&project_id);
     project::with_ref(&project_id, |state| {
         let scan_result = state.require_scan()?;
 
@@ -1503,7 +1556,13 @@ fn export_issues_to_json(project_id: String) -> Result<String, String> {
         // view under any custom config.
         let config = load_rule_config(&state.root_path)?;
         let ignore_set = build_ignore_set(&config)?;
-        let result = run_full_analysis(scan_result, &state.root_path, &config, ignore_set.as_ref());
+        let result = run_full_analysis(
+            scan_result,
+            &state.root_path,
+            &config,
+            ignore_set.as_ref(),
+            &package_index,
+        );
 
         serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
     })
@@ -1528,6 +1587,8 @@ fn export_to_html(
     let issue_cap = cap(issue_limit, 100);
     let asset_cap = cap(asset_limit, 500);
 
+    // Fetched before the lock below — see package_index_for.
+    let package_index = package_index_for(&project_id);
     project::with_ref(&project_id, |state| {
         let scan_result = state.require_scan()?;
 
@@ -1538,8 +1599,13 @@ fn export_to_html(
         // [ignore].patterns scope analysis, not the project's file census.
         let config = load_rule_config(&state.root_path)?;
         let ignore_set = build_ignore_set(&config)?;
-        let analysis_result =
-            run_full_analysis(scan_result, &state.root_path, &config, ignore_set.as_ref());
+        let analysis_result = run_full_analysis(
+            scan_result,
+            &state.root_path,
+            &config,
+            ignore_set.as_ref(),
+            &package_index,
+        );
 
         let mut type_counts: HashMap<String, usize> = HashMap::new();
         let mut size_by_type: HashMap<String, u64> = HashMap::new();

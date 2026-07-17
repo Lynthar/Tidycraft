@@ -19,6 +19,7 @@ const REFERENCEABLE_EXTS: &[&str] = &["prefab", "unity", "mat", "controller", "a
 pub fn find_missing_references(
     assets: &[AssetInfo],
     project_type: &Option<ProjectType>,
+    package_index: &unity::PackageGuidIndex,
 ) -> AnalysisResult {
     let mut result = AnalysisResult::new();
 
@@ -61,15 +62,22 @@ pub fn find_missing_references(
             if unity::is_null_guid(&r.guid) || unity::is_builtin_guid(&r.guid) {
                 continue;
             }
+            // Package assets resolve through the PackageCache index — known
+            // to exist, just installed by the package manager rather than
+            // living in the project. Not a finding.
+            if package_index.get(&r.guid).is_some() {
+                continue;
+            }
             if known_guids.contains(&r.guid) {
                 continue;
             }
             if !reported.insert(r.guid.clone()) {
                 continue;
             }
-            // Warning, not Error: known_guids only covers what the scan saw,
-            // and gitignored Library/ or Packages/ contents never enter it —
-            // a miss is strong signal, not proof of breakage.
+            // Warning, not Error: known_guids only covers what the scan saw
+            // and the package index only what a local Library/ cache
+            // resolves (a fresh clone has neither) — a miss is strong
+            // signal, not proof of breakage.
             result.add_issue(Issue {
                 rule_id: "missing_reference".to_string(),
                 rule_name: "Missing Reference".to_string(),
@@ -153,7 +161,7 @@ mod tests {
                 ],
             ),
         ];
-        let r = find_missing_references(&assets, &Some(ProjectType::Unity));
+        let r = find_missing_references(&assets, &Some(ProjectType::Unity), &unity::PackageGuidIndex::default());
         assert_eq!(r.issue_count, 1);
         assert!(r.issues[0].message.contains("22222222"));
     }
@@ -170,7 +178,7 @@ mod tests {
                 "99999999999999999999999999999999",
             ],
         )];
-        let r = find_missing_references(&assets, &Some(ProjectType::Unity));
+        let r = find_missing_references(&assets, &Some(ProjectType::Unity), &unity::PackageGuidIndex::default());
         assert_eq!(r.issue_count, 1);
     }
 
@@ -182,7 +190,7 @@ mod tests {
             "x.prefab",
             &["99999999999999999999999999999999"],
         )];
-        let r = find_missing_references(&assets, &Some(ProjectType::Unreal));
+        let r = find_missing_references(&assets, &Some(ProjectType::Unreal), &unity::PackageGuidIndex::default());
         assert_eq!(r.issue_count, 0);
     }
 
@@ -197,13 +205,47 @@ mod tests {
                 &["00000000000000000000000000000000"],
             ),
         ];
-        let r = find_missing_references(&assets, &Some(ProjectType::Unity));
+        let r = find_missing_references(&assets, &Some(ProjectType::Unity), &unity::PackageGuidIndex::default());
         assert_eq!(r.issue_count, 0);
     }
 
     #[test]
+    fn package_resolved_guids_are_not_missing() {
+        // A guid the PackageCache index accounts for is a package asset —
+        // known to exist, not a finding; an unindexed one still reports.
+        let dir = tempdir().unwrap();
+        let pkg = dir
+            .path()
+            .join("Library")
+            .join("PackageCache")
+            .join("com.example.pkg@1.0.0");
+        fs::create_dir_all(&pkg).unwrap();
+        fs::write(
+            pkg.join("Thing.shader.meta"),
+            "fileFormatVersion: 2\nguid: 33333333333333333333333333333333\n",
+        )
+        .unwrap();
+        let index = crate::unity::build_package_guid_index(dir.path());
+
+        let assets = vec![
+            texture_with_guid(dir.path(), "t.png", "11111111111111111111111111111111"),
+            prefab_referencing(
+                dir.path(),
+                "p.prefab",
+                &[
+                    "33333333333333333333333333333333", // package-resolved
+                    "22222222222222222222222222222222", // truly unknown
+                ],
+            ),
+        ];
+        let r = find_missing_references(&assets, &Some(ProjectType::Unity), &index);
+        assert_eq!(r.issue_count, 1);
+        assert!(r.issues[0].message.contains("22222222"));
+    }
+
+    #[test]
     fn empty_project_reports_nothing() {
-        let r = find_missing_references(&[], &Some(ProjectType::Unity));
+        let r = find_missing_references(&[], &Some(ProjectType::Unity), &unity::PackageGuidIndex::default());
         assert_eq!(r.issue_count, 0);
     }
 
@@ -225,7 +267,7 @@ mod tests {
                 ],
             ),
         ];
-        let r = find_missing_references(&assets, &Some(ProjectType::Unity));
+        let r = find_missing_references(&assets, &Some(ProjectType::Unity), &unity::PackageGuidIndex::default());
         assert_eq!(r.issue_count, 0);
     }
 
@@ -246,7 +288,7 @@ mod tests {
                 ],
             ),
         ];
-        let r = find_missing_references(&assets, &Some(ProjectType::Unity));
+        let r = find_missing_references(&assets, &Some(ProjectType::Unity), &unity::PackageGuidIndex::default());
         assert_eq!(r.issue_count, 3);
     }
 
@@ -264,7 +306,7 @@ mod tests {
                 &["22222222222222222222222222222222"],
             ),
         ];
-        let r = find_missing_references(&assets, &Some(ProjectType::Unity));
+        let r = find_missing_references(&assets, &Some(ProjectType::Unity), &unity::PackageGuidIndex::default());
         assert_eq!(r.issue_count, 1);
         assert!(matches!(r.issues[0].severity, Severity::Warning));
     }

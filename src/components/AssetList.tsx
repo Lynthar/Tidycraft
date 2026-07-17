@@ -16,6 +16,7 @@ import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import { MoveCopyDialog } from "./MoveCopyDialog";
 import type { FileOpResult } from "../types/asset";
 import { relativeToRoot } from "../lib/pathUtils";
+import { isMacOS } from "../lib/platform";
 import { BatchTagSelector } from "./TagSelector";
 import { ContextMenu } from "./ContextMenu";
 import { AssetListView } from "./AssetListView";
@@ -39,6 +40,14 @@ const FILTER_TYPE_ORDER: AssetType[] = [
   "other",
 ];
 
+/// The "Art assets" quick-group pill: everything an artist owns, minus the
+/// code / data / misc files real engine projects interleave with them. One
+/// click gets "all art, no clutter" — the multi-select union that motivated
+/// multi-select in the first place.
+const ART_TYPE_GROUP: AssetType[] = FILTER_TYPE_ORDER.filter(
+  (t) => t !== "script" && t !== "data" && t !== "other"
+);
+
 export function AssetList() {
   const { t } = useTranslation();
   const {
@@ -54,6 +63,7 @@ export function AssetList() {
     gitStatuses,
     typeFilter,
     setTypeFilter,
+    toggleTypeFilter,
     searchQuery,
     selectedDirectory,
     setSelectedDirectory,
@@ -61,7 +71,7 @@ export function AssetList() {
     refreshUndoState,
     advancedFilters,
   } = useProjectStore(
-    useShallow((s) => ({ scanResult: s.scanResult, selectedAsset: s.selectedAsset, setSelectedAsset: s.setSelectedAsset, getFilteredAssets: s.getFilteredAssets, isScanning: s.isScanning, sortField: s.sortField, sortDirection: s.sortDirection, setSortField: s.setSortField, toggleSortDirection: s.toggleSortDirection, gitStatuses: s.gitStatuses, typeFilter: s.typeFilter, setTypeFilter: s.setTypeFilter, searchQuery: s.searchQuery, selectedDirectory: s.selectedDirectory, setSelectedDirectory: s.setSelectedDirectory, projectPath: s.projectPath, refreshUndoState: s.refreshUndoState, advancedFilters: s.advancedFilters, }))
+    useShallow((s) => ({ scanResult: s.scanResult, selectedAsset: s.selectedAsset, setSelectedAsset: s.setSelectedAsset, getFilteredAssets: s.getFilteredAssets, isScanning: s.isScanning, sortField: s.sortField, sortDirection: s.sortDirection, setSortField: s.setSortField, toggleSortDirection: s.toggleSortDirection, gitStatuses: s.gitStatuses, typeFilter: s.typeFilter, setTypeFilter: s.setTypeFilter, toggleTypeFilter: s.toggleTypeFilter, searchQuery: s.searchQuery, selectedDirectory: s.selectedDirectory, setSelectedDirectory: s.setSelectedDirectory, projectPath: s.projectPath, refreshUndoState: s.refreshUndoState, advancedFilters: s.advancedFilters, }))
   );
   const { loadTags, assetTags: allAssetTags, tagFilters } = useTagsStore();
   const viewMode = useColumnStore((s) => s.viewMode);
@@ -76,6 +86,24 @@ export function AssetList() {
   // are gated on BOTH a configured provider AND the advanced toggle.
   // Learning mode is the recommended path; this entry is opt-in.
   const aiDirectModeAvailable = !!aiActiveProvider && aiPerAssetModeEnabled;
+
+  // "Art assets" quick group, intersected with what this scan actually
+  // holds. The pill only renders when it differs from "All" (i.e. the
+  // project has some code/data/misc to hide) — see the toolbar below.
+  const artPresent = scanResult
+    ? ART_TYPE_GROUP.filter((t) => (scanResult.type_counts[t] ?? 0) > 0)
+    : [];
+  const artCount = artPresent.reduce(
+    (n, t) => n + (scanResult?.type_counts[t] ?? 0),
+    0
+  );
+  const artActive =
+    typeFilter !== null &&
+    typeFilter.length === artPresent.length &&
+    artPresent.every((t) => typeFilter.includes(t));
+  const typePillHint = t("assetList.typePillHint", {
+    mod: isMacOS() ? "⌘" : "Ctrl",
+  });
 
   const selectedPaths = useSelectionStore((s) => s.selectedPaths);
   const setSelectedPaths = useSelectionStore((s) => s.setSelectedPaths);
@@ -531,14 +559,38 @@ export function AssetList() {
               {t("assetTypes.all")}
               <span className="mono">{scanResult.total_count}</span>
             </button>
+            {artPresent.length > 0 && artCount < scanResult.total_count && (
+              <button
+                className="tc-pill"
+                data-active={artActive ? "true" : undefined}
+                title={t("assetList.artAssetsHint")}
+                onClick={() => setTypeFilter(artActive ? null : artPresent)}
+              >
+                {t("assetList.artAssets")}
+                <span className="mono">{artCount}</span>
+              </button>
+            )}
             {FILTER_TYPE_ORDER.filter(
               (type) => (scanResult.type_counts[type] ?? 0) > 0
             ).map((type) => (
               <button
                 key={type}
                 className="tc-pill"
-                data-active={typeFilter === type ? "true" : undefined}
-                onClick={() => setTypeFilter(type)}
+                data-active={typeFilter?.includes(type) ? "true" : undefined}
+                title={typePillHint}
+                onClick={(e) => {
+                  // Plain click keeps the familiar single-select (and
+                  // re-clicking the sole active type clears back to All);
+                  // Ctrl/Cmd+click accumulates — the same modifier grammar
+                  // as batch selection.
+                  if (e.ctrlKey || e.metaKey) {
+                    toggleTypeFilter(type);
+                  } else if (typeFilter?.length === 1 && typeFilter[0] === type) {
+                    setTypeFilter(null);
+                  } else {
+                    setTypeFilter([type]);
+                  }
+                }}
               >
                 <span
                   style={{
