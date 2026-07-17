@@ -106,7 +106,10 @@ export interface ProjectData {
   selectedDirectory: string | null;
   selectedAsset: AssetInfo | null;
   searchQuery: string;
-  typeFilter: AssetType | null;
+  /// Asset-type filter as a UNION of selected types; `null` is the one
+  /// canonical "no filter" state (an empty array normalizes to it in the
+  /// setters — same discipline as `selectedDirectory`'s null).
+  typeFilter: AssetType[] | null;
   sortField: SortField;
   sortDirection: SortDirection;
   advancedFilters: AdvancedFilters;
@@ -222,7 +225,10 @@ interface ProjectState {
   selectedDirectory: string | null;
   selectedAsset: AssetInfo | null;
   searchQuery: string;
-  typeFilter: AssetType | null;
+  /// Asset-type filter as a UNION of selected types; `null` is the one
+  /// canonical "no filter" state (an empty array normalizes to it in the
+  /// setters — same discipline as `selectedDirectory`'s null).
+  typeFilter: AssetType[] | null;
   sortField: SortField;
   sortDirection: SortDirection;
   advancedFilters: AdvancedFilters;
@@ -271,7 +277,10 @@ interface ProjectState {
   setSelectedDirectory: (path: string | null) => void;
   setSelectedAsset: (asset: AssetInfo | null) => void;
   setSearchQuery: (query: string) => void;
-  setTypeFilter: (type: AssetType | null) => void;
+  setTypeFilter: (types: AssetType[] | null) => void;
+  /// Add/remove one type from the filter set (Ctrl+click on a pill, the
+  /// command palette's filter entries, the advanced panel's type chips).
+  toggleTypeFilter: (type: AssetType) => void;
   setSortField: (field: SortField) => void;
   toggleSortDirection: () => void;
   locateAsset: (path: string) => void;
@@ -1063,8 +1072,22 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set(updateActiveProject(get(), { searchQuery: query }));
   },
 
-  setTypeFilter: (type: AssetType | null) => {
-    set(updateActiveProject(get(), { typeFilter: type }));
+  setTypeFilter: (types: AssetType[] | null) => {
+    // [] normalizes to null so "no filter" has exactly one state — an empty
+    // set would otherwise read as "hide everything".
+    set(updateActiveProject(get(), {
+      typeFilter: types && types.length > 0 ? types : null,
+    }));
+  },
+
+  toggleTypeFilter: (type: AssetType) => {
+    const current = get().typeFilter ?? [];
+    const next = current.includes(type)
+      ? current.filter((t) => t !== type)
+      : [...current, type];
+    set(updateActiveProject(get(), {
+      typeFilter: next.length > 0 ? next : null,
+    }));
   },
 
   setSortField: (field: SortField) => {
@@ -1295,7 +1318,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     // Filter by asset type
     if (typeFilter) {
-      assets = assets.filter((asset) => asset.asset_type === typeFilter);
+      const wanted = new Set(typeFilter);
+      assets = assets.filter((asset) => wanted.has(asset.asset_type));
     }
 
     // Advanced filters

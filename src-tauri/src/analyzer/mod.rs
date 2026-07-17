@@ -170,11 +170,18 @@ impl Analyzer {
     }
 
     /// Check for Unity GUID references that don't resolve to any asset in
-    /// the project. No-op for non-Unity projects.
-    pub fn find_missing_references(&self, scan_result: &ScanResult) -> AnalysisResult {
+    /// the project. No-op for non-Unity projects. `package_index` clears
+    /// references the local `Library/PackageCache` accounts for (empty
+    /// index = resolve nothing).
+    pub fn find_missing_references(
+        &self,
+        scan_result: &ScanResult,
+        package_index: &crate::unity::PackageGuidIndex,
+    ) -> AnalysisResult {
         rules::missing_reference::find_missing_references(
             &scan_result.assets,
             &scan_result.project_type,
+            package_index,
         )
     }
 

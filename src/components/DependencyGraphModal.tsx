@@ -15,16 +15,19 @@ const NODE_W = 180;
 const NODE_H = 40;
 const HOPS = 2;
 
-/// BFS outward from `centerId` up to `hops`, following edges in BOTH directions
-/// (we want both what the asset uses and what uses it). Returns the reachable
-/// node ids plus the edges that stay within that set.
+/// The center's neighborhood, walked DIRECTION-CONSISTENTLY: one sweep
+/// follows only outgoing edges ("what it uses", up to `hops` levels) and one
+/// only incoming edges ("what uses it") — a path never flips direction
+/// midway. Mixed-direction walks read as relevance but deliver siblings: any
+/// shared dependency (an atlas, a package shader) is one hop down, and the
+/// flip-back hop would drag in every OTHER user of it — on real projects
+/// that's the entire material list. Same Uses / Used-by split as Unity's own
+/// dependency viewer. Edges between reached nodes are all kept (true
+/// information); they just don't expand the set.
 ///
-/// Non-`asset` nodes (unresolved / unscanned / missing) are TERMINALS: they
-/// may join the neighborhood, but expansion never continues through them.
-/// Without this, one widely-shared unresolved reference — every URP
-/// material's shader GUID, say — acts as a phantom hub whose second hop
-/// drags all of its other referrers (the entire project's materials) into
-/// the view.
+/// Non-`asset` nodes (package / unresolved / unscanned / missing) stay
+/// TERMINALS on top of that: nothing is known about their far side, so
+/// expansion stops at them in both sweeps.
 function extractSubgraph(
   graph: DependencyGraph,
   centerId: string,
@@ -33,26 +36,36 @@ function extractSubgraph(
   const terminals = new Set(
     graph.nodes.filter((n) => n.kind !== "asset").map((n) => n.id)
   );
-  const adj = new Map<string, Set<string>>();
+  const out = new Map<string, Set<string>>();
+  const inc = new Map<string, Set<string>>();
   for (const e of graph.edges) {
-    (adj.get(e.from) ?? adj.set(e.from, new Set()).get(e.from)!).add(e.to);
-    (adj.get(e.to) ?? adj.set(e.to, new Set()).get(e.to)!).add(e.from);
+    (out.get(e.from) ?? out.set(e.from, new Set()).get(e.from)!).add(e.to);
+    (inc.get(e.to) ?? inc.set(e.to, new Set()).get(e.to)!).add(e.from);
   }
   const nodeIds = new Set<string>([centerId]);
-  let frontier = [centerId];
-  for (let h = 0; h < hops; h++) {
-    const next: string[] = [];
-    for (const id of frontier) {
-      if (terminals.has(id)) continue;
-      for (const nb of adj.get(id) ?? []) {
-        if (!nodeIds.has(nb)) {
-          nodeIds.add(nb);
-          next.push(nb);
+  // Per-sweep visited set: a node reached downstream may still need its own
+  // upstream walk in the other sweep (cycles aside, the global set would cut
+  // the second sweep short).
+  const sweep = (adj: Map<string, Set<string>>) => {
+    const seen = new Set<string>([centerId]);
+    let frontier = [centerId];
+    for (let h = 0; h < hops; h++) {
+      const next: string[] = [];
+      for (const id of frontier) {
+        if (terminals.has(id)) continue;
+        for (const nb of adj.get(id) ?? []) {
+          if (!seen.has(nb)) {
+            seen.add(nb);
+            nodeIds.add(nb);
+            next.push(nb);
+          }
         }
       }
+      frontier = next;
     }
-    frontier = next;
-  }
+  };
+  sweep(out);
+  sweep(inc);
   const edges = graph.edges.filter((e) => nodeIds.has(e.from) && nodeIds.has(e.to));
   return { nodeIds, edges };
 }
@@ -60,13 +73,17 @@ function extractSubgraph(
 /// i18n keys per non-asset node kind: the hover explanation and the footer
 /// legend label. Colors: unresolved reads as a warning (ambiguous, not
 /// asserted broken), missing as an error (confirmed absent from disk),
-/// unscanned stays neutral with a dashed border (present, just not indexed).
+/// package and unscanned stay neutral with a dashed border — both mean
+/// "exists outside the scan", and they never co-occur (package is
+/// Unity-only, unscanned Godot-only) so the shared look stays unambiguous.
 const KIND_TIP = {
+  package: "depGraph.packageTip",
   unresolved: "depGraph.unresolvedTip",
   unscanned: "depGraph.unscannedTip",
   missing: "depGraph.missingTip",
 } as const;
 const KIND_LEGEND = {
+  package: "depGraph.legendPackage",
   unresolved: "depGraph.legendUnresolved",
   unscanned: "depGraph.legendUnscanned",
   missing: "depGraph.legendMissing",
@@ -82,7 +99,7 @@ function kindBackground(kind: SpecialKind): string {
 }
 function kindBorder(kind: SpecialKind): string {
   const tone = kindTone(kind);
-  return kind === "unscanned" ? "1px dashed var(--line)" : `1px solid ${tone}`;
+  return tone ? `1px solid ${tone}` : "1px dashed var(--line)";
 }
 
 /// dagre left→right layout: ranks nodes by dependency direction so the graph
@@ -151,13 +168,14 @@ export function DependencyGraphModal() {
       .map((n) => {
         const isCenter = n.id === center.id;
         if (n.kind !== "asset") {
-          // Identity stays visible — a Godot res:// path is actionable as-is,
-          // a Unity GUID shortens to a searchable 8-char prefix — and the
-          // full string plus the kind explanation live in the hover title.
+          // Identity stays visible — a package node shows its file name, a
+          // Godot res:// path is actionable as-is, a Unity GUID shortens to
+          // a searchable 8-char prefix — and the explanation, the package id
+          // (when known) and the full string live in the hover title.
           // (div styles resolve CSS var() fine, unlike SVG edge markers.)
           const label = (
             <span
-              title={t(KIND_TIP[n.kind]) + "\n" + n.name}
+              title={[t(KIND_TIP[n.kind]), n.detail, n.name].filter(Boolean).join("\n")}
               style={{
                 display: "block",
                 overflow: "hidden",
@@ -222,8 +240,8 @@ export function DependencyGraphModal() {
 
   // Footer legend, limited to the special kinds actually on screen — no
   // dead swatches, and an all-asset neighborhood shows none at all.
-  const specialKinds = (["unresolved", "unscanned", "missing"] as const).filter((k) =>
-    nodes.some((n) => (n.data as { kind?: string }).kind === k)
+  const specialKinds = (["package", "unresolved", "unscanned", "missing"] as const).filter(
+    (k) => nodes.some((n) => (n.data as { kind?: string }).kind === k)
   );
 
   return (

@@ -15,7 +15,7 @@ const GIT_STATUS_FILTER_OPTIONS: GitFileStatus[] = [
 
 export function AdvancedFiltersPanel() {
   const { t } = useTranslation();
-  const { advancedFilters, setAdvancedFilters, resetAdvancedFilters, scanResult, typeFilter, setTypeFilter, gitInfo } = useProjectStore();
+  const { advancedFilters, setAdvancedFilters, resetAdvancedFilters, scanResult, typeFilter, setTypeFilter, toggleTypeFilter, gitInfo } = useProjectStore();
   const [isOpen, setIsOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -189,9 +189,11 @@ export function AdvancedFiltersPanel() {
                 {ASSET_TYPES.filter(type => availableAssetTypes.includes(type)).map((type) => (
                   <button
                     key={type}
-                    onClick={() => setTypeFilter(typeFilter === type ? null : type)}
+                    // Accumulating toggle — the panel is where you compose a
+                    // multi-type union without holding a modifier key.
+                    onClick={() => toggleTypeFilter(type)}
                     className={`px-2 py-1 text-xs rounded transition-colors ${
-                      typeFilter === type
+                      typeFilter?.includes(type)
                         ? "bg-primary text-[var(--on-primary)]"
                         : "bg-background text-text-secondary hover:text-text-primary"
                     }`}

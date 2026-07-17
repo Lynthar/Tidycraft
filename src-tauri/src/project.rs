@@ -43,6 +43,11 @@ pub struct ProjectState {
     /// run; dropped with the project state (an unsaved run does not survive
     /// closing the project — accepted trade-off of review-before-commit).
     pub pending_ai_rules: Option<crate::llm::rule_store::AiRulesDoc>,
+    /// GUID → package-asset index from `Library/PackageCache`, cached with
+    /// the key it was built for (the sorted package-dir listing — those dirs
+    /// are immutable, so the listing changing is the only staleness signal).
+    /// Built lazily by `lib.rs::package_index_for`; `None` until first use.
+    pub package_index: Option<(Vec<String>, Arc<crate::unity::PackageGuidIndex>)>,
 }
 
 impl ProjectState {
@@ -60,6 +65,7 @@ impl ProjectState {
             respect_gitignore: true,
             watcher: None,
             pending_ai_rules: None,
+            package_index: None,
         }
     }
 
