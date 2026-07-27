@@ -6,6 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-07-27
+
+### Changed
+- **Tidycraft has a real icon.** A four-facet amber gem with a cyan companion spark — drawn from the same Forge palette the interface already uses — replaces the Tauri scaffold placeholder in every platform bundle (macOS `.icns`, Windows `.ico`, Linux PNGs), so the app is recognisable in the dock, the taskbar, and the installer. The header's brand mark used to be a CSS approximation of the same idea; it is now the identical artwork as inline SVG, with facet colours tuned separately for the light and dark themes. Both READMEs open with a matching banner. Existing installs may keep showing the old icon until the OS icon cache refreshes.
+
 ## [0.8.1] - 2026-07-17
 
 ### Added
