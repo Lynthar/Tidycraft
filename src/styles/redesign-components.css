@@ -182,38 +182,20 @@
   height: 32px;
 }
 
+/* BrandMark.tsx renders the mark as inline SVG; dark/light facet groups are
+   baked in the component and toggled here off [data-theme]. */
 .tc-brand-mark {
-  width: 24px;
-  height: 24px;
-  border-radius: 7px;
-  background: conic-gradient(
-    from 200deg at 50% 50%,
-    var(--primary) 0deg,
-    oklch(70% 0.14 200) 120deg,
-    var(--primary-strong) 240deg,
-    var(--primary) 360deg
-  );
-  position: relative;
-  display: grid;
-  place-items: center;
-  box-shadow: 0 0 0 1px var(--primary) inset, 0 4px 12px -4px var(--primary);
+  display: block;
   flex: none;
 }
-.tc-brand-mark::after {
-  content: "";
-  position: absolute;
-  inset: 4px;
-  border-radius: 4px;
-  background: var(--panel);
+.tc-brand-mark .bm-light {
+  display: none;
 }
-.tc-brand-mark::before {
-  content: "";
-  position: absolute;
-  inset: 7px;
-  border-radius: 2px;
-  background: var(--primary);
-  z-index: 1;
-  transform: rotate(45deg);
+[data-theme="light"] .tc-brand-mark .bm-dark {
+  display: none;
+}
+[data-theme="light"] .tc-brand-mark .bm-light {
+  display: block;
 }
 
 .tc-brand-name {

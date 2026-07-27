@@ -22,6 +22,7 @@ import { formatShortcut, SHORTCUTS } from "../hooks/useKeyboardShortcuts";
 import { AdvancedFiltersPanel } from "./AdvancedFilters";
 import { SearchHistory } from "./SearchHistory";
 import { ProjectSwitcher } from "./ProjectSwitcher";
+import { BrandMark } from "./BrandMark";
 import { useSearchHistoryStore } from "../stores/searchHistoryStore";
 
 interface HeaderProps {
@@ -123,7 +124,7 @@ export function Header({ searchInputRef }: HeaderProps) {
     <header className="tc-header">
       {/* Brand */}
       <div className="tc-brand">
-        <div className="tc-brand-mark" />
+        <BrandMark />
         <span className="tc-brand-name">{t("app.name")}</span>
       </div>
 

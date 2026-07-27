@@ -1,8 +1,6 @@
 <div align="center">
 
-# 🎮 Tidycraft
-
-**Game Asset Management & Analysis Tool**
+<img src="docs/brand/hero.png" alt="Tidycraft — Game Asset Management & Analysis Tool" width="100%">
 
 [![Tauri](https://img.shields.io/badge/Tauri-2.0-blue?logo=tauri)](https://tauri.app/)
 [![Rust](https://img.shields.io/badge/Rust-1.75+-orange?logo=rust)](https://www.rust-lang.org/)
