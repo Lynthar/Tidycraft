@@ -59,9 +59,13 @@ Out-of-box `Run Analysis` therefore flags only **real bugs** — illegal charact
 | Forbidden characters | space, `! @ # $ % ^ & * ( ) + =`, and the Windows-illegal `< > : " \| ?` | `forbidden_chars` | Inheriting Unity Asset Store packages or third-party samples |
 | Forbid Chinese characters | false | `forbid_chinese = true` | Strict ASCII-only pipelines |
 | Required prefix per type | none | `texture_prefix = "T_"` / `model_prefix` / `audio_prefix` | Teams enforcing a naming convention |
-| Case style | any | `case_style` ∈ `"any" \| "PascalCase" \| "snake_case" \| "camelCase"` | Mixed-case codebases |
+| Case style | any | `case_style` ∈ `"any" \| "PascalCase" \| "snake_case" \| "camelCase" \| "kebab-case"` | Mixed-case codebases |
 
 > **First-issue mode**: a single asset that violates several naming sub-rules will only show the first match in the order above. Fix it, re-run, the next one surfaces.
+
+> **Prefix rules skip authoring sources.** `texture_prefix` / `model_prefix` / `audio_prefix` are not applied to DCC source files — a `.blend` is not a runtime mesh and a `.psd` is not a shipped texture, so a strict `SM_` / `T_` convention would otherwise flood the report with findings against files that never ship. The other naming checks (length, forbidden characters, case style) still apply to those files.
+
+> **Case is checked past the prefix.** With both a type prefix and a case style configured, the case check runs on the part of the name *after* the prefix — no case style accepts `T_`, so checking the whole name would fail every correctly named file.
 
 ---
 

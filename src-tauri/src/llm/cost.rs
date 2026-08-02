@@ -1,11 +1,12 @@
 //! Per-provider pricing and cost estimation.
 //!
 //! All token prices and image-tokenization rules verified from official
-//! provider docs on 2026-05-08:
+//! provider docs; Anthropic figures rechecked 2026-08-02, OpenAI 2026-05-08:
 //! - Anthropic: https://platform.claude.com/docs/en/about-claude/pricing
 //! - Anthropic vision: https://platform.claude.com/docs/en/build-with-claude/vision
-//!   (formula `tokens ≈ width × height / 750`, cap 1568 for non-Opus,
-//!    4784 for Opus 4.7 with 2576px long-edge native res)
+//!   (formula `tokens ≈ width × height / 750`; the per-image cap follows the
+//!    model's maximum input resolution — 1568 at the 1568px long edge, 4784
+//!    at the 2576px high-resolution tier, which is no longer Opus-only)
 //! - OpenAI: https://developers.openai.com/api/docs/pricing
 //! - OpenAI vision: 32×32 patch tokenization for 5.4-mini/nano (cap 1536
 //!   patches, ×1.62 mini / ×2.46 nano multipliers), tile-based for 4o
@@ -74,11 +75,33 @@ const LEARNING_OUTPUT_TOKENS_PER_SAMPLE: usize = 40;
 
 fn pricing(model: &str) -> Option<Pricing> {
     match model {
-        // Anthropic
+        // Anthropic. Superseded models keep their entries: a user pinned to
+        // one still gets a real estimate instead of the "unknown model"
+        // degradation, and the settings dropdown now preserves whatever
+        // model is actually configured.
+        //
+        // The `max` in each vision rule is the per-image token ceiling, which
+        // tracks the model's maximum input resolution: 1568 for the older
+        // 1568px-long-edge tier, 4784 for the 2576px high-resolution tier.
         "claude-haiku-4-5" => Some(Pricing {
             input_per_m: 1_000_000,
             output_per_m: 5_000_000,
             vision: VisionRule::AnthropicWHOver750 { max: 1568 },
+        }),
+        // Sonnet 5 also carries a lower introductory input/output price for a
+        // limited period. Listed at the standard rate deliberately: an
+        // estimate that expires silently would start *under*-charging the
+        // moment the promotion ends, and this estimator's stated policy is to
+        // err high rather than low.
+        "claude-sonnet-5" => Some(Pricing {
+            input_per_m: 3_000_000,
+            output_per_m: 15_000_000,
+            vision: VisionRule::AnthropicWHOver750 { max: 4784 },
+        }),
+        "claude-opus-5" => Some(Pricing {
+            input_per_m: 5_000_000,
+            output_per_m: 25_000_000,
+            vision: VisionRule::AnthropicWHOver750 { max: 4784 },
         }),
         "claude-sonnet-4-6" => Some(Pricing {
             input_per_m: 3_000_000,
@@ -331,6 +354,47 @@ mod tests {
         // the cap is 1536; mini ×1.62 → 2488.
         let tokens = estimate_image_tokens(4096, 4096, "gpt-5.4-mini");
         assert_eq!(tokens, (1536.0_f32 * 1.62).round() as usize);
+    }
+
+    /// Every Claude model the settings dropdown offers must be priced here.
+    /// An unpriced model estimates as zero, which the UI reads as "unknown"
+    /// and silently drops the confirm modal's cost line — the user then
+    /// approves a paid call with no figure in front of them.
+    ///
+    /// Mirrors `MODEL_OPTIONS.claude` in `src/components/SettingsModal.tsx`
+    /// (first entry is also `DEFAULT_AI_PROVIDERS.claude` in
+    /// `src/stores/settingsStore.ts`). There is no codegen between the two,
+    /// so this list is the executable half of that contract.
+    #[test]
+    fn every_offered_claude_model_is_priced() {
+        for model in ["claude-sonnet-5", "claude-haiku-4-5", "claude-opus-5"] {
+            let p = pricing(model).unwrap_or_else(|| panic!("{model} has no pricing entry"));
+            assert!(p.input_per_m > 0 && p.output_per_m > 0, "{model} priced at zero");
+            assert!(
+                estimate_image_tokens(512, 512, model) > 0,
+                "{model} has no vision rule"
+            );
+        }
+    }
+
+    /// Superseded models keep their entries so a pinned configuration still
+    /// gets a real estimate rather than the unknown-model degradation.
+    #[test]
+    fn previously_offered_claude_models_stay_priced() {
+        for model in ["claude-sonnet-4-6", "claude-opus-4-7"] {
+            assert!(pricing(model).is_some(), "{model} lost its pricing entry");
+        }
+    }
+
+    /// The high-resolution tier accepts larger images, and its per-image
+    /// token ceiling is correspondingly higher — pricing one of these at the
+    /// older 1568 cap would under-estimate a full-resolution image threefold.
+    #[test]
+    fn high_resolution_models_cap_image_tokens_higher() {
+        // 4096×4096 / 750 = 22369 raw, well past either cap.
+        assert_eq!(estimate_image_tokens(4096, 4096, "claude-opus-5"), 4784);
+        assert_eq!(estimate_image_tokens(4096, 4096, "claude-sonnet-5"), 4784);
+        assert_eq!(estimate_image_tokens(4096, 4096, "claude-haiku-4-5"), 1568);
     }
 
     // ----- Cost roll-up -----

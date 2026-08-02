@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [main]
 
+# CI only reads the repository — it publishes nothing. Stating that here
+# overrides whatever the repository default happens to be, so a token that
+# leaks through a build script or a compromised action can't write.
+# (release.yml grants `contents: write` on its build job, where it is needed.)
+permissions:
+  contents: read
+
 # Cancel old runs on the same ref when a new push lands.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

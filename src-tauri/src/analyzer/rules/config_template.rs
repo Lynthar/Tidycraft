@@ -53,7 +53,8 @@ max_length = 512
 # texture_prefix = "T_"
 # model_prefix = "SM_"
 # audio_prefix = "A_"
-# Case style: "any" / "PascalCase" / "snake_case" / "camelCase".
+# Case style: "any" / "PascalCase" / "snake_case" / "camelCase" / "kebab-case".
+# Checked on the part of the name after any required prefix above.
 case_style = "any"
 
 # ─── Texture Standards ─── (applies to image assets)

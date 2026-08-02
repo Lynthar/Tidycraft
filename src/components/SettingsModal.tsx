@@ -10,13 +10,20 @@ import { useProjectStore } from "../stores/projectStore";
 import { useToastStore } from "../stores/toastStore";
 import { formatFileSize } from "../lib/utils";
 
-// Curated model dropdown lists. Keep first entry as the recommended
-// default (same as backend `DEFAULT_MODEL` constants in
-// src-tauri/src/llm/{claude,openai,ollama}.rs). Entries beyond the
-// first are alternative options exposed to the user.
+// Curated model dropdown lists. Keep the first entry as the recommended
+// default, matching `DEFAULT_AI_PROVIDERS` in stores/settingsStore.ts;
+// entries beyond the first are alternatives offered to the user.
+//
+// Two places must move together whenever this list changes: that store
+// default, and the pricing table in src-tauri/src/llm/cost.rs — a model
+// offered here but absent there estimates as "unknown" and suppresses the
+// cost preview. (There is no backend `DEFAULT_MODEL` constant; earlier
+// comments here and in settingsStore.ts pointed at one that never existed.)
+// A configured model missing from this list is still shown — see
+// modelOptionsFor — so retiring an entry doesn't blank anyone's setting.
 const MODEL_OPTIONS: Record<AiProviderId, string[]> = {
   openai: ["gpt-5.4-mini", "gpt-4o-mini", "gpt-5.4", "gpt-5.4-nano"],
-  claude: ["claude-sonnet-4-6", "claude-haiku-4-5", "claude-opus-4-7"],
+  claude: ["claude-sonnet-5", "claude-haiku-4-5", "claude-opus-5"],
   ollama: [
     "qwen2.5vl:32b",
     "qwen2.5vl:7b",

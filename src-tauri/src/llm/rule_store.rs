@@ -55,7 +55,7 @@ pub struct AiRulesDoc {
     pub sampling_depth: usize,
     /// `claude` / `openai` / `ollama` — for diagnostics + UI display.
     pub provider_used: String,
-    /// e.g. `claude-sonnet-4-6`. Same purpose as `provider_used`.
+    /// e.g. `claude-sonnet-5`. Same purpose as `provider_used`.
     pub model_used: String,
     /// The rules themselves, in the order the LLM emitted them. Order
     /// matters for predictability when an asset matches multiple rules

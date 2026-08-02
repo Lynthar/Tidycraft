@@ -386,7 +386,6 @@ Backlog:
 
 - [ ] VRAM budget estimates (per texture, per directory)
 - [ ] Cross-engine reverse-reference graph (extend Unity GUID graph to UE / Godot)
-- [ ] Multi-select / saved asset filters (e.g. an "art assets only" view that hides scripts and data)
 
 ---
 

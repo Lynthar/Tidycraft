@@ -29,15 +29,20 @@ export interface AiProviderConfig {
 }
 
 /**
- * Defaults must match the `DEFAULT_MODEL` constants in
- * `src-tauri/src/llm/{claude,openai,ollama}.rs`. The backend command
- * `llm_default_models` exposes these so we COULD fetch them at boot,
- * but mirroring as constants here avoids the async startup race and
- * keeps the TS types self-documenting. If you bump a backend default,
- * mirror it here.
+ * The model each provider starts on. This is the authoritative default —
+ * the backend picks no model of its own, it uses whatever the request
+ * carries. (Earlier comments here named backend `DEFAULT_MODEL` constants
+ * and an `llm_default_models` command; neither exists.)
+ *
+ * Changing an entry only affects new configurations: a stored provider
+ * config keeps its model through the settings merge.
+ *
+ * Keep in step with `MODEL_OPTIONS` in components/SettingsModal.tsx (this
+ * model should be its first entry) and with the pricing table in
+ * `src-tauri/src/llm/cost.rs`.
  */
 const DEFAULT_AI_PROVIDERS: Record<AiProviderId, AiProviderConfig> = {
-  claude: { model: "claude-sonnet-4-6" },
+  claude: { model: "claude-sonnet-5" },
   openai: { model: "gpt-5.4-mini" },
   ollama: { model: "qwen2.5vl:32b", endpoint: "http://localhost:11434" },
 };

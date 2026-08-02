@@ -41,7 +41,7 @@ pub struct TagRequest {
     /// `prompts.rs`. Stored on the cache key so an old cached response
     /// from a stale prompt cannot be served.
     pub prompt_version: u32,
-    /// Provider-specific model id (e.g. "claude-sonnet-4-6", "gpt-5.4-mini",
+    /// Provider-specific model id (e.g. "claude-sonnet-5", "gpt-5.4-mini",
     /// "qwen2.5vl:32b"). Cached separately per model so users can
     /// upgrade their default without losing prior runs.
     pub model: String,
