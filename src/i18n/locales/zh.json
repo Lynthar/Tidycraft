@@ -348,6 +348,7 @@
     "rescanUnused": "重新扫描",
     "scanningUnused": "扫描中…",
     "noUnusedAssets": "未发现未使用资源。",
+    "unusedTruncated": "另有 {{count}} 项未显示——导出报告可查看完整列表",
     "engineProject": "项目名",
     "engineMainScene": "主场景",
     "engineRenderer": "渲染器",

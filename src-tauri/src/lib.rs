@@ -299,6 +299,23 @@ fn relativize_samples(samples: Vec<String>, root: &str) -> Vec<String> {
 /// `<img src=x onerror=...>.png` injects markup/script that runs when the user
 /// opens the exported report. Escapes the five HTML-significant chars; `&` must
 /// go first so we don't double-escape the entities we just inserted.
+/// One quoted CSV cell built from a project-derived string (asset names,
+/// paths, extensions — none of which the user chose).
+///
+/// Quoting alone is not enough: spreadsheets read a leading `=`, `+`, `-`,
+/// `@`, tab or CR as the start of a *formula*, quotes and all, so a file
+/// named `=cmd|'/c calc'!A1.png` — a legal name on every filesystem — runs
+/// when the exported sheet is opened. A leading apostrophe is the standard
+/// neutralizer: the cell then reads as literal text and displays unchanged.
+/// This is the same threat the HTML report handles with [`html_escape`];
+/// only the CSV side was missing it.
+fn csv_cell(value: &str) -> String {
+    let escaped = value.replace('"', "\"\"");
+    let leads_a_formula = value.starts_with(['=', '+', '-', '@', '\t', '\r']);
+    let prefix = if leads_a_formula { "'" } else { "" };
+    format!("\"{prefix}{escaped}\"")
+}
+
 fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -1585,11 +1602,11 @@ fn export_to_csv(project_id: String) -> Result<String, String> {
                 .unwrap_or_default();
 
             csv.push_str(&format!(
-                "\"{}\",\"{}\",{:?},\"{}\",{},{},{}\n",
-                asset.name.replace('"', "\"\""),
-                asset.path.replace('"', "\"\""),
+                "{},{},{:?},{},{},{},{}\n",
+                csv_cell(&asset.name),
+                csv_cell(&asset.path),
                 asset.asset_type,
-                asset.extension.replace('"', "\"\""),
+                csv_cell(&asset.extension),
                 asset.size,
                 width,
                 height
@@ -3520,6 +3537,33 @@ mod tests {
         .unwrap();
 
         project::unregister(project_id);
+    }
+
+    /// The CSV export faces the same threat the HTML export already defends
+    /// against, from the same source (file names the user did not choose):
+    /// a cell whose text starts with `=`, `+`, `-` or `@` is a *formula* to
+    /// Excel / LibreOffice / Sheets, and `=cmd|'/c calc'!A1` is the classic
+    /// proof that it reaches the shell. Such names are perfectly legal on
+    /// disk, so an asset library shared as CSV carries the payload along.
+    #[test]
+    fn csv_cells_cannot_smuggle_a_formula_into_a_spreadsheet() {
+        for dangerous in ["=cmd|'/c calc'!A1", "+1+1", "-1+1", "@SUM(A1)"] {
+            let cell = csv_cell(dangerous);
+            assert!(
+                cell.starts_with("\"'"),
+                "{dangerous} must be neutralized, got {cell}"
+            );
+        }
+
+        // Tab and carriage return lead a formula just as well.
+        assert!(csv_cell("\t=1+1").starts_with("\"'"));
+        assert!(csv_cell("\r=1+1").starts_with("\"'"));
+
+        // Ordinary values are untouched apart from the quoting that was
+        // always there, and embedded quotes still double.
+        assert_eq!(csv_cell("hero.png"), "\"hero.png\"");
+        assert_eq!(csv_cell(r#"a"b.png"#), "\"a\"\"b.png\"");
+        assert_eq!(csv_cell(""), "\"\"");
     }
 
     #[test]

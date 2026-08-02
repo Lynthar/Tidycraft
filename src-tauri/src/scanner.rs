@@ -1119,9 +1119,12 @@ fn parse_unity_meta(path: &Path) -> Option<String> {
 
 /// Detect project type based on marker files
 fn detect_project_type(root_path: &Path) -> Option<ProjectType> {
-    // Unity: Has ProjectSettings folder or Assets folder with .meta files
-    if root_path.join("ProjectSettings").is_dir()
-        || root_path.join("Assets").is_dir() && root_path.join("Assets").join("Editor.meta").exists()
+    // Unity: a `ProjectSettings/` at or above this root (so opening `Assets/`
+    // still detects the project it belongs to), or an Assets folder carrying
+    // .meta files for a root whose settings aren't checked out.
+    if crate::unity::unity_project_root(root_path).is_some()
+        || (root_path.join("Assets").is_dir()
+            && root_path.join("Assets").join("Editor.meta").exists())
     {
         return Some(ProjectType::Unity);
     }
@@ -2584,6 +2587,40 @@ mod tests {
 
         let project_type = detect_project_type(dir.path());
         assert!(matches!(project_type, Some(ProjectType::Generic)));
+    }
+
+    /// Opening `Assets/` (or a folder inside it) instead of the project root
+    /// is a routine user action, and everything that says "Unity" —
+    /// `ProjectSettings/`, `Library/` — sits above it. Falling through to
+    /// Generic silently switches off the dependency graph, unused-asset
+    /// detection and the prefab component panel, with no message anywhere.
+    #[test]
+    fn unity_is_detected_when_the_assets_folder_is_the_scan_root() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("ProjectSettings")).unwrap();
+        fs::create_dir_all(root.join("Assets").join("Art")).unwrap();
+
+        assert!(matches!(
+            detect_project_type(&root.join("Assets")),
+            Some(ProjectType::Unity)
+        ));
+        assert!(matches!(
+            detect_project_type(&root.join("Assets").join("Art")),
+            Some(ProjectType::Unity)
+        ));
+    }
+
+    #[test]
+    fn a_bare_assets_folder_is_not_a_unity_project() {
+        let dir = tempdir().unwrap();
+        let assets = dir.path().join("Assets");
+        fs::create_dir_all(&assets).unwrap();
+
+        assert!(matches!(
+            detect_project_type(&assets),
+            Some(ProjectType::Generic)
+        ));
     }
 
     // ---- ICC profile classification (PNG iCCP chunk) ----

@@ -87,6 +87,14 @@ const TOOLTIP_ITEM_STYLE = { color: "var(--text-2)" };
 
 const SIZE_ORDER = ["< 1 KB", "1-10 KB", "10-100 KB", "100 KB - 1 MB", "1-10 MB", "> 10 MB"];
 
+/// Cap on unused-asset rows rendered at once, matching `IssueList`'s
+/// duplicate-group cap. A project that has never been pruned can report tens
+/// of thousands of unused files, and this list mounts a row plus a button for
+/// each — the same unbounded render that turned a large duplicate group into
+/// a frozen black screen. The count of what isn't shown is printed below, and
+/// the report export carries the complete list.
+const UNUSED_MAX_RENDERED = 200;
+
 /// Which engine card the project gets, tagged so render can switch on it.
 /// `null` (no marker file / unparseable) simply hides the card.
 type EngineInfo =
@@ -559,7 +567,7 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
             <p className="text-xs text-text-secondary">{t("stats.noUnusedAssets")}</p>
           ) : (
             <div className="space-y-1 max-h-64 overflow-auto">
-              {unused.map((path) => (
+              {unused.slice(0, UNUSED_MAX_RENDERED).map((path) => (
                 <div
                   key={path}
                   className="flex items-center justify-between gap-2 text-sm"
@@ -575,6 +583,13 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
                   </button>
                 </div>
               ))}
+              {unused.length > UNUSED_MAX_RENDERED && (
+                <p className="pt-1 text-xs text-text-secondary">
+                  {t("stats.unusedTruncated", {
+                    count: unused.length - UNUSED_MAX_RENDERED,
+                  })}
+                </p>
+              )}
             </div>
           )}
         </div>

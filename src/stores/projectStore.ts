@@ -191,6 +191,15 @@ export const registerTagFilterBridge = (bridge: TagFilterBridge) => {
 const needsHydration = (project: ProjectData): boolean =>
   project.scanResult === null && !project.isScanning && !project.error;
 
+// Filtering by the project root is identical to no filter at all, so the root
+// is stored as `null`. Letting both representations exist is what desynced the
+// tree highlight from the real scope in the first place — every path that
+// assigns `selectedDirectory` goes through here, not just the setter, or the
+// second one reintroduces the bug on its own (`locateAsset` did exactly that:
+// locating a root-level asset left a redundant scope bar behind).
+const normalizeDirectory = (path: string | null, projectPath: string | null): string | null =>
+  path && path === projectPath ? null : path;
+
 interface ProjectState {
   // Multi-project state
   projects: Map<string, ProjectData>;
@@ -1057,10 +1066,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   setSelectedDirectory: (path: string | null) => {
-    // Normalize the project root to null: filtering by the root is identical
-    // to no filter, and letting both representations exist is exactly what
-    // desynced the tree highlight from the real scope.
-    const normalized = path && path === get().projectPath ? null : path;
+    const normalized = normalizeDirectory(path, get().projectPath);
     set(updateActiveProject(get(), { selectedDirectory: normalized, selectedAsset: null }));
   },
 
@@ -1111,10 +1117,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const asset = scanResult.assets.find((a) => a.path === path);
     if (!asset) return;
 
-    const dir = dirname(path);
     set(updateActiveProject(get(), {
       viewMode: "assets",
-      selectedDirectory: dir,
+      selectedDirectory: normalizeDirectory(dirname(path), get().projectPath),
       selectedAsset: asset,
     }));
 

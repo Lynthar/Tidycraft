@@ -363,15 +363,14 @@ function AiTaggingSection() {
     };
   }, [activeId, ollamaEndpoint]);
 
-  /** Compute the dropdown options for the active provider's model select.
+  /** The candidate models for a provider, before the user's own choice is
+   *  taken into account.
    *  - Cloud providers: static curated list.
-   *  - Ollama, daemon reachable: real `/api/tags` list, with the user's
-   *    currently-selected model appended if it's not in the list (so a
-   *    stale config doesn't lose the value silently).
+   *  - Ollama, daemon reachable: real `/api/tags` list.
    *  - Ollama, daemon unreachable: fall back to MODEL_OPTIONS.ollama so
    *    the user can still pick something — the call itself will fail
    *    later with a clear error if the daemon is genuinely down. */
-  const modelOptionsFor = (id: AiProviderId, currentModel: string): string[] => {
+  const candidateModelsFor = (id: AiProviderId): string[] => {
     if (id !== "ollama") return MODEL_OPTIONS[id];
     if (ollamaError || ollamaModels.length === 0) {
       // Network failure path → curated suggestions. Empty-but-no-error
@@ -379,10 +378,25 @@ function AiTaggingSection() {
       // here too; the empty list itself is handled by the hint UI.
       return ollamaError ? MODEL_OPTIONS.ollama : [];
     }
-    if (currentModel && !ollamaModels.includes(currentModel)) {
-      return [...ollamaModels, currentModel];
-    }
     return ollamaModels;
+  };
+
+  /** Dropdown options for the model select: the candidates, plus the model
+   *  actually configured when the list doesn't contain it. Without that
+   *  append a `<select>` whose value matches no `<option>` renders BLANK —
+   *  the setting reads as unset while the configured model is still what
+   *  gets called. The Ollama branch has always done this; cloud providers
+   *  did not, so pinning an older or newer model than the curated list
+   *  carries (or opening a config written by a later release) showed an
+   *  empty box. The rule belongs to every provider, not one of them. */
+  const modelOptionsFor = (id: AiProviderId, currentModel: string): string[] => {
+    const candidates = candidateModelsFor(id);
+    // An empty Ollama list is meaningful in itself (the hint UI explains
+    // "no models installed"); appending to it would hide that state.
+    if (candidates.length === 0) return candidates;
+    return currentModel && !candidates.includes(currentModel)
+      ? [...candidates, currentModel]
+      : candidates;
   };
 
   const handleApiKeyChange = (v: string) => {

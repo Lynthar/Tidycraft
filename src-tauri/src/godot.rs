@@ -361,6 +361,20 @@ fn extract_res_references(content: &str, re: &regex::Regex) -> Vec<String> {
         .collect()
 }
 
+/// Comparison key for a `res://` path: the same name can reach us in two
+/// different Unicode encodings — decomposed (NFD) from a macOS directory
+/// listing, composed (NFC) from a scene file the editor wrote — and they are
+/// equal to every human and unequal to `HashSet`/`HashMap`. Both sides of
+/// every path comparison go through here.
+///
+/// Only comparisons are keyed this way; the raw reference string keeps
+/// flowing to [`res_path_to_abs`] and to anything the user sees, so nothing
+/// downstream inherits a form the project didn't actually write.
+fn res_key(res: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    res.nfc().collect()
+}
+
 /// Find assets in a Godot project that no scene / resource / script references,
 /// mirroring the Unity unused-asset check. Heuristic: collects the literal
 /// `res://` paths from `.tscn` / `.tres` / `.gd` files plus the project's entry
@@ -388,10 +402,10 @@ pub fn find_unused_godot_assets(root_path: &str, assets: &[AssetInfo]) -> Vec<St
     //    the quoted-res:// scan can't match, so parse those explicitly.
     if let Ok(content) = fs::read_to_string(root.join("project.godot")) {
         for r in extract_res_references(&content, &re) {
-            referenced.insert(r);
+            referenced.insert(res_key(&r));
         }
         for autoload in extract_autoloads(&parse_godot_config(&content)) {
-            referenced.insert(autoload.path);
+            referenced.insert(res_key(&autoload.path));
         }
     }
 
@@ -404,7 +418,7 @@ pub fn find_unused_godot_assets(root_path: &str, assets: &[AssetInfo]) -> Vec<St
         if ext == "tscn" || ext == "tres" || ext == "gd" || ext == "cs" {
             if let Ok(content) = fs::read_to_string(&asset.path) {
                 for r in extract_res_references(&content, &re) {
-                    referenced.insert(r);
+                    referenced.insert(res_key(&r));
                 }
             }
         }
@@ -421,7 +435,7 @@ pub fn find_unused_godot_assets(root_path: &str, assets: &[AssetInfo]) -> Vec<St
         .filter(|a| !is_godot_metadata(&a.extension))
         .filter(|a| !matches!(a.asset_type, crate::scanner::AssetType::Scene))
         .filter(|a| match asset_to_res_path(&a.path, root) {
-            Some(res) => !referenced.contains(&res),
+            Some(res) => !referenced.contains(&res_key(&res)),
             None => false, // outside the project root — not res://-addressable
         })
         .map(|a| a.path.clone())
@@ -450,7 +464,7 @@ pub fn referencing_files(
     let mut target_by_res: HashMap<String, String> = HashMap::new();
     for t in targets {
         if let Some(res) = asset_to_res_path(t, root) {
-            target_by_res.insert(res, t.clone());
+            target_by_res.insert(res_key(&res), t.clone());
         }
     }
     if target_by_res.is_empty() {
@@ -460,7 +474,7 @@ pub fn referencing_files(
     let mut result: HashMap<String, Vec<String>> = HashMap::new();
     let mut record = |source_rel: &str, refs: HashSet<String>| {
         for res in refs {
-            if let Some(abs) = target_by_res.get(&res) {
+            if let Some(abs) = target_by_res.get(&res_key(&res)) {
                 result
                     .entry(abs.clone())
                     .or_default()
@@ -808,6 +822,64 @@ config/name="Minimal"
         // roots (loaded dynamically / from the editor), so it must NOT be
         // flagged unused.
         assert!(!unused.iter().any(|p| p.ends_with("level_2.tscn")));
+    }
+
+    /// macOS writes decomposed (NFD) file names to disk in a number of
+    /// routine situations — HFS+ volumes, zips round-tripped through other
+    /// systems, older sync tools — while the Godot editor writes the
+    /// composed (NFC) form into scene files. The two are the same name to
+    /// every user-visible surface and different strings to a `HashSet`.
+    ///
+    /// Both directions of that mismatch are silent and destructive: the
+    /// rename guard reports "nothing references this", the user renames, and
+    /// the game breaks — which is the single thing the guard exists to
+    /// prevent — while unused-asset detection invites deleting a file that
+    /// is very much in use.
+    #[test]
+    fn nfd_disk_names_match_nfc_scene_references() {
+        use crate::scanner::AssetType;
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        // "café.png": decomposed on disk (e + U+0301), composed (U+00E9) in
+        // the scene file — exactly what a macOS checkout of an editor-written
+        // project looks like.
+        let nfd = "cafe\u{0301}.png";
+        let nfc = "caf\u{e9}.png";
+        assert_ne!(nfd, nfc, "the two forms must differ as strings");
+
+        fs::write(
+            root.join("main.tscn"),
+            format!("[ext_resource type=\"Texture2D\" path=\"res://{nfc}\" id=\"1\"]\n"),
+        )
+        .unwrap();
+        fs::write(root.join(nfd), "x").unwrap();
+
+        let mk = |name: &str, ext: &str| AssetInfo {
+            path: root.join(name).to_string_lossy().to_string(),
+            name: name.to_string(),
+            extension: ext.to_string(),
+            asset_type: AssetType::Other,
+            size: 1,
+            modified: 0,
+            metadata: None,
+            unity_guid: None,
+        };
+        let assets = vec![mk("main.tscn", "tscn"), mk(nfd, "png")];
+
+        let unused = find_unused_godot_assets(&root.to_string_lossy(), &assets);
+        assert!(
+            !unused.iter().any(|p| p.ends_with(nfd)),
+            "the NFD file is referenced by main.tscn in NFC form: {unused:?}"
+        );
+
+        let target = root.join(nfd).to_string_lossy().to_string();
+        let refs = referencing_files(root, &assets, &[target.clone()]);
+        assert_eq!(
+            refs.get(&target).map(Vec::as_slice),
+            Some(["main.tscn".to_string()].as_slice()),
+            "the rename guard must see main.tscn's reference"
+        );
     }
 
     #[test]

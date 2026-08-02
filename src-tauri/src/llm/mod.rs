@@ -479,8 +479,15 @@ where
         // A cache save failure is non-fatal: worst case we re-bill that
         // asset next call. Caching per chunk also means an error on a LATER
         // chunk doesn't waste what's already been paid for.
+        //
+        // Non-fatal is not the same as invisible, though: a cache directory
+        // that is permanently unwritable means every AI tagging run pays the
+        // provider in full, forever, with nothing anywhere to explain why.
+        // `cache::save` returns the error precisely so it can be logged.
         for (s, k) in pair_suggestions_with_keys(&fresh.suggestions, chunk_assets, chunk_keys) {
-            let _ = cache::save(k, s);
+            if let Err(e) = cache::save(k, s) {
+                eprintln!("[llm] failed to cache a suggestion (key {k}): {e}");
+            }
         }
 
         input_tokens += fresh.usage.input_tokens;

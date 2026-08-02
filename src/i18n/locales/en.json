@@ -348,6 +348,7 @@
     "rescanUnused": "Rescan",
     "scanningUnused": "Scanning…",
     "noUnusedAssets": "No unused assets found.",
+    "unusedTruncated": "+{{count}} more not shown — export the report for the full list",
     "engineProject": "Project",
     "engineMainScene": "Main scene",
     "engineRenderer": "Renderer",

@@ -64,10 +64,12 @@ struct UProjectFile {
     category: Option<String>,
     #[serde(rename = "Description")]
     description: Option<String>,
+    // Held as raw values and converted one at a time: a single entry missing
+    // a required field must cost that entry, not the whole `.uproject`.
     #[serde(rename = "Modules")]
-    modules: Option<Vec<UProjectModule>>,
+    modules: Option<Vec<serde_json::Value>>,
     #[serde(rename = "Plugins")]
-    plugins: Option<Vec<UProjectPlugin>>,
+    plugins: Option<Vec<serde_json::Value>>,
     #[serde(rename = "TargetPlatforms")]
     target_platforms: Option<Vec<String>>,
     #[serde(rename = "IsEnterpriseProject")]
@@ -112,8 +114,22 @@ pub fn find_uproject_file(root_path: &Path) -> Option<PathBuf> {
 
 /// 解析 .uproject 文件
 pub fn parse_uproject(path: &Path) -> Option<UnrealProjectInfo> {
-    let content = fs::read_to_string(path).ok()?;
-    let uproject: UProjectFile = serde_json::from_str(&content).ok()?;
+    let content = match fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[unreal] failed to read {}: {e}", path.display());
+            return None;
+        }
+    };
+    let uproject: UProjectFile = match serde_json::from_str(&content) {
+        Ok(u) => u,
+        Err(e) => {
+            // Reaching here means the whole engine card disappears from the
+            // UI, so it must not be the silent `.ok()?` it used to be.
+            eprintln!("[unreal] failed to parse {}: {e}", path.display());
+            return None;
+        }
+    };
 
     let project_name = path
         .file_stem()
@@ -124,9 +140,15 @@ pub fn parse_uproject(path: &Path) -> Option<UnrealProjectInfo> {
         .plugins
         .unwrap_or_default()
         .into_iter()
-        .map(|p| UnrealPlugin {
-            name: p.name,
-            enabled: p.enabled,
+        .filter_map(|v| match serde_json::from_value::<UProjectPlugin>(v) {
+            Ok(p) => Some(UnrealPlugin {
+                name: p.name,
+                enabled: p.enabled,
+            }),
+            Err(e) => {
+                eprintln!("[unreal] skipping a Plugins entry in {}: {e}", path.display());
+                None
+            }
         })
         .collect();
 
@@ -134,10 +156,16 @@ pub fn parse_uproject(path: &Path) -> Option<UnrealProjectInfo> {
         .modules
         .unwrap_or_default()
         .into_iter()
-        .map(|m| UnrealModule {
-            name: m.name,
-            module_type: m.module_type,
-            loading_phase: m.loading_phase,
+        .filter_map(|v| match serde_json::from_value::<UProjectModule>(v) {
+            Ok(m) => Some(UnrealModule {
+                name: m.name,
+                module_type: m.module_type,
+                loading_phase: m.loading_phase,
+            }),
+            Err(e) => {
+                eprintln!("[unreal] skipping a Modules entry in {}: {e}", path.display());
+                None
+            }
         })
         .collect();
 
@@ -237,6 +265,60 @@ mod tests {
         assert_eq!(info.engine_association, Some("5.3".to_string()));
         assert!(info.plugins.is_empty());
         assert!(info.modules.is_empty());
+    }
+
+    /// One malformed entry in a list must cost that entry, not the project.
+    /// `serde_json::from_str(...).ok()?` made any missing field anywhere —
+    /// a hand-edited plugin line, a field a newer editor stopped writing —
+    /// return `None` for the whole file, and the Unreal card, engine version
+    /// and plugin list then vanish from the UI with nothing said.
+    #[test]
+    fn one_malformed_plugin_entry_does_not_take_the_project_with_it() {
+        let dir = tempdir().unwrap();
+        let uproject_path = dir.path().join("MyGame.uproject");
+
+        fs::write(
+            &uproject_path,
+            r#"{
+                "FileVersion": 3,
+                "EngineAssociation": "5.3",
+                "Plugins": [
+                    { "Name": "Niagara", "Enabled": true },
+                    { "Name": "MissingEnabledField" },
+                    { "Name": "Water", "Enabled": false }
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let info = parse_uproject(&uproject_path).expect("the project still parses");
+        assert_eq!(info.engine_association, Some("5.3".to_string()));
+
+        let names: Vec<&str> = info.plugins.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["Niagara", "Water"], "only the bad entry is dropped");
+    }
+
+    #[test]
+    fn one_malformed_module_entry_does_not_take_the_project_with_it() {
+        let dir = tempdir().unwrap();
+        let uproject_path = dir.path().join("MyGame.uproject");
+
+        fs::write(
+            &uproject_path,
+            r#"{
+                "FileVersion": 3,
+                "EngineAssociation": "5.3",
+                "Modules": [
+                    { "Name": "MyGame", "Type": "Runtime" },
+                    { "Name": "NoType" }
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        let info = parse_uproject(&uproject_path).expect("the project still parses");
+        let names: Vec<&str> = info.modules.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, ["MyGame"]);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Reference to another Unity asset via GUID
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -93,11 +93,43 @@ pub struct UnityProjectInfo {
     pub editor_version_with_revision: Option<String>,
 }
 
+/// The Unity project root for a scanned directory: the nearest directory at
+/// or above `scan_root` that holds `ProjectSettings/`.
+///
+/// Usually that is `scan_root` itself, but opening `Assets/` — or a folder
+/// inside it — instead of the project root is a routine user action, and
+/// every marker of Unity-ness (`ProjectSettings/`, `Library/PackageCache`)
+/// lives *above* such a root. Reading them relative to the scan root alone
+/// turns the entire engine integration off without a word.
+///
+/// Only the `Assets/` subtree qualifies, so a sibling like `Docs/` doesn't
+/// inherit the project. `starts_with` compares whole path components, so
+/// `AssetsBackup/` is not inside `Assets/`.
+pub fn unity_project_root(scan_root: &Path) -> Option<PathBuf> {
+    if scan_root.join("ProjectSettings").is_dir() {
+        return Some(scan_root.to_path_buf());
+    }
+    scan_root
+        .ancestors()
+        .skip(1)
+        .find(|a| a.join("ProjectSettings").is_dir() && scan_root.starts_with(a.join("Assets")))
+        .map(Path::to_path_buf)
+}
+
+/// [`unity_project_root`] falling back to the scan root itself, for readers
+/// that must still behave sensibly outside a Unity project (they then simply
+/// find nothing where they looked, exactly as before).
+fn project_root_or_self(scan_root: &Path) -> PathBuf {
+    unity_project_root(scan_root).unwrap_or_else(|| scan_root.to_path_buf())
+}
+
 /// Read `ProjectSettings/ProjectVersion.txt` under `root_path`. `None` when
 /// the file is missing (not a Unity project, or settings not checked out) or
 /// carries no `m_EditorVersion` line — the frontend hides the card.
 pub fn parse_project_version(root_path: &Path) -> Option<UnityProjectInfo> {
-    let path = root_path.join("ProjectSettings").join("ProjectVersion.txt");
+    let path = project_root_or_self(root_path)
+        .join("ProjectSettings")
+        .join("ProjectVersion.txt");
     let content = fs::read_to_string(path).ok()?;
 
     let mut editor_version: Option<String> = None;
@@ -156,7 +188,10 @@ impl PackageGuidIndex {
 /// only way the index goes stale — it serves as the cache key in
 /// `ProjectState`. Missing cache dir → empty list.
 pub fn package_cache_key(root: &Path) -> Vec<String> {
-    let mut names: Vec<String> = fs::read_dir(root.join("Library").join("PackageCache"))
+    let cache = project_root_or_self(root)
+        .join("Library")
+        .join("PackageCache");
+    let mut names: Vec<String> = fs::read_dir(cache)
         .map(|rd| {
             rd.filter_map(|e| e.ok())
                 .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
@@ -175,7 +210,10 @@ pub fn package_cache_key(root: &Path) -> Vec<String> {
 /// the `ProjectState` cache makes it once per session).
 pub fn build_package_guid_index(root: &Path) -> PackageGuidIndex {
     let mut map = HashMap::new();
-    let Ok(packages) = fs::read_dir(root.join("Library").join("PackageCache")) else {
+    let cache = project_root_or_self(root)
+        .join("Library")
+        .join("PackageCache");
+    let Ok(packages) = fs::read_dir(cache) else {
         return PackageGuidIndex::default();
     };
     for pkg in packages.filter_map(|e| e.ok()) {
@@ -605,5 +643,92 @@ mod tests {
         fs::create_dir(&settings).unwrap();
         fs::write(settings.join("ProjectVersion.txt"), "m_EditorVersion:\n").unwrap();
         assert!(parse_project_version(dir.path()).is_none());
+    }
+
+    // ---- Scan roots inside the Assets tree ----
+
+    /// Lay out a Unity project with a package cache and a version file.
+    fn unity_project(root: &Path) {
+        fs::create_dir_all(root.join("ProjectSettings")).unwrap();
+        fs::write(
+            root.join("ProjectSettings").join("ProjectVersion.txt"),
+            "m_EditorVersion: 2022.3.10f1\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("Assets").join("Art").join("Textures")).unwrap();
+        let pkg = root
+            .join("Library")
+            .join("PackageCache")
+            .join("com.example.renderpipe@14.0.8");
+        fs::create_dir_all(&pkg).unwrap();
+        fs::write(
+            pkg.join("Lit.shader.meta"),
+            "fileFormatVersion: 2\nguid: dddddddddddddddddddddddddddddd01\n",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn unity_project_root_is_found_from_inside_the_assets_tree() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        unity_project(root);
+
+        assert_eq!(unity_project_root(root).as_deref(), Some(root));
+        assert_eq!(
+            unity_project_root(&root.join("Assets")).as_deref(),
+            Some(root)
+        );
+        assert_eq!(
+            unity_project_root(&root.join("Assets").join("Art").join("Textures")).as_deref(),
+            Some(root)
+        );
+    }
+
+    #[test]
+    fn unity_project_root_ignores_lookalikes() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // An `Assets` folder with no ProjectSettings above it is just a folder.
+        let loose = dir.path().join("loose").join("Assets");
+        fs::create_dir_all(&loose).unwrap();
+        assert!(unity_project_root(&loose).is_none());
+
+        // Only the Assets subtree qualifies — a sibling directory of the real
+        // project root does not, or opening `Docs/` would light up Unity.
+        let root = dir.path().join("proj");
+        unity_project(&root);
+        fs::create_dir_all(root.join("Docs")).unwrap();
+        assert!(unity_project_root(&root.join("Docs")).is_none());
+    }
+
+    /// The regression that makes the `Assets/`-as-root fix safe rather than
+    /// harmful: turning the Unity rules on for that root while
+    /// `Library/PackageCache` — which lives ABOVE it — stayed unresolved
+    /// would report every package reference as a dangling GUID.
+    #[test]
+    fn package_cache_resolves_when_the_scan_root_is_the_assets_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        unity_project(root);
+        let assets = root.join("Assets");
+
+        let index = build_package_guid_index(&assets);
+        assert!(
+            index.get("dddddddddddddddddddddddddddddd01").is_some(),
+            "package GUIDs must resolve when the scan root is Assets/"
+        );
+        assert_eq!(package_cache_key(&assets), package_cache_key(root));
+        assert!(!package_cache_key(&assets).is_empty());
+    }
+
+    #[test]
+    fn project_version_resolves_when_the_scan_root_is_the_assets_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        unity_project(root);
+
+        let info = parse_project_version(&root.join("Assets")).expect("version resolves");
+        assert_eq!(info.editor_version, "2022.3.10f1");
     }
 }

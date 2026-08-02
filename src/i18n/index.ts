@@ -10,8 +10,19 @@ import zh from "./locales/zh.json";
 function detectLanguage(): "en" | "zh" {
   const saved = localStorage.getItem("language");
   if (saved === "en" || saved === "zh") return saved;
+  // `navigator.languages` is ordered by preference, so the FIRST supported
+  // entry wins — testing "is zh anywhere in the list" let a lower-priority
+  // Chinese locale outrank the user's actual first choice, booting someone
+  // whose settings read ["en-US", "zh-CN"] into Chinese. Unsupported locales
+  // are skipped rather than ending the search, so ["fr", "zh-CN"] still
+  // reaches Chinese.
   const candidates = [navigator.language, ...(navigator.languages ?? [])];
-  if (candidates.some((l) => l?.toLowerCase().startsWith("zh"))) return "zh";
+  for (const candidate of candidates) {
+    const tag = candidate?.toLowerCase();
+    if (!tag) continue;
+    if (tag.startsWith("zh")) return "zh";
+    if (tag.startsWith("en")) return "en";
+  }
   return "en";
 }
 

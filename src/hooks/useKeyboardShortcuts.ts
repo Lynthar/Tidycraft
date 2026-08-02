@@ -12,21 +12,17 @@ interface KeyboardShortcuts {
 }
 
 export function useKeyboardShortcuts({ onOpenFolder, onFocusSearch }: KeyboardShortcuts = {}) {
-  const {
-    projectPath,
-    isScanning,
-    openProject,
-    rescan,
-    cancelScan,
-    runAnalysis,
-    setViewMode,
-    setSelectedAsset,
-    setSearchQuery,
-  } = useProjectStore();
   const { t } = useTranslation();
 
+  // Store state is read via `getState()` at keystroke time rather than
+  // subscribed to. This hook is mounted at the App root and needs no
+  // rendering of its own, but destructuring the store subscribed App to
+  // EVERY store change — including the scan progress that lands every 100ms,
+  // re-rendering the whole tree throughout a scan and undoing the `useShallow`
+  // selectors App applies for exactly that reason. Reading on demand is also
+  // always fresh, so the handler needs no dependency on the values.
   const handleOpenFolder = useCallback(async () => {
-    if (isScanning) return;
+    if (useProjectStore.getState().isScanning) return;
 
     const selected = await open({
       directory: true,
@@ -35,9 +31,9 @@ export function useKeyboardShortcuts({ onOpenFolder, onFocusSearch }: KeyboardSh
     });
 
     if (selected && typeof selected === "string") {
-      openProject(selected);
+      useProjectStore.getState().openProject(selected);
     }
-  }, [isScanning, openProject, t]);
+  }, [t]);
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
@@ -99,6 +95,17 @@ export function useKeyboardShortcuts({ onOpenFolder, onFocusSearch }: KeyboardSh
         }
         return;
       }
+
+      const {
+        projectPath,
+        isScanning,
+        rescan,
+        cancelScan,
+        runAnalysis,
+        setViewMode,
+        setSelectedAsset,
+        setSearchQuery,
+      } = useProjectStore.getState();
 
       // Ctrl/Cmd + O: Open folder
       if (modKey && key.toLowerCase() === "o") {
@@ -184,20 +191,7 @@ export function useKeyboardShortcuts({ onOpenFolder, onFocusSearch }: KeyboardSh
         }
       }
     },
-    [
-      projectPath,
-      isScanning,
-      handleOpenFolder,
-      onOpenFolder,
-      onFocusSearch,
-      openProject,
-      rescan,
-      cancelScan,
-      runAnalysis,
-      setViewMode,
-      setSelectedAsset,
-      setSearchQuery,
-    ]
+    [handleOpenFolder, onOpenFolder, onFocusSearch]
   );
 
   useEffect(() => {

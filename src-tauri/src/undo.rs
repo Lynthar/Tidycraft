@@ -112,22 +112,64 @@ impl UndoManager {
     /// 回读后会按 `max_history` trim 掉过旧的批次。
     pub fn load_for_project(project_root: &Path, max_history: usize) -> Self {
         let persist_path = Self::persist_path_for(project_root);
-        let mut history: Vec<BatchOperation> = Vec::new();
-
-        if let Some(ref p) = persist_path {
-            if let Ok(content) = fs::read_to_string(p) {
-                if let Ok(loaded) = serde_json::from_str::<Vec<BatchOperation>>(&content) {
-                    let start = loaded.len().saturating_sub(max_history);
-                    history = loaded[start..].to_vec();
-                }
-            }
-        }
+        let history = persist_path
+            .as_deref()
+            .map(|p| Self::read_history_from(p, max_history))
+            .unwrap_or_default();
 
         Self {
             history,
             max_history,
             persist_path,
         }
+    }
+
+    /// 从 `path` 读回历史并按 `max_history` 保留最新的若干条。
+    ///
+    /// 文件缺失是正常的「还没有历史」→ 空。但**存在却解析不了**的文件不能
+    /// 静默退化为空:下一次 `record_batch` 的 `save_to_disk` 会盖掉它,用户
+    /// 那份(很可能还能救的)历史就永久没了,且全程无任何痕迹。所以先把损坏
+    /// 文件挪到 `.corrupt` 备份再从空开始——与 `tags.rs::load` 同一套纪律。
+    fn read_history_from(path: &Path, max_history: usize) -> Vec<BatchOperation> {
+        if !path.exists() {
+            return Vec::new();
+        }
+        match fs::read_to_string(path) {
+            Ok(content) => match serde_json::from_str::<Vec<BatchOperation>>(&content) {
+                Ok(loaded) => {
+                    let start = loaded.len().saturating_sub(max_history);
+                    return loaded[start..].to_vec();
+                }
+                Err(e) => {
+                    // 保留最早那份备份(最可能是完整的),别让后一次损坏覆盖它。
+                    let backup = path.with_extension("json.corrupt");
+                    if !backup.exists() {
+                        let _ = fs::rename(path, &backup);
+                    }
+                    eprintln!(
+                        "[undo] {} failed to parse ({e}); backed up to {}",
+                        path.display(),
+                        backup.display()
+                    );
+                }
+            },
+            Err(e) => eprintln!("[undo] failed to read {}: {e}", path.display()),
+        }
+        Vec::new()
+    }
+
+    /// 把历史原子写入 `path`(建父目录)。错误**向上传播**,由 `save_to_disk`
+    /// 负责记日志——写盘持续失败意味着每次重启都丢光撤销历史,静默吞掉它
+    /// 等于让这种故障永远查不出来。
+    fn write_history_to(path: &Path, history: &[BatchOperation]) -> std::io::Result<()> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_string_pretty(history)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        // Atomic (temp + rename): a crash mid-write must not tear the
+        // persisted undo history — same discipline as tags.rs.
+        crate::fs_atomic::write_atomic(path, json.as_bytes())
     }
 
     /// 以项目根路径的 SHA256(前 16 hex) 做文件名,避免路径特殊字符 /
@@ -143,20 +185,15 @@ impl UndoManager {
         })
     }
 
-    /// 写盘 best-effort:目录不存在会建;写失败静默忽略以不阻塞撤销操作。
+    /// 写盘 best-effort:失败不阻塞撤销操作(内存里的历史照常可用),但**必须
+    /// 留下日志**——否则一个持续写不进去的数据目录表现为「每次重启撤销历史
+    /// 都空了」,没有任何线索可查。
     fn save_to_disk(&self) {
         let Some(path) = &self.persist_path else {
             return;
         };
-        if let Some(parent) = path.parent() {
-            if fs::create_dir_all(parent).is_err() {
-                return;
-            }
-        }
-        if let Ok(json) = serde_json::to_string_pretty(&self.history) {
-            // Atomic (temp + rename): a crash mid-write must not tear the
-            // persisted undo history — same discipline as tags.rs.
-            let _ = crate::fs_atomic::write_atomic(path, json.as_bytes());
+        if let Err(e) = Self::write_history_to(path, &self.history) {
+            eprintln!("[undo] failed to persist history to {}: {e}", path.display());
         }
     }
 
@@ -444,6 +481,92 @@ fn current_timestamp() -> u64 {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    // ---- History persistence (the same discipline tags.rs already keeps) ----
+
+    fn a_batch(description: &str) -> BatchOperation {
+        BatchOperation {
+            id: "id-1".to_string(),
+            description: description.to_string(),
+            operations: vec![FileOperation {
+                operation_type: OperationType::Rename,
+                original_path: "/p/a.png".to_string(),
+                new_path: Some("/p/b.png".to_string()),
+                timestamp: 1,
+            }],
+            timestamp: 1,
+            undone: false,
+        }
+    }
+
+    /// A history file that exists but won't parse must not degrade to "no
+    /// history": the next `record_batch` saves over it, and the user's route
+    /// back is gone with no way to tell it ever existed. `tags.rs` already
+    /// backs its file up for exactly this reason; this path did not.
+    #[test]
+    fn a_corrupt_history_file_is_preserved_rather_than_silently_dropped() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("history.json");
+        fs::write(&path, "{ truncated not json").unwrap();
+
+        let history = UndoManager::read_history_from(&path, 50);
+
+        assert!(history.is_empty(), "unparseable history yields no entries");
+        let backup = dir.path().join("history.json.corrupt");
+        assert_eq!(
+            fs::read_to_string(&backup).unwrap(),
+            "{ truncated not json",
+            "the corrupt file must survive for recovery"
+        );
+        assert!(!path.exists(), "it is moved aside, not copied");
+    }
+
+    /// Second corruption keeps the FIRST backup — that one is the likeliest
+    /// to be complete, and a fresh empty file overwriting it would finish the
+    /// job the corruption started.
+    #[test]
+    fn an_existing_corrupt_backup_is_not_overwritten() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("history.json");
+        let backup = dir.path().join("history.json.corrupt");
+        fs::write(&backup, "the original").unwrap();
+        fs::write(&path, "later garbage").unwrap();
+
+        UndoManager::read_history_from(&path, 50);
+
+        assert_eq!(fs::read_to_string(&backup).unwrap(), "the original");
+    }
+
+    #[test]
+    fn a_readable_history_round_trips_and_trims_to_the_limit() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("nested").join("history.json");
+        let batches: Vec<BatchOperation> = ["oldest", "middle", "newest"]
+            .iter()
+            .map(|d| a_batch(d))
+            .collect();
+
+        UndoManager::write_history_to(&path, &batches).expect("write succeeds");
+        let loaded = UndoManager::read_history_from(&path, 2);
+
+        // Trimming keeps the newest entries.
+        let descriptions: Vec<&str> = loaded.iter().map(|b| b.description.as_str()).collect();
+        assert_eq!(descriptions, ["middle", "newest"]);
+    }
+
+    /// A write that fails must reach a log, not `let _ =`. The manager keeps
+    /// working in memory either way, but a persistently unwritable history is
+    /// a silent loss of every undo across restarts.
+    #[test]
+    fn a_failed_history_write_is_reported_rather_than_swallowed() {
+        let dir = tempdir().unwrap();
+        // A *file* sits where the history's parent directory would go, so
+        // `create_dir_all` cannot succeed.
+        let blocker = dir.path().join("undo");
+        fs::write(&blocker, "not a directory").unwrap();
+
+        assert!(UndoManager::write_history_to(&blocker.join("history.json"), &[]).is_err());
+    }
 
     fn create_test_file(dir: &Path, name: &str) -> String {
         let path = dir.join(name);

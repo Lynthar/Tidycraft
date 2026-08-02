@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { Filter, X, ChevronDown, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
@@ -15,19 +16,48 @@ const GIT_STATUS_FILTER_OPTIONS: GitFileStatus[] = [
 
 export function AdvancedFiltersPanel() {
   const { t } = useTranslation();
-  const { advancedFilters, setAdvancedFilters, resetAdvancedFilters, scanResult, typeFilter, setTypeFilter, toggleTypeFilter, gitInfo } = useProjectStore();
+  // Selector + shallow compare: this panel lives in the Header, so an
+  // unselected `useProjectStore()` re-rendered it on every store change —
+  // not just the search box it sits next to, but each scan-progress tick as
+  // well, and each of those re-runs the two full-asset scans below.
+  const {
+    advancedFilters,
+    setAdvancedFilters,
+    resetAdvancedFilters,
+    scanResult,
+    typeFilter,
+    setTypeFilter,
+    toggleTypeFilter,
+    gitInfo,
+  } = useProjectStore(
+    useShallow((s) => ({
+      advancedFilters: s.advancedFilters,
+      setAdvancedFilters: s.setAdvancedFilters,
+      resetAdvancedFilters: s.resetAdvancedFilters,
+      scanResult: s.scanResult,
+      typeFilter: s.typeFilter,
+      setTypeFilter: s.setTypeFilter,
+      toggleTypeFilter: s.toggleTypeFilter,
+      gitInfo: s.gitInfo,
+    }))
+  );
   const [isOpen, setIsOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // Get unique extensions from scan result
-  const availableExtensions = scanResult
-    ? [...new Set(scanResult.assets.map((a) => a.extension.toLowerCase()))].sort()
-    : [];
+  // Both walk every asset in the project, so they recompute only when the
+  // scan result itself changes — not on each keystroke in the search box.
+  const availableExtensions = useMemo(
+    () =>
+      scanResult
+        ? [...new Set(scanResult.assets.map((a) => a.extension.toLowerCase()))].sort()
+        : [],
+    [scanResult]
+  );
 
-  // Get available asset types from scan result
-  const availableAssetTypes = scanResult
-    ? [...new Set(scanResult.assets.map((a) => a.asset_type))].sort()
-    : [];
+  const availableAssetTypes = useMemo(
+    () => (scanResult ? [...new Set(scanResult.assets.map((a) => a.asset_type))].sort() : []),
+    [scanResult]
+  );
 
   // Check if any filters are active
   const hasActiveFilters =
@@ -213,7 +243,7 @@ export function AdvancedFiltersPanel() {
                 <input
                   type="number"
                   placeholder={t("filters.min", "Min")}
-                  value={advancedFilters.minSize ? (advancedFilters.minSize / 1024 / 1024).toFixed(2) : ""}
+                  value={advancedFilters.minSize != null ? (advancedFilters.minSize / 1024 / 1024).toFixed(2) : ""}
                   onChange={(e) => handleSizeChange("minSize", e.target.value)}
                   className="flex-1 px-2 py-1.5 text-sm bg-background border border-border rounded text-text-primary focus:outline-none focus:border-primary"
                 />
@@ -221,7 +251,7 @@ export function AdvancedFiltersPanel() {
                 <input
                   type="number"
                   placeholder={t("filters.max", "Max")}
-                  value={advancedFilters.maxSize ? (advancedFilters.maxSize / 1024 / 1024).toFixed(2) : ""}
+                  value={advancedFilters.maxSize != null ? (advancedFilters.maxSize / 1024 / 1024).toFixed(2) : ""}
                   onChange={(e) => handleSizeChange("maxSize", e.target.value)}
                   className="flex-1 px-2 py-1.5 text-sm bg-background border border-border rounded text-text-primary focus:outline-none focus:border-primary"
                 />
