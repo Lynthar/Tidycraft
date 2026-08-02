@@ -6,6 +6,29 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+- **A strict Content Security Policy.** The webview previously ran with no policy at all, so any script injected into it would have had the full asset protocol (every file on disk) and the whole command surface. Scripts are now restricted to the app's own bundle, and the preview chain is allowlisted precisely: thumbnails (`data:`), images and audio/video (`asset:`), and 3D model loading (which fetches over XHR, so it needs `connect-src`). Verified against a real build — note that `pnpm tauri dev` applies no CSP at all, so a CSP-breaking change cannot be caught in dev.
+- **Unused-asset detection warns when it can't be trusted.** A project set to Force Binary asset serialization stores scenes and prefabs as binary, so their references are invisible to Tidycraft — and every asset only those files referenced looked unused. The panel now counts unreadable source files and, when any exist, says so above the list with a "don't delete based on this" warning and the setting to change. This was the one place the app could talk you into deleting assets that were in use.
+
+### Changed
+- **Default forbidden characters now cover the Windows-illegal set** (`< > : " | ?`). The rule's stated purpose was portability, but the default list only held shell-awkward punctuation — the one category that is unambiguously a bug (such a file cannot be checked out on Windows at all) was the category it missed. Existing projects will report new issues on re-analysis; all are genuine.
+- **Failures that used to be silent now say something.** Tag edits, cache clearing, and asset duplication reported errors only to the developer console — a failed tag delete looked exactly like nothing happening. They now surface as toasts. Tag and scan-cache write failures are also logged on the backend rather than discarded.
+- **Minimum Rust version is now 1.88** (was declared as 1.75). This is the floor the dependency graph already imposed; the old declaration simply could not be honored. Building has not changed for anyone on a current toolchain.
+
+### Fixed
+- **Assets that follow a prefix convention are no longer reported as misnamed.** With both a type prefix (e.g. `T_`) and a case style configured, the case check ran against the whole filename — and no case style accepts `T_`, so every correctly named `T_rock.png` was flagged. Worse, accepting the suggested fix produced a name that violated the prefix rule, whose fix violated the case rule again: applied repeatedly, names grew without ever settling. Case is now checked past the configured prefix, and the prefix is preserved by the fix.
+- **Ignoring a folder no longer makes everything that references it look broken.** `[ignore]` dropped matching assets before analysis entirely, so ignoring vendored directories — the sample config's own example — removed their GUIDs from the project's known set and every prefab or material pointing at them reported a dangling reference. Ignored assets still count as existing; ignoring a *referencing* file still suppresses its findings as documented. Duplicate, PBR-set and DCC-source checks are unchanged.
+- **Tags no longer vanish during large rename or move batches.** The disk operations ran with the project unlocked and tag bindings were migrated only afterwards, so the filesystem watcher could see the old paths already gone and reap their tags as orphans — silently, and only on batches long enough to outlast its debounce window. Each file's rename and its tag migration now share one lock window.
+- **A malformed `project.godot` no longer takes the app down.** A half-typed value ending in a lone quote hit an out-of-bounds slice, and release builds abort on panic, so this exited the whole application rather than failing one command.
+- **An undo that reverts nothing stays undoable.** The entry was consumed even when every file failed — typically because they were open in another application — so the operation became unrecoverable after fixing the cause. Partial success still consumes the entry.
+- **Fix-it and Move now leave a working undo.** Both recorded an undo batch on the backend but never refreshed the frontend, so the header's undo button stayed disabled: Fix-it was recoverable only during its ~5-second toast, and Move — which shows no toast — had no reachable undo at all.
+- **Dependency graph edges no longer curve back on themselves.** Edges entered and left the long sides of each node while the layout ran left-to-right; they now follow the layout direction.
+- **A symlinked directory no longer appears in the tree.** The tree followed links while the asset scan does not, so linked folders showed up holding files that could never be listed — and a symlink loop made the walk recurse until the OS stopped it.
+- **The largest-files list translates its type badges.**
+
+### Security
+- Refreshed dependencies with published advisories: vite, postcss, @babel/core (build-time only, but the vite issue is exploitable against the dev server), plus serde_with and quinn-proto.
+
 ## [0.8.2] - 2026-07-27
 
 ### Changed
