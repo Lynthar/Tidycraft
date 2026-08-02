@@ -138,6 +138,11 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
   const [unused, setUnused] = useState<string[] | null>(null);
   const [unusedLoading, setUnusedLoading] = useState(false);
   const [unusedError, setUnusedError] = useState<string | null>(null);
+  /// Referenceable Unity files whose text couldn't be read — a Force Binary
+  /// serialization project. Their outgoing references are invisible, so the
+  /// list below under-counts what's actually in use. Non-zero means "do not
+  /// act on this list" (see `UnusedAssetsResult` in lib.rs).
+  const [unusedUnreadable, setUnusedUnreadable] = useState(0);
 
   // Chart palette resolved from the design tokens, recomputed on theme flip
   // so the charts share the app's colors (recharts SVG fills can't consume
@@ -196,10 +201,14 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
     setUnusedLoading(true);
     setUnusedError(null);
     try {
-      const result = await invoke<string[]>("find_unused_assets", {
-        projectId: pid,
-      });
-      if (useProjectStore.getState().activeProjectId === pid) setUnused(result);
+      const result = await invoke<{
+        unused: string[];
+        unreadable_sources: number;
+      }>("find_unused_assets", { projectId: pid });
+      if (useProjectStore.getState().activeProjectId === pid) {
+        setUnused(result.unused);
+        setUnusedUnreadable(result.unreadable_sources);
+      }
     } catch (err) {
       if (useProjectStore.getState().activeProjectId === pid) setUnusedError(String(err));
     } finally {
@@ -214,6 +223,7 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
     // unused scan (it goes stale, but stale beats vanishing mid-read).
     setUnused(null);
     setUnusedError(null);
+    setUnusedUnreadable(0);
   }, [activeProjectId]);
 
   useEffect(() => {
@@ -501,7 +511,7 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
                     color: `var(--c-${file.asset_type}, var(--c-other))`,
                   }}
                 >
-                  {file.asset_type}
+                  {t(`assetTypes.${file.asset_type}` as const)}
                 </span>
               </div>
               <span className="text-text-secondary shrink-0">{formatFileSize(file.size)}</span>
@@ -538,6 +548,11 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
               ? t("stats.unusedAssetsHintGodot")
               : t("stats.unusedAssetsHint")}
           </p>
+          {unusedUnreadable > 0 && (
+            <p className="text-xs text-warning mb-2">
+              {t("stats.unusedAssetsBinaryWarning", { count: unusedUnreadable })}
+            </p>
+          )}
           {unusedError ? (
             <p className="text-xs text-warning">{unusedError}</p>
           ) : unused === null ? null : unused.length === 0 ? (

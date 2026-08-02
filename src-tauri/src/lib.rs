@@ -849,7 +849,11 @@ fn run_full_analysis(
     let mut result = analyzer.analyze(scan_to_analyze);
     let duplicates = analyzer.find_duplicates(scan_to_analyze);
     result.merge(duplicates);
-    let missing = analyzer.find_missing_references(scan_to_analyze, package_index);
+    // Existence comes from the UNFILTERED scan: `[ignore]` limits what we
+    // report on, not what the project is understood to contain. (The other
+    // three cross-asset rules deliberately keep the filtered view — their
+    // documented suppression path is "drop the file"; see docs/analyzer-rules.md.)
+    let missing = analyzer.find_missing_references(scan_to_analyze, scan_result, package_index);
     result.merge(missing);
     let pbr = analyzer.find_pbr_set_issues(scan_to_analyze, &config.pbr_set);
     result.merge(pbr);
@@ -1103,6 +1107,38 @@ fn package_index_for(project_id: &str) -> std::sync::Arc<unity::PackageGuidIndex
     .unwrap_or_default()
 }
 
+/// The slice of project state the engine-walk commands need, cloned under a
+/// brief lock so the walk itself runs with the lock released.
+///
+/// `get_unity_dependencies`, `find_unused_assets`, `get_godot_dependencies` and
+/// `godot_asset_references` all re-open and re-parse every scene / prefab /
+/// material / script in the project — seconds on a large one. Doing that inside
+/// `with_ref` held the per-project mutex for the entire walk, which stalls the
+/// watcher's 500ms batches, every other command for that project, and the
+/// cancel path. Nothing in the walk reads state beyond these three values, so a
+/// snapshot is sufficient — the same "snapshot inside the lock, IO outside"
+/// discipline `llm_suggest_tags` already follows.
+///
+/// Worst case the snapshot is one scan stale (a watcher batch lands mid-walk).
+/// That was already true of the returned graph the moment it crossed the IPC
+/// boundary, so it costs no accuracy that existed before.
+struct EngineScanSnapshot {
+    root_path: String,
+    assets: Vec<scanner::AssetInfo>,
+    project_type: Option<scanner::ProjectType>,
+}
+
+fn engine_scan_snapshot(project_id: &str) -> Result<EngineScanSnapshot, String> {
+    project::with_ref(project_id, |state| {
+        let scan = state.require_scan()?;
+        Ok(EngineScanSnapshot {
+            root_path: state.root_path.clone(),
+            assets: scan.assets.clone(),
+            project_type: scan.project_type.clone(),
+        })
+    })
+}
+
 #[derive(Serialize)]
 pub struct DependencyEdge {
     pub from: String,
@@ -1129,158 +1165,185 @@ const UNITY_REFERENCEABLE_EXTS: &[&str] = &[
     "anim",
 ];
 
-// `(async)`: re-reads + parses every prefab/scene/mat under the project lock —
-// off the main thread so a 10k-asset project doesn't freeze the window.
+// `(async)`: re-reads + parses every prefab/scene/mat — off the main thread so
+// a 10k-asset project doesn't freeze the window, and off the project lock (see
+// EngineScanSnapshot) so it doesn't freeze the project's other commands either.
 #[tauri::command(async)]
 fn get_unity_dependencies(project_id: String) -> Result<DependencyGraph, String> {
-    // Fetched before the lock below — see package_index_for.
+    // Fetched before the snapshot below — see package_index_for.
     let package_index = package_index_for(&project_id);
-    project::with_ref(&project_id, |state| {
-        let scan_result = state.require_scan()?;
+    let scan_result = engine_scan_snapshot(&project_id)?;
+    if !matches!(scan_result.project_type, Some(scanner::ProjectType::Unity)) {
+        return Err("Not a Unity project".to_string());
+    }
 
-        if !matches!(scan_result.project_type, Some(scanner::ProjectType::Unity)) {
-            return Err("Not a Unity project".to_string());
+    let mut nodes: Vec<DependencyNode> = Vec::new();
+    let mut edges: Vec<DependencyEdge> = Vec::new();
+    let mut guid_to_path: HashMap<String, String> = HashMap::new();
+
+    for asset in &scan_result.assets {
+        if let Some(ref guid) = asset.unity_guid {
+            guid_to_path.insert(guid.clone(), asset.path.clone());
+            nodes.push(DependencyNode {
+                id: guid.clone(),
+                path: asset.path.clone(),
+                name: asset.name.clone(),
+                file_type: format!("{:?}", asset.asset_type).to_lowercase(),
+                kind: DependencyNodeKind::Asset,
+                detail: None,
+            });
         }
+    }
 
-        let mut nodes: Vec<DependencyNode> = Vec::new();
-        let mut edges: Vec<DependencyEdge> = Vec::new();
-        let mut guid_to_path: HashMap<String, String> = HashMap::new();
-
-        for asset in &scan_result.assets {
-            if let Some(ref guid) = asset.unity_guid {
-                guid_to_path.insert(guid.clone(), asset.path.clone());
-                nodes.push(DependencyNode {
-                    id: guid.clone(),
-                    path: asset.path.clone(),
-                    name: asset.name.clone(),
-                    file_type: format!("{:?}", asset.asset_type).to_lowercase(),
-                    kind: DependencyNodeKind::Asset,
-                    detail: None,
-                });
-            }
-        }
-
-        // References the scan can't resolve. Two classes never enter the
-        // graph at all — the all-zero "no reference" sentinel and the
-        // editor-shipped built-in bundles (`unity default resources` /
-        // `unity_builtin_extra`), the same exemptions the missing_reference
-        // rule applies: they aren't project assets, and the built-ins are
-        // exactly the GUIDs every material / UI element shares, so one node
-        // for them would hub-connect the whole project in the 2-hop view.
-        // The rest resolves through the PackageCache index when a local
-        // Library/ exists — a `package` node with its file and package name
-        // — and only what's left is genuinely ambiguous (no cache to check,
-        // ignore-excluded, or truly deleted): one deduped `unresolved` node,
-        // a warning with its edge intact, not an asserted breakage.
-        let mut unresolved_guids: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
-        for asset in &scan_result.assets {
-            let ext = asset.extension.to_lowercase();
-            if UNITY_REFERENCEABLE_EXTS.contains(&ext.as_str()) {
-                if let Some(unity_info) = unity::parse_unity_file(Path::new(&asset.path)) {
-                    if let Some(ref from_guid) = asset.unity_guid {
-                        for reference in &unity_info.references {
-                            if unity::is_null_guid(&reference.guid)
-                                || unity::is_builtin_guid(&reference.guid)
-                            {
-                                continue;
-                            }
-                            if !guid_to_path.contains_key(&reference.guid)
-                                && unresolved_guids.insert(reference.guid.clone())
-                            {
-                                nodes.push(match package_index.get(&reference.guid) {
-                                    Some(pkg) => DependencyNode {
-                                        id: reference.guid.clone(),
-                                        path: String::new(),
-                                        name: pkg.file_name.clone(),
-                                        file_type: "package".to_string(),
-                                        kind: DependencyNodeKind::Package,
-                                        detail: Some(pkg.package.clone()),
-                                    },
-                                    None => DependencyNode {
-                                        id: reference.guid.clone(),
-                                        path: String::new(),
-                                        name: reference.guid.clone(),
-                                        file_type: "unresolved".to_string(),
-                                        kind: DependencyNodeKind::Unresolved,
-                                        detail: None,
-                                    },
-                                });
-                            }
-                            edges.push(DependencyEdge {
-                                from: from_guid.clone(),
-                                to: reference.guid.clone(),
+    // References the scan can't resolve. Two classes never enter the
+    // graph at all — the all-zero "no reference" sentinel and the
+    // editor-shipped built-in bundles (`unity default resources` /
+    // `unity_builtin_extra`), the same exemptions the missing_reference
+    // rule applies: they aren't project assets, and the built-ins are
+    // exactly the GUIDs every material / UI element shares, so one node
+    // for them would hub-connect the whole project in the 2-hop view.
+    // The rest resolves through the PackageCache index when a local
+    // Library/ exists — a `package` node with its file and package name
+    // — and only what's left is genuinely ambiguous (no cache to check,
+    // ignore-excluded, or truly deleted): one deduped `unresolved` node,
+    // a warning with its edge intact, not an asserted breakage.
+    let mut unresolved_guids: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    for asset in &scan_result.assets {
+        let ext = asset.extension.to_lowercase();
+        if UNITY_REFERENCEABLE_EXTS.contains(&ext.as_str()) {
+            if let Some(unity_info) = unity::parse_unity_file(Path::new(&asset.path)) {
+                if let Some(ref from_guid) = asset.unity_guid {
+                    for reference in &unity_info.references {
+                        if unity::is_null_guid(&reference.guid)
+                            || unity::is_builtin_guid(&reference.guid)
+                        {
+                            continue;
+                        }
+                        if !guid_to_path.contains_key(&reference.guid)
+                            && unresolved_guids.insert(reference.guid.clone())
+                        {
+                            nodes.push(match package_index.get(&reference.guid) {
+                                Some(pkg) => DependencyNode {
+                                    id: reference.guid.clone(),
+                                    path: String::new(),
+                                    name: pkg.file_name.clone(),
+                                    file_type: "package".to_string(),
+                                    kind: DependencyNodeKind::Package,
+                                    detail: Some(pkg.package.clone()),
+                                },
+                                None => DependencyNode {
+                                    id: reference.guid.clone(),
+                                    path: String::new(),
+                                    name: reference.guid.clone(),
+                                    file_type: "unresolved".to_string(),
+                                    kind: DependencyNodeKind::Unresolved,
+                                    detail: None,
+                                },
                             });
                         }
+                        edges.push(DependencyEdge {
+                            from: from_guid.clone(),
+                            to: reference.guid.clone(),
+                        });
                     }
                 }
             }
         }
+    }
 
-        Ok(DependencyGraph { nodes, edges })
-    })
+    Ok(DependencyGraph { nodes, edges })
+}
+
+/// Result of an unused-asset scan.
+///
+/// `unreadable_sources` counts referenceable files whose text could not be
+/// read. That is almost always a project set to Force Binary (or Mixed) asset
+/// serialization: `unity::parse_unity_file` reads YAML, so a binary `.prefab`
+/// or `.unity` yields NO outgoing references, and every asset only those files
+/// referenced then looks unused. Silently returning that list invites the user
+/// to delete assets that are very much in use — the one genuinely destructive
+/// failure mode in the app — so the count travels with the result and the UI
+/// says the answer can't be trusted.
+#[derive(Debug, Serialize)]
+struct UnusedAssetsResult {
+    unused: Vec<String>,
+    unreadable_sources: usize,
 }
 
 // `(async)`: same heavy Unity/Godot re-parse under the lock as the dependency
 // graph — kept off the main thread.
 #[tauri::command(async)]
-fn find_unused_assets(project_id: String) -> Result<Vec<String>, String> {
-    project::with_ref(&project_id, |state| {
-        let scan_result = state.require_scan()?;
-
-        match scan_result.project_type {
-            // Godot uses res:// path refs, not GUIDs — dispatch to its own
-            // parser and return early.
-            Some(scanner::ProjectType::Godot) => {
-                return Ok(godot::find_unused_godot_assets(
-                    &state.root_path,
+fn find_unused_assets(project_id: String) -> Result<UnusedAssetsResult, String> {
+    let scan_result = engine_scan_snapshot(&project_id)?;
+    match scan_result.project_type {
+        // Godot uses res:// path refs, not GUIDs — dispatch to its own
+        // parser and return early.
+        Some(scanner::ProjectType::Godot) => {
+            return Ok(UnusedAssetsResult {
+                unused: godot::find_unused_godot_assets(
+                    &scan_result.root_path,
                     &scan_result.assets,
-                ));
-            }
-            // Unity falls through to the GUID-based logic below.
-            Some(scanner::ProjectType::Unity) => {}
-            _ => {
-                return Err(
-                    "Unused-asset detection supports Unity and Godot projects".to_string(),
-                )
-            }
+                ),
+                // Godot's parser reads text too, but its sources are scenes
+                // and scripts that are text by format — no binary mode to
+                // silently swallow, so nothing to warn about.
+                unreadable_sources: 0,
+            });
         }
-
-        let mut referenced_guids: std::collections::HashSet<String> = std::collections::HashSet::new();
-        let mut all_guids: HashMap<String, String> = HashMap::new();
-
-        for asset in &scan_result.assets {
-            // Scenes are graph roots (loaded via build settings / the editor /
-            // SceneManager.LoadScene by name), so having no incoming GUID
-            // reference doesn't make a scene unused — drop them as candidates.
-            // They're still parsed as reference *sources* below, so assets a
-            // scene references aren't falsely flagged.
-            if matches!(asset.asset_type, scanner::AssetType::Scene) {
-                continue;
-            }
-            if let Some(ref guid) = asset.unity_guid {
-                all_guids.insert(guid.clone(), asset.path.clone());
-            }
+        // Unity falls through to the GUID-based logic below.
+        Some(scanner::ProjectType::Unity) => {}
+        _ => {
+            return Err(
+                "Unused-asset detection supports Unity and Godot projects".to_string(),
+            )
         }
+    }
 
-        for asset in &scan_result.assets {
-            let ext = asset.extension.to_lowercase();
-            if UNITY_REFERENCEABLE_EXTS.contains(&ext.as_str()) {
-                if let Some(unity_info) = unity::parse_unity_file(Path::new(&asset.path)) {
+    let mut referenced_guids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut all_guids: HashMap<String, String> = HashMap::new();
+
+    for asset in &scan_result.assets {
+        // Scenes are graph roots (loaded via build settings / the editor /
+        // SceneManager.LoadScene by name), so having no incoming GUID
+        // reference doesn't make a scene unused — drop them as candidates.
+        // They're still parsed as reference *sources* below, so assets a
+        // scene references aren't falsely flagged.
+        if matches!(asset.asset_type, scanner::AssetType::Scene) {
+            continue;
+        }
+        if let Some(ref guid) = asset.unity_guid {
+            all_guids.insert(guid.clone(), asset.path.clone());
+        }
+    }
+
+    let mut unreadable_sources = 0usize;
+    for asset in &scan_result.assets {
+        let ext = asset.extension.to_lowercase();
+        if UNITY_REFERENCEABLE_EXTS.contains(&ext.as_str()) {
+            match unity::parse_unity_file(Path::new(&asset.path)) {
+                Some(unity_info) => {
                     for reference in &unity_info.references {
                         referenced_guids.insert(reference.guid.clone());
                     }
                 }
+                // Binary-serialized (or otherwise unreadable): its outgoing
+                // references are invisible to us, so anything only it points
+                // at is about to be reported unused. Count, don't guess.
+                None => unreadable_sources += 1,
             }
         }
+    }
 
-        let unused: Vec<String> = all_guids
-            .iter()
-            .filter(|(guid, _path)| !referenced_guids.contains(*guid))
-            .map(|(_guid, path)| path.clone())
-            .collect();
+    let unused: Vec<String> = all_guids
+        .iter()
+        .filter(|(guid, _path)| !referenced_guids.contains(*guid))
+        .map(|(_guid, path)| path.clone())
+        .collect();
 
-        Ok(unused)
+    Ok(UnusedAssetsResult {
+        unused,
+        unreadable_sources,
     })
 }
 
@@ -1292,63 +1355,61 @@ fn find_unused_assets(project_id: String) -> Result<Vec<String>, String> {
 // main thread (mirrors get_unity_dependencies).
 #[tauri::command(async)]
 fn get_godot_dependencies(project_id: String) -> Result<DependencyGraph, String> {
-    project::with_ref(&project_id, |state| {
-        let scan_result = state.require_scan()?;
-        if !matches!(scan_result.project_type, Some(scanner::ProjectType::Godot)) {
-            return Err("Not a Godot project".to_string());
-        }
+    let scan_result = engine_scan_snapshot(&project_id)?;
+    if !matches!(scan_result.project_type, Some(scanner::ProjectType::Godot)) {
+        return Err("Not a Godot project".to_string());
+    }
 
-        let root = Path::new(&state.root_path);
-        let mut nodes: Vec<DependencyNode> = Vec::new();
-        let mut known: std::collections::HashSet<String> = std::collections::HashSet::new();
-        for asset in &scan_result.assets {
-            if godot::is_godot_metadata(&asset.extension) {
-                continue;
-            }
-            if let Some(id) = godot::asset_to_res_path(&asset.path, root) {
-                known.insert(id.clone());
-                nodes.push(DependencyNode {
-                    id,
-                    path: asset.path.clone(),
-                    name: asset.name.clone(),
-                    file_type: format!("{:?}", asset.asset_type).to_lowercase(),
-                    kind: DependencyNodeKind::Asset,
-                    detail: None,
-                });
-            }
+    let root = Path::new(&scan_result.root_path);
+    let mut nodes: Vec<DependencyNode> = Vec::new();
+    let mut known: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for asset in &scan_result.assets {
+        if godot::is_godot_metadata(&asset.extension) {
+            continue;
         }
-
-        // Keep every edge, but classify unknown `res://` targets honestly:
-        // unlike Unity GUIDs, a res path can be checked against the disk, so
-        // "outside the scan but present" (gitignored addons/, hidden dirs —
-        // not breakage) and "genuinely gone" (a broken reference) get
-        // different nodes instead of one scary bucket. One deduped node per
-        // distinct target either way.
-        let mut edges: Vec<DependencyEdge> = Vec::new();
-        let mut unknown: std::collections::HashSet<String> = std::collections::HashSet::new();
-        for (from, to) in godot::godot_dependency_edges(root, &scan_result.assets) {
-            if !known.contains(&to) && unknown.insert(to.clone()) {
-                let on_disk = godot::res_path_to_abs(&to, root)
-                    .map(|p| p.exists())
-                    .unwrap_or(false);
-                nodes.push(DependencyNode {
-                    id: to.clone(),
-                    path: String::new(),
-                    name: to.clone(),
-                    file_type: if on_disk { "unscanned" } else { "missing" }.to_string(),
-                    kind: if on_disk {
-                        DependencyNodeKind::Unscanned
-                    } else {
-                        DependencyNodeKind::Missing
-                    },
-                    detail: None,
-                });
-            }
-            edges.push(DependencyEdge { from, to });
+        if let Some(id) = godot::asset_to_res_path(&asset.path, root) {
+            known.insert(id.clone());
+            nodes.push(DependencyNode {
+                id,
+                path: asset.path.clone(),
+                name: asset.name.clone(),
+                file_type: format!("{:?}", asset.asset_type).to_lowercase(),
+                kind: DependencyNodeKind::Asset,
+                detail: None,
+            });
         }
+    }
 
-        Ok(DependencyGraph { nodes, edges })
-    })
+    // Keep every edge, but classify unknown `res://` targets honestly:
+    // unlike Unity GUIDs, a res path can be checked against the disk, so
+    // "outside the scan but present" (gitignored addons/, hidden dirs —
+    // not breakage) and "genuinely gone" (a broken reference) get
+    // different nodes instead of one scary bucket. One deduped node per
+    // distinct target either way.
+    let mut edges: Vec<DependencyEdge> = Vec::new();
+    let mut unknown: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for (from, to) in godot::godot_dependency_edges(root, &scan_result.assets) {
+        if !known.contains(&to) && unknown.insert(to.clone()) {
+            let on_disk = godot::res_path_to_abs(&to, root)
+                .map(|p| p.exists())
+                .unwrap_or(false);
+            nodes.push(DependencyNode {
+                id: to.clone(),
+                path: String::new(),
+                name: to.clone(),
+                file_type: if on_disk { "unscanned" } else { "missing" }.to_string(),
+                kind: if on_disk {
+                    DependencyNodeKind::Unscanned
+                } else {
+                    DependencyNodeKind::Missing
+                },
+                detail: None,
+            });
+        }
+        edges.push(DependencyEdge { from, to });
+    }
+
+    Ok(DependencyGraph { nodes, edges })
 }
 
 /// Rename guardrail: for each of `paths` (absolute), the project files that
@@ -1363,17 +1424,15 @@ fn godot_asset_references(
     project_id: String,
     paths: Vec<String>,
 ) -> Result<HashMap<String, Vec<String>>, String> {
-    project::with_ref(&project_id, |state| {
-        let scan_result = state.require_scan()?;
-        if !matches!(scan_result.project_type, Some(scanner::ProjectType::Godot)) {
-            return Err("Not a Godot project".to_string());
-        }
-        Ok(godot::referencing_files(
-            Path::new(&state.root_path),
-            &scan_result.assets,
-            &paths,
-        ))
-    })
+    let scan_result = engine_scan_snapshot(&project_id)?;
+    if !matches!(scan_result.project_type, Some(scanner::ProjectType::Godot)) {
+        return Err("Not a Godot project".to_string());
+    }
+    Ok(godot::referencing_files(
+        Path::new(&scan_result.root_path),
+        &scan_result.assets,
+        &paths,
+    ))
 }
 
 // ============ Engine Info Commands ============
@@ -2083,18 +2142,83 @@ fn rename_batch_on_disk(
     )
 }
 
-/// Rename a heterogeneous batch on disk, then — if anything moved — record ONE
-/// undo batch (so the whole set reverts with a single Ctrl+Z) and migrate tag
-/// bindings to the new paths. `label` names the undo entry ("Batch rename" /
-/// "Fix naming"); the recorded description is `"{label}: {N} files"` with N =
-/// the number of files actually renamed. Shared by execute_batch_rename and
-/// apply_naming_fixes.
-fn commit_renames(project_id: &str, planned: Vec<(String, String)>, label: &str) -> BatchRenameResult {
-    let (done, result) = rename_batch_on_disk(planned);
+/// Files renamed per lock window.
+///
+/// A file's disk rename and its tag migration must not be separated by a lock
+/// release: the watcher reaps tag bindings for paths that have vanished, so a
+/// gap there loses the tags of every file renamed before the watcher fired.
+/// Holding the project lock across a five-thousand-file batch would instead
+/// freeze every other command for that project, so the batch is chunked —
+/// bounded hold, and between chunks the watcher can only see files whose tags
+/// have already moved or files not yet touched.
+const RENAME_LOCK_CHUNK: usize = 100;
 
-    if !done.is_empty() {
+/// Rename a heterogeneous batch on disk, migrating tag bindings as it goes, and
+/// — if anything moved — record ONE undo batch (so the whole set reverts with a
+/// single Ctrl+Z). `label` names the undo entry ("Batch rename" / "Fix
+/// naming"); the recorded description is `"{label}: {N} files"` with N = the
+/// number of files actually renamed. Shared by execute_batch_rename and
+/// apply_naming_fixes.
+///
+/// The rename itself runs *inside* the project lock, in `RENAME_LOCK_CHUNK`
+/// slices — see that constant for why, and
+/// `commit_renames_does_not_expose_renamed_files_before_tags_follow` for the
+/// regression this shape exists to prevent.
+fn commit_renames(project_id: &str, planned: Vec<(String, String)>, label: &str) -> BatchRenameResult {
+    let total = planned.len();
+    let mut all_done: Vec<(String, String)> = Vec::new();
+    let mut result = BatchRenameResult {
+        success_count: 0,
+        error_count: 0,
+        errors: Vec::new(),
+    };
+
+    for chunk in planned.chunks(RENAME_LOCK_CHUNK) {
+        let outcome = project::with_mut(project_id, |state| {
+            let (done, part) = rename_batch_on_disk(chunk.to_vec());
+
+            // Tags follow the file across renames — same as move_assets /
+            // rename_file. Paths are already normalized (scanner::path_to_string)
+            // so the new key matches what the next scan produces.
+            if state.tags_data.is_some() && !done.is_empty() {
+                let tags = state.ensure_tags();
+                for (original, new_path) in &done {
+                    tags.rename_path(original, new_path);
+                }
+                // Logged, not swallowed: the files are already renamed, so this
+                // must not fail the command, but a silent failure here means the
+                // bindings only live in memory (watcher.rs logs the same way).
+                if let Err(e) = state.save_tags() {
+                    eprintln!("[batch_rename] failed to save tags after rename: {}", e);
+                }
+            }
+            Ok((done, part))
+        });
+
+        match outcome {
+            Ok((done, part)) => {
+                result.success_count += part.success_count;
+                result.error_count += part.error_count;
+                result.errors.extend(part.errors);
+                all_done.extend(done);
+            }
+            Err(e) => {
+                // Project not registered. We could still rename on disk, but
+                // with no undo record and no tag migration — renaming files
+                // with no way back is worse than refusing, so report it. (The
+                // previous shape swallowed this with `let _ =` and renamed
+                // anyway.)
+                let untouched = total - result.success_count - result.error_count;
+                result.error_count += untouched;
+                result.errors.push(format!("Renames aborted: {}", e));
+                return result;
+            }
+        }
+    }
+
+    if !all_done.is_empty() {
         let ts = unix_timestamp();
-        let file_ops: Vec<undo::FileOperation> = done
+        let file_ops: Vec<undo::FileOperation> = all_done
             .iter()
             .map(|(original, new_path)| undo::FileOperation {
                 operation_type: undo::OperationType::Rename,
@@ -2108,19 +2232,6 @@ fn commit_renames(project_id: &str, planned: Vec<(String, String)>, label: &str)
             state
                 .undo_manager
                 .record_batch(format!("{}: {} files", label, file_ops.len()), file_ops);
-
-            // Tags follow the file across renames — same as move_assets /
-            // rename_file. Without this, the watcher's later orphan cleanup
-            // reaps the old-path bindings and the tags are lost. Paths are
-            // already normalized (scanner::path_to_string) so the new key
-            // matches what the next scan produces for the renamed file.
-            if state.tags_data.is_some() {
-                let tags = state.ensure_tags();
-                for (original, new_path) in &done {
-                    tags.rename_path(original, new_path);
-                }
-                let _ = state.save_tags();
-            }
             Ok(())
         });
     }
@@ -2469,48 +2580,93 @@ fn move_assets(
         return FileOpResult { successes, errors };
     }
 
-    for path in paths {
-        let src = Path::new(&path);
-        let name = match src.file_name() {
-            Some(n) => n.to_os_string(),
-            None => {
-                errors.push(FileOpError {
-                    path: path.clone(),
-                    message: "Invalid source path".to_string(),
-                });
-                continue;
-            }
-        };
-        let dst = target.join(&name);
+    // Chunked, and the moves happen INSIDE the project lock: a file that has
+    // left its old path but whose tag binding hasn't moved yet is exactly what
+    // the watcher's orphan cleanup reaps. Same shape and same reasoning as
+    // `commit_renames` — see `RENAME_LOCK_CHUNK`.
+    for chunk in paths.chunks(RENAME_LOCK_CHUNK) {
+        let outcome = project::with_mut(&project_id, |state| {
+            let mut moved: Vec<FileOpSuccess> = Vec::new();
+            let mut failed: Vec<FileOpError> = Vec::new();
 
-        if src == dst {
-            // No-op: source already in target directory. Skip silently.
-            continue;
-        }
-        if dst.exists() {
-            errors.push(FileOpError {
-                path: path.clone(),
-                message: format!("Target already exists: {}", scanner::path_to_string(&dst)),
-            });
-            continue;
-        }
+            for path in chunk {
+                let src = Path::new(path);
+                let name = match src.file_name() {
+                    Some(n) => n.to_os_string(),
+                    None => {
+                        failed.push(FileOpError {
+                            path: path.clone(),
+                            message: "Invalid source path".to_string(),
+                        });
+                        continue;
+                    }
+                };
+                let dst = target.join(&name);
 
-        match std::fs::rename(src, &dst) {
-            Ok(_) => {
-                // Carry the Unity .meta sidecar so moved assets keep their
-                // GUID. Best-effort: no-op without a sidecar, logs on failure.
-                if let Err(e) = meta_sidecar::carry_on_rename(src, &dst) {
-                    eprintln!("[move_assets] .meta sidecar not carried for {}: {}", path, e);
+                if src == dst {
+                    // No-op: source already in target directory. Skip silently.
+                    continue;
                 }
-                successes.push(FileOpSuccess {
-                    original_path: path,
-                    new_path: scanner::path_to_string(&dst),
-                })
+                if dst.exists() {
+                    failed.push(FileOpError {
+                        path: path.clone(),
+                        message: format!("Target already exists: {}", scanner::path_to_string(&dst)),
+                    });
+                    continue;
+                }
+
+                match std::fs::rename(src, &dst) {
+                    Ok(_) => {
+                        // Carry the Unity .meta sidecar so moved assets keep their
+                        // GUID. Best-effort: no-op without a sidecar, logs on failure.
+                        if let Err(e) = meta_sidecar::carry_on_rename(src, &dst) {
+                            eprintln!("[move_assets] .meta sidecar not carried for {}: {}", path, e);
+                        }
+                        moved.push(FileOpSuccess {
+                            original_path: path.clone(),
+                            new_path: scanner::path_to_string(&dst),
+                        })
+                    }
+                    Err(e) => failed.push(FileOpError {
+                        path: path.clone(),
+                        message: e.to_string(),
+                    }),
+                }
             }
-            Err(e) => errors.push(FileOpError {
-                path,
-                message: e.to_string(),
-            }),
+
+            // Tags follow the file across moves, before the lock is released.
+            // Skip if tags haven't been touched in this session (lazy load).
+            if state.tags_data.is_some() && !moved.is_empty() {
+                let tags = state.ensure_tags();
+                for s in &moved {
+                    tags.rename_path(&s.original_path, &s.new_path);
+                }
+                // Logged, not swallowed: the move already succeeded so this
+                // can't fail the command, but a silent failure leaves the
+                // bindings in memory only (watcher.rs logs the same way).
+                if let Err(e) = state.save_tags() {
+                    eprintln!("[move_assets] failed to save tags after move: {}", e);
+                }
+            }
+            Ok((moved, failed))
+        });
+
+        match outcome {
+            Ok((moved, failed)) => {
+                successes.extend(moved);
+                errors.extend(failed);
+            }
+            Err(e) => {
+                // Project not registered: moving with no undo record and no tag
+                // migration is worse than refusing. Report the untouched files.
+                for path in chunk {
+                    errors.push(FileOpError {
+                        path: path.clone(),
+                        message: format!("Move aborted: {}", e),
+                    });
+                }
+                return FileOpResult { successes, errors };
+            }
         }
     }
 
@@ -2530,17 +2686,6 @@ fn move_assets(
                 format!("Move {} file(s)", ops.len()),
                 ops,
             );
-
-            // Tags follow the file across moves. Skip if tags haven't
-            // been touched in this session (lazy load). Save errors
-            // are swallowed — the move itself already succeeded.
-            if state.tags_data.is_some() {
-                let tags = state.ensure_tags();
-                for s in &successes {
-                    tags.rename_path(&s.original_path, &s.new_path);
-                }
-                let _ = state.save_tags();
-            }
             Ok(())
         });
     }
@@ -2768,13 +2913,16 @@ fn rename_file(project_id: String, old_path: String, new_name: String) -> Result
             .undo_manager
             .record_batch(format!("Rename {} to {}", old_name, new_name), vec![operation]);
 
-        // Carry tags from the old path to the new one. Best-effort —
-        // tag bookkeeping must never block a successful rename, so we
-        // ignore save errors (the file is already renamed on disk).
+        // Carry tags from the old path to the new one. Best-effort — tag
+        // bookkeeping must never fail a rename that already landed on disk —
+        // but logged, not silent, so a persistently unwritable tags file is
+        // diagnosable (same treatment as watcher.rs / the batch paths).
         if state.tags_data.is_some() {
             // new_path_str is already normalized (scanner::path_to_string above).
             state.ensure_tags().rename_path(&old_path, &new_path_str);
-            let _ = state.save_tags();
+            if let Err(e) = state.save_tags() {
+                eprintln!("[rename_file] failed to save tags after rename: {}", e);
+            }
         }
         Ok(())
     });
@@ -2803,7 +2951,12 @@ fn carry_tags_after_undo(state: &mut project::ProjectState, reverted_pairs: &[(S
     for (original, new_path) in reverted_pairs {
         tags.rename_path(new_path, original);
     }
-    let _ = state.save_tags();
+    // Worth a log line even though the undo itself succeeded: memory now says
+    // the bindings sit at the restored paths while disk still says the new
+    // ones, and on the next launch the watcher reaps those as orphans.
+    if let Err(e) = state.save_tags() {
+        eprintln!("[undo] failed to save tags after carrying them back: {}", e);
+    }
 }
 
 #[tauri::command]
@@ -3169,6 +3322,177 @@ mod tests {
         // rather than shipping the full absolute path.
         let rel = relativize_samples(vec!["D:/elsewhere/x.png".to_string()], "C:/proj");
         assert_eq!(rel, vec!["x.png"]);
+    }
+
+    /// The tag-migration race. `commit_renames` used to run the ENTIRE disk
+    /// batch with the project lock free and only then take the lock to migrate
+    /// tag bindings. The watcher releases events by individual age (500ms
+    /// timeout, 125ms tick — see notify-debouncer-full's `debounced_events`),
+    /// not after a quiet period, so on a batch longer than the window it fires
+    /// mid-flight, sees the early files' old paths gone, and reaps their tag
+    /// bindings as orphans (watcher.rs). The later migration then looked up an
+    /// old key that no longer existed and silently did nothing: the tags of
+    /// every early file were lost from memory AND disk, with no log line. Small
+    /// batches finished inside the window and looked fine.
+    ///
+    /// Deterministic proof of the fix — no sleep-and-hope for the race itself:
+    /// hold the project lock, start the rename on another thread, and assert it
+    /// cannot touch the disk while the lock is held. That mutual exclusion is
+    /// precisely what leaves the watcher no window to observe a renamed-away
+    /// file whose tag hasn't moved yet.
+    #[test]
+    fn commit_renames_does_not_expose_renamed_files_before_tags_follow() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let root = scanner::path_to_string(dir.path());
+        let project_id = "test_commit_renames_tag_race";
+        project::register(project_id.to_string(), root);
+
+        // Enough files that the old code's unlocked batch is plainly observable.
+        let planned: Vec<(String, String)> = (0..12)
+            .map(|i| {
+                let src = dir.path().join(format!("old_{}.png", i));
+                std::fs::write(&src, "x").unwrap();
+                (scanner::path_to_string(&src), format!("new_{}.png", i))
+            })
+            .collect();
+
+        // Bind a tag to every source path so the migration has work to do.
+        let tag_id = project::with_mut(project_id, |state| {
+            let tags = state.ensure_tags();
+            let tag = tags.create_tag("race".to_string(), "#fff".to_string());
+            for (path, _) in &planned {
+                tags.add_tag_to_asset(path, &tag.id);
+            }
+            Ok(tag.id)
+        })
+        .unwrap();
+
+        let guard_holder = project::get(project_id).unwrap();
+        let held = guard_holder.lock();
+
+        let worker = {
+            let planned = planned.clone();
+            std::thread::spawn(move || commit_renames(project_id, planned, "Race"))
+        };
+
+        // While the lock is held, no rename may land on disk. Without the fix
+        // the worker renames all twelve immediately and this fails.
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        for (path, _) in &planned {
+            assert!(
+                Path::new(path).exists(),
+                "{} was renamed while the project lock was held — the watcher \
+                 could observe it before its tag binding moved",
+                path
+            );
+        }
+
+        drop(held);
+        let result = worker.join().unwrap();
+        assert_eq!(result.success_count, planned.len());
+        assert_eq!(result.error_count, 0);
+
+        // Every binding followed its file; none were left on an old path.
+        project::with_ref(project_id, |state| {
+            let tags = state.tags_data.as_ref().expect("tags were created above");
+            for (old_path, new_name) in &planned {
+                let new_path = Path::new(old_path).with_file_name(new_name);
+                let new_key = scanner::path_to_string(&new_path);
+                assert!(
+                    tags.get_asset_tags(&new_key).iter().any(|t| t.id == tag_id),
+                    "tag did not follow {} → {}",
+                    old_path,
+                    new_key
+                );
+                assert!(tags.get_asset_tags(old_path).is_empty());
+            }
+            Ok(())
+        })
+        .unwrap();
+
+        project::unregister(project_id);
+    }
+
+    /// `move_assets` carried the identical defect as `commit_renames`: the whole
+    /// disk loop ran with the lock free, tags migrated afterwards. Right-click →
+    /// "Move to…" is a common bulk action, so the exposure was the same.
+    #[test]
+    fn move_assets_does_not_expose_moved_files_before_tags_follow() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let root = scanner::path_to_string(dir.path());
+        let project_id = "test_move_assets_tag_race";
+        project::register(project_id.to_string(), root);
+
+        let target = dir.path().join("dest");
+        std::fs::create_dir(&target).unwrap();
+
+        let sources: Vec<String> = (0..12)
+            .map(|i| {
+                let src = dir.path().join(format!("m_{}.png", i));
+                std::fs::write(&src, "x").unwrap();
+                scanner::path_to_string(&src)
+            })
+            .collect();
+
+        let tag_id = project::with_mut(project_id, |state| {
+            let tags = state.ensure_tags();
+            let tag = tags.create_tag("move".to_string(), "#fff".to_string());
+            for path in &sources {
+                tags.add_tag_to_asset(path, &tag.id);
+            }
+            Ok(tag.id)
+        })
+        .unwrap();
+
+        let guard_holder = project::get(project_id).unwrap();
+        let held = guard_holder.lock();
+
+        let worker = {
+            let paths = sources.clone();
+            let target_dir = scanner::path_to_string(&target);
+            std::thread::spawn(move || {
+                move_assets(project_id.to_string(), paths, target_dir)
+            })
+        };
+
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        for path in &sources {
+            assert!(
+                Path::new(path).exists(),
+                "{} moved while the project lock was held",
+                path
+            );
+        }
+
+        drop(held);
+        let result = worker.join().unwrap();
+        assert_eq!(result.successes.len(), sources.len());
+        assert!(
+            result.errors.is_empty(),
+            "unexpected errors: {:?}",
+            result.errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        );
+
+        project::with_ref(project_id, |state| {
+            let tags = state.tags_data.as_ref().expect("tags were created above");
+            for s in &result.successes {
+                assert!(
+                    tags.get_asset_tags(&s.new_path).iter().any(|t| t.id == tag_id),
+                    "tag did not follow {} → {}",
+                    s.original_path,
+                    s.new_path
+                );
+                assert!(tags.get_asset_tags(&s.original_path).is_empty());
+            }
+            Ok(())
+        })
+        .unwrap();
+
+        project::unregister(project_id);
     }
 
     #[test]

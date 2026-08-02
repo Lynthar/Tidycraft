@@ -72,7 +72,8 @@
     "artAssetsHint": "Textures, models, audio, video, animation, materials, prefabs and scenes — hides code and data files.",
     "typePillHint": "Click to filter · {{mod}}+Click to multi-select",
     "dccSourceFile": "Source file",
-    "vertsInline": "{{n}} v"
+    "vertsInline": "{{n}} v",
+    "duplicateFailed": "Duplicate failed: {{reason}}"
   },
   "exportToast": {
     "saved": "Exported {{name}}",
@@ -326,7 +327,8 @@
     "undoEntries_other": "{{count}} operations recorded",
     "undoNoProject": "No active project",
     "clear": "Clear",
-    "clearing": "Clearing…"
+    "clearing": "Clearing…",
+    "clearFailed": "Couldn't clear: {{reason}}"
   },
   "stats": {
     "noData": "No data available",
@@ -353,7 +355,8 @@
     "engineFeatures": "Features",
     "engineModules": "Modules",
     "enginePlugins": "Plugins enabled",
-    "enginePlatforms": "Target platforms"
+    "enginePlatforms": "Target platforms",
+    "unusedAssetsBinaryWarning": "{{count}} scene/prefab file(s) couldn't be read as text — this project appears to use Force Binary asset serialization. Their references are invisible to Tidycraft, so assets listed below may actually be in use. Don't delete based on this list; switch Edit → Project Settings → Editor → Asset Serialization to Force Text and rescan."
   },
   "theme": {
     "switchToLight": "Switch to light mode",
@@ -398,7 +401,8 @@
     "multiSelectHint": "Hold Cmd/Ctrl to multi-select",
     "manageTitle": "Manage Tags",
     "confirmDelete": "Are you sure you want to delete this tag?",
-    "descriptionPlaceholder": "Description (optional, used by AI tagging)"
+    "descriptionPlaceholder": "Description (optional, used by AI tagging)",
+    "writeFailed": "Tag update failed: {{reason}}"
   },
   "contextMenu": {
     "openInEditor": "Open in {{name}}",
@@ -575,7 +579,8 @@
     "ctaTitle": "Upgrade with AI Learning",
     "ctaBody": "Sample your project's filenames + tag system, infer naming and directory conventions, then generate local heuristic rules that replace the generic matches below. ~$0.05 one-time, then free.",
     "ctaButton": "Run AI Learning",
-    "heuristicDivider": "Heuristic fallback (filename / dimension / path)"
+    "heuristicDivider": "Heuristic fallback (filename / dimension / path)",
+    "applyFailed": "Couldn't apply tags: {{reason}}"
   },
   "learnSetup": {
     "title": "AI Learning Setup",

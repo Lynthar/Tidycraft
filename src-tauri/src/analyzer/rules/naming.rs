@@ -43,7 +43,17 @@ fn default_enabled() -> bool {
 }
 
 fn default_forbidden_chars() -> Vec<char> {
-    vec![' ', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '+', '=']
+    vec![
+        // Awkward in shells, build scripts and asset paths.
+        ' ', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '+', '=',
+        // Illegal in Windows filenames (`< > : " | ? *`, plus the separators
+        // `/` and `\`). These are the only entries that make the rule a
+        // portability check rather than a style preference: a file named with
+        // any of them cannot be checked out on Windows at all. `*` is already
+        // above; `/` and `\` can't occur in a single path component, so they
+        // are omitted rather than listed for show.
+        '<', '>', ':', '"', '|', '?',
+    ]
 }
 
 fn default_forbid_chinese() -> bool {
@@ -115,20 +125,43 @@ impl NamingRule {
         })
     }
 
-    fn check_prefix(&self, name: &str, asset_type: &AssetType) -> Option<String> {
-        let required_prefix = match asset_type {
+    fn required_prefix(&self, asset_type: &AssetType) -> Option<&String> {
+        match asset_type {
             AssetType::Texture => self.config.texture_prefix.as_ref(),
             AssetType::Model => self.config.model_prefix.as_ref(),
             AssetType::Audio => self.config.audio_prefix.as_ref(),
             _ => None,
-        };
+        }
+    }
 
-        if let Some(prefix) = required_prefix {
+    fn check_prefix(&self, name: &str, asset_type: &AssetType) -> Option<String> {
+        if let Some(prefix) = self.required_prefix(asset_type) {
             if !name.starts_with(prefix) {
                 return Some(prefix.clone());
             }
         }
         None
+    }
+
+    /// Split `stem` into (configured prefix, remainder). The prefix is what
+    /// `check_prefix` requires for this asset type, and only when the stem
+    /// actually carries it; otherwise the whole stem is the remainder.
+    ///
+    /// Case style applies to the remainder only. The two rules are orthogonal
+    /// requirements, but a prefix like `T_` is uppercase-plus-underscore by
+    /// construction and NO case style accepts it — PascalCase rejects the `_`,
+    /// snake/kebab/camel reject the capital. Checking the full stem made every
+    /// compliant `T_rock.png` report naming.case, and Fix-it's answer
+    /// (`t_rock.png`) then violated naming.prefix, whose answer was
+    /// `T_t_rock.png`… the two rules generated each other's violations and the
+    /// name grew on every pass. See `case_fix_under_a_prefix_converges`.
+    fn split_required_prefix<'a>(&self, stem: &'a str, asset_type: &AssetType) -> (&'a str, &'a str) {
+        if let Some(prefix) = self.required_prefix(asset_type) {
+            if let Some(tail) = stem.strip_prefix(prefix.as_str()) {
+                return (&stem[..prefix.len()], tail);
+            }
+        }
+        ("", stem)
     }
 
     fn check_case_style(&self, name: &str) -> bool {
@@ -206,12 +239,23 @@ impl NamingRule {
         }
 
         // Case style. Conversion can lengthen too (snake_case inserts a `_`
-        // at each camel hump), so the same length gate applies.
-        if !self.check_case_style(stem) {
-            let fixed_stem = to_case_style(stem, &self.config.case_style)?;
+        // at each camel hump), so the same length gate applies. Convert only
+        // the part past the configured prefix and put the prefix back verbatim
+        // — converting it too is what used to make the fix oscillate.
+        let (case_prefix, case_target) = self.split_required_prefix(stem, &asset.asset_type);
+        if !self.check_case_style(case_target) {
+            let fixed_stem = format!(
+                "{}{}",
+                case_prefix,
+                to_case_style(case_target, &self.config.case_style)?
+            );
             let candidate = reattach_ext(&fixed_stem, ext);
+            // Re-check through the same split `check` will apply next pass, so
+            // the invariant "a fix never leaves its own issue standing" holds
+            // for the predicate as actually evaluated.
+            let (_, recheck) = self.split_required_prefix(&fixed_stem, &asset.asset_type);
             return (candidate != *name
-                && self.check_case_style(&fixed_stem)
+                && self.check_case_style(recheck)
                 && candidate.chars().count() <= self.config.max_length)
                 .then_some(candidate);
         }
@@ -345,8 +389,10 @@ impl Rule for NamingRule {
             }
         }
 
-        // Check case style
-        if !self.check_case_style(name_without_ext) {
+        // Check case style — on the part the pipeline actually names, i.e.
+        // past any configured prefix (see `split_required_prefix`).
+        let (_, case_target) = self.split_required_prefix(name_without_ext, &asset.asset_type);
+        if !self.check_case_style(case_target) {
             return Some(Issue {
                 rule_id: "naming.case".to_string(),
                 rule_name: "Naming Case".to_string(),
@@ -506,6 +552,90 @@ mod tests {
             texture_prefix: Some("T_".to_string()),
             ..Default::default()
         })
+    }
+
+    /// The default list is what makes this rule a portability check rather
+    /// than a style preference, and the Windows-illegal set is the only part
+    /// that is unambiguously a bug: such a file cannot be checked out on
+    /// Windows at all. It used to hold only shell-awkward punctuation while
+    /// the surrounding comments advertised Windows coverage.
+    #[test]
+    fn default_forbidden_chars_cover_windows_illegal_characters() {
+        let rule = NamingRule::new(NamingConfig::default());
+        for c in ['<', '>', ':', '"', '|', '?', '*'] {
+            let name = format!("we{}ird.png", c);
+            let issue = rule
+                .check(&asset(&name, "png", AssetType::Texture, None))
+                .unwrap_or_else(|| panic!("{:?} should be reported", c));
+            assert_eq!(issue.rule_id, "naming.forbidden_char");
+            // And the fix must not simply swap in another forbidden character.
+            let fixed = rule
+                .suggest_compliant_name(&asset(&name, "png", AssetType::Texture, None))
+                .unwrap_or_else(|| panic!("{:?} should be fixable", c));
+            assert_eq!(fixed, "we_ird.png");
+            assert!(rule
+                .check(&asset(&fixed, "png", AssetType::Texture, None))
+                .is_none());
+        }
+    }
+
+    #[test]
+    fn prefix_and_case_compose_instead_of_contradicting() {
+        // The UE-style pipeline: `T_` prefix AND snake_case. Every one of the
+        // four case styles rejects `T_` on its own terms (uppercase and/or
+        // underscore), so checking the *full* stem made every compliant asset
+        // report naming.case.
+        for style in ["snake_case", "PascalCase", "camelCase", "kebab-case"] {
+            let rule = NamingRule::new(NamingConfig {
+                texture_prefix: Some("T_".to_string()),
+                case_style: style.to_string(),
+                ..Default::default()
+            });
+            let compliant = match style {
+                "PascalCase" => "T_Rock.png",
+                "camelCase" => "T_rock.png",
+                _ => "T_rock.png",
+            };
+            assert!(
+                rule.check(&asset(compliant, "png", AssetType::Texture, None))
+                    .is_none(),
+                "{} + T_ prefix wrongly flagged {}",
+                style,
+                compliant
+            );
+        }
+    }
+
+    #[test]
+    fn case_fix_under_a_prefix_converges() {
+        // Non-convergence guard: fixing the case must not mint a prefix
+        // violation, whose fix mints a case violation, whose fix… Applying
+        // the suggestion repeatedly has to reach a fixed point.
+        let rule = NamingRule::new(NamingConfig {
+            texture_prefix: Some("T_".to_string()),
+            case_style: "snake_case".to_string(),
+            ..Default::default()
+        });
+
+        let mut name = "T_RockWall.png".to_string();
+        for _ in 0..5 {
+            match rule.suggest_compliant_name(&asset(&name, "png", AssetType::Texture, None)) {
+                Some(next) => {
+                    assert_ne!(next, name, "suggestion must make progress");
+                    name = next;
+                }
+                None => break,
+            }
+        }
+        assert_eq!(name, "T_rock_wall.png");
+        // Fixed point: the settled name reports nothing and proposes nothing.
+        assert!(rule
+            .check(&asset(&name, "png", AssetType::Texture, None))
+            .is_none());
+        assert_eq!(
+            rule.suggest_compliant_name(&asset(&name, "png", AssetType::Texture, None)),
+            None
+        );
     }
 
     #[test]

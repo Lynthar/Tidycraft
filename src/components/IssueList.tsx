@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
 import { useSelectionStore } from "../stores/selectionStore";
+import { useTagsStore } from "../stores/tagsStore";
 import { useToastStore } from "../stores/toastStore";
 import { basename, relativeToRoot } from "../lib/pathUtils";
 import { exportTextFile } from "../lib/exportFile";
@@ -322,6 +323,8 @@ export function IssueList({ result, stale, isAnalyzing, onAnalyze, onLocate }: I
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const projectPath = useProjectStore((s) => s.projectPath);
   const pruneDuplicateGroup = useProjectStore((s) => s.pruneDuplicateGroup);
+  const refreshUndoState = useProjectStore((s) => s.refreshUndoState);
+  const undoLastOperation = useProjectStore((s) => s.undoLastOperation);
   const removePaths = useSelectionStore((s) => s.removePaths);
   const pushToast = useToastStore((s) => s.push);
   /// Fix-it (auto-fixable naming) dialog. `null` = closed; `{ scope: null }` =
@@ -487,13 +490,24 @@ export function IssueList({ result, stale, isAnalyzing, onAnalyze, onLocate }: I
   /// one-tap undo of the whole batch (only on full success — a partial failure
   /// keeps the dialog open with its per-file errors).
   const handleFixComplete = (fullySucceeded: boolean, count: number) => {
+    // Refresh BEFORE the full-success gate: commit_renames records an undo
+    // batch whenever *anything* renamed (`if !done.is_empty()`), so a partial
+    // failure — which shows no toast at all — leaves the Header button as the
+    // only route back to the files that did move. Same pairing the AssetList
+    // rename handlers use, and they don't gate on success either.
+    void refreshUndoState();
     if (!fullySucceeded) return;
     pushToast({
       kind: "success",
       message: t("namingFix.fixedToast", { count }),
       actionLabel: t("common.undo"),
       onAction: () => {
-        if (activeProjectId) invoke("undo_last_operation", { projectId: activeProjectId });
+        // Via the store, not a bare invoke: it refreshes canUndo/history and
+        // swallows errors, and the tag bindings carried back by the undo need
+        // a re-sync (mirrors Header.handleUndo).
+        void undoLastOperation().then((r) => {
+          if (r?.success) void useTagsStore.getState().loadTags();
+        });
       },
     });
   };

@@ -10,6 +10,7 @@ import { useColumnStore } from "../stores/columnStore";
 import { useUiStore, isBlockingOverlayOpen } from "../stores/uiStore";
 import { useSelectionStore } from "../stores/selectionStore";
 import { useSettingsStore } from "../stores/settingsStore";
+import { useToastStore } from "../stores/toastStore";
 import { BatchRenameDialog } from "./BatchRenameDialog";
 import { RenameDialog } from "./RenameDialog";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
@@ -50,6 +51,7 @@ const ART_TYPE_GROUP: AssetType[] = FILTER_TYPE_ORDER.filter(
 
 export function AssetList() {
   const { t } = useTranslation();
+  const pushToast = useToastStore((s) => s.push);
   const {
     scanResult,
     selectedAsset,
@@ -348,12 +350,20 @@ export function AssetList() {
         paths: targets,
       });
       if (result.errors.length > 0) {
-        console.warn("Duplicate had errors:", result.errors);
+        pushToast({
+          kind: "error",
+          message: t("assetList.duplicateFailed", {
+            reason: result.errors[0].message,
+          }),
+        });
       }
     } catch (err) {
-      console.error("Failed to duplicate:", err);
+      pushToast({
+        kind: "error",
+        message: t("assetList.duplicateFailed", { reason: String(err) }),
+      });
     }
-  }, [targetPathsFromContext]);
+  }, [targetPathsFromContext, pushToast, t]);
 
   // Del key triggers delete for the current multi-selection when nothing
   // interactive has focus. We deliberately don't handle Del for the
@@ -728,6 +738,11 @@ export function AssetList() {
           // takes care of removing / inserting them in scanResult.assets.
           if (result.successes.length === 0) return;
           removePaths(result.successes.map((s) => s.original_path));
+          // A move records an undo batch on the backend (copy doesn't), and the
+          // Header button is the only way to reach it — this dialog shows no
+          // toast. Refresh unconditionally: the copy case is a cheap no-change
+          // refetch, same as loadTags below.
+          refreshUndoState();
           // Moved files carried their tag bindings on the backend — re-sync.
           // (Copy doesn't carry tags; loadTags is a harmless no-change refetch.)
           loadTags();

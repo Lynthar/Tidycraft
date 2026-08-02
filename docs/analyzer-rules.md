@@ -56,7 +56,7 @@ Out-of-box `Run Analysis` therefore flags only **real bugs** — illegal charact
 | Sub-rule | Default | TOML key | When to relax |
 |---|---|---|---|
 | Max name length | 512 chars (loose) | `max_length = 64` | Strict pipelines (UE, deep nesting) |
-| Forbidden characters | space, `! @ # $ % ^ & * ( ) + =` | `forbidden_chars` | Inheriting Unity Asset Store packages or third-party samples |
+| Forbidden characters | space, `! @ # $ % ^ & * ( ) + =`, and the Windows-illegal `< > : " \| ?` | `forbidden_chars` | Inheriting Unity Asset Store packages or third-party samples |
 | Forbid Chinese characters | false | `forbid_chinese = true` | Strict ASCII-only pipelines |
 | Required prefix per type | none | `texture_prefix = "T_"` / `model_prefix` / `audio_prefix` | Teams enforcing a naming convention |
 | Case style | any | `case_style` ∈ `"any" \| "PascalCase" \| "snake_case" \| "camelCase"` | Mixed-case codebases |
@@ -238,6 +238,10 @@ The issue is anchored on the **source** file (clicking the issue jumps to the so
 ## Ignore Patterns (`[ignore]`)
 
 The most powerful escape hatch. Glob patterns matched against asset paths **relative to the project root**; any matching asset is dropped before any rule runs (per-asset, duplicate, and missing-reference all respect it).
+
+`[ignore]` narrows **what gets reported**, not what the project is understood to contain. Missing-reference makes that distinction explicit: an ignored asset still counts as existing, so ignoring `Plugins/**` silences findings *in* `Plugins/` without making every prefab that references a plugin asset report a dangling GUID. Ignoring a referencing file still suppresses that file's own findings.
+
+The three other cross-asset rules (duplicate, PBR set, DCC source) work on the dropped set as described in their sections above — for them "drop the file" *is* the documented suppression mechanism (e.g. ignoring an archive folder of deliberate copies).
 
 ```toml
 [ignore]

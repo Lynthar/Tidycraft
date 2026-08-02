@@ -3,7 +3,7 @@
 <img src="docs/brand/hero.png" alt="Tidycraft — 游戏资源管理与分析工具" width="100%">
 
 [![Tauri](https://img.shields.io/badge/Tauri-2.0-blue?logo=tauri)](https://tauri.app/)
-[![Rust](https://img.shields.io/badge/Rust-1.75+-orange?logo=rust)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/Rust-1.88+-orange?logo=rust)](https://www.rust-lang.org/)
 [![React](https://img.shields.io/badge/React-18-61dafb?logo=react)](https://react.dev/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue)](LICENSE)
 [![CI](https://github.com/Lynthar/Tidycraft/actions/workflows/ci.yml/badge.svg)](https://github.com/Lynthar/Tidycraft/actions/workflows/ci.yml)
@@ -211,7 +211,7 @@
 
 - [Node.js](https://nodejs.org/) 18+（CI 用 20）
 - [pnpm](https://pnpm.io/) 8+（CI 用 9）
-- [Rust](https://rustup.rs/) 1.75+
+- [Rust](https://rustup.rs/) 1.88+
 
 ```bash
 # 克隆仓库

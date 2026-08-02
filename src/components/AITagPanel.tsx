@@ -6,6 +6,7 @@ import { useUiStore, type AiRulesDoc, type AiLearningResult } from "../stores/ui
 import { useProjectStore } from "../stores/projectStore";
 import { useTagsStore } from "../stores/tagsStore";
 import { useSelectionStore } from "../stores/selectionStore";
+import { useToastStore } from "../stores/toastStore";
 
 interface TagGroup {
   name: string;
@@ -26,6 +27,7 @@ const HINT_KEYS: Record<string, string> = {
 
 export function AITagPanel() {
   const { t } = useTranslation();
+  const pushToast = useToastStore((s) => s.push);
   const aiPanelOpen = useUiStore((s) => s.aiPanelOpen);
   const setAiPanelOpen = useUiStore((s) => s.setAiPanelOpen);
   const setLearnSetupOpen = useUiStore((s) => s.setLearnSetupOpen);
@@ -171,7 +173,10 @@ export function AITagPanel() {
       setGroups((prev) => (prev ? prev.filter((g) => g.name !== group.name) : prev));
       return true;
     } catch (err) {
-      console.error("Failed to apply tag group:", err);
+      pushToast({
+        kind: "error",
+        message: t("aiTagPanel.applyFailed", { reason: String(err) }),
+      });
       return false;
     } finally {
       setPending((prev) => {

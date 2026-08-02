@@ -173,13 +173,20 @@ impl Analyzer {
     /// the project. No-op for non-Unity projects. `package_index` clears
     /// references the local `Library/PackageCache` accounts for (empty
     /// index = resolve nothing).
+    ///
+    /// `scan_result` is the analysis scope (post-`[ignore]`); `full_scan` is the
+    /// unfiltered scan that decides which GUIDs exist. They are the same value
+    /// when no ignore patterns are configured — see the rule's own doc comment
+    /// for why they must be allowed to differ.
     pub fn find_missing_references(
         &self,
         scan_result: &ScanResult,
+        full_scan: &ScanResult,
         package_index: &crate::unity::PackageGuidIndex,
     ) -> AnalysisResult {
         rules::missing_reference::find_missing_references(
             &scan_result.assets,
+            &full_scan.assets,
             &scan_result.project_type,
             package_index,
         )

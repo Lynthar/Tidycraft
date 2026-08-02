@@ -1219,7 +1219,21 @@ fn build_dir_node(
     if let Ok(entries) = fs::read_dir(path) {
         for entry in entries.flatten() {
             let entry_path = entry.path();
-            if entry_path.is_dir() {
+            // `entry.file_type()` does NOT traverse the link, unlike
+            // `Path::is_dir()` — so a symlinked / junctioned directory reports
+            // `is_dir() == false` here and is skipped. That matters twice:
+            //
+            // 1. `ln -s .. loop` (or `mklink /J`, which needs no admin rights)
+            //    made this recursion unbounded. A stack overflow aborts the
+            //    process under every panic strategy, so it wasn't catchable.
+            // 2. The asset walker runs with `follow_links(false)`, so files
+            //    under a linked directory are never scanned. Recursing here
+            //    put directories in the tree that could never hold a listed
+            //    file — the tree and the list disagreed.
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_dir() {
                 let dir_name = entry_path.file_name().unwrap_or_default().to_string_lossy();
                 if dir_name.starts_with('.') {
                     continue;
@@ -1831,8 +1845,12 @@ pub fn scan_directory_incremental(
     let total_count = assets.len();
     let total_size = assets.iter().map(|a| a.size).sum();
 
-    // Save updated cache
-    let _ = cache.save();
+    // Save updated cache. Never fatal — a failed save just means the next scan
+    // is a full one — but logged, because the silent version left "every scan
+    // is slow" with no clue that the cache directory was unwritable.
+    if let Err(e) = cache.save() {
+        eprintln!("[scan] failed to save scan cache (next scan will be full): {}", e);
+    }
 
     if let Some(ref s) = state {
         *s.phase.write() = ScanPhase::Completed;
@@ -1870,6 +1888,53 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::tempdir;
+
+    /// A symlink loop used to make `build_directory_tree` recurse forever —
+    /// `Path::is_dir()` follows links, so `loop -> ..` is an infinite tree.
+    /// The overflow aborts the process, which no panic strategy can catch.
+    /// Creating the loop needs no elevated rights on any platform.
+    #[cfg(unix)]
+    #[test]
+    fn directory_tree_does_not_follow_symlinks_into_a_cycle() {
+        let dir = tempdir().unwrap();
+        let sub = dir.path().join("assets");
+        fs::create_dir(&sub).unwrap();
+        fs::write(sub.join("a.png"), b"x").unwrap();
+        // assets/loop -> assets  (a cycle one level down)
+        std::os::unix::fs::symlink(&sub, sub.join("loop")).unwrap();
+
+        // Terminates at all == the bug is gone.
+        let tree = build_directory_tree(dir.path(), &[], None);
+
+        let assets_node = tree
+            .children
+            .iter()
+            .find(|c| c.name == "assets")
+            .expect("assets directory should be in the tree");
+        assert!(
+            assets_node.children.is_empty(),
+            "a symlinked directory must not appear in the tree: {:?}",
+            assets_node.children.iter().map(|c| &c.name).collect::<Vec<_>>()
+        );
+    }
+
+    /// Real subdirectories must still be walked — the symlink guard must not
+    /// be a blanket "stop recursing".
+    #[test]
+    fn directory_tree_still_descends_real_subdirectories() {
+        let dir = tempdir().unwrap();
+        let nested = dir.path().join("models").join("props");
+        fs::create_dir_all(&nested).unwrap();
+
+        let tree = build_directory_tree(dir.path(), &[], None);
+        let models = tree
+            .children
+            .iter()
+            .find(|c| c.name == "models")
+            .expect("models should be present");
+        assert_eq!(models.children.len(), 1);
+        assert_eq!(models.children[0].name, "props");
+    }
 
     #[test]
     fn test_get_asset_type_textures() {

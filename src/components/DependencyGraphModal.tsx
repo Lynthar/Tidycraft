@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { ModalShell } from "./ModalShell";
 import { X } from "lucide-react";
-import { ReactFlow, Background, Controls, MarkerType, type Node, type Edge } from "@xyflow/react";
+import { ReactFlow, Background, Controls, MarkerType, Position, type Node, type Edge } from "@xyflow/react";
 import dagre from "@dagrejs/dagre";
 import "@xyflow/react/dist/style.css";
 import { useUiStore } from "../stores/uiStore";
@@ -190,6 +190,13 @@ export function DependencyGraphModal() {
           return {
             id: n.id,
             position: { x: 0, y: 0 },
+            // Match dagre's `rankdir: "LR"`. React Flow defaults to
+            // Bottom→Top handles, so on a 180×40 node the edges left and
+            // entered the middle of the *long* sides while the layout ran
+            // horizontally — every edge bent into an S. (Standard config from
+            // React Flow's own dagre example.)
+            sourcePosition: Position.Right,
+            targetPosition: Position.Left,
             data: { label, path: n.path, kind: n.kind },
             style: {
               width: NODE_W,
@@ -206,6 +213,8 @@ export function DependencyGraphModal() {
         return {
           id: n.id,
           position: { x: 0, y: 0 },
+          sourcePosition: Position.Right, // see the branch above
+          targetPosition: Position.Left,
           data: { label: n.name, path: n.path, kind: n.kind },
           style: {
             width: NODE_W,

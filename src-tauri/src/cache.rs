@@ -93,7 +93,11 @@ impl ScanCache {
         let content = serde_json::to_string(self)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-        fs::write(&cache_path, content)?;
+        // Atomic (temp + rename), matching tags.rs / undo.rs. `load()` already
+        // self-heals from a torn file (version + parse validation → None → full
+        // rescan), so this is about not paying that rescan, not about
+        // correctness.
+        crate::fs_atomic::write_atomic(&cache_path, content.as_bytes())?;
         Ok(())
     }
 

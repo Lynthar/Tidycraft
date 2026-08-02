@@ -38,10 +38,11 @@ goal = ""
 # produces almost no false positives.
 [naming]
 enabled = true
-# Forbidden characters in filenames. Default catches shell-unsafe punctuation;
-# add `<`, `>`, `:`, `"`, `|`, `?`, `*`, `/`, `\` if you also want every
-# Windows-illegal character flagged.
-# forbidden_chars = [' ', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '+', '=']
+# Forbidden characters in filenames. Default covers shell-unsafe punctuation
+# plus every character Windows rejects outright (`< > : " | ? *`) — a file
+# named with one of those cannot be checked out on Windows at all. (`/` and
+# `\` can't occur inside a single filename, so they aren't listed.)
+# forbidden_chars = [' ', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '+', '=', '<', '>', ':', '"', '|', '?']
 # Set true to forbid CJK characters in filenames. Default false (many teams
 # legitimately ship localized content).
 forbid_chinese = false

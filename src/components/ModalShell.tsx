@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { registerModalShell } from "../stores/uiStore";
 
 /// Shared behavior wrapper for every blocking modal: renders the backdrop
 /// layer and adds the things each modal previously lacked —
@@ -62,6 +63,10 @@ export function ModalShell({
   useEffect(() => {
     const token = Symbol("modal");
     modalStack.push(token);
+    // Tell the global shortcut layer that a blocking dialog is up. Dialogs
+    // held in component-local state have no uiStore flag of their own; this
+    // is what keeps Ctrl+1/2/3, Ctrl+R and Ctrl+K from firing behind them.
+    const releaseShellCount = registerModalShell();
     const container = containerRef.current;
     const opener = document.activeElement as HTMLElement | null;
 
@@ -122,6 +127,7 @@ export function ModalShell({
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener("keydown", onKeyDown, true);
+      releaseShellCount();
       const i = modalStack.indexOf(token);
       if (i >= 0) modalStack.splice(i, 1);
       // Hand focus back to whatever opened the dialog, if it still exists.

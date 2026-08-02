@@ -2,6 +2,8 @@ import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import type { Tag, AssetTagsMap } from "../types/asset";
 import { useProjectStore, registerTagFilterBridge } from "./projectStore";
+import { useToastStore } from "./toastStore";
+import i18n from "../i18n";
 
 interface TagsState {
   // State
@@ -37,6 +39,24 @@ interface TagsState {
 // mirrors that project's tags. Switching projects means re-loading.
 const activeProjectId = (): string | null =>
   useProjectStore.getState().activeProjectId;
+
+/// Run a tag mutation against the backend, reporting failure instead of
+/// throwing. Every write action's declared type is `Promise<void>` or
+/// `Promise<Tag | null>`, but a failed `invoke` used to reject straight through
+/// them — and every call site does a bare `await`, so a failed delete became an
+/// unhandled rejection, no toast, and an edit form stuck in its pending state.
+/// `null` means "it didn't happen"; callers must not patch the mirror.
+async function tagWrite<T>(op: () => Promise<T>): Promise<T | null> {
+  try {
+    return await op();
+  } catch (err) {
+    useToastStore.getState().push({
+      kind: "error",
+      message: i18n.t("tags.writeFailed", { reason: String(err) }),
+    });
+    return null;
+  }
+}
 
 export const useTagsStore = create<TagsState>((set, get) => ({
   tags: [],
@@ -87,7 +107,10 @@ export const useTagsStore = create<TagsState>((set, get) => ({
   createTag: async (name: string, color: string) => {
     const projectId = activeProjectId();
     if (!projectId) return null;
-    const tag = await invoke<Tag>("create_tag", { projectId, name, color });
+    const tag = await tagWrite(() =>
+      invoke<Tag>("create_tag", { projectId, name, color })
+    );
+    if (!tag) return null;
     // The backend write above targeted the snapshot projectId and stays
     // valid; the in-memory mirror, however, belongs to whatever project is
     // active NOW. If the user switched projects mid-flight, skip the mirror
@@ -121,7 +144,7 @@ export const useTagsStore = create<TagsState>((set, get) => ({
     if (description !== undefined) {
       payload.description = description ?? ""; // null → "" so the clear lands
     }
-    await invoke<Tag>("update_tag", payload);
+    if ((await tagWrite(() => invoke<Tag>("update_tag", payload))) === null) return;
     if (activeProjectId() !== projectId) return; // mid-flight project switch — see createTag
     set((state) => ({
       tags: state.tags.map((t) =>
@@ -143,7 +166,7 @@ export const useTagsStore = create<TagsState>((set, get) => ({
   deleteTag: async (tagId: string) => {
     const projectId = activeProjectId();
     if (!projectId) return;
-    await invoke("delete_tag", { projectId, tagId });
+    if ((await tagWrite(() => invoke("delete_tag", { projectId, tagId }))) === null) return;
     if (activeProjectId() !== projectId) return; // mid-flight project switch — see createTag
     set((state) => {
       // Also prune the id from the active filters — a deleted tag left in an
@@ -168,7 +191,12 @@ export const useTagsStore = create<TagsState>((set, get) => ({
   addTagToAsset: async (assetPath: string, tagId: string) => {
     const projectId = activeProjectId();
     if (!projectId) return;
-    await invoke("add_tag_to_asset", { projectId, assetPath, tagId });
+    if (
+      (await tagWrite(() =>
+        invoke("add_tag_to_asset", { projectId, assetPath, tagId })
+      )) === null
+    )
+      return;
     if (activeProjectId() !== projectId) return; // mid-flight project switch — see createTag
     const { tags, assetTags } = get();
     const tag = tags.find((t) => t.id === tagId);
@@ -188,7 +216,12 @@ export const useTagsStore = create<TagsState>((set, get) => ({
   removeTagFromAsset: async (assetPath: string, tagId: string) => {
     const projectId = activeProjectId();
     if (!projectId) return;
-    await invoke("remove_tag_from_asset", { projectId, assetPath, tagId });
+    if (
+      (await tagWrite(() =>
+        invoke("remove_tag_from_asset", { projectId, assetPath, tagId })
+      )) === null
+    )
+      return;
     if (activeProjectId() !== projectId) return; // mid-flight project switch — see createTag
     const { assetTags } = get();
     set({
@@ -202,7 +235,12 @@ export const useTagsStore = create<TagsState>((set, get) => ({
   addTagToAssets: async (assetPaths: string[], tagId: string) => {
     const projectId = activeProjectId();
     if (!projectId) return;
-    await invoke("add_tag_to_assets", { projectId, assetPaths, tagId });
+    if (
+      (await tagWrite(() =>
+        invoke("add_tag_to_assets", { projectId, assetPaths, tagId })
+      )) === null
+    )
+      return;
     if (activeProjectId() !== projectId) return; // mid-flight project switch — see createTag
     const { tags, assetTags } = get();
     const tag = tags.find((t) => t.id === tagId);

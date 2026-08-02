@@ -7,6 +7,7 @@ import { ModalShell } from "./ModalShell";
 import { useSettingsStore, type AiProviderId } from "../stores/settingsStore";
 import { useThemeStore, type ThemePreference } from "../stores/themeStore";
 import { useProjectStore } from "../stores/projectStore";
+import { useToastStore } from "../stores/toastStore";
 import { formatFileSize } from "../lib/utils";
 
 // Curated model dropdown lists. Keep first entry as the recommended
@@ -630,6 +631,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const undoHistory = useProjectStore((s) => s.undoHistory);
   const refreshUndoState = useProjectStore((s) => s.refreshUndoState);
   const clearUndoHistory = useProjectStore((s) => s.clearUndoHistory);
+  const pushToast = useToastStore((s) => s.push);
 
   const [thumbCacheBytes, setThumbCacheBytes] = useState<number | null>(null);
   const [llmCacheBytes, setLlmCacheBytes] = useState<number | null>(null);
@@ -677,7 +679,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       await invoke<number>("clear_thumbnail_cache");
       setThumbCacheBytes(0);
     } catch (err) {
-      console.error("Failed to clear thumbnail cache:", err);
+      pushToast({ kind: "error", message: t("settings.clearFailed", { reason: String(err) }) });
     } finally {
       setClearingCache(false);
     }
@@ -689,7 +691,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       await invoke<number>("llm_clear_cache");
       setLlmCacheBytes(0);
     } catch (err) {
-      console.error("Failed to clear LLM cache:", err);
+      pushToast({ kind: "error", message: t("settings.clearFailed", { reason: String(err) }) });
     } finally {
       setClearingLlmCache(false);
     }
@@ -701,7 +703,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     try {
       await clearUndoHistory();
     } catch (err) {
-      console.error("Failed to clear undo history:", err);
+      pushToast({ kind: "error", message: t("settings.clearFailed", { reason: String(err) }) });
     } finally {
       setClearingUndo(false);
     }

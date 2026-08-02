@@ -171,13 +171,42 @@ fn apply_changes(
     candidates: &[PathBuf],
     ignore_matcher: Option<&scanner::IgnoreMatcher>,
 ) -> Result<FsChangeEvent, String> {
+    // Pass 1 — outside the lock. Parsing a candidate decodes image headers,
+    // model geometry and audio streams; under a `git checkout` or a bulk export
+    // a 500ms batch can carry hundreds of them. Doing that inside `with_mut`
+    // meant the watcher owned the project lock for the whole burst, every
+    // 500ms, blocking every command for that project. The parse depends on
+    // nothing but the path and the project type, so only the type needs the
+    // lock — briefly.
+    let project_type = project::with_ref(project_id, |state| {
+        Ok(state
+            .cached_scan
+            .as_ref()
+            .ok_or_else(|| "No cached scan to patch".to_string())?
+            .project_type
+            .clone())
+    })?;
+
+    // `(path, parsed-asset-or-None, vanished)` — the syscalls (`is_file`,
+    // `exists`) belong out here with the parse for the same reason.
+    let probed: Vec<(PathBuf, Option<AssetInfo>, bool)> = candidates
+        .iter()
+        .map(|path| {
+            if path.is_file() {
+                (path.clone(), scanner::parse_asset_file(path, &project_type), false)
+            } else {
+                (path.clone(), None, !path.exists())
+            }
+        })
+        .collect();
+
+    // Pass 2 — under the lock: pure in-memory patching plus the tree rebuild,
+    // which genuinely needs the merged asset list.
     let event = project::with_mut(project_id, |state| {
         let scan_result = state
             .cached_scan
             .as_mut()
             .ok_or_else(|| "No cached scan to patch".to_string())?;
-
-        let project_type = scan_result.project_type.clone();
 
         let mut path_to_idx: HashMap<String, usize> = scan_result
             .assets
@@ -191,22 +220,21 @@ fn apply_changes(
         // the same batch can't schedule the same asset for removal twice.
         let mut removed_set: HashSet<String> = HashSet::new();
 
-        for path in candidates {
+        for (path, parsed, vanished) in &probed {
             // Must match the normalization scanner.rs uses for AssetInfo.path;
             // otherwise HashMap lookups miss on Windows (backslash vs forward).
             let path_str = scanner::path_to_string(path);
 
-            if path.is_file() {
-                if let Some(asset) = scanner::parse_asset_file(path, &project_type) {
-                    if let Some(&idx) = path_to_idx.get(&path_str) {
-                        scan_result.assets[idx] = asset.clone();
-                    } else {
-                        scan_result.assets.push(asset.clone());
-                        path_to_idx.insert(path_str.clone(), scan_result.assets.len() - 1);
-                    }
-                    updated.push(asset);
+            if let Some(asset) = parsed {
+                let asset = asset.clone();
+                if let Some(&idx) = path_to_idx.get(&path_str) {
+                    scan_result.assets[idx] = asset.clone();
+                } else {
+                    scan_result.assets.push(asset.clone());
+                    path_to_idx.insert(path_str.clone(), scan_result.assets.len() - 1);
                 }
-            } else if !path.exists() {
+                updated.push(asset);
+            } else if *vanished {
                 // The path is gone. Remove every tracked asset at or under it: an
                 // exact-match file, or — when macOS coalesces a directory removal
                 // into a single event on the (extensionless) directory path — all
@@ -220,7 +248,8 @@ fn apply_changes(
                     }
                 }
             }
-            // else: path exists but is a directory (mkdir event) — nothing to track.
+            // else: path exists but is a directory (mkdir event), or it's a file
+            // that didn't parse — nothing to track either way.
         }
 
         if updated.is_empty() && removed_set.is_empty() {

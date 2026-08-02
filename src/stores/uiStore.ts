@@ -206,9 +206,35 @@ export const useUiStore = create<UiState>((set, get) => ({
 /// panel with no backdrop, so the asset list behind it stays interactive.
 /// AssetList's own file-op dialogs (rename / batch / delete / move) are
 /// component-local state and are checked by AssetList separately.
+/// Live count of mounted `ModalShell`s.
+///
+/// The uiStore flags below only cover overlays that HAVE a flag. The file-op
+/// dialogs — rename, batch rename, delete, move/copy, Fix-it — are `useState`
+/// in their parent component, so global shortcuts couldn't see them: Ctrl+2
+/// unmounted the host view and took the open dialog with it, Ctrl+K stacked
+/// the palette on top, Ctrl+R rescanned underneath. ModalShell is the one
+/// choke point every blocking dialog already passes through, so it reports
+/// here instead of each dialog inventing a flag.
+///
+/// A plain counter, not zustand state: it is read from imperative key
+/// handlers and never rendered, so it must not trigger re-renders.
+let openModalShells = 0;
+
+/// Called by `ModalShell` on mount; the returned function releases on unmount.
+export function registerModalShell(): () => void {
+  openModalShells += 1;
+  let released = false;
+  return () => {
+    if (released) return; // StrictMode double-invokes cleanup in dev
+    released = true;
+    openModalShells -= 1;
+  };
+}
+
 export function isBlockingOverlayOpen(): boolean {
   const s = useUiStore.getState();
   return (
+    openModalShells > 0 ||
     s.cmdkOpen ||
     s.settingsOpen ||
     s.tagManagerOpen ||

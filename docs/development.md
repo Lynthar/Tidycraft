@@ -36,7 +36,7 @@ Blender saves).
 | Layer | Choice | Why |
 |---|---|---|
 | Shell | Tauri 2 | Small native binary, no browser runtime |
-| Backend | Rust (edition 2021, MSRV 1.75) | Fast parallel scan, binary parsers |
+| Backend | Rust (edition 2021, MSRV 1.88) | Fast parallel scan, binary parsers |
 | Frontend | React 18 + TypeScript + Vite 6 | Typed, fast dev, familiar |
 | State | Zustand | Lighter than Redux, less ceremony than MobX |
 | Styling | Tailwind CSS | Co-located styles, no naming bikeshed |
@@ -62,7 +62,7 @@ mutexes), `tauri-plugin-dialog` / `tauri-plugin-fs` /
 
 Prereqs:
 
-- Rust 1.75+
+- Rust 1.88+
 - Node 18+
 - pnpm 8+
 - **Linux only:** `webkit2gtk-4.1-dev`, `libssl-dev`, GTK3 dev headers

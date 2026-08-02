@@ -104,11 +104,29 @@ fn registry() -> &'static Mutex<ProjectMap> {
 /// updated (handles the case where the frontend re-opens the same project at a
 /// different path).
 pub fn register(project_id: String, root_path: String) -> Arc<Mutex<ProjectState>> {
-    let mut map = registry().lock();
-    let entry = map
-        .entry(project_id.clone())
-        .or_insert_with(|| Arc::new(Mutex::new(ProjectState::new(project_id, root_path.clone()))))
-        .clone();
+    // The registry lock is global — every project-scoped command passes through
+    // it — so nothing slow may happen while it is held. Two things here are
+    // slow: `ProjectState::new` reads the persisted undo history off disk, and
+    // `entry.lock()` waits on the *project* lock, which a scan, a watcher batch
+    // or a dependency-graph rebuild can hold for seconds. Doing either under the
+    // registry lock made one busy project stall commands for all of them,
+    // cancel_scan included.
+    let existing = registry().lock().get(&project_id).cloned();
+    let entry = match existing {
+        Some(e) => e,
+        None => {
+            // Built outside the lock; if another thread registered the same id
+            // meanwhile, `or_insert` keeps theirs and this one is dropped.
+            let fresh = Arc::new(Mutex::new(ProjectState::new(
+                project_id.clone(),
+                root_path.clone(),
+            )));
+            let mut map = registry().lock();
+            map.entry(project_id).or_insert(fresh).clone()
+        }
+    };
+
+    // Registry lock is released by here — only the project lock is taken.
     {
         let mut state = entry.lock();
         if state.root_path != root_path {

@@ -89,9 +89,9 @@ pub fn write_back(project_root: &Path, theme: &str, goal: &str) -> Result<(), St
     // get the full annotated rule scaffold rather than a bare
     // [project] table.
     if !toml_path.exists() {
-        std::fs::write(
+        crate::fs_atomic::write_atomic(
             &toml_path,
-            crate::analyzer::rules::config_template::DEFAULT_CONFIG_TEMPLATE,
+            crate::analyzer::rules::config_template::DEFAULT_CONFIG_TEMPLATE.as_bytes(),
         )
         .map_err(|e| format!("Failed to create tidycraft.toml: {e}"))?;
     }
@@ -117,7 +117,11 @@ pub fn write_back(project_root: &Path, theme: &str, goal: &str) -> Result<(), St
     project_table["theme"] = toml_edit::value(theme);
     project_table["goal"] = toml_edit::value(goal);
 
-    std::fs::write(&toml_path, doc.to_string())
+    // Atomic (temp + rename): this is the user's hand-edited rule config, the
+    // highest-value file we ever overwrite. A torn write here loses their
+    // analyzer settings, not something we can regenerate. `tidycraft.ai.toml`
+    // has always been written this way; this one was the gap.
+    crate::fs_atomic::write_atomic(&toml_path, doc.to_string().as_bytes())
         .map_err(|e| format!("Failed to write tidycraft.toml: {e}"))?;
     Ok(())
 }

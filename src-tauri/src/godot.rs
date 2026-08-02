@@ -283,7 +283,13 @@ fn parse_godot_array(s: &str) -> Vec<String> {
 /// 去除字符串两端的引号
 fn unquote(s: &str) -> String {
     let s = s.trim();
-    if (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) {
+    // The length guard is load-bearing, not defensive noise: on a lone `"` the
+    // starts_with and ends_with checks both match the *same* character, and the
+    // slice below would be `1..0`. A half-typed `config/name="` is enough to hit
+    // it, and release builds are `panic = "abort"`.
+    if s.len() >= 2
+        && ((s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')))
+    {
         s[1..s.len() - 1].to_string()
     } else {
         s.to_string()
@@ -665,6 +671,30 @@ config/name="Minimal"
         assert_eq!(unquote("'world'"), "world");
         assert_eq!(unquote("no quotes"), "no quotes");
         assert_eq!(unquote("  \"spaced\"  "), "spaced");
+    }
+
+    /// A half-typed `config/name="` yields a value of one lone quote, where
+    /// starts_with and ends_with match the *same* character. Slicing `1..0`
+    /// there used to panic — and release builds are `panic = "abort"`, so a
+    /// malformed project.godot took the whole app down instead of failing the
+    /// one command.
+    #[test]
+    fn unquote_tolerates_a_lone_quote_character() {
+        assert_eq!(unquote("\""), "\"");
+        assert_eq!(unquote("'"), "'");
+        assert_eq!(unquote("  \"  "), "\"");
+    }
+
+    /// End-to-end guard for the same defect: the truncated line must parse,
+    /// not abort the process.
+    #[test]
+    fn parse_project_godot_survives_a_truncated_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let project_path = dir.path().join("project.godot");
+        std::fs::write(&project_path, "[application]\nconfig/name=\"\n").unwrap();
+
+        let info = parse_project_godot(&project_path).expect("truncated value should still parse");
+        assert_eq!(info.project_name, "\"");
     }
 
     #[test]

@@ -72,7 +72,8 @@
     "artAssetsHint": "纹理、模型、音频、视频、动画、材质、预制体与场景——隐藏代码与数据文件。",
     "typePillHint": "点击筛选 · {{mod}}+点击多选",
     "dccSourceFile": "源文件",
-    "vertsInline": "{{n}} 顶点"
+    "vertsInline": "{{n}} 顶点",
+    "duplicateFailed": "创建副本失败：{{reason}}"
   },
   "exportToast": {
     "saved": "已导出 {{name}}",
@@ -326,7 +327,8 @@
     "undoEntries_other": "已记录 {{count}} 次操作",
     "undoNoProject": "暂无活动项目",
     "clear": "清除",
-    "clearing": "清除中…"
+    "clearing": "清除中…",
+    "clearFailed": "清理失败：{{reason}}"
   },
   "stats": {
     "noData": "暂无数据",
@@ -353,7 +355,8 @@
     "engineFeatures": "特性",
     "engineModules": "模块",
     "enginePlugins": "已启用插件",
-    "enginePlatforms": "目标平台"
+    "enginePlatforms": "目标平台",
+    "unusedAssetsBinaryWarning": "有 {{count}} 个场景/预制体文件无法按文本读取——该工程似乎启用了 Force Binary 资源序列化。Tidycraft 看不到它们的引用，因此下方列出的资源可能其实正在使用中。请勿据此删除；可在 Edit → Project Settings → Editor → Asset Serialization 切换为 Force Text 后重新扫描。"
   },
   "theme": {
     "switchToLight": "切换到浅色模式",
@@ -398,7 +401,8 @@
     "multiSelectHint": "按住 Cmd/Ctrl 多选",
     "manageTitle": "管理标签",
     "confirmDelete": "确定要删除此标签吗？",
-    "descriptionPlaceholder": "描述（可选，供 AI 标签使用）"
+    "descriptionPlaceholder": "描述（可选，供 AI 标签使用）",
+    "writeFailed": "标签操作失败：{{reason}}"
   },
   "contextMenu": {
     "openInEditor": "用 {{name}} 打开",
@@ -575,7 +579,8 @@
     "ctaTitle": "升级到 AI 学习模式",
     "ctaBody": "抽样项目文件名和 tag 体系,推断命名与目录约定,生成本地启发式规则取代下方的通用匹配。一次性约 $0.05,之后免费。",
     "ctaButton": "运行 AI 学习",
-    "heuristicDivider": "启发式回退（文件名 / 尺寸 / 路径）"
+    "heuristicDivider": "启发式回退（文件名 / 尺寸 / 路径）",
+    "applyFailed": "应用标签失败：{{reason}}"
   },
   "learnSetup": {
     "title": "AI 学习设置",

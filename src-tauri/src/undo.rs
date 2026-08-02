@@ -196,11 +196,18 @@ impl UndoManager {
         let description = batch.description.clone();
 
         // 执行撤销
+        let had_operations = !batch.operations.is_empty();
         let result = execute_batch_undo(&batch.operations);
 
-        // 标记为已撤销
-        self.history[index].undone = true;
-        self.save_to_disk();
+        // 标记为已撤销。全败(一个都没回滚)时**不**标记:失败几乎总是暂时且
+        // 可修复的——文件被 Photoshop/Unity 占用、盘符临时不可用——烧掉条目
+        // 就等于在用户关掉那个程序之后再也回不去了。部分成功仍然标记:重跑
+        // 会对已经回滚过的文件再次尝试并报错,不是可用的重试语义。
+        // `had_operations` 守住空批次,否则它会永远卡在栈顶。
+        if result.reverted_count > 0 || !had_operations {
+            self.history[index].undone = true;
+            self.save_to_disk();
+        }
 
         Some(UndoResult {
             success: result.failed_count == 0,
@@ -442,6 +449,78 @@ mod tests {
         let path = dir.join(name);
         fs::write(&path, "test content").unwrap();
         path.to_string_lossy().to_string()
+    }
+
+    /// A batch where nothing could be reverted must stay retryable. The usual
+    /// cause is transient and fixable — the files are open in Photoshop/Unity,
+    /// or a drive is momentarily unavailable — so burning the entry destroys
+    /// the user's only route back once they close the other app.
+    #[test]
+    fn a_totally_failed_undo_leaves_the_batch_retryable() {
+        let mut manager = UndoManager::new(10);
+        // new_path doesn't exist, so every revert fails.
+        manager.record_batch(
+            "Rename 2 files".to_string(),
+            vec![
+                FileOperation {
+                    operation_type: OperationType::Rename,
+                    original_path: "/nowhere/a.png".to_string(),
+                    new_path: Some("/nowhere/a_new.png".to_string()),
+                    timestamp: current_timestamp(),
+                },
+                FileOperation {
+                    operation_type: OperationType::Rename,
+                    original_path: "/nowhere/b.png".to_string(),
+                    new_path: Some("/nowhere/b_new.png".to_string()),
+                    timestamp: current_timestamp(),
+                },
+            ],
+        );
+
+        let result = manager.undo_last().expect("a batch was recorded");
+        assert_eq!(result.reverted_count, 0);
+        assert_eq!(result.failed_count, 2);
+        assert!(!result.success);
+
+        assert!(
+            manager.can_undo(),
+            "a batch that reverted nothing must remain undoable"
+        );
+        assert!(manager.undo_last().is_some(), "retry must find it again");
+    }
+
+    /// Partial success still consumes the entry: re-running would re-attempt
+    /// the files that already moved back and error on them. Only a *total*
+    /// failure is retryable.
+    #[test]
+    fn a_partial_undo_still_consumes_the_batch() {
+        let dir = tempfile::tempdir().unwrap();
+        let moved = create_test_file(dir.path(), "renamed.png");
+        let original = dir.path().join("original.png").to_string_lossy().to_string();
+
+        let mut manager = UndoManager::new(10);
+        manager.record_batch(
+            "Mixed".to_string(),
+            vec![
+                FileOperation {
+                    operation_type: OperationType::Rename,
+                    original_path: original,
+                    new_path: Some(moved),
+                    timestamp: current_timestamp(),
+                },
+                FileOperation {
+                    operation_type: OperationType::Rename,
+                    original_path: "/nowhere/b.png".to_string(),
+                    new_path: Some("/nowhere/b_new.png".to_string()),
+                    timestamp: current_timestamp(),
+                },
+            ],
+        );
+
+        let result = manager.undo_last().expect("a batch was recorded");
+        assert_eq!(result.reverted_count, 1);
+        assert_eq!(result.failed_count, 1);
+        assert!(!manager.can_undo());
     }
 
     #[test]

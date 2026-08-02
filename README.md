@@ -3,7 +3,7 @@
 <img src="docs/brand/hero.png" alt="Tidycraft — Game Asset Management & Analysis Tool" width="100%">
 
 [![Tauri](https://img.shields.io/badge/Tauri-2.0-blue?logo=tauri)](https://tauri.app/)
-[![Rust](https://img.shields.io/badge/Rust-1.75+-orange?logo=rust)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/Rust-1.88+-orange?logo=rust)](https://www.rust-lang.org/)
 [![React](https://img.shields.io/badge/React-18-61dafb?logo=react)](https://react.dev/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue)](LICENSE)
 [![CI](https://github.com/Lynthar/Tidycraft/actions/workflows/ci.yml/badge.svg)](https://github.com/Lynthar/Tidycraft/actions/workflows/ci.yml)
@@ -211,7 +211,7 @@ Prerequisites:
 
 - [Node.js](https://nodejs.org/) 18+ (CI uses 20)
 - [pnpm](https://pnpm.io/) 8+ (CI uses 9)
-- [Rust](https://rustup.rs/) 1.75+
+- [Rust](https://rustup.rs/) 1.88+
 
 ```bash
 # Clone repository
@@ -253,7 +253,7 @@ A working starter config is at [`examples/tidycraft.example.toml`](examples/tidy
 ```toml
 [naming]
 enabled = true
-forbidden_chars = [' ', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '+', '=']
+forbidden_chars = [' ', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '+', '=', '<', '>', ':', '"', '|', '?']
 forbid_chinese = false
 max_length = 512                       # loose; tighten to 64-96 for strict pipelines
 # texture_prefix = "T_"                # uncomment to require a per-type prefix

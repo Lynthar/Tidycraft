@@ -16,8 +16,20 @@ use crate::unity;
 /// Extensions that Unity stores as YAML with GUID references.
 const REFERENCEABLE_EXTS: &[&str] = &["prefab", "unity", "mat", "controller", "asset"];
 
+/// `sources` are the files walked for references — the analysis scope, i.e.
+/// post-`[ignore]`. `known` is what establishes which GUIDs exist and must be
+/// the FULL scan, ignore patterns included.
+///
+/// The two differ on purpose. `[ignore]` means "don't report problems in these
+/// files", not "pretend these files were deleted" — and the sample config's own
+/// example (`"Plugins/**"`, `"ThirdParty/**"`) is exactly the case where the
+/// difference bites: dropping vendored assets from the existence universe made
+/// every prefab/scene/material that references them report a dangling GUID, in
+/// bulk. Ignoring a *referencing* file still suppresses its findings, because
+/// it never appears in `sources` — the suppression path the docs describe.
 pub fn find_missing_references(
-    assets: &[AssetInfo],
+    sources: &[AssetInfo],
+    known: &[AssetInfo],
     project_type: &Option<ProjectType>,
     package_index: &unity::PackageGuidIndex,
 ) -> AnalysisResult {
@@ -31,7 +43,7 @@ pub fn find_missing_references(
     }
 
     // Build the set of GUIDs that DO exist in the project.
-    let known_guids: HashSet<String> = assets
+    let known_guids: HashSet<String> = known
         .iter()
         .filter_map(|a| a.unity_guid.clone())
         .collect();
@@ -40,7 +52,7 @@ pub fn find_missing_references(
         return result; // No .meta files scanned — Unity project state is empty or unusual.
     }
 
-    for asset in assets {
+    for asset in sources {
         let ext = asset.extension.to_lowercase();
         if !REFERENCEABLE_EXTS.iter().any(|&e| e == ext) {
             continue;
@@ -147,6 +159,65 @@ mod tests {
         }
     }
 
+    /// `[ignore]` narrows what we report on, not what exists. Ignoring the
+    /// sample config's own `"Plugins/**"` used to make every prefab that
+    /// referenced a plugin asset report a dangling GUID — in bulk, on a
+    /// perfectly healthy project.
+    #[test]
+    fn ignored_assets_still_count_as_existing() {
+        let dir = tempdir().unwrap();
+        let vendored =
+            texture_with_guid(dir.path(), "plugin.png", "33333333333333333333333333333333");
+        let prefab = prefab_referencing(
+            dir.path(),
+            "user.prefab",
+            &["33333333333333333333333333333333"],
+        );
+
+        // Post-[ignore] scope dropped the vendored texture; the full scan has both.
+        let sources = vec![prefab.clone()];
+        let known = vec![vendored, prefab];
+
+        let r = find_missing_references(
+            &sources,
+            &known,
+            &Some(ProjectType::Unity),
+            &unity::PackageGuidIndex::default(),
+        );
+        assert_eq!(r.issue_count, 0);
+    }
+
+    /// The other half of the contract, which the docs advertise as the way to
+    /// silence a known-broken file: ignoring the *referencing* file still
+    /// suppresses its findings, because it never enters `sources`.
+    #[test]
+    fn ignoring_the_referencing_file_still_suppresses_it() {
+        let dir = tempdir().unwrap();
+        let broken = prefab_referencing(
+            dir.path(),
+            "legacy.prefab",
+            &["44444444444444444444444444444444"], // genuinely absent
+        );
+        let known = vec![broken];
+
+        let r = find_missing_references(
+            &[], // the prefab itself was ignored
+            &known,
+            &Some(ProjectType::Unity),
+            &unity::PackageGuidIndex::default(),
+        );
+        assert_eq!(r.issue_count, 0);
+
+        // Sanity: without the ignore it is still reported.
+        let r = find_missing_references(
+            &known,
+            &known,
+            &Some(ProjectType::Unity),
+            &unity::PackageGuidIndex::default(),
+        );
+        assert_eq!(r.issue_count, 1);
+    }
+
     #[test]
     fn reports_only_missing_guids() {
         let dir = tempdir().unwrap();
@@ -161,7 +232,7 @@ mod tests {
                 ],
             ),
         ];
-        let r = find_missing_references(&assets, &Some(ProjectType::Unity), &unity::PackageGuidIndex::default());
+        let r = find_missing_references(&assets, &assets, &Some(ProjectType::Unity), &unity::PackageGuidIndex::default());
         assert_eq!(r.issue_count, 1);
         assert!(r.issues[0].message.contains("22222222"));
     }
@@ -178,7 +249,7 @@ mod tests {
                 "99999999999999999999999999999999",
             ],
         )];
-        let r = find_missing_references(&assets, &Some(ProjectType::Unity), &unity::PackageGuidIndex::default());
+        let r = find_missing_references(&assets, &assets, &Some(ProjectType::Unity), &unity::PackageGuidIndex::default());
         assert_eq!(r.issue_count, 1);
     }
 
@@ -190,7 +261,7 @@ mod tests {
             "x.prefab",
             &["99999999999999999999999999999999"],
         )];
-        let r = find_missing_references(&assets, &Some(ProjectType::Unreal), &unity::PackageGuidIndex::default());
+        let r = find_missing_references(&assets, &assets, &Some(ProjectType::Unreal), &unity::PackageGuidIndex::default());
         assert_eq!(r.issue_count, 0);
     }
 
@@ -205,7 +276,7 @@ mod tests {
                 &["00000000000000000000000000000000"],
             ),
         ];
-        let r = find_missing_references(&assets, &Some(ProjectType::Unity), &unity::PackageGuidIndex::default());
+        let r = find_missing_references(&assets, &assets, &Some(ProjectType::Unity), &unity::PackageGuidIndex::default());
         assert_eq!(r.issue_count, 0);
     }
 
@@ -238,14 +309,14 @@ mod tests {
                 ],
             ),
         ];
-        let r = find_missing_references(&assets, &Some(ProjectType::Unity), &index);
+        let r = find_missing_references(&assets, &assets, &Some(ProjectType::Unity), &index);
         assert_eq!(r.issue_count, 1);
         assert!(r.issues[0].message.contains("22222222"));
     }
 
     #[test]
     fn empty_project_reports_nothing() {
-        let r = find_missing_references(&[], &Some(ProjectType::Unity), &unity::PackageGuidIndex::default());
+        let r = find_missing_references(&[], &[], &Some(ProjectType::Unity), &unity::PackageGuidIndex::default());
         assert_eq!(r.issue_count, 0);
     }
 
@@ -267,7 +338,7 @@ mod tests {
                 ],
             ),
         ];
-        let r = find_missing_references(&assets, &Some(ProjectType::Unity), &unity::PackageGuidIndex::default());
+        let r = find_missing_references(&assets, &assets, &Some(ProjectType::Unity), &unity::PackageGuidIndex::default());
         assert_eq!(r.issue_count, 0);
     }
 
@@ -288,7 +359,7 @@ mod tests {
                 ],
             ),
         ];
-        let r = find_missing_references(&assets, &Some(ProjectType::Unity), &unity::PackageGuidIndex::default());
+        let r = find_missing_references(&assets, &assets, &Some(ProjectType::Unity), &unity::PackageGuidIndex::default());
         assert_eq!(r.issue_count, 3);
     }
 
@@ -306,7 +377,7 @@ mod tests {
                 &["22222222222222222222222222222222"],
             ),
         ];
-        let r = find_missing_references(&assets, &Some(ProjectType::Unity), &unity::PackageGuidIndex::default());
+        let r = find_missing_references(&assets, &assets, &Some(ProjectType::Unity), &unity::PackageGuidIndex::default());
         assert_eq!(r.issue_count, 1);
         assert!(matches!(r.issues[0].severity, Severity::Warning));
     }
