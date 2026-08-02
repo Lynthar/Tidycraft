@@ -3089,6 +3089,31 @@ fn get_all_asset_tags(project_id: String) -> Result<HashMap<String, Vec<tags::Ta
     })
 }
 
+/// Toggle the webview inspector. Debug builds open it automatically at
+/// startup (see the setup hook below), so this exists for the one case that
+/// hook doesn't cover: getting it back after closing it. The frontend
+/// suppresses the native context menu app-wide, which takes the "Inspect
+/// Element" entry with it, and neither WKWebView nor WebView2 gives us a
+/// cross-platform key for this — hence a command plus a frontend binding.
+///
+/// Compiles to a no-op in release: the `devtools` cargo feature is off, so
+/// these methods only exist under `debug_assertions` and there is no
+/// inspector to toggle. The command stays registered either way so the
+/// keybinding needs no build-mode branch of its own.
+#[tauri::command]
+fn toggle_devtools(window: tauri::WebviewWindow) {
+    #[cfg(debug_assertions)]
+    {
+        if window.is_devtools_open() {
+            window.close_devtools();
+        } else {
+            window.open_devtools();
+        }
+    }
+    #[cfg(not(debug_assertions))]
+    let _ = window;
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -3191,7 +3216,9 @@ pub fn run() {
             read_ai_rules,
             save_ai_rules,
             read_project_meta,
-            write_project_meta
+            write_project_meta,
+            // Developer tools
+            toggle_devtools
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

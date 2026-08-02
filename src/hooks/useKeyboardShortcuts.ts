@@ -1,4 +1,5 @@
 import { useEffect, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useProjectStore } from "../stores/projectStore";
 import { useUiStore, isBlockingOverlayOpen } from "../stores/uiStore";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -40,8 +41,25 @@ export function useKeyboardShortcuts({ onOpenFolder, onFocusSearch }: KeyboardSh
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
-      const { key, ctrlKey, metaKey, shiftKey } = event;
+      const { key, ctrlKey, metaKey, shiftKey, altKey } = event;
       const modKey = ctrlKey || metaKey;
+
+      // F12 / Cmd+Opt+I: toggle the webview inspector. Sits above every
+      // guard below — including the text-field one — because a debugging
+      // tool the app blocks while a modal or an input has focus is a
+      // debugging tool for exactly the moments you don't need it.
+      // Matched on `event.code`, not `key`: Option+I on macOS emits the
+      // dead-key "ˆ", so `key.toLowerCase() === "i"` never fires there.
+      // No dev-mode branch — the backend command is a no-op in release,
+      // which keeps this one binding honest across both builds (same
+      // reason `main.tsx` suppresses the native menu unconditionally).
+      if (key === "F12" || (modKey && altKey && event.code === "KeyI")) {
+        event.preventDefault();
+        invoke("toggle_devtools").catch((e) =>
+          console.error("toggle_devtools failed", e)
+        );
+        return;
+      }
 
       // Ctrl/Cmd + K: toggle the command palette. Handled before the
       // input-blur guard so it works from inside any text field too.
