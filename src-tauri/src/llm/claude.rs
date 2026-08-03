@@ -209,12 +209,12 @@ async fn call_anthropic(
         // surface raw provider errors to the user — map to our enum
         // categories so the UI can show a localized message.
         let body_preview = resp.text().await.unwrap_or_default();
-        return Err(match status.as_u16() {
-            401 | 403 => LLMError::NoApiKey("claude".into()),
-            429 => LLMError::RateLimit,
-            500..=599 => LLMError::Network(format!("Anthropic {status}: {body_preview}")),
-            _ => LLMError::Other(format!("Anthropic {status}: {body_preview}")),
-        });
+        return Err(super::map_cloud_http_status(
+            "claude",
+            "Anthropic",
+            status.as_u16(),
+            &body_preview,
+        ));
     }
 
     let parsed: AnthropicResponse = resp
@@ -319,12 +319,12 @@ async fn send_text_chat(
     let status = resp.status();
     if !status.is_success() {
         let body_preview = resp.text().await.unwrap_or_default();
-        return Err(match status.as_u16() {
-            401 | 403 => LLMError::NoApiKey("claude".into()),
-            429 => LLMError::RateLimit,
-            500..=599 => LLMError::Network(format!("Anthropic {status}: {body_preview}")),
-            _ => LLMError::Other(format!("Anthropic {status}: {body_preview}")),
-        });
+        return Err(super::map_cloud_http_status(
+            "claude",
+            "Anthropic",
+            status.as_u16(),
+            &body_preview,
+        ));
     }
     let parsed: AnthropicResponse = resp
         .json()

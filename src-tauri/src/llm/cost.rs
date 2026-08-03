@@ -9,8 +9,9 @@
 //!    at the 2576px high-resolution tier, which is no longer Opus-only)
 //! - OpenAI: https://developers.openai.com/api/docs/pricing
 //! - OpenAI vision: 32×32 patch tokenization for 5.4-mini/nano (cap 1536
-//!   patches, ×1.62 mini / ×2.46 nano multipliers), tile-based for 4o
-//!   family (low-detail = 85 flat, high = 85 + 170×tiles).
+//!   patches, ×1.62 mini / ×2.46 nano multipliers), tile-based for the 4o
+//!   family — where the flat low-detail count is per *model*, not shared:
+//!   4o bills 85 and 4o-mini 2833 (33×, matching its 33×-lower token price).
 //!
 //! Rule of thumb when prices change: edit only the `pricing()` table.
 //! Every caller goes through `estimate_cost`, which routes to the table.
@@ -31,10 +32,17 @@ enum VisionRule {
     /// Cap reflects the model's max native-resolution tokens before
     /// the API would auto-downscale the image.
     AnthropicWHOver750 { max: u32 },
-    /// OpenAI gpt-4o family at "low detail" mode: flat 85 tokens per
-    /// image regardless of size. We default to low-detail because
-    /// thumbnail-sized previews don't benefit from high-detail tiles.
-    OpenAILowDetailFlat,
+    /// OpenAI gpt-4o family at "low detail" mode: a flat count per image
+    /// regardless of size. We default to low-detail because thumbnail-sized
+    /// previews don't benefit from high-detail tiles.
+    ///
+    /// The count is flat per *size*, not per model: `gpt-4o` bills 85 while
+    /// `gpt-4o-mini` bills 2833 for the identical image. OpenAI scales the
+    /// mini count by the same ~33× that separates the two per-token prices,
+    /// so the dollar cost of an image lands in the same place on either
+    /// model — which is exactly why a single shared constant read as correct
+    /// and was 33× low.
+    OpenAILowDetailFlat { tokens: usize },
     /// OpenAI 5.4-mini and 5.4-nano: image is covered by 32×32 patches,
     /// patch count is capped at 1536, then multiplied by a per-model
     /// factor that brings the count up to the billed token total.
@@ -115,10 +123,12 @@ fn pricing(model: &str) -> Option<Pricing> {
         }),
 
         // OpenAI
+        // 2833, not 85: see `OpenAILowDetailFlat`. The 33× token markup is
+        // the counterpart of this model's 33×-lower per-token price.
         "gpt-4o-mini" => Some(Pricing {
             input_per_m: 150_000,
             output_per_m: 600_000,
-            vision: VisionRule::OpenAILowDetailFlat,
+            vision: VisionRule::OpenAILowDetailFlat { tokens: 2833 },
         }),
         "gpt-5.4-nano" => Some(Pricing {
             input_per_m: 200_000,
@@ -133,7 +143,7 @@ fn pricing(model: &str) -> Option<Pricing> {
         "gpt-5.4" => Some(Pricing {
             input_per_m: 2_500_000,
             output_per_m: 15_000_000,
-            vision: VisionRule::OpenAILowDetailFlat,
+            vision: VisionRule::OpenAILowDetailFlat { tokens: 85 },
         }),
 
         // Ollama: any vision-capable tag the user might ship in. Match
@@ -169,7 +179,7 @@ pub fn estimate_image_tokens(width: u32, height: u32, model: &str) -> usize {
             let tokens = (width as u64 * height as u64) / 750;
             tokens.min(max as u64) as usize
         }
-        VisionRule::OpenAILowDetailFlat => 85,
+        VisionRule::OpenAILowDetailFlat { tokens } => tokens,
         VisionRule::OpenAIPatchBased { multiplier } => {
             let patches_w = (width as f32 / 32.0).ceil() as u32;
             let patches_h = (height as f32 / 32.0).ceil() as u32;
@@ -329,11 +339,18 @@ mod tests {
 
     // ----- OpenAI vision rules -----
 
+    /// Flat means size-independent, not model-independent. `gpt-4o-mini`
+    /// bills a low-detail image at 2833 tokens, not 85: OpenAI scales the
+    /// count by the same ~33× that separates the two models' per-token
+    /// prices, so an image costs about the same dollars on either. Charging
+    /// the estimate 85 made the preview 33× low — the direction this module's
+    /// own header says never to err.
     #[test]
-    fn openai_low_detail_is_flat_85() {
-        assert_eq!(estimate_image_tokens(256, 256, "gpt-4o-mini"), 85);
-        assert_eq!(estimate_image_tokens(2048, 2048, "gpt-4o-mini"), 85);
-        assert_eq!(estimate_image_tokens(50, 50, "gpt-4o-mini"), 85);
+    fn openai_low_detail_is_flat_per_size_but_priced_per_model() {
+        for (w, h) in [(256, 256), (2048, 2048), (50, 50)] {
+            assert_eq!(estimate_image_tokens(w, h, "gpt-4o-mini"), 2833);
+            assert_eq!(estimate_image_tokens(w, h, "gpt-5.4"), 85);
+        }
     }
 
     #[test]

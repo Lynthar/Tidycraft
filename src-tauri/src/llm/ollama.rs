@@ -67,10 +67,33 @@ struct OllamaOptions {
 const NUM_CTX_MIN: usize = 8_192;
 const NUM_CTX_MAX: usize = 32_768;
 
-/// Context window for a request whose messages total `prompt_chars`.
-fn num_ctx_for(prompt_chars: usize) -> usize {
-    let est_prompt_tokens = prompt_chars / 4;
-    let with_headroom = est_prompt_tokens + 2_048; // response + slack
+/// Context tokens to budget per attached image.
+///
+/// Images ride at message level, outside `content`, so they cost nothing to
+/// measure by string length and a great deal to actually process: a vision
+/// model expands each into a block of tokens — about 1610 for
+/// llama3.2-vision at 512×512, 576 for llava's fixed 336px projection. This
+/// takes the high end of that range on purpose. Over-budgeting costs
+/// KV-cache memory that the `NUM_CTX_MAX` clamp bounds anyway;
+/// under-budgeting costs the silent front-truncation that `num_ctx` exists
+/// to prevent.
+const IMAGE_TOKENS_EST: usize = 1_610;
+
+/// Context window for a request whose text totals `prompt_chars` and which
+/// carries `image_count` attached images.
+fn num_ctx_for(prompt_chars: usize, image_count: usize) -> usize {
+    let est_prompt_tokens =
+        prompt_chars / 4 + image_count.saturating_mul(IMAGE_TOKENS_EST);
+    let with_headroom = est_prompt_tokens.saturating_add(2_048); // response + slack
+    if with_headroom > NUM_CTX_MAX {
+        // Still truncated, but no longer silently: the ceiling is a guess at
+        // what local models support, and a request that needs more than it
+        // now leaves a line to find when the reply comes back malformed.
+        eprintln!(
+            "[ollama] request needs ~{with_headroom} context tokens ({image_count} images), \
+             capped at {NUM_CTX_MAX} — the model may drop the front of the prompt"
+        );
+    }
     with_headroom.clamp(NUM_CTX_MIN, NUM_CTX_MAX)
 }
 
@@ -89,6 +112,12 @@ struct OllamaMessage {
 #[derive(Deserialize)]
 struct OllamaResponse {
     message: OllamaResponseMessage,
+    /// `"stop"` normally; `"length"` when generation stopped at the context
+    /// or output limit — the same event Anthropic reports as
+    /// `stop_reason: "max_tokens"` and OpenAI as `finish_reason: "length"`,
+    /// and surfaced the same way here. Optional: older Ollama builds omit it.
+    #[serde(default)]
+    done_reason: Option<String>,
     /// Tokens spent reading the prompt (system + user). May be absent
     /// on errors or very-old Ollama versions; defaults to 0.
     #[serde(default)]
@@ -141,6 +170,13 @@ fn build_messages(
 // ---- Response → TagResponse ----
 
 fn extract_response(parsed: OllamaResponse) -> Result<TagResponse, LLMError> {
+    // Checked before parsing, like claude.rs does with `stop_reason`: a
+    // cut-off reply is invalid JSON, so parsing first reports a malformed
+    // response and sends the user looking at the model instead of at the
+    // request size, which is the part they can change.
+    if parsed.done_reason.as_deref() == Some("length") {
+        return Err(LLMError::Truncated);
+    }
     let suggestions = super::parse_suggestions(&parsed.message.content)?;
     Ok(TagResponse {
         suggestions,
@@ -190,13 +226,14 @@ async fn call_ollama(
         request.include_thumbnails,
     );
     let prompt_chars: usize = messages.iter().map(|m| m.content.len()).sum();
+    let image_count: usize = messages.iter().map(|m| m.images.len()).sum();
     let body = OllamaRequest {
         model,
         messages,
         stream: false,
         format: "json",
         options: OllamaOptions {
-            num_ctx: num_ctx_for(prompt_chars),
+            num_ctx: num_ctx_for(prompt_chars, image_count),
         },
     };
 
@@ -297,7 +334,8 @@ async fn send_text_chat(
     let body = OllamaRequest {
         model,
         options: OllamaOptions {
-            num_ctx: num_ctx_for(system.len() + user.len()),
+            // Text-only by construction — no images to budget for.
+            num_ctx: num_ctx_for(system.len() + user.len(), 0),
         },
         messages: vec![
             OllamaMessage {
@@ -336,6 +374,11 @@ async fn send_text_chat(
         .json()
         .await
         .map_err(|e| LLMError::ParseError(format!("Ollama JSON: {e}")))?;
+    // Same check as the tagging path — learning's single large reply is the
+    // one most likely to actually hit the limit.
+    if parsed.done_reason.as_deref() == Some("length") {
+        return Err(LLMError::Truncated);
+    }
     Ok((
         parsed.message.content,
         Usage {
@@ -374,6 +417,58 @@ mod tests {
         assert_eq!(r.usage.input_tokens, 320);
         assert_eq!(r.usage.output_tokens, 80);
         assert!(!r.usage.cached);
+    }
+
+    /// Ollama reports a cut-off reply as `done_reason: "length"`, the same
+    /// event Anthropic calls `stop_reason: "max_tokens"` and OpenAI calls
+    /// `finish_reason: "length"`. Both cloud providers turn it into
+    /// `Truncated`; Ollama ignored the field, so the cut-off JSON reached the
+    /// parser and came back as a `ParseError` about malformed JSON — pointing
+    /// the user at the model's output instead of at the request size, which is
+    /// the thing they can actually change.
+    #[test]
+    fn a_length_cutoff_is_truncated_not_a_parse_error() {
+        let json = r#"{
+            "message": {
+                "role": "assistant",
+                "content": "{\"suggestions\":[{\"asset_path\":\"a.png\",\"tags\":[{\"lab"
+            },
+            "done": true,
+            "done_reason": "length",
+            "prompt_eval_count": 320,
+            "eval_count": 512
+        }"#;
+        match parse_response_json(json) {
+            Err(LLMError::Truncated) => {}
+            other => panic!("expected Truncated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_normal_stop_reason_still_parses() {
+        let json = r#"{
+            "message": {
+                "role": "assistant",
+                "content": "{\"suggestions\":[]}"
+            },
+            "done": true,
+            "done_reason": "stop"
+        }"#;
+        assert_eq!(parse_response_json(json).unwrap().suggestions.len(), 0);
+    }
+
+    /// Ollama attaches images at message level, so they add nothing to
+    /// `content.len()` while a vision model expands each into a block of
+    /// tokens. Sizing the window from text alone left a vision request short
+    /// by thousands of them, and Ollama answers a too-small window by
+    /// truncating from the front — dropping the system prompt first, which is
+    /// the exact failure `num_ctx` was added to prevent.
+    #[test]
+    fn num_ctx_counts_images_not_only_text() {
+        // Text large enough that neither call lands on the MIN clamp.
+        let text_only = num_ctx_for(40_000, 0);
+        let with_four = num_ctx_for(40_000, 4);
+        assert_eq!(with_four - text_only, 4 * IMAGE_TOKENS_EST);
     }
 
     #[test]

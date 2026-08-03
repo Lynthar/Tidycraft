@@ -209,6 +209,38 @@ pub enum LLMError {
     Other(String),
 }
 
+/// Map a cloud provider's non-2xx status to an error family.
+///
+/// `provider` is the id `NoApiKey` carries (`"claude"` / `"openai"`); `label`
+/// is what the user sees in the message (`"Anthropic"` / `"OpenAI"`).
+///
+/// Shared because claude.rs and openai.rs each had two byte-identical copies
+/// of this match inline — four places to keep in step, which is three too many
+/// for a table that encodes provider behavior. Ollama keeps its own
+/// (`ollama::map_http_status`): a local server has no auth or metering, and
+/// its 404 means "model not installed", not "no such endpoint".
+pub(crate) fn map_cloud_http_status(
+    provider: &str,
+    label: &str,
+    status: u16,
+    body_preview: &str,
+) -> LLMError {
+    match status {
+        401 | 403 => LLMError::NoApiKey(provider.to_string()),
+        429 => LLMError::RateLimit,
+        // 529 is Anthropic's `overloaded_error`, 503 the generic equivalent:
+        // the provider is busy, and waiting is the whole fix. Kept out of
+        // `Network` because the frontend turns any message mentioning Network
+        // / "Could not reach" / "timed out" into "check your connection" —
+        // advice that sends the user to inspect the one thing that is fine.
+        503 | 529 => LLMError::Other(format!(
+            "{label} is temporarily overloaded ({status}) — wait a few seconds and try again"
+        )),
+        500..=599 => LLMError::Network(format!("{label} {status}: {body_preview}")),
+        _ => LLMError::Other(format!("{label} {status}: {body_preview}")),
+    }
+}
+
 // Tauri commands return `Result<T, String>`. The boundary conversion
 // lives here so providers can `?` LLMError up to the command without
 // each command re-mapping it.
@@ -514,6 +546,45 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 529 is Anthropic's documented `overloaded_error` and 503 is the generic
+    /// equivalent: the provider is busy and the useful response is to wait.
+    /// Both landed in `Network`, and the frontend routes any message mentioning
+    /// Network / "Could not reach" / "timed out" to "Check your connection or
+    /// endpoint" — pointing the user at the one thing that isn't wrong.
+    #[test]
+    fn provider_overload_is_not_reported_as_a_network_problem() {
+        for status in [503, 529] {
+            let err = map_cloud_http_status("claude", "Anthropic", status, "");
+            let msg = err.to_string();
+            assert!(
+                matches!(err, LLMError::Other(_)),
+                "{status} must not be a Network error, got {err:?}"
+            );
+            assert!(msg.contains("overloaded"), "{status}: says why: {msg}");
+            // The frontend dispatches on substrings; these would misroute it.
+            for misleading in ["Network", "Could not reach", "timed out", "Rate limit", "quota"] {
+                assert!(
+                    !msg.contains(misleading),
+                    "{status} message must not contain {misleading:?}: {msg}"
+                );
+            }
+        }
+        // A plain 500 is still a server-side failure with no better advice.
+        assert!(matches!(
+            map_cloud_http_status("claude", "Anthropic", 500, ""),
+            LLMError::Network(_)
+        ));
+        // And the rest of the mapping is unchanged.
+        assert!(matches!(
+            map_cloud_http_status("openai", "OpenAI", 401, ""),
+            LLMError::NoApiKey(_)
+        ));
+        assert!(matches!(
+            map_cloud_http_status("openai", "OpenAI", 429, ""),
+            LLMError::RateLimit
+        ));
+    }
 
     #[test]
     fn tag_category_serializes_snake_case() {

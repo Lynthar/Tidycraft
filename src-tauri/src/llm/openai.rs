@@ -104,7 +104,15 @@ struct OpenAIChoice {
 
 #[derive(Deserialize)]
 struct OpenAIChoiceMessage {
-    content: String,
+    /// `null` when the model declines — the reason moves to `refusal`. Held as
+    /// an Option so the body still deserializes: a required String failed the
+    /// whole response, which surfaced as "failed to parse provider response"
+    /// about a reply that was perfectly well-formed, and threw away the one
+    /// sentence explaining what happened.
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    refusal: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -163,7 +171,17 @@ fn extract_text_response(parsed: OpenAIResponse) -> Result<(String, Usage), LLME
     if choice.finish_reason.as_deref() == Some("length") {
         return Err(LLMError::Truncated);
     }
-    Ok((choice.message.content, usage))
+    match (choice.message.content, choice.message.refusal) {
+        (Some(text), _) => Ok((text, usage)),
+        // Not a parse failure and not the user's fault — pass the model's own
+        // words through, since they are the only thing that explains it.
+        (None, Some(reason)) => Err(LLMError::Other(format!(
+            "OpenAI declined the request: {reason}"
+        ))),
+        (None, None) => Err(LLMError::ParseError(
+            "OpenAI reply carried neither content nor a refusal".into(),
+        )),
+    }
 }
 
 /// Tagging-path wrapper: text reply → parsed suggestions.
@@ -225,12 +243,12 @@ async fn call_openai(
     let status = resp.status();
     if !status.is_success() {
         let body_preview = resp.text().await.unwrap_or_default();
-        return Err(match status.as_u16() {
-            401 | 403 => LLMError::NoApiKey("openai".into()),
-            429 => LLMError::RateLimit,
-            500..=599 => LLMError::Network(format!("OpenAI {status}: {body_preview}")),
-            _ => LLMError::Other(format!("OpenAI {status}: {body_preview}")),
-        });
+        return Err(super::map_cloud_http_status(
+            "openai",
+            "OpenAI",
+            status.as_u16(),
+            &body_preview,
+        ));
     }
 
     let parsed: OpenAIResponse = resp
@@ -352,12 +370,12 @@ async fn send_text_chat(
     let status = resp.status();
     if !status.is_success() {
         let body_preview = resp.text().await.unwrap_or_default();
-        return Err(match status.as_u16() {
-            401 | 403 => LLMError::NoApiKey("openai".into()),
-            429 => LLMError::RateLimit,
-            500..=599 => LLMError::Network(format!("OpenAI {status}: {body_preview}")),
-            _ => LLMError::Other(format!("OpenAI {status}: {body_preview}")),
-        });
+        return Err(super::map_cloud_http_status(
+            "openai",
+            "OpenAI",
+            status.as_u16(),
+            &body_preview,
+        ));
     }
     let parsed: OpenAIResponse = resp
         .json()
@@ -377,6 +395,35 @@ mod tests {
         let parsed: OpenAIResponse =
             serde_json::from_str(json).map_err(|e| LLMError::ParseError(e.to_string()))?;
         extract_response(parsed)
+    }
+
+    /// A refusal comes back as HTTP 200 with `content: null` and the reason in
+    /// `refusal`. Modelling `content` as a required String made serde fail on
+    /// the whole body, so the call surfaced as "failed to parse provider
+    /// response" — reporting a malformed reply for a reply that was perfectly
+    /// well-formed, and discarding the one sentence that said what happened.
+    #[test]
+    fn a_refusal_surfaces_its_reason_instead_of_a_parse_error() {
+        let json = r#"{
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "refusal": "I can't help with identifying people in images."
+                },
+                "finish_reason": "stop"
+            }],
+            "usage": {"prompt_tokens": 120, "completion_tokens": 8}
+        }"#;
+        match parse_response_json(json) {
+            Err(LLMError::Other(msg)) => {
+                assert!(
+                    msg.contains("identifying people"),
+                    "the model's own words must survive: {msg}"
+                );
+            }
+            other => panic!("expected the refusal reason, got {other:?}"),
+        }
     }
 
     #[test]
