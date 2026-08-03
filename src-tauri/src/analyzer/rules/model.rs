@@ -1,4 +1,4 @@
-use crate::analyzer::{Issue, Severity};
+use crate::analyzer::{issue_args, Issue, Severity};
 use crate::scanner::{AssetInfo, AssetType};
 use serde::{Deserialize, Serialize};
 
@@ -92,7 +92,14 @@ impl Rule for ModelRule {
                     asset_path: asset.path.clone(),
                     suggestion: Some("Consider reducing polygon count or using LODs".to_string()),
                     auto_fixable: false,
-            related_paths: None,
+                    related_paths: None,
+                    // `vertex_count` not `count`: i18next treats a `count`
+                    // interpolation value as a plural selector and looks for
+                    // `key_one` / `key_other`, which we do not ship.
+                    args: issue_args([
+                        ("vertex_count", vertex_count.to_string()),
+                        ("max", self.config.max_vertices.to_string()),
+                    ]),
                 });
             }
         }
@@ -111,7 +118,11 @@ impl Rule for ModelRule {
                     asset_path: asset.path.clone(),
                     suggestion: Some("Consider reducing polygon count or using LODs".to_string()),
                     auto_fixable: false,
-            related_paths: None,
+                    related_paths: None,
+                    args: issue_args([
+                        ("face_count", face_count.to_string()),
+                        ("max", self.config.max_faces.to_string()),
+                    ]),
                 });
             }
         }
@@ -130,7 +141,11 @@ impl Rule for ModelRule {
                     asset_path: asset.path.clone(),
                     suggestion: Some("Consider combining materials to reduce draw calls".to_string()),
                     auto_fixable: false,
-            related_paths: None,
+                    related_paths: None,
+                    args: issue_args([
+                        ("material_count", material_count.to_string()),
+                        ("max", self.config.max_materials.to_string()),
+                    ]),
                 });
             }
         }

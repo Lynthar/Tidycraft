@@ -324,6 +324,71 @@ fn html_escape(s: &str) -> String {
         .replace('\'', "&#39;")
 }
 
+/// Substitute `{{name}}` placeholders, i18next's syntax, so one locale
+/// template string works in the webview and in the HTML export alike.
+/// Unknown names are left in place — same as i18next, so a broken template
+/// fails identically at both ends instead of two different ways.
+fn render_template(template: &str, args: &HashMap<String, String>) -> String {
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some(start) = rest.find("{{") {
+        let (head, tail) = rest.split_at(start);
+        out.push_str(head);
+        match tail[2..].find("}}") {
+            Some(end) => {
+                let name = &tail[2..2 + end];
+                match args.get(name.trim()) {
+                    Some(value) => out.push_str(value),
+                    None => out.push_str(&tail[..2 + end + 2]),
+                }
+                rest = &tail[2 + end + 2..];
+            }
+            // Unterminated `{{` — emit the rest verbatim and stop.
+            None => {
+                out.push_str(tail);
+                return out;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The title and message an issue shows in the exported report. `templates`
+/// carries the UI's current locale, flattened as `<rule_id>.<field>`; absent
+/// (English) means the analyzer's own prose, so the English report stays
+/// byte-for-byte what it was.
+fn localized_issue_cells(
+    issue: &analyzer::Issue,
+    templates: Option<&HashMap<String, String>>,
+) -> (String, String) {
+    // dcc_source's age unit is the one placeholder whose value is itself a
+    // word: `args.age_unit` is the raw tag (`"d"`), not a noun. The bucket
+    // choice stays in Rust's `humanize_seconds`; only the noun is looked up,
+    // exactly as `localizeIssue` does in the UI — the two ends must do one
+    // lookup each or the report and the panel disagree on the same issue.
+    // No `duration.*` entry (a locale that skipped them) leaves the tag, which
+    // is what the English prose prints anyway.
+    let localized = issue
+        .args
+        .get("age_unit")
+        .and_then(|tag| templates.and_then(|t| t.get(&format!("duration.{tag}"))))
+        .map(|noun| {
+            let mut args = issue.args.clone();
+            args.insert("age_unit".to_string(), noun.clone());
+            args
+        });
+    let args = localized.as_ref().unwrap_or(&issue.args);
+
+    let pick = |field: &str, fallback: &str| match templates
+        .and_then(|t| t.get(&format!("{}.{}", issue.rule_id, field)))
+    {
+        Some(tpl) => render_template(tpl, args),
+        None => fallback.to_string(),
+    };
+    (pick("title", &issue.rule_name), pick("message", &issue.message))
+}
+
 /// Main entry point for AI tagging. Loads thumbnails for the selected
 /// assets, gathers project context (theme/goal from tidycraft.toml +
 /// existing tags with up to 5 sample paths each), then dispatches to
@@ -1632,6 +1697,10 @@ fn export_to_html(
     project_id: String,
     issue_limit: Option<usize>,
     asset_limit: Option<usize>,
+    // Flattened `issues.rules.*` / `issues.duration.*` for the UI's current
+    // locale, keyed `"<rule_id>.message"` / `"duration.d"`. Absent for
+    // English — the report then uses the analyzer's own prose.
+    templates: Option<HashMap<String, String>>,
 ) -> Result<String, String> {
     let cap = |limit: Option<usize>, default: usize| match limit {
         Some(0) => usize::MAX,
@@ -1845,13 +1914,15 @@ fn export_to_html(
                             .rsplit(['/', '\\'])
                             .next()
                             .unwrap_or(&issue.asset_path);
+                        let (title, message) =
+                            localized_issue_cells(issue, templates.as_ref());
                         format!(
                             r#"<tr><td class="{}">{:?}</td><td>{}</td><td>{}</td><td>{}</td></tr>"#,
                             severity_class,
                             issue.severity,
-                            html_escape(&issue.rule_name),
+                            html_escape(&title),
                             html_escape(file_name),
-                            html_escape(&issue.message)
+                            html_escape(&message)
                         )
                     })
                     .collect();
@@ -3769,5 +3840,153 @@ mod tests {
             escaped,
             "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;.png"
         );
+    }
+
+    #[test]
+    fn render_template_substitutes_named_placeholders() {
+        let args = HashMap::from([
+            ("width".to_string(), "1024".to_string()),
+            ("height".to_string(), "768".to_string()),
+        ]);
+        assert_eq!(
+            render_template("贴图 {{width}}×{{height}} 超过上限", &args),
+            "贴图 1024×768 超过上限"
+        );
+    }
+
+    #[test]
+    fn render_template_leaves_unknown_placeholders_alone() {
+        // Matches i18next's default, so a translator's typo looks the same in
+        // the exported report as it does in the UI. The template gate is what
+        // stops it from shipping; this is only about the two ends agreeing.
+        let args = HashMap::from([("width".to_string(), "1024".to_string())]);
+        assert_eq!(
+            render_template("{{width}} / {{witdh}}", &args),
+            "1024 / {{witdh}}"
+        );
+    }
+
+    #[test]
+    fn render_template_passes_through_a_template_with_no_placeholders() {
+        assert_eq!(render_template("纯文本", &HashMap::new()), "纯文本");
+    }
+
+    #[test]
+    fn html_issue_rows_use_the_supplied_templates_and_escape_after_interpolation() {
+        let issue = analyzer::Issue {
+            rule_id: "texture.max_size".to_string(),
+            rule_name: "Texture Too Large".to_string(),
+            severity: analyzer::Severity::Warning,
+            message: "Texture 4096x4096 exceeds maximum size 2048".to_string(),
+            asset_path: "/p/a<b>.png".to_string(),
+            suggestion: None,
+            auto_fixable: false,
+            related_paths: None,
+            args: HashMap::from([
+                ("width".to_string(), "4096".to_string()),
+                ("height".to_string(), "4096".to_string()),
+                ("max".to_string(), "2048".to_string()),
+            ]),
+        };
+        let templates = HashMap::from([
+            ("texture.max_size.title".to_string(), "贴图尺寸过大".to_string()),
+            (
+                "texture.max_size.message".to_string(),
+                "贴图 {{width}}×{{height}} 超过上限 {{max}}".to_string(),
+            ),
+        ]);
+
+        let (title, message) = localized_issue_cells(&issue, Some(&templates));
+        assert_eq!(title, "贴图尺寸过大");
+        assert_eq!(message, "贴图 4096×4096 超过上限 2048");
+
+        // No templates: the analyzer's own prose, unchanged.
+        let (title_en, message_en) = localized_issue_cells(&issue, None);
+        assert_eq!(title_en, "Texture Too Large");
+        assert_eq!(message_en, "Texture 4096x4096 exceeds maximum size 2048");
+    }
+
+    /// A `dcc_source.outdated_export` issue as the rule emits it: `age_unit`
+    /// is the bucket tag `humanize_seconds` chose, not a word.
+    fn outdated_export_issue() -> analyzer::Issue {
+        analyzer::Issue {
+            rule_id: "dcc_source.outdated_export".to_string(),
+            rule_name: "Outdated DCC export".to_string(),
+            severity: analyzer::Severity::Warning,
+            message: "Source `character.blend` is 3d newer than its export `character.fbx` — possibly missing a re-export.".to_string(),
+            asset_path: "/p/character.blend".to_string(),
+            suggestion: None,
+            auto_fixable: false,
+            related_paths: None,
+            args: HashMap::from([
+                ("source".to_string(), "character.blend".to_string()),
+                ("export".to_string(), "character.fbx".to_string()),
+                ("dcc".to_string(), "Blender".to_string()),
+                ("age_value".to_string(), "3".to_string()),
+                ("age_unit".to_string(), "d".to_string()),
+            ]),
+        }
+    }
+
+    const OUTDATED_EXPORT_ZH: &str =
+        "源文件 {{source}} 比它的导出 {{export}} 新 {{age_value}} {{age_unit}}，可能漏了一次重新导出。";
+
+    #[test]
+    fn age_unit_resolves_through_the_duration_templates() {
+        // The UI looks the tag up in `issues.duration.*` before interpolating;
+        // the report has to do the same or the two disagree on one issue.
+        let templates = HashMap::from([
+            (
+                "dcc_source.outdated_export.message".to_string(),
+                OUTDATED_EXPORT_ZH.to_string(),
+            ),
+            ("duration.d".to_string(), "天".to_string()),
+            ("duration.h".to_string(), "小时".to_string()),
+        ]);
+        let (_, message) = localized_issue_cells(&outdated_export_issue(), Some(&templates));
+        assert_eq!(
+            message,
+            "源文件 character.blend 比它的导出 character.fbx 新 3 天，可能漏了一次重新导出。"
+        );
+    }
+
+    #[test]
+    fn age_unit_falls_back_to_the_raw_tag_when_the_duration_templates_are_absent() {
+        // A locale that translated the rule but not the units. The tag is what
+        // the English prose prints, so the sentence still reads.
+        let templates = HashMap::from([(
+            "dcc_source.outdated_export.message".to_string(),
+            OUTDATED_EXPORT_ZH.to_string(),
+        )]);
+        let (_, message) = localized_issue_cells(&outdated_export_issue(), Some(&templates));
+        assert_eq!(
+            message,
+            "源文件 character.blend 比它的导出 character.fbx 新 3 d，可能漏了一次重新导出。"
+        );
+    }
+
+    #[test]
+    fn html_escaping_happens_after_interpolation_not_before() {
+        // The template is ours and carries no markup; the arg values come from
+        // file names and can. Escaping the composed string once covers both —
+        // escaping the template first would double-escape nothing and escaping
+        // only the template would let `<` through from the args.
+        let issue = analyzer::Issue {
+            rule_id: "naming.forbidden_char".to_string(),
+            rule_name: "Forbidden Character".to_string(),
+            severity: analyzer::Severity::Warning,
+            message: "File name contains forbidden character: '<'".to_string(),
+            asset_path: "/p/a<b.png".to_string(),
+            suggestion: None,
+            auto_fixable: false,
+            related_paths: None,
+            args: HashMap::from([("char".to_string(), "<".to_string())]),
+        };
+        let templates = HashMap::from([(
+            "naming.forbidden_char.message".to_string(),
+            "文件名含禁用字符 {{char}}".to_string(),
+        )]);
+        let (_, message) = localized_issue_cells(&issue, Some(&templates));
+        assert_eq!(html_escape(&message), "文件名含禁用字符 &lt;");
     }
 }

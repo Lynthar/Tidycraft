@@ -252,7 +252,40 @@
     "dupCleanupConfirm": "保留选中，其余 {{count}} 个移入回收站",
     "dupKeepThis": "保留这份",
     "fix": "修复",
-    "fixAll": "修复全部命名 ({{count}})"
+    "fixAll": "修复全部命名 ({{count}})",
+    "duration": { "s": "秒", "m": "分钟", "h": "小时", "d": "天" },
+    "rules": {
+      "texture": {
+        "file_size": {
+          "title": "文件体积过大",
+          "message": "贴图体积 {{size}} MB，超过上限 {{max}} MB",
+          "suggestion": "压缩一下，或者降低分辨率"
+        },
+        "pot": {
+          "title": "尺寸不是 2 的幂",
+          "message": "贴图尺寸 {{width}}×{{height}} 不是 2 的幂",
+          "suggestion": "改成 {{pot_width}}×{{pot_height}}"
+        },
+        "max_size": {
+          "title": "贴图尺寸过大",
+          "message": "贴图 {{width}}×{{height}} 超过上限 {{max}}",
+          "suggestion": "缩到 {{max}}×{{max}} 以内"
+        },
+        "min_size": {
+          "title": "贴图尺寸过小",
+          "message": "贴图 {{width}}×{{height}} 小于下限 {{min}}"
+        },
+        "non_square": {
+          "title": "非正方形贴图",
+          "message": "贴图 {{width}}×{{height}} 不是正方形"
+        },
+        "no_mipmaps": {
+          "title": "缺少 mipmap 链",
+          "message": "DDS 贴图 {{width}}×{{height}} 没有 mipmap。远处会出现锯齿和摩尔纹，而且每帧都按全分辨率采样。",
+          "suggestion": "重新导出时生成 mipmap；如果是 UI 或 LUT 贴图，确认这是有意为之。"
+        }
+      }
+    }
   },
   "settings": {
     "title": "设置",

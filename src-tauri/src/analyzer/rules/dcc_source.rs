@@ -41,7 +41,7 @@ use std::time::UNIX_EPOCH;
 
 use serde::{Deserialize, Serialize};
 
-use crate::analyzer::{AnalysisResult, Issue, Severity};
+use crate::analyzer::{issue_args, AnalysisResult, Issue, Severity};
 use crate::scanner::AssetInfo;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -277,17 +277,19 @@ fn mapping_for_source<'a>(
         .find(|m| m.sources.iter().any(|s| s.eq_ignore_ascii_case(&ext_lower)))
 }
 
-/// Convert a duration in seconds to a short human label
-/// ("12s" / "5m" / "3h" / "2d") for use in issue messages.
-fn humanize_seconds(secs: u64) -> String {
+/// Split a duration into a magnitude and a unit tag. The English prose below
+/// renders it as "3d"; locales render the tag through `issues.duration.*`.
+/// Keeping the bucket choice here means there is exactly one implementation
+/// of it — the frontend only looks the tag up.
+fn humanize_seconds(secs: u64) -> (u64, &'static str) {
     if secs < 60 {
-        format!("{secs}s")
+        (secs, "s")
     } else if secs < 3600 {
-        format!("{}m", secs / 60)
+        (secs / 60, "m")
     } else if secs < 86400 {
-        format!("{}h", secs / 3600)
+        (secs / 3600, "h")
     } else {
-        format!("{}d", secs / 86400)
+        (secs / 86400, "d")
     }
 }
 
@@ -400,15 +402,14 @@ pub fn find_dcc_source_issues(
         }
 
         let diff = source_mtime - export_mtime;
+        let (age_value, age_unit) = humanize_seconds(diff);
         result.add_issue(Issue {
             rule_id: "dcc_source.outdated_export".into(),
             rule_name: "Outdated DCC export".into(),
             severity: Severity::Warning,
             message: format!(
-                "Source `{}` is {} newer than its export `{}` — possibly missing a re-export.",
-                source.name,
-                humanize_seconds(diff),
-                export.name,
+                "Source `{}` is {}{} newer than its export `{}` — possibly missing a re-export.",
+                source.name, age_value, age_unit, export.name,
             ),
             asset_path: source.path.clone(),
             suggestion: Some(format!(
@@ -417,14 +418,24 @@ pub fn find_dcc_source_issues(
             )),
             auto_fixable: false,
             related_paths: None,
+            args: issue_args([
+                ("source", source.name.clone()),
+                ("export", export.name.clone()),
+                ("dcc", mapping.name.clone()),
+                ("age_value", age_value.to_string()),
+                ("age_unit", age_unit.to_string()),
+            ]),
         });
     }
 
     result
 }
 
+/// `pub(crate)` so `analyzer::tests`' arg-harvest can build its fixture from
+/// the same two constructors this rule's own tests use, rather than a copy
+/// that would quietly stop matching the rule the day the rule changes.
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::scanner::{AssetMetadata, AssetType};
     use filetime::{set_file_mtime, FileTime};
@@ -433,7 +444,7 @@ mod tests {
 
     /// Build an AssetInfo for a file path. Only path / name / extension
     /// are exercised by the analyzer's index; the rest can be defaults.
-    fn make_asset(path: &str, asset_type: AssetType) -> AssetInfo {
+    pub(crate) fn make_asset(path: &str, asset_type: AssetType) -> AssetInfo {
         let p = Path::new(path);
         AssetInfo {
             path: path.to_string(),
@@ -458,7 +469,7 @@ mod tests {
     /// Write a 1-byte fixture and stamp its mtime to N seconds ago.
     /// `filetime` is the cross-platform standard; std doesn't expose
     /// mtime setting.
-    fn write_with_mtime(path: &Path, secs_ago: u64) {
+    pub(crate) fn write_with_mtime(path: &Path, secs_ago: u64) {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).unwrap();
         }
@@ -501,6 +512,9 @@ mod tests {
         assert_eq!(r.issues[0].rule_id, "dcc_source.outdated_export");
         assert!(r.issues[0].message.contains("character.blend"));
         assert!(r.issues[0].message.contains("character.fbx"));
+        // diff = 7200s - 60s = 7140s, bucketed to whole hours: "1h", not
+        // "1 h" or "h1". Comfortably clear of the 3600s/7200s bucket edges.
+        assert!(r.issues[0].message.contains("1h newer than its export"));
     }
 
     #[test]
@@ -619,11 +633,11 @@ mod tests {
 
     #[test]
     fn humanize_buckets() {
-        assert_eq!(humanize_seconds(30), "30s");
-        assert_eq!(humanize_seconds(60), "1m");
-        assert_eq!(humanize_seconds(120), "2m");
-        assert_eq!(humanize_seconds(7200), "2h");
-        assert_eq!(humanize_seconds(86400 * 3), "3d");
+        assert_eq!(humanize_seconds(30), (30, "s"));
+        assert_eq!(humanize_seconds(60), (1, "m"));
+        assert_eq!(humanize_seconds(120), (2, "m"));
+        assert_eq!(humanize_seconds(7200), (2, "h"));
+        assert_eq!(humanize_seconds(86400 * 3), (3, "d"));
     }
 
     #[test]

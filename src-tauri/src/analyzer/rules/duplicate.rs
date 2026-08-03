@@ -1,4 +1,4 @@
-use crate::analyzer::{AnalysisResult, Issue, Severity};
+use crate::analyzer::{issue_args, AnalysisResult, Issue, Severity};
 use crate::scanner::AssetInfo;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -101,6 +101,12 @@ pub fn find_duplicates(assets: &[AssetInfo], root: &str) -> AnalysisResult {
                 )),
                 auto_fixable: false,
                 related_paths: Some(group),
+                // `file_count` not `count` — see the model rules' note on
+                // i18next's plural selector.
+                args: issue_args([
+                    ("file_count", duplicates.len().to_string()),
+                    ("original", original.name.clone()),
+                ]),
             });
         }
     }

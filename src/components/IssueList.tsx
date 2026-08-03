@@ -3,12 +3,14 @@ import { AlertCircle, AlertTriangle, ChevronRight, Info, FileWarning, Layers, Do
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useProjectStore } from "../stores/projectStore";
 import { useSelectionStore } from "../stores/selectionStore";
 import { useTagsStore } from "../stores/tagsStore";
 import { useToastStore } from "../stores/toastStore";
 import { basename, relativeToRoot } from "../lib/pathUtils";
 import { exportTextFile } from "../lib/exportFile";
+import { localizeIssue } from "../lib/issueText";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import { NamingFixDialog } from "./NamingFixDialog";
 import type { Issue, Severity, AnalysisResult } from "../types/asset";
@@ -32,6 +34,7 @@ function SeverityIcon({ severity }: { severity: Severity }) {
 
 interface IssueRowProps {
   issue: Issue;
+  t: TFunction;
   /** Root-relative form of `issue.asset_path` for display; the absolute
    *  path stays available in the tooltip. */
   displayPath: string;
@@ -48,9 +51,14 @@ interface IssueRowProps {
 
 /// `expanded` lives on the parent so virtualization (which unmounts rows
 /// outside the overscan window) doesn't lose user state on scroll.
-function IssueRow({ issue, displayPath, expanded, onToggle, onLocate, onFix, suggestionLabel, locateLabel, fixLabel }: IssueRowProps) {
+function IssueRow({ issue, t, displayPath, expanded, onToggle, onLocate, onFix, suggestionLabel, locateLabel, fixLabel }: IssueRowProps) {
   const fileName = basename(issue.asset_path);
   const tone = SEV_TO_TONE[issue.severity];
+  // Localized here rather than in the `rows` memo: that memo rebuilds on every
+  // filter change and walks ALL issues, while virtualization only ever mounts
+  // about thirty rows. On a project reporting thousands of issues that is the
+  // difference between three `t()` calls per keystroke and thousands.
+  const text = localizeIssue(issue, t);
 
   return (
     <div
@@ -63,7 +71,7 @@ function IssueRow({ issue, displayPath, expanded, onToggle, onLocate, onFix, sug
       </span>
       <div className="tc-issue-body">
         <div className="tc-issue-title">
-          {issue.rule_name}
+          {text.title}
           <span className="tc-issue-rule-id">{issue.rule_id}</span>
           <span className="tc-issue-chev" data-expanded={expanded ? "true" : undefined}>
             <ChevronRight size={11} />
@@ -76,11 +84,11 @@ function IssueRow({ issue, displayPath, expanded, onToggle, onLocate, onFix, sug
         </div>
         {expanded && (
           <div className="tc-issue-detail" onClick={(e) => e.stopPropagation()}>
-            <div>{issue.message}</div>
-            {issue.suggestion && (
+            <div>{text.message}</div>
+            {text.suggestion && (
               <div>
                 <span className="tc-issue-suggestion">{suggestionLabel}:</span>{" "}
-                {issue.suggestion}
+                {text.suggestion}
               </div>
             )}
           </div>
@@ -132,9 +140,9 @@ interface IssueListProps {
 /// issues; flat mode is just issues. Either way the virtualizer renders
 /// from a single 1-D array so positioning math stays simple.
 type VirtualRow =
-  | { kind: "group-head"; key: string; ruleName: string; count: number }
+  | { kind: "group-head"; key: string; ruleId: string; ruleName: string; count: number }
   | { kind: "issue"; key: string; issue: Issue }
-  | { kind: "dup-group"; key: string; ruleName: string; paths: string[] };
+  | { kind: "dup-group"; key: string; ruleId: string; ruleName: string; paths: string[] };
 
 /// Collapse per-file duplicate issues into one row per content group.
 /// `related_paths` (root-relative, original first) is the group identity;
@@ -150,7 +158,7 @@ function collapseDuplicates(issues: Issue[]): VirtualRow[] {
       const key = `dup:${group[0]}`;
       if (emitted.has(key)) return;
       emitted.add(key);
-      rows.push({ kind: "dup-group", key, ruleName: issue.rule_name, paths: group });
+      rows.push({ kind: "dup-group", key, ruleId: issue.rule_id, ruleName: issue.rule_name, paths: group });
       return;
     }
     rows.push({ kind: "issue", key: `${issue.rule_id}|${issue.asset_path}|${i}`, issue });
@@ -219,7 +227,7 @@ function DupGroupRow({
       </span>
       <div className="tc-issue-body">
         <div className="tc-issue-title">
-          {row.ruleName}
+          <span>{t(`issues.rules.${row.ruleId}.title`, { defaultValue: row.ruleName })}</span>
           <span className="tc-issue-rule-id">duplicate</span>
           <span className="tc-dup-count">{t("issues.dupGroupCount", { count: row.paths.length })}</span>
         </div>
@@ -382,6 +390,7 @@ export function IssueList({ result, stale, isAnalyzing, onAnalyze, onLocate }: I
         list.push({
           kind: "group-head",
           key: `head:${ruleId}`,
+          ruleId: issues[0].rule_id,
           ruleName: issues[0].rule_name,
           count: collapsed.length,
         });
@@ -678,7 +687,7 @@ export function IssueList({ result, stale, isAnalyzing, onAnalyze, onLocate }: I
                 >
                   {row.kind === "group-head" ? (
                     <div className="tc-issues-group-head">
-                      <span>{row.ruleName}</span>
+                      <span>{t(`issues.rules.${row.ruleId}.title`, { defaultValue: row.ruleName })}</span>
                       <span className="mono">{row.count}</span>
                     </div>
                   ) : row.kind === "dup-group" ? (
@@ -717,6 +726,7 @@ export function IssueList({ result, stale, isAnalyzing, onAnalyze, onLocate }: I
                   ) : (
                     <IssueRow
                       issue={row.issue}
+                      t={t}
                       displayPath={relativeToRoot(row.issue.asset_path, projectPath)}
                       expanded={expandedIds.has(row.key)}
                       onToggle={() => toggleExpanded(row.key)}

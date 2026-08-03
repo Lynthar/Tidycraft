@@ -1,4 +1,6 @@
-use crate::analyzer::{Issue, Severity};
+use std::collections::HashMap;
+
+use crate::analyzer::{issue_args, Issue, Severity};
 use crate::scanner::{AssetInfo, AssetType};
 use serde::{Deserialize, Serialize};
 
@@ -332,7 +334,11 @@ impl Rule for NamingRule {
                 asset_path: asset.path.clone(),
                 suggestion: Some(format!("Shorten the file name to {} characters", self.config.max_length)),
                 auto_fixable: false,
-            related_paths: None,
+                related_paths: None,
+                args: issue_args([
+                    ("char_count", char_count.to_string()),
+                    ("max", self.config.max_length.to_string()),
+                ]),
             });
         }
 
@@ -346,7 +352,8 @@ impl Rule for NamingRule {
                 asset_path: asset.path.clone(),
                 suggestion: Some(format!("Remove '{}' from the file name", c)),
                 auto_fixable: true,
-            related_paths: None,
+                related_paths: None,
+                args: issue_args([("char", c.to_string())]),
             });
         }
 
@@ -360,7 +367,8 @@ impl Rule for NamingRule {
                 asset_path: asset.path.clone(),
                 suggestion: Some("Use English characters for file names".to_string()),
                 auto_fixable: false,
-            related_paths: None,
+                related_paths: None,
+                args: HashMap::new(),
             });
         }
 
@@ -386,6 +394,10 @@ impl Rule for NamingRule {
                     suggestion: Some(format!("Rename to {}{}", prefix, name)),
                     auto_fixable: true,
                     related_paths: None,
+                    args: issue_args([
+                        ("prefix", prefix.to_string()),
+                        ("name", name.to_string()),
+                    ]),
                 });
             }
         }
@@ -405,7 +417,8 @@ impl Rule for NamingRule {
                 asset_path: asset.path.clone(),
                 suggestion: Some(format!("Use {} for file names", self.config.case_style)),
                 auto_fixable: true,
-            related_paths: None,
+                related_paths: None,
+                args: issue_args([("style", self.config.case_style.clone())]),
             });
         }
 

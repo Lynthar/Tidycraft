@@ -22,7 +22,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use crate::analyzer::{AnalysisResult, Issue, Severity};
+use crate::analyzer::{issue_args, AnalysisResult, Issue, Severity};
 use crate::scanner::{AssetInfo, AssetType};
 use serde::{Deserialize, Serialize};
 
@@ -277,6 +277,14 @@ pub fn find_pbr_set_issues(assets: &[AssetInfo], config: &PbrSetConfig) -> Analy
             ),
             auto_fixable: false,
             related_paths: None,
+            // `channels` ships pre-joined rather than as a list: the only
+            // consumer that would benefit from the structure is a locale that
+            // wants a different separator, which is not worth widening `args`
+            // from HashMap<String, String> to serde_json::Value for one rule.
+            args: issue_args([
+                ("set", base_stem.clone()),
+                ("channels", missing.join(", ")),
+            ]),
         });
     }
 

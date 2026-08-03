@@ -24,6 +24,7 @@ import { useSettingsStore } from "./stores/settingsStore";
 import { restoreSession } from "./stores/sessionStore";
 import { Toasts } from "./components/Toasts";
 import { exportTextFile } from "./lib/exportFile";
+import { issueTemplatesForExport } from "./lib/issueTemplates";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useShallow } from "zustand/react/shallow";
 import { isMacOS } from "./lib/platform";
@@ -169,6 +170,7 @@ function App() {
           projectId: activeProjectId,
           issueLimit: htmlReportIssueLimit,
           assetLimit: htmlReportAssetLimit,
+          templates: issueTemplatesForExport(),
         }),
     });
   };

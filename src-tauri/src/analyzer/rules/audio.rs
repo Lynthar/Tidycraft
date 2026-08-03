@@ -1,4 +1,6 @@
-use crate::analyzer::{Issue, Severity};
+use std::collections::HashMap;
+
+use crate::analyzer::{issue_args, Issue, Severity};
 use crate::scanner::{AssetInfo, AssetType};
 use serde::{Deserialize, Serialize};
 
@@ -134,18 +136,32 @@ impl Rule for AudioRule {
             self.config.allowed_sample_rates.first(),
         ) {
             if !self.config.allowed_sample_rates.contains(&sample_rate) {
+                // Was `{:?}` on the Vec, which printed Rust's debug form
+                // ("[44100, 48000]") straight into the UI.
+                let allowed_list = self
+                    .config
+                    .allowed_sample_rates
+                    .iter()
+                    .map(|r| r.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 return Some(Issue {
                     rule_id: "audio.sample_rate".to_string(),
                     rule_name: "Non-Standard Sample Rate".to_string(),
                     severity: Severity::Info,
                     message: format!(
-                        "Audio sample rate {} Hz is not standard (expected {:?})",
-                        sample_rate, self.config.allowed_sample_rates
+                        "Audio sample rate {} Hz is not standard (expected {})",
+                        sample_rate, allowed_list
                     ),
                     asset_path: asset.path.clone(),
                     suggestion: Some(format!("Consider resampling to {} Hz", preferred)),
                     auto_fixable: false,
-            related_paths: None,
+                    related_paths: None,
+                    args: issue_args([
+                        ("rate", sample_rate.to_string()),
+                        ("allowed", allowed_list.clone()),
+                        ("preferred", preferred.to_string()),
+                    ]),
                 });
             }
         }
@@ -164,7 +180,11 @@ impl Rule for AudioRule {
                     asset_path: asset.path.clone(),
                     suggestion: Some("Long audio should be music/ambient, not SFX".to_string()),
                     auto_fixable: false,
-            related_paths: None,
+                    related_paths: None,
+                    args: issue_args([
+                        ("duration", format!("{:.1}", duration)),
+                        ("max", format!("{:.0}", self.config.max_sfx_duration)),
+                    ]),
                 });
             }
         }
@@ -182,7 +202,10 @@ impl Rule for AudioRule {
                         asset_path: asset.path.clone(),
                         suggestion: Some("Convert to mono for better 3D spatialization".to_string()),
                         auto_fixable: false,
-            related_paths: None,
+                        related_paths: None,
+                        // Nothing to interpolate — the message is a fixed
+                        // sentence, so the locale template needs no values.
+                        args: HashMap::new(),
                     });
                 }
             }
@@ -202,7 +225,14 @@ impl Rule for AudioRule {
                 asset_path: asset.path.clone(),
                 suggestion: Some("Consider using compressed format (OGG/MP3)".to_string()),
                 auto_fixable: false,
-            related_paths: None,
+                related_paths: None,
+                args: issue_args([
+                    ("size", format!("{:.2}", asset.size as f64 / 1024.0 / 1024.0)),
+                    (
+                        "max",
+                        format!("{:.2}", self.config.max_file_size as f64 / 1024.0 / 1024.0),
+                    ),
+                ]),
             });
         }
 
@@ -249,6 +279,11 @@ mod tests {
         let issue = rule.check(&audio_asset(22050)).expect("22.05 kHz is non-standard");
         assert_eq!(issue.rule_id, "audio.sample_rate");
         assert!(issue.suggestion.expect("has suggestion").contains("44100"));
+        // The allowed rates must be joined ("44100, 48000"), not Rust's
+        // debug form of the Vec ("[44100, 48000]"). The `[` check is what
+        // actually catches a regression back to `{:?}`.
+        assert!(issue.message.contains("44100, 48000"));
+        assert!(!issue.message.contains('['));
     }
 }
 

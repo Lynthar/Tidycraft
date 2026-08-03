@@ -14,7 +14,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::analyzer::{Issue, Severity};
+use crate::analyzer::{issue_args, Issue, Severity};
 use crate::scanner::{AssetInfo, AssetType};
 
 use super::Rule;
@@ -110,6 +110,7 @@ impl Rule for TextureColorSpaceRule {
             ),
             auto_fixable: false,
             related_paths: None,
+            args: issue_args([("suffix", matched.to_string())]),
         })
     }
 }

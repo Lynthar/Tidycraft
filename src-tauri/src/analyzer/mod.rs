@@ -32,6 +32,23 @@ pub struct Issue {
     /// stay byte-identical for those.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub related_paths: Option<Vec<String>>,
+    /// Placeholder values for the localized rendering of this issue's message
+    /// and suggestion, keyed by the placeholder name used in the locale
+    /// templates (`{{width}}` → `"width"`). The English prose in `message` /
+    /// `suggestion` stays authoritative: it is what the JSON export and the
+    /// logs carry, and what the UI falls back to when a locale has no entry
+    /// for this rule yet. Empty for rules that interpolate nothing — omitted
+    /// from serialized output so their exports stay byte-identical.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub args: HashMap<String, String>,
+}
+
+/// Build an `Issue.args` map from literal pairs. Exists because the 23
+/// construction sites would otherwise each carry a `HashMap::from([...])`
+/// literal with `.to_string()` on both halves of every pair, which buries the
+/// one interesting part — which placeholders the rule promises to fill.
+pub fn issue_args<const N: usize>(pairs: [(&str, String); N]) -> HashMap<String, String> {
+    pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -228,36 +245,399 @@ impl Default for Analyzer {
 mod tests {
     use super::*;
     use crate::scanner::{AssetMetadata, AssetType};
+    use std::collections::{BTreeMap, BTreeSet};
 
-    fn create_test_asset(name: &str, asset_type: AssetType) -> AssetInfo {
+    /// Which placeholders each rule promises to fill. Read by the locale
+    /// template gates (`zh_templates_only_use_placeholders_the_rules_emit`
+    /// and `zh_template_keys_all_name_a_declared_rule`), which cannot look at
+    /// the rules themselves. Kept honest by
+    /// `declared_rule_args_match_what_the_rules_actually_emit` below — this
+    /// table is pinned to observed behavior, not a free-floating declaration.
+    ///
+    /// Those gates read `zh.json` and nothing else, and that is correct:
+    /// `issues.rules.*` and `issues.duration.*` exist ONLY in the non-English
+    /// locales. English is the analyzer's own `format!` output, carried on the
+    /// issue itself and used as the fallback at both ends, so no string lives
+    /// in two places. A third locale writes its own section rather than
+    /// copying en.json's key set, which does not have one, and both gates name
+    /// `zh.json` literally — they have to be pointed at the new file too.
+    const RULE_ARGS: &[(&str, &[&str])] = &[
+        ("texture.file_size", &["size", "max"]),
+        ("texture.pot", &["width", "height", "pot_width", "pot_height"]),
+        ("texture.max_size", &["width", "height", "max"]),
+        ("texture.min_size", &["width", "height", "min"]),
+        ("texture.non_square", &["width", "height"]),
+        ("texture.no_mipmaps", &["width", "height"]),
+        ("naming.length", &["char_count", "max"]),
+        ("naming.forbidden_char", &["char"]),
+        ("naming.chinese", &[]),
+        ("naming.prefix", &["prefix", "name"]),
+        ("naming.case", &["style"]),
+        ("model.vertices", &["vertex_count", "max"]),
+        ("model.faces", &["face_count", "max"]),
+        ("model.materials", &["material_count", "max"]),
+        ("audio.sample_rate", &["rate", "allowed", "preferred"]),
+        ("audio.sfx_duration", &["duration", "max"]),
+        ("audio.stereo_sfx", &[]),
+        ("audio.file_size", &["size", "max"]),
+        ("texture.color_space", &["suffix"]),
+        ("duplicate", &["file_count", "original"]),
+        ("missing_reference", &["guid"]),
+        ("pbr_set.incomplete", &["set", "channels"]),
+        ("dcc_source.outdated_export", &["source", "export", "dcc", "age_value", "age_unit"]),
+    ];
+
+    /// Run every rule against a fixture built to trigger it, and collect the
+    /// arg keys each one actually emitted. The completeness check that every
+    /// rule is represented lands last.
+    fn harvest() -> BTreeMap<String, BTreeSet<String>> {
+        let mut found: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        let mut record = |issue: &Issue| {
+            found
+                .entry(issue.rule_id.clone())
+                .or_default()
+                .extend(issue.args.keys().cloned());
+        };
+
+        for issue in harvest_texture() {
+            record(&issue);
+        }
+        for issue in harvest_naming() {
+            record(&issue);
+        }
+        for issue in harvest_model() {
+            record(&issue);
+        }
+        for issue in harvest_audio() {
+            record(&issue);
+        }
+        for issue in harvest_colorspace() {
+            record(&issue);
+        }
+        for issue in harvest_duplicate() {
+            record(&issue);
+        }
+        for issue in harvest_missing_reference() {
+            record(&issue);
+        }
+        for issue in harvest_pbr_set() {
+            record(&issue);
+        }
+        for issue in harvest_dcc_source() {
+            record(&issue);
+        }
+
+        found
+    }
+
+    fn texture_asset(name: &str, size: u64, meta: crate::scanner::AssetMetadata) -> AssetInfo {
         AssetInfo {
-            path: format!("/test/{}", name),
+            path: format!("/p/{name}"),
             name: name.to_string(),
-            extension: name.split('.').last().unwrap_or("").to_string(),
-            asset_type,
-            size: 1024,
+            extension: "png".to_string(),
+            asset_type: crate::scanner::AssetType::Texture,
+            size,
             modified: 0,
-            metadata: None,
+            metadata: Some(meta),
             unity_guid: None,
         }
     }
 
-    fn create_texture_with_dimensions(name: &str, width: u32, height: u32) -> AssetInfo {
-        AssetInfo {
-            path: format!("/test/{}", name),
-            name: name.to_string(),
-            extension: "png".to_string(),
-            asset_type: AssetType::Texture,
-            size: 1024,
-            modified: 0,
-            metadata: Some(AssetMetadata {
-                width: Some(width),
-                height: Some(height),
-                has_alpha: Some(false),
-                ..Default::default()
-            }),
-            unity_guid: None,
+    fn sized(width: u32, height: u32) -> crate::scanner::AssetMetadata {
+        crate::scanner::AssetMetadata {
+            width: Some(width),
+            height: Some(height),
+            ..Default::default()
         }
+    }
+
+    fn harvest_texture() -> Vec<Issue> {
+        use rules::texture::{TextureConfig, TextureRule};
+        let cfg = TextureConfig {
+            require_pot: true,
+            warn_non_square: true,
+            max_size: 2048,
+            min_size: 32,
+            max_file_size: 10 * 1024 * 1024,
+            ..TextureConfig::default()
+        };
+        let rule = TextureRule::new(cfg);
+        // One fixture per branch, in the rule's own precedence order: the
+        // dimension checks short-circuit, so a fixture meant for a later
+        // branch must pass every earlier one.
+        let mut meta_no_mips = sized(512, 512);
+        meta_no_mips.mipmap_count = Some(1);
+        [
+            texture_asset("not-pot.png", 1024, sized(100, 100)),
+            texture_asset("too-big.png", 1024, sized(8192, 8192)),
+            texture_asset("too-small.png", 1024, sized(8, 8)),
+            texture_asset("oblong.png", 1024, sized(512, 256)),
+            texture_asset("heavy.png", 11 * 1024 * 1024, sized(512, 512)),
+            texture_asset("no-mips.dds", 1024, meta_no_mips),
+        ]
+        .iter()
+        .filter_map(|a| rule.check(a))
+        .collect()
+    }
+
+    fn harvest_naming() -> Vec<Issue> {
+        use rules::naming::{NamingConfig, NamingRule};
+        // Each fixture isolates one branch: the rule returns at the first
+        // violation it finds (length → forbidden → chinese → prefix → case),
+        // so a name meant for a later check must be clean for every earlier
+        // one. `case_style` is a plain String on the config, not an enum.
+        let long_name = format!("{}.png", "a".repeat(80));
+        let cases: Vec<(NamingConfig, String)> = vec![
+            (
+                NamingConfig { enabled: true, max_length: 32, ..NamingConfig::default() },
+                long_name,
+            ),
+            (
+                NamingConfig { enabled: true, ..NamingConfig::default() },
+                "he<ro.png".to_string(),
+            ),
+            (
+                NamingConfig { enabled: true, forbid_chinese: true, ..NamingConfig::default() },
+                "英雄.png".to_string(),
+            ),
+            (
+                NamingConfig {
+                    enabled: true,
+                    texture_prefix: Some("T_".to_string()),
+                    ..NamingConfig::default()
+                },
+                "rock.png".to_string(),
+            ),
+            (
+                NamingConfig {
+                    enabled: true,
+                    case_style: "PascalCase".to_string(),
+                    ..NamingConfig::default()
+                },
+                "rock_wall.png".to_string(),
+            ),
+        ];
+        cases
+            .into_iter()
+            .filter_map(|(cfg, name)| {
+                let rule = NamingRule::new(cfg);
+                rule.check(&texture_asset(&name, 1024, crate::scanner::AssetMetadata::default()))
+            })
+            .collect()
+    }
+
+    fn harvest_model() -> Vec<Issue> {
+        use rules::model::{ModelConfig, ModelRule};
+        // `enabled` is inert here: no `Rule::check` impl reads it. It only
+        // decides whether `Analyzer::with_config` registers the rule at all,
+        // and this harvest calls `check()` directly. Set true anyway so the
+        // fixture reads as a config a user could actually have written.
+        // (The free-function rules below are the opposite case —
+        // `find_pbr_set_issues` / `find_dcc_source_issues` test the flag in
+        // their own body, so their fixtures genuinely need it on.)
+        let cfg = ModelConfig {
+            enabled: true,
+            max_vertices: 10_000,
+            max_faces: 10_000,
+            max_materials: 4,
+        };
+        let rule = ModelRule::new(cfg);
+        let mk = |vertices, faces, materials| {
+            let meta = crate::scanner::AssetMetadata {
+                vertex_count: Some(vertices),
+                face_count: Some(faces),
+                material_count: Some(materials),
+                ..Default::default()
+            };
+            AssetInfo {
+                path: "/p/prop.fbx".to_string(),
+                name: "prop.fbx".to_string(),
+                extension: "fbx".to_string(),
+                asset_type: crate::scanner::AssetType::Model,
+                size: 1024,
+                modified: 0,
+                metadata: Some(meta),
+                unity_guid: None,
+            }
+        };
+        // Same short-circuit caution as the texture fixtures.
+        [mk(50_000, 10, 1), mk(10, 50_000, 1), mk(10, 10, 32)]
+            .iter()
+            .filter_map(|a| rule.check(a))
+            .collect()
+    }
+
+    fn harvest_audio() -> Vec<Issue> {
+        use rules::audio::{AudioConfig, AudioRule};
+        let cfg = AudioConfig {
+            enabled: true,
+            allowed_sample_rates: vec![44100, 48000],
+            max_sfx_duration: 5.0,
+            max_file_size: 10 * 1024 * 1024,
+            prefer_mono_for_sfx: true,
+        };
+        let rule = AudioRule::new(cfg);
+        let mk = |name: &str, size: u64, meta: crate::scanner::AssetMetadata| AssetInfo {
+            path: format!("/p/{name}"),
+            name: name.to_string(),
+            extension: "wav".to_string(),
+            asset_type: crate::scanner::AssetType::Audio,
+            size,
+            modified: 0,
+            metadata: Some(meta),
+            unity_guid: None,
+        };
+        let meta = |rate: u32, secs: Option<f64>, channels: u32| crate::scanner::AssetMetadata {
+            sample_rate: Some(rate),
+            duration_secs: secs,
+            channels: Some(channels),
+            ..Default::default()
+        };
+        // Branch order is sample_rate → sfx_duration → stereo_sfx →
+        // file_size, and the two SFX branches additionally require an SFX
+        // token in the file name (`hit` / `click` / `sfx` / …, matched as a
+        // whole token). So the later fixtures carry an allowed rate, and the
+        // file-size one avoids an SFX name entirely.
+        [
+            mk("ambience.wav", 1024, meta(22050, None, 1)),
+            mk("sword_hit.wav", 1024, meta(44100, Some(12.0), 1)),
+            mk("ui_click.wav", 1024, meta(44100, Some(0.3), 2)),
+            mk("music_loop.wav", 11 * 1024 * 1024, meta(44100, Some(60.0), 2)),
+        ]
+        .iter()
+        .filter_map(|a| rule.check(a))
+        .collect()
+    }
+
+    fn harvest_colorspace() -> Vec<Issue> {
+        use rules::texture_colorspace::TextureColorSpaceRule;
+        // `_normal` is a data-texture suffix, so sRGB encoding is the
+        // suspicious combination the rule exists to catch.
+        let meta = AssetMetadata {
+            color_space: Some("sRGB".to_string()),
+            ..Default::default()
+        };
+        TextureColorSpaceRule
+            .check(&texture_asset("rock_normal.png", 1024, meta))
+            .into_iter()
+            .collect()
+    }
+
+    fn harvest_duplicate() -> Vec<Issue> {
+        use rules::dcc_source::tests::make_asset;
+        let dir = tempfile::tempdir().expect("tempdir");
+        // The rule buckets by the declared `size` (both files get
+        // `make_asset`'s 1) and only then hashes, so the two have to be
+        // byte-identical on disk. Writing exactly one byte each also keeps
+        // the declared size honest.
+        let paths: Vec<_> = ["a.png", "b.png"]
+            .iter()
+            .map(|name| {
+                let path = dir.path().join(name);
+                std::fs::write(&path, b"x").expect("write fixture");
+                path
+            })
+            .collect();
+        let assets: Vec<AssetInfo> = paths
+            .iter()
+            .map(|p| make_asset(&p.to_string_lossy(), AssetType::Texture))
+            .collect();
+        rules::duplicate::find_duplicates(&assets, &dir.path().to_string_lossy()).issues
+    }
+
+    fn harvest_missing_reference() -> Vec<Issue> {
+        use rules::missing_reference::tests::{prefab_referencing, texture_with_guid};
+        let dir = tempfile::tempdir().expect("tempdir");
+        // The rule bails out before reporting anything when no GUID is known
+        // at all, so the fixture needs one resolvable asset alongside the
+        // prefab's dangling reference.
+        let assets = vec![
+            texture_with_guid(dir.path(), "known.png", "11111111111111111111111111111111"),
+            prefab_referencing(
+                dir.path(),
+                "scene.prefab",
+                &["22222222222222222222222222222222"],
+            ),
+        ];
+        rules::missing_reference::find_missing_references(
+            &assets,
+            &assets,
+            &Some(crate::scanner::ProjectType::Unity),
+            &crate::unity::PackageGuidIndex::default(),
+        )
+        .issues
+    }
+
+    fn harvest_pbr_set() -> Vec<Issue> {
+        use rules::pbr_set::PbrSetConfig;
+        // `find_pbr_set_issues` reads `config.enabled` in its own body and
+        // returns an empty result when it is false — and false is the
+        // default. Unlike the trait rules above, this one really does need
+        // the override, or the harvest sees nothing to record.
+        let cfg = PbrSetConfig {
+            enabled: true,
+            ..PbrSetConfig::default()
+        };
+        // `_BaseColor` is a default alias of the `basecolor` trigger channel,
+        // so a set forms; `normal` is required and has no sibling file.
+        let asset = texture_asset("rock_BaseColor.png", 1024, AssetMetadata::default());
+        rules::pbr_set::find_pbr_set_issues(&[asset], &cfg).issues
+    }
+
+    fn harvest_dcc_source() -> Vec<Issue> {
+        use rules::dcc_source::tests::{make_asset, write_with_mtime};
+        use rules::dcc_source::DccSourceConfig;
+        // Same `config.enabled` caveat as pbr_set above. The export is
+        // stamped first and the source second, so the gap is at least the
+        // 3 days asked for and never less — it lands in `humanize_seconds`'s
+        // last bucket, and the message reads "3d" as that function documents.
+        let cfg = DccSourceConfig {
+            enabled: true,
+            ..DccSourceConfig::default()
+        };
+        let dir = tempfile::tempdir().expect("tempdir");
+        let blend = dir.path().join("character.blend");
+        let fbx = dir.path().join("character.fbx");
+        write_with_mtime(&fbx, 86_400 * 3);
+        write_with_mtime(&blend, 0);
+        let assets = vec![
+            make_asset(&blend.to_string_lossy(), AssetType::Model),
+            make_asset(&fbx.to_string_lossy(), AssetType::Model),
+        ];
+        rules::dcc_source::find_dcc_source_issues(&assets, &cfg).issues
+    }
+
+    #[test]
+    fn declared_rule_args_match_what_the_rules_actually_emit() {
+        let found = harvest();
+        for (rule_id, declared) in RULE_ARGS {
+            let actual = found.get(*rule_id).unwrap_or_else(|| {
+                panic!("no fixture in harvest() triggers {rule_id} — the declaration is unpinned")
+            });
+            let expected: BTreeSet<String> = declared.iter().map(|s| s.to_string()).collect();
+            assert_eq!(actual, &expected, "args mismatch for {rule_id}");
+        }
+    }
+
+    #[test]
+    fn every_rule_the_harvest_reaches_is_declared() {
+        // The other direction of `declared_rule_args_match_…`: a rule whose
+        // fixture runs but whose row was never added would otherwise sit
+        // unchecked, and the locale gate would silently skip it.
+        let found = harvest();
+        let declared: BTreeSet<&str> = RULE_ARGS.iter().map(|(id, _)| *id).collect();
+        let undeclared: Vec<&String> =
+            found.keys().filter(|id| !declared.contains(id.as_str())).collect();
+        assert!(undeclared.is_empty(), "rules emitted but not declared: {undeclared:?}");
+        // Guards the harvest, not the analyzer: nothing here counts rule_id
+        // construction sites, so a 24th rule with no fixture in `harvest()`
+        // reaches neither of the checks above. Bump this by hand when adding a
+        // rule, and add the fixture that makes the bump legitimate.
+        assert_eq!(
+            RULE_ARGS.len(),
+            23,
+            "RULE_ARGS is maintained by hand — a new rule needs a row here and a fixture in harvest()"
+        );
     }
 
     #[test]
@@ -284,6 +664,7 @@ mod tests {
             suggestion: None,
             auto_fixable: false,
             related_paths: None,
+            args: HashMap::new(),
         };
 
         result.add_issue(issue);
@@ -306,6 +687,7 @@ mod tests {
             suggestion: Some("Fix this".to_string()),
             auto_fixable: true,
             related_paths: None,
+            args: HashMap::new(),
         };
 
         result.add_issue(issue);
@@ -329,6 +711,7 @@ mod tests {
             suggestion: None,
             auto_fixable: false,
             related_paths: None,
+            args: HashMap::new(),
         });
 
         result2.add_issue(Issue {
@@ -340,6 +723,7 @@ mod tests {
             suggestion: None,
             auto_fixable: false,
             related_paths: None,
+            args: HashMap::new(),
         });
 
         result1.merge(result2);
@@ -385,6 +769,7 @@ mod tests {
             suggestion: None,
             auto_fixable: false,
             related_paths: None,
+            args: HashMap::new(),
         });
 
         result.add_issue(Issue {
@@ -396,6 +781,7 @@ mod tests {
             suggestion: None,
             auto_fixable: false,
             related_paths: None,
+            args: HashMap::new(),
         });
 
         result.add_issue(Issue {
@@ -407,9 +793,177 @@ mod tests {
             suggestion: None,
             auto_fixable: false,
             related_paths: None,
+            args: HashMap::new(),
         });
 
         assert_eq!(*result.by_rule.get("rule_a").unwrap(), 2);
         assert_eq!(*result.by_rule.get("rule_b").unwrap(), 1);
+    }
+
+    #[test]
+    fn an_issue_without_args_serializes_exactly_as_before() {
+        // `args` mirrors `related_paths`: rules that interpolate nothing must
+        // not grow the JSON export by an empty object. Exports are a contract
+        // scripts read, and this keeps them byte-identical for those rules.
+        let issue = Issue {
+            rule_id: "naming.chinese".to_string(),
+            rule_name: "Chinese Characters".to_string(),
+            severity: Severity::Warning,
+            message: "File name contains Chinese characters".to_string(),
+            asset_path: "/p/中文.png".to_string(),
+            suggestion: None,
+            auto_fixable: false,
+            related_paths: None,
+            args: HashMap::new(),
+        };
+        let json = serde_json::to_string(&issue).expect("serialize");
+        assert!(!json.contains("args"), "empty args must be skipped: {json}");
+    }
+
+    #[test]
+    fn issue_args_builds_the_map_from_pairs() {
+        let a = issue_args([("width", "1024".to_string()), ("height", "768".to_string())]);
+        assert_eq!(a.get("width").map(String::as_str), Some("1024"));
+        assert_eq!(a.get("height").map(String::as_str), Some("768"));
+        assert_eq!(a.len(), 2);
+    }
+
+    #[test]
+    fn zh_templates_only_use_placeholders_the_rules_emit() {
+        // The only place that can see both halves: which placeholders a rule
+        // fills (RULE_ARGS, itself pinned by the harvest) and which ones the
+        // translations reference. A typo here renders as a literal `{{witdh}}`
+        // on screen and in the exported report, since neither end substitutes
+        // unknown names.
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../src/i18n/locales/zh.json");
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let doc: serde_json::Value = serde_json::from_str(&raw).expect("zh.json parses");
+        let declared: BTreeMap<&str, BTreeSet<&str>> = RULE_ARGS
+            .iter()
+            .map(|(id, args)| (*id, args.iter().copied().collect()))
+            .collect();
+
+        let rules = &doc["issues"]["rules"];
+        if rules.is_null() {
+            return; // nothing translated yet
+        }
+        for (rule_id, allowed) in &declared {
+            // rule_id contains dots, which i18next reads as nesting.
+            let mut node = rules;
+            for segment in rule_id.split('.') {
+                node = &node[segment];
+            }
+            if node.is_null() {
+                continue; // this rule is not translated yet — falls back to English
+            }
+            for field in ["title", "message", "suggestion"] {
+                let Some(tpl) = node[field].as_str() else { continue };
+                for name in placeholders(tpl) {
+                    assert!(
+                        allowed.contains(name.as_str()),
+                        "zh.json {rule_id}.{field} uses {{{{{name}}}}}, which {rule_id} never emits (it emits {allowed:?})"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn zh_template_keys_all_name_a_declared_rule() {
+        // The other direction of `zh_templates_only_use_placeholders_…`: that
+        // test walks declared rule id → JSON and skips what is missing, so a
+        // key the JSON has and no rule claims is invisible to it.
+        //
+        // It is not a harmless typo. `issueTemplates.ts` flattens with `.`
+        // regardless of nesting depth, so a flat `"texture.max_size": {...}`
+        // under `rules` — the shape a translator writes who does not know
+        // i18next reads `.` as nesting — produces exactly the key the report
+        // looks up. The panel then renders English (i18next misses) while the
+        // exported report renders Chinese, with every other gate green.
+        // A misspelled or undeclared id sits inert the same way.
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../src/i18n/locales/zh.json");
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let doc: serde_json::Value = serde_json::from_str(&raw).expect("zh.json parses");
+        let declared: BTreeSet<&str> = RULE_ARGS.iter().map(|(id, _)| *id).collect();
+
+        for segments in leaf_paths(&doc["issues"]["rules"]) {
+            // Checked on the segments, not on the joined key: a flat
+            // `"texture.max_size"` joins to the same string a properly nested
+            // one does, which is exactly why the split is invisible in the
+            // rendered output and visible only here.
+            for segment in &segments {
+                assert!(
+                    !segment.contains('.'),
+                    "zh.json issues.rules has the literal key `{segment}` — i18next reads `.` as \
+                     nesting, so the UI misses it and falls back to English while the report, \
+                     which flattens the same tree with `.`, finds it. Nest it instead."
+                );
+            }
+            let key = segments.join(".");
+            let (rule_id, field) = key
+                .rsplit_once('.')
+                .unwrap_or_else(|| panic!("zh.json issues.rules.{key} is not <rule_id>.<field>"));
+            assert!(
+                matches!(field, "title" | "message" | "suggestion"),
+                "zh.json issues.rules.{key} ends in `{field}`, not title/message/suggestion"
+            );
+            assert!(
+                declared.contains(rule_id),
+                "zh.json issues.rules.{key} translates `{rule_id}`, which no rule emits"
+            );
+        }
+
+        // The nouns `localized_issue_cells` (report) and `localizeIssue` (UI)
+        // resolve `args.age_unit` through. The tags are `humanize_seconds`'.
+        for segments in leaf_paths(&doc["issues"]["duration"]) {
+            let key = segments.join(".");
+            assert!(
+                matches!(key.as_str(), "s" | "m" | "h" | "d"),
+                "zh.json issues.duration.{key} is not a bucket humanize_seconds emits"
+            );
+        }
+    }
+
+    /// Every leaf under `node`, as the object keys walked to reach it. Kept as
+    /// segments rather than a joined key so a key that itself contains the
+    /// separator stays distinguishable from real nesting.
+    fn leaf_paths(node: &serde_json::Value) -> Vec<Vec<String>> {
+        let mut out = Vec::new();
+        fn walk(node: &serde_json::Value, path: &mut Vec<String>, out: &mut Vec<Vec<String>>) {
+            match node {
+                serde_json::Value::Null => {}
+                serde_json::Value::Object(map) => {
+                    for (k, v) in map {
+                        path.push(k.clone());
+                        walk(v, path, out);
+                        path.pop();
+                    }
+                }
+                _ => out.push(path.clone()),
+            }
+        }
+        walk(node, &mut Vec::new(), &mut out);
+        out
+    }
+
+    /// The `{{name}}` names a template references.
+    fn placeholders(template: &str) -> Vec<String> {
+        let mut names = Vec::new();
+        let mut rest = template;
+        while let Some(start) = rest.find("{{") {
+            let tail = &rest[start + 2..];
+            match tail.find("}}") {
+                Some(end) => {
+                    names.push(tail[..end].trim().to_string());
+                    rest = &tail[end + 2..];
+                }
+                None => break,
+            }
+        }
+        names
     }
 }

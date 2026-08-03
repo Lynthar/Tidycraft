@@ -98,12 +98,21 @@ export interface Issue {
   severity: Severity;
   message: string;
   asset_path: string;
-  suggestion?: string;
+  /** Unlike every other optional field here, this one has no
+   *  `skip_serializing_if` on the Rust side (see Rust `Issue`), so a rule
+   *  that makes no suggestion arrives as `suggestion: null`, not an absent
+   *  key. Treat `null` and `undefined` the same at any call site. */
+  suggestion?: string | null;
   auto_fixable: boolean;
   /** All members of the same finding, root-relative, original first.
    *  Currently only the `duplicate` rule fills this (see Rust `Issue`);
    *  the issue list collapses such issues into one group card. */
   related_paths?: string[];
+  /** Placeholder values for the localized rendering of `message` /
+   *  `suggestion` (see Rust `Issue`). Absent for rules that interpolate
+   *  nothing — every field on the Rust side is `skip_serializing_if`, so
+   *  unset arrives absent rather than null. */
+  args?: Record<string, string>;
 }
 
 export interface AnalysisResult {

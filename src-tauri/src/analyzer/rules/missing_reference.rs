@@ -9,7 +9,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use crate::analyzer::{AnalysisResult, Issue, Severity};
+use crate::analyzer::{issue_args, AnalysisResult, Issue, Severity};
 use crate::scanner::{AssetInfo, ProjectType};
 use crate::unity;
 
@@ -105,7 +105,8 @@ pub fn find_missing_references(
                         .to_string(),
                 ),
                 auto_fixable: false,
-            related_paths: None,
+                related_paths: None,
+                args: issue_args([("guid", r.guid.clone())]),
             });
         }
     }
@@ -113,14 +114,17 @@ pub fn find_missing_references(
     result
 }
 
+/// `pub(crate)` so `analyzer::tests`' arg-harvest can build its fixture from
+/// the same two constructors this rule's own tests use, rather than a copy
+/// that would quietly stop matching the rule the day the rule changes.
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::scanner::{AssetInfo, AssetType};
     use std::fs;
     use tempfile::tempdir;
 
-    fn texture_with_guid(dir: &std::path::Path, name: &str, guid: &str) -> AssetInfo {
+    pub(crate) fn texture_with_guid(dir: &std::path::Path, name: &str, guid: &str) -> AssetInfo {
         let path = dir.join(name);
         fs::write(&path, b"fake").unwrap();
         // Write Unity .meta sidecar so a real scan would pick up the guid,
@@ -137,7 +141,7 @@ mod tests {
         }
     }
 
-    fn prefab_referencing(dir: &std::path::Path, name: &str, refs: &[&str]) -> AssetInfo {
+    pub(crate) fn prefab_referencing(dir: &std::path::Path, name: &str, refs: &[&str]) -> AssetInfo {
         let mut content = String::from("--- !u!1 &1\nGameObject:\n  m_Name: Test\n");
         for g in refs {
             content.push_str(&format!(

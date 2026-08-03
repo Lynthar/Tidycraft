@@ -1,4 +1,4 @@
-use crate::analyzer::{Issue, Severity};
+use crate::analyzer::{issue_args, Issue, Severity};
 use crate::scanner::{AssetInfo, AssetType};
 use serde::{Deserialize, Serialize};
 
@@ -135,7 +135,11 @@ impl Rule for TextureRule {
                 asset_path: asset.path.clone(),
                 suggestion: Some("Consider compressing or reducing resolution".to_string()),
                 auto_fixable: false,
-            related_paths: None,
+                related_paths: None,
+                args: issue_args([
+                    ("size", format!("{:.2}", asset.size as f64 / 1024.0 / 1024.0)),
+                    ("max", format!("{:.2}", self.config.max_file_size as f64 / 1024.0 / 1024.0)),
+                ]),
             });
         }
 
@@ -171,7 +175,13 @@ impl TextureRule {
                         next_power_of_two(height)
                     )),
                     auto_fixable: false,
-            related_paths: None,
+                    related_paths: None,
+                    args: issue_args([
+                        ("width", width.to_string()),
+                        ("height", height.to_string()),
+                        ("pot_width", next_power_of_two(width).to_string()),
+                        ("pot_height", next_power_of_two(height).to_string()),
+                    ]),
                 });
             }
         }
@@ -192,7 +202,12 @@ impl TextureRule {
                     self.config.max_size, self.config.max_size
                 )),
                 auto_fixable: false,
-            related_paths: None,
+                related_paths: None,
+                args: issue_args([
+                    ("width", width.to_string()),
+                    ("height", height.to_string()),
+                    ("max", self.config.max_size.to_string()),
+                ]),
             });
         }
 
@@ -209,7 +224,12 @@ impl TextureRule {
                 asset_path: asset.path.clone(),
                 suggestion: None,
                 auto_fixable: false,
-            related_paths: None,
+                related_paths: None,
+                args: issue_args([
+                    ("width", width.to_string()),
+                    ("height", height.to_string()),
+                    ("min", self.config.min_size.to_string()),
+                ]),
             });
         }
 
@@ -223,7 +243,11 @@ impl TextureRule {
                 asset_path: asset.path.clone(),
                 suggestion: None,
                 auto_fixable: false,
-            related_paths: None,
+                related_paths: None,
+                args: issue_args([
+                    ("width", width.to_string()),
+                    ("height", height.to_string()),
+                ]),
             });
         }
 
@@ -251,7 +275,11 @@ impl TextureRule {
                             .to_string(),
                     ),
                     auto_fixable: false,
-            related_paths: None,
+                    related_paths: None,
+                    args: issue_args([
+                        ("width", width.to_string()),
+                        ("height", height.to_string()),
+                    ]),
                 });
             }
         }
