@@ -45,6 +45,7 @@ use crate::analyzer::{AnalysisResult, Issue, Severity};
 use crate::scanner::AssetInfo;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DccSourceConfig {
     /// Out-of-box OFF: pairing rules are opinionated (which sources go
     /// with which exports), and a fresh project rarely matches a
@@ -73,6 +74,7 @@ pub struct DccSourceConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DccMapping {
     /// Display label — appears in the issue's suggestion text
     /// (e.g. "Re-export from blender").
@@ -87,6 +89,7 @@ pub struct DccMapping {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DccLookup {
     /// Search the source's own directory for exports. Default true —
     /// the most common layout (`models/character.blend` next to

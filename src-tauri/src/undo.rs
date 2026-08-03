@@ -424,7 +424,10 @@ fn execute_single_undo(operation: &FileOperation) -> Result<(), String> {
                 return Err(format!("Source file not found: {}", new_path));
             }
 
-            if dst.exists() {
+            // 与上面 Rename 分支同一判据(理由见那里的注释):`dst.exists()` 命中
+            // 源文件自身时必须放行,否则撤销永远失败——全败的批次不会被消费,
+            // 同一个错误每次重试都再来一遍。
+            if dst.exists() && !paths_are_same_file(src, dst) {
                 return Err(format!(
                     "Target path already exists: {}",
                     operation.original_path
@@ -930,6 +933,39 @@ mod tests {
                 operation_type: OperationType::Rename,
                 original_path: original.to_string_lossy().to_string(),
                 new_path: Some(renamed.clone()),
+                timestamp: current_timestamp(),
+            }],
+        );
+
+        let result = manager.undo_last().unwrap();
+        assert!(
+            result.success,
+            "the file itself must not count as a conflicting occupant: {:?}",
+            result.errors
+        );
+    }
+
+    // Unix-only for the same POSIX-rename reason as the twin above.
+    #[cfg(unix)]
+    #[test]
+    fn undo_move_allows_target_occupied_by_the_same_file() {
+        // The Move branch kept the bare `dst.exists()` the Rename branch had
+        // already outgrown, so undoing a move whose original path resolves to
+        // the moved file itself failed with "Target path already exists" —
+        // and permanently: a batch in which every operation fails is not
+        // consumed, so the same error came back on every retry.
+        let dir = tempdir().unwrap();
+        let moved = create_test_file(dir.path(), "moved.txt");
+        let original = dir.path().join("orig.txt");
+        std::fs::hard_link(&moved, &original).unwrap();
+
+        let mut manager = UndoManager::new(10);
+        manager.record_batch(
+            "Move".to_string(),
+            vec![FileOperation {
+                operation_type: OperationType::Move,
+                original_path: original.to_string_lossy().to_string(),
+                new_path: Some(moved.clone()),
                 timestamp: current_timestamp(),
             }],
         );

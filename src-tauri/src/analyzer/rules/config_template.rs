@@ -13,6 +13,8 @@
 pub const DEFAULT_CONFIG_TEMPLATE: &str = r##"# Tidycraft analysis rules.
 # Edit and save — Run Analysis re-reads this file on each click; no rescan needed.
 # Delete this file to fall back to built-in defaults.
+# A key a section doesn't recognise is reported by name rather than ignored,
+# so a typo shows up as an error instead of silently keeping the default.
 # See docs/analyzer-rules.md for what each rule does and when to relax it.
 #
 # OUT-OF-BOX DEFAULTS ARE DELIBERATELY MINIMAL.

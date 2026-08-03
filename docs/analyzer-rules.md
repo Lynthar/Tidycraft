@@ -67,6 +67,8 @@ Out-of-box `Run Analysis` therefore flags only **real bugs** — illegal charact
 
 > **Case is checked past the prefix.** With both a type prefix and a case style configured, the case check runs on the part of the name *after* the prefix — no case style accepts `T_`, so checking the whole name would fail every correctly named file.
 
+> **PascalCase accepts acronyms.** `HUD.png`, `UI.png` and `A.png` pass — an acronym is one capitalized word, and without an underscore to key on there is no way to tell `HUD` from a shouted `ROCK`. Guessing "shouted" reported compliant files and proposed `Hud` as the fix, which threw the acronym away.
+
 ---
 
 ## Texture Standards (`[texture]`) — *disabled by default*
@@ -278,6 +280,8 @@ If a pattern is malformed, Run Analysis fails fast with a "Invalid ignore patter
 4. Click **Run Analysis** (or `⌘⇧R`). The toml is re-read on every click — no rescan needed.
 
 If parsing fails (typo, broken array, missing quote), Run Analysis surfaces the error from the toml parser; fix the line and re-run.
+
+**A key a rule section does not recognise is an error, not a shrug.** Writing `max_sze = 512` under `[texture]` used to leave `max_size` at its default and run the analysis with settings you believed you had changed — nothing on screen said so. Such a key is now rejected by name, listing the keys that section accepts. The strictness is per-section: the top level still tolerates `[project]` and anything else a future feature adds to the same file.
 
 To go back to defaults, delete `tidycraft.toml`. The next analysis run uses built-in values.
 

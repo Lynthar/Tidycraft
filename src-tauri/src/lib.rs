@@ -1162,26 +1162,6 @@ pub struct DependencyEdge {
     pub to: String,
 }
 
-/// Unity text files that carry GUID references to other assets. Both the
-/// dependency graph (`get_unity_dependencies`) and the unused-asset scan
-/// (`find_unused_assets`) walk this *same* set so their reference views never
-/// diverge (previously deps used prefab/unity/mat and unused added controller —
-/// so their results disagreed). Beyond prefab/scene/material/controller it adds:
-///   - `.asset` — ScriptableObjects + EditorBuildSettings (scene refs live here,
-///     so scenes were otherwise always flagged unused),
-///   - `.anim` — sprite-animation PPtr curves,
-///   - `.overridecontroller` — animator override controllers.
-/// `unity::parse_unity_file` recognizes each of these extensions.
-const UNITY_REFERENCEABLE_EXTS: &[&str] = &[
-    "prefab",
-    "unity",
-    "mat",
-    "controller",
-    "overridecontroller",
-    "asset",
-    "anim",
-];
-
 // `(async)`: re-reads + parses every prefab/scene/mat — off the main thread so
 // a 10k-asset project doesn't freeze the window, and off the project lock (see
 // EngineScanSnapshot) so it doesn't freeze the project's other commands either.
@@ -1227,8 +1207,7 @@ fn get_unity_dependencies(project_id: String) -> Result<DependencyGraph, String>
     let mut unresolved_guids: std::collections::HashSet<String> =
         std::collections::HashSet::new();
     for asset in &scan_result.assets {
-        let ext = asset.extension.to_lowercase();
-        if UNITY_REFERENCEABLE_EXTS.contains(&ext.as_str()) {
+        if unity::is_reference_source(&asset.extension) {
             if let Some(unity_info) = unity::parse_unity_file(Path::new(&asset.path)) {
                 if let Some(ref from_guid) = asset.unity_guid {
                     for reference in &unity_info.references {
@@ -1336,8 +1315,7 @@ fn find_unused_assets(project_id: String) -> Result<UnusedAssetsResult, String> 
 
     let mut unreadable_sources = 0usize;
     for asset in &scan_result.assets {
-        let ext = asset.extension.to_lowercase();
-        if UNITY_REFERENCEABLE_EXTS.contains(&ext.as_str()) {
+        if unity::is_reference_source(&asset.extension) {
             match unity::parse_unity_file(Path::new(&asset.path)) {
                 Some(unity_info) => {
                     for reference in &unity_info.references {
@@ -2019,12 +1997,41 @@ fn apply_rename_operation(name: &str, operation: &RenameOperation) -> String {
 /// checks — a separator in `new_name` turns `parent.join(new_name)` into a
 /// directory traversal, and a find→replace text can inject one just as
 /// easily as a direct call.
+/// MS-DOS device names. Win32 still resolves them as devices whatever the
+/// extension carried — `CON.png` is the console, not a file — so such a file
+/// cannot be created on Windows at all.
+const WINDOWS_RESERVED_STEMS: &[&str] = &[
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+/// The last gate before a rename touches the disk. The two Windows rules below
+/// are enforced on every platform on purpose: a name minted on macOS lands in
+/// the repository a Windows teammate checks out, and a guard behind
+/// `cfg(windows)` is a guard that never runs where the work is being done —
+/// the same trap as a policy that only applies in production.
 fn validate_new_name(new_name: &str) -> Result<(), String> {
     if new_name.is_empty() || new_name == "." || new_name == ".." {
         return Err("Invalid file name".to_string());
     }
     if new_name.contains('/') || new_name.contains('\\') {
         return Err("File name cannot contain path separators".to_string());
+    }
+    // Win32 strips these on create, so the file would land under a name that
+    // is not the one we record in the undo stack and the tag bindings — three
+    // views of one file that stop agreeing, silently.
+    if new_name.ends_with(' ') || new_name.ends_with('.') {
+        return Err("File name cannot end with a space or a period".to_string());
+    }
+    let stem = new_name.split('.').next().unwrap_or(new_name);
+    if WINDOWS_RESERVED_STEMS
+        .iter()
+        .any(|r| stem.eq_ignore_ascii_case(r))
+    {
+        return Err(format!(
+            "\"{}\" is a reserved device name on Windows and cannot be used as a file name",
+            stem
+        ));
     }
     Ok(())
 }
@@ -2551,7 +2558,7 @@ pub struct DeleteResult {
 
 // ============ Move / Copy / Duplicate ============
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct FileOpError {
     pub path: String,
     pub message: String,
@@ -2620,8 +2627,15 @@ fn move_assets(
                 };
                 let dst = target.join(&name);
 
-                if src == dst {
+                if src == dst || undo::paths_are_same_file(src, &dst) {
                     // No-op: source already in target directory. Skip silently.
+                    // The literal comparison alone only catches the spelling
+                    // the caller happened to send; a case variant on a
+                    // case-insensitive filesystem, a symlinked folder, or a
+                    // `..` names the same directory and used to fall through
+                    // to the guard below, which reported "Target already
+                    // exists" about the very file being moved. Same identity
+                    // check the rename guard uses, same reason.
                     continue;
                 }
                 if dst.exists() {
@@ -3259,6 +3273,185 @@ mod tests {
         assert!(validate_new_name("normal_name.png").is_ok());
         // Dotfiles are odd but legal targets.
         assert!(validate_new_name(".hidden").is_ok());
+    }
+
+    /// Two Windows landmines, rejected on every platform deliberately: a name
+    /// minted on macOS lands in the repository a Windows teammate has to check
+    /// out, and a guard compiled only on one platform is a guard nobody
+    /// exercises where the work gets done.
+    #[test]
+    fn rename_targets_reject_windows_reserved_names_and_trailing_punctuation() {
+        // Win32 resolves these to devices whatever the extension, so the file
+        // cannot be created at all — the rename fails with an OS error nobody
+        // can act on.
+        for name in ["CON", "con.png", "NUL.txt", "aux.fbx", "COM1.wav", "lpt9"] {
+            assert!(
+                validate_new_name(name).is_err(),
+                "{} is a reserved device name and must be rejected",
+                name
+            );
+        }
+        // Win32 strips a trailing space or period on create, so the file lands
+        // under a name that is not the one recorded in the undo stack or the
+        // tag bindings — three views of one file that no longer agree.
+        for name in ["rock.png.", "rock.png ", "trailing "] {
+            assert!(
+                validate_new_name(name).is_err(),
+                "{:?} ends in stripped punctuation and must be rejected",
+                name
+            );
+        }
+        // Merely containing a reserved word is fine — the device name has to
+        // be the whole stem.
+        for name in ["console.png", "connect.fbx", "my_con.png", "AUXILIARY.wav"] {
+            assert!(
+                validate_new_name(name).is_ok(),
+                "{} is an ordinary name and must be allowed",
+                name
+            );
+        }
+    }
+
+    /// Build a one-directory scan result so engine commands can run against a
+    /// hand-made asset set without going through a real scan.
+    #[cfg(test)]
+    fn scan_of(root: &std::path::Path, assets: Vec<scanner::AssetInfo>) -> scanner::ScanResult {
+        let root_path = scanner::path_to_string(root);
+        scanner::ScanResult {
+            directory_tree: scanner::DirectoryNode {
+                name: root
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default(),
+                path: root_path.clone(),
+                children: Vec::new(),
+                file_count: assets.len(),
+                total_size: 0,
+            },
+            total_count: assets.len(),
+            total_size: 0,
+            type_counts: HashMap::new(),
+            project_type: Some(scanner::ProjectType::Unity),
+            root_path,
+            assets,
+        }
+    }
+
+    #[cfg(test)]
+    fn unity_asset(
+        path: &std::path::Path,
+        asset_type: scanner::AssetType,
+        guid: Option<&str>,
+    ) -> scanner::AssetInfo {
+        scanner::AssetInfo {
+            path: scanner::path_to_string(path),
+            name: path.file_name().unwrap().to_string_lossy().to_string(),
+            extension: path
+                .extension()
+                .map(|e| e.to_string_lossy().to_string())
+                .unwrap_or_default(),
+            asset_type,
+            size: 1,
+            modified: 0,
+            metadata: None,
+            unity_guid: guid.map(|g| g.to_string()),
+        }
+    }
+
+    /// A sprite atlas exists to list the sprites it packs — it is a pure
+    /// reference holder. Leaving `.spriteatlas` out of the reference-source
+    /// set made every sprite that only an atlas points at look unused, which
+    /// is the one failure mode that talks a user into deleting a live asset.
+    ///
+    /// `unreadable_sources` is asserted too, and that is the sharp end: the
+    /// extension list in this file and `UnityFileType::from_extension` are two
+    /// gates in series. Widening only the first one gets the atlas handed to a
+    /// parser that still refuses it, which counts as an unreadable source and
+    /// raises the "don't trust this list" banner on every atlas project —
+    /// swapping a silent false positive for a loud one.
+    #[test]
+    fn sprite_atlas_keeps_the_sprites_it_packs_out_of_the_unused_list() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let hero_guid = "1234567890abcdef1234567890abcdef";
+
+        let hero = dir.path().join("hero.png");
+        std::fs::write(&hero, "png").unwrap();
+        let atlas = dir.path().join("Heroes.spriteatlas");
+        std::fs::write(
+            &atlas,
+            format!(
+                "%YAML 1.1\n--- !u!687078895 &1\nSpriteAtlas:\n  m_PackedSprites:\n  - {{fileID: 21300000, guid: {}, type: 3}}\n",
+                hero_guid
+            ),
+        )
+        .unwrap();
+
+        let project_id = "test_spriteatlas_unused";
+        project::register(project_id.to_string(), scanner::path_to_string(dir.path()));
+        let scan = scan_of(
+            dir.path(),
+            vec![
+                unity_asset(&hero, scanner::AssetType::Texture, Some(hero_guid)),
+                unity_asset(&atlas, scanner::AssetType::Other, None),
+            ],
+        );
+        project::with_mut(project_id, |s| {
+            s.cached_scan = Some(scan);
+            Ok(())
+        })
+        .unwrap();
+
+        let result = find_unused_assets(project_id.to_string()).unwrap();
+        project::unregister(project_id);
+
+        assert_eq!(
+            result.unreadable_sources, 0,
+            "the atlas must parse, not be counted as unreadable"
+        );
+        assert!(
+            !result.unused.contains(&scanner::path_to_string(&hero)),
+            "a sprite the atlas packs is in use, got unused = {:?}",
+            result.unused
+        );
+    }
+
+    /// `move_assets` guarded its destination with a bare `dst.exists()` while
+    /// the rename path beside it asks `paths_are_same_file`. So any spelling
+    /// of the target directory that isn't byte-identical to the source's
+    /// parent — a case variant on a case-insensitive filesystem, a symlinked
+    /// folder, a `..` in the middle — reported "Target already exists" about
+    /// the very file being moved.
+    ///
+    /// The fixture uses `..` rather than a case variant because case is not
+    /// portable: the same fixture is a no-op on macOS and two distinct files
+    /// on Linux CI. `..` names the same directory on every filesystem, and it
+    /// reaches the identical guard.
+    #[test]
+    fn moving_a_file_into_its_own_directory_under_another_spelling_is_a_no_op() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let sub = dir.path().join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        let hero = sub.join("hero.png");
+        std::fs::write(&hero, "x").unwrap();
+
+        let project_id = "test_move_same_dir_alias";
+        project::register(project_id.to_string(), scanner::path_to_string(dir.path()));
+        let alias = sub.join("..").join("sub");
+        let result = move_assets(
+            project_id.to_string(),
+            vec![scanner::path_to_string(&hero)],
+            scanner::path_to_string(&alias),
+        );
+        project::unregister(project_id);
+
+        assert!(
+            result.errors.is_empty(),
+            "moving a file into the directory it is already in must not error: {:?}",
+            result.errors
+        );
+        assert!(hero.exists(), "the file must still be on disk");
     }
 
     #[test]

@@ -26,6 +26,7 @@ use super::Rule;
 /// corruption bug (engine de-gammas sRGB-flagged data textures), not
 /// a stylistic convention.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TextureColorSpaceConfig {
     #[serde(default = "default_enabled")]
     pub enabled: bool,

@@ -6,6 +6,7 @@ use super::texture_colorspace::TextureColorSpaceConfig;
 use super::Rule;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TextureConfig {
     #[serde(default = "default_enabled")]
     pub enabled: bool,

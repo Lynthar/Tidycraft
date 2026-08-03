@@ -43,9 +43,51 @@ impl UnityFileType {
             "asset" => UnityFileType::Asset,
             // Sprite-animation .anim files reference sprites/clips via PPtr guids.
             "anim" => UnityFileType::Anim,
+            // The remaining native Unity YAML assets whose job is to point at
+            // other assets. Filed under `Asset` deliberately: the variant only
+            // decides whether component extraction runs (prefab / scene), so a
+            // variant per type would buy nothing and would have to be mirrored
+            // in `UnityFileInfo`'s TypeScript union.
+            //
+            //   spriteatlas / spriteatlasv2 — the sprites and textures packed
+            //   terrainlayer                — diffuse / normal / mask textures
+            //   playable                    — Timeline clips, prefabs, bindings
+            //   shadervariants              — the shaders in the collection
+            //   guiskin                     — font + per-style background textures
+            //   fontsettings                — a custom font's texture + material
+            //   flare                       — the lens flare's texture
+            //   preset                      — serialized values, object refs included
+            //
+            // The cost of this list is deliberately lopsided: a type left out
+            // makes every asset only it references show up as unused, and the
+            // unused list is what people delete from. A type wrongly included
+            // costs one file read that turns up no guids.
+            "spriteatlas"
+            | "spriteatlasv2"
+            | "terrainlayer"
+            | "playable"
+            | "shadervariants"
+            | "guiskin"
+            | "fontsettings"
+            | "flare"
+            | "preset" => UnityFileType::Asset,
             _ => UnityFileType::Unknown,
         }
     }
+}
+
+/// Does `ext` name a Unity text asset `parse_unity_file` can pull GUID
+/// references out of?
+///
+/// Callers that pre-filter before calling it must ask here rather than keep
+/// their own extension list. Two lists drifted before — the dependency graph
+/// walked prefab/unity/mat while the unused-asset scan also walked controller,
+/// so the two disagreed about what referenced what — and a caller's list being
+/// *wider* than the parser's is worse still: it hands over files the parser
+/// refuses, which the unused-asset scan counts as unreadable sources and
+/// reports as a reason to distrust its own output.
+pub fn is_reference_source(ext: &str) -> bool {
+    !matches!(UnityFileType::from_extension(ext), UnityFileType::Unknown)
 }
 
 /// Parse Unity YAML file and extract references
@@ -501,6 +543,39 @@ mod tests {
         );
         assert_eq!(UnityFileType::from_extension("PREFAB"), UnityFileType::Prefab);
         assert_eq!(UnityFileType::from_extension("Anim"), UnityFileType::Anim);
+    }
+
+    /// Each of these types exists to point at other assets, so an asset that
+    /// only one of them references is in use. Missing any of them puts that
+    /// asset on the unused list, which is the list people delete from.
+    #[test]
+    fn reference_source_covers_every_pointing_asset_type() {
+        for ext in [
+            "prefab",
+            "unity",
+            "mat",
+            "controller",
+            "overrideController",
+            "asset",
+            "anim",
+            "spriteatlas",
+            "spriteatlasv2",
+            "terrainlayer",
+            "playable",
+            "shadervariants",
+            "guiskin",
+            "fontsettings",
+            "flare",
+            "preset",
+        ] {
+            assert!(is_reference_source(ext), "{} should be a source", ext);
+        }
+        // Binary / foreign formats stay out: handing them to the parser turns
+        // into an "unreadable source" count, which the unused-asset panel
+        // shows as a reason to distrust its own result.
+        for ext in ["png", "fbx", "wav", "cs", "psd", "meta"] {
+            assert!(!is_reference_source(ext), "{} should not be a source", ext);
+        }
     }
 
     #[test]

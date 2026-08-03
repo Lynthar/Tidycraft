@@ -27,6 +27,7 @@ use crate::scanner::{AssetInfo, AssetType};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PbrSetConfig {
     #[serde(default = "default_enabled")]
     pub enabled: bool,
@@ -166,6 +167,12 @@ pub fn find_pbr_set_issues(assets: &[AssetInfo], config: &PbrSetConfig) -> Analy
     // file so clicking the issue takes the user to the most relevant
     // texture in the group.
     let mut trigger_path_per_set: HashMap<SetKey, String> = HashMap::new();
+    // Fallback anchor: the first file seen in the set, whatever its role. A
+    // packed suffix can carry the trigger role on its own (e.g. a packed key
+    // listing `basecolor`), and then no trigger-channel file exists — the
+    // issue used to ship an empty `asset_path`, which made the frontend's
+    // Locate a silent no-op.
+    let mut any_path_per_set: HashMap<SetKey, String> = HashMap::new();
     // First-seen original casing per set, for the issue message (the key
     // itself is lowercased for grouping).
     let mut display_stem: HashMap<SetKey, String> = HashMap::new();
@@ -199,6 +206,9 @@ pub fn find_pbr_set_issues(assets: &[AssetInfo], config: &PbrSetConfig) -> Analy
         // each then reported as incomplete.
         let key = (dir, base_stem.to_lowercase());
         display_stem.entry(key.clone()).or_insert(base_stem);
+        any_path_per_set
+            .entry(key.clone())
+            .or_insert_with(|| asset.path.clone());
         let entry = sets.entry(key.clone()).or_insert_with(HashSet::new);
 
         match role {
@@ -246,7 +256,11 @@ pub fn find_pbr_set_issues(assets: &[AssetInfo], config: &PbrSetConfig) -> Analy
         }
         missing.sort();
 
-        let asset_path = trigger_path_per_set.get(key).cloned().unwrap_or_default();
+        let asset_path = trigger_path_per_set
+            .get(key)
+            .or_else(|| any_path_per_set.get(key))
+            .cloned()
+            .unwrap_or_default();
         let base_stem = display_stem.get(key).unwrap_or(&key.1);
         result.add_issue(Issue {
             rule_id: "pbr_set.incomplete".into(),
@@ -304,6 +318,25 @@ mod tests {
         let mut cfg = PbrSetConfig::default();
         cfg.enabled = true;
         cfg
+    }
+
+    /// The issue's `asset_path` is what the frontend's Locate jumps to. When
+    /// the trigger role is satisfied only by a packed texture there is no
+    /// trigger-channel file to anchor on, and the path came out empty — Locate
+    /// then did nothing at all, with no error to explain why.
+    #[test]
+    fn packed_only_trigger_still_anchors_the_issue_on_a_real_file() {
+        let mut cfg = enabled_cfg();
+        cfg.packed
+            .insert("BCA".to_string(), vec!["basecolor".into(), "ao".into()]);
+
+        let assets = vec![texture("/proj/T_Wood_BCA.png")];
+        let result = find_pbr_set_issues(&assets, &cfg);
+
+        assert_eq!(result.issue_count, 1);
+        let issue = &result.issues[0];
+        assert_eq!(issue.rule_id, "pbr_set.incomplete");
+        assert_eq!(issue.asset_path, "/proj/T_Wood_BCA.png");
     }
 
     #[test]

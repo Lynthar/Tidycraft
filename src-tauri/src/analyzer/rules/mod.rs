@@ -14,6 +14,7 @@ use crate::scanner::AssetInfo;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct IgnoreConfig {
     /// Glob patterns matched against asset paths relative to the project
     /// root. Any asset whose relative path matches at least one pattern is
@@ -78,5 +79,50 @@ impl RuleConfig {
     /// Load config from TOML string
     pub fn from_toml(content: &str) -> Result<Self, toml::de::Error> {
         toml::from_str(content)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A misspelled key used to be dropped on the floor: `max_sze = 512` left
+    /// `max_size` at its default and the analysis ran with settings the user
+    /// believed they had changed, with nothing on screen to say otherwise.
+    /// Every caller of `from_toml` turns the error into "Invalid config: …",
+    /// so refusing the key produces a message naming it — actionable, where
+    /// the silent default was not even noticeable.
+    #[test]
+    fn a_misspelled_rule_key_is_reported_rather_than_silently_ignored() {
+        let err = RuleConfig::from_toml("[texture]\nenabled = true\nmax_sze = 512\n")
+            .expect_err("a misspelled key must not parse");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("max_sze"),
+            "the error has to name the offending key: {}",
+            msg
+        );
+    }
+
+    /// `[project]` is not part of `RuleConfig` — it carries the AI-tagging
+    /// metadata that `ProjectMeta` reads out of the same file. The top level
+    /// therefore has to stay permissive; only the rule sections are strict.
+    #[test]
+    fn the_project_section_still_coexists_with_the_rule_sections() {
+        let cfg =
+            RuleConfig::from_toml("[project]\ntheme = \"cyberpunk\"\n\n[texture]\nenabled = true\n")
+                .expect("[project] must not break rule parsing");
+        assert!(cfg.texture.enabled);
+    }
+
+    /// The template written into every new project has to survive the same
+    /// strictness. It is kept in sync with the `default_*` functions by hand,
+    /// and its own doc comment concedes there is no compile-time check for
+    /// that — this is the check: a key the template offers that no struct
+    /// accepts now fails here instead of silently doing nothing in the field.
+    #[test]
+    fn the_shipped_template_parses_under_strict_sections() {
+        RuleConfig::from_toml(config_template::DEFAULT_CONFIG_TEMPLATE)
+            .expect("the template we write into user projects must parse");
     }
 }

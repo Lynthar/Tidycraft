@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::Rule;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AudioConfig {
     #[serde(default = "default_enabled")]
     pub enabled: bool,

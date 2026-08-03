@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::Rule;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NamingConfig {
     #[serde(default = "default_enabled")]
     pub enabled: bool,
@@ -412,12 +413,16 @@ impl Rule for NamingRule {
     }
 }
 
+/// All-caps stems pass: `HUD` is an acronym, which is one capitalized word.
+/// There is no way to tell it apart from a SHOUTED word without an underscore
+/// to key on, and guessing "shouted" was the wrong bet — it reported compliant
+/// files and then "fixed" `HUD` to `Hud`.
 fn is_pascal_case(s: &str) -> bool {
     if s.is_empty() {
         return true;
     }
     let first = s.chars().next().unwrap();
-    first.is_uppercase() && !s.contains('_') && !s.chars().all(|c| c.is_uppercase())
+    first.is_uppercase() && !s.contains('_')
 }
 
 fn is_snake_case(s: &str) -> bool {
@@ -491,9 +496,10 @@ fn tokenize_words(stem: &str) -> Vec<String> {
     words
 }
 
-/// First character uppercase, the rest lowercase — lowercasing the tail keeps
-/// an all-caps input (`ID`) from producing an all-uppercase word, which
-/// `is_pascal_case` rejects.
+/// First character uppercase, the rest lowercase. The tail is lowercased so
+/// the conversion is idempotent and keeps its word boundaries: without it
+/// `SOME_THING` would convert to `SOMETHING`, erasing the split it was just
+/// tokenized on, and a second pass could never recover it.
 fn capitalize(word: &str) -> String {
     let mut chars = word.chars();
     match chars.next() {
@@ -636,6 +642,34 @@ mod tests {
             rule.suggest_compliant_name(&asset(&name, "png", AssetType::Texture, None)),
             None
         );
+    }
+
+    /// An acronym is a single capitalized word, so `HUD.png` and `UI.png` are
+    /// PascalCase. Rejecting every all-caps stem reported compliant files and
+    /// then "fixed" `HUD` into `Hud`, destroying the acronym — and for a
+    /// one-letter stem like `A.png` the only candidate is the name itself, so
+    /// the fix generator returned nothing and the issue was unfixable.
+    #[test]
+    fn pascal_case_accepts_all_caps_acronyms() {
+        let rule = cased_rule("PascalCase");
+        for name in ["HUD.png", "UI.png", "A.png"] {
+            assert!(
+                rule.check(&asset(name, "png", AssetType::Texture, None))
+                    .is_none(),
+                "{} is PascalCase but was reported",
+                name
+            );
+        }
+        // The predicate still has teeth: a lowercase start and an underscore
+        // are both still non-PascalCase.
+        for name in ["rockWall.png", "Rock_Wall.png"] {
+            assert!(
+                rule.check(&asset(name, "png", AssetType::Texture, None))
+                    .is_some(),
+                "{} is not PascalCase but passed",
+                name
+            );
+        }
     }
 
     #[test]
