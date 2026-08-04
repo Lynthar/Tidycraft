@@ -103,9 +103,20 @@ pub fn find_duplicates(assets: &[AssetInfo], root: &str) -> AnalysisResult {
                 related_paths: Some(group),
                 // `file_count` not `count` — see the model rules' note on
                 // i18next's plural selector.
+                //
+                // The suggestion interpolates two values the message does not:
+                // the original's root-relative path (the message carries only
+                // its name) and the count of redundant copies. Both have to
+                // ship, or a locale template cannot reproduce the English and
+                // the translation ends up carrying less than the string it
+                // replaces. Nothing gates this — the harvest pins declared
+                // against emitted, but no test reads the `format!` calls — so
+                // it surfaces only when someone tries to translate the rule.
                 args: issue_args([
                     ("file_count", duplicates.len().to_string()),
                     ("original", original.name.clone()),
+                    ("original_path", rel(&original.path, root).to_string()),
+                    ("other_count", (duplicates.len() - 1).to_string()),
                 ]),
             });
         }

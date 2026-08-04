@@ -283,7 +283,102 @@
           "title": "缺少 mipmap 链",
           "message": "DDS 贴图 {{width}}×{{height}} 没有 mipmap。远处会出现锯齿和摩尔纹，而且每帧都按全分辨率采样。",
           "suggestion": "重新导出时生成 mipmap；如果是 UI 或 LUT 贴图，确认这是有意为之。"
+        },
+        "color_space": {
+          "title": "色彩空间可疑",
+          "message": "后缀「{{suffix}}」表明这是数据贴图（法线／粗糙度／遮罩之类），但文件按 sRGB 编码。引擎导入时会对这些像素做反 Gamma，通道数据会被破坏。",
+          "suggestion": "用 Linear 色彩空间重新导出，或者在引擎的导入设置里把它显式标成非颜色数据（关掉 sRGB）。"
         }
+      },
+      "naming": {
+        "length": {
+          "title": "文件名过长",
+          "message": "文件名有 {{char_count}} 个字符，上限是 {{max}}",
+          "suggestion": "缩短到 {{max}} 个字符以内"
+        },
+        "forbidden_char": {
+          "title": "含禁用字符",
+          "message": "文件名含禁用字符「{{char}}」",
+          "suggestion": "把「{{char}}」从文件名里去掉"
+        },
+        "chinese": {
+          "title": "含中文字符",
+          "message": "文件名含中文字符",
+          "suggestion": "文件名改用英文字符"
+        },
+        "prefix": {
+          "title": "缺少前缀",
+          "message": "文件名应以「{{prefix}}」开头",
+          "suggestion": "改名为 {{prefix}}{{name}}"
+        },
+        "case": {
+          "title": "命名风格不符",
+          "message": "文件名不符合 {{style}} 规范",
+          "suggestion": "文件名改用 {{style}}"
+        }
+      },
+      "model": {
+        "vertices": {
+          "title": "顶点数过高",
+          "message": "模型有 {{vertex_count}} 个顶点，建议上限 {{max}}",
+          "suggestion": "减面，或者做 LOD"
+        },
+        "faces": {
+          "title": "面数过高",
+          "message": "模型有 {{face_count}} 个面，建议上限 {{max}}",
+          "suggestion": "减面，或者做 LOD"
+        },
+        "materials": {
+          "title": "材质数过多",
+          "message": "模型有 {{material_count}} 个材质，建议上限 {{max}}",
+          "suggestion": "合并材质，减少 draw call"
+        }
+      },
+      "audio": {
+        "sample_rate": {
+          "title": "非标准采样率",
+          "message": "音频采样率 {{rate}} Hz 不是标准值（应为 {{allowed}}）",
+          "suggestion": "重采样到 {{preferred}} Hz"
+        },
+        "sfx_duration": {
+          "title": "音效过长",
+          "message": "音效时长 {{duration}} 秒，建议上限 {{max}} 秒",
+          "suggestion": "这么长的音频该归为音乐或环境音，而不是音效"
+        },
+        "stereo_sfx": {
+          "title": "立体声音效",
+          "message": "音效是立体声，3D 音频建议用单声道",
+          "suggestion": "转成单声道，3D 空间化效果更好"
+        },
+        "file_size": {
+          "title": "音频文件过大",
+          "message": "音频体积 {{size}} MB，超过上限 {{max}} MB",
+          "suggestion": "换用压缩格式（OGG／MP3）"
+        }
+      },
+      "pbr_set": {
+        "incomplete": {
+          "title": "PBR 套图不完整",
+          "message": "PBR 套图「{{set}}」缺少通道：{{channels}}",
+          "suggestion": "把缺的贴图补进这套，或者改名让文件不再以已知的 PBR 后缀结尾。要跳过某个确知不完整的目录，把它加进 `[ignore].patterns`。"
+        }
+      },
+      "dcc_source": {
+        "outdated_export": {
+          "title": "导出文件已过期",
+          "message": "源文件「{{source}}」比导出的「{{export}}」新 {{age_value}} {{age_unit}}，可能漏了重新导出。",
+          "suggestion": "从 {{dcc}} 重新导出，并确认新导出文件的修改时间超过源文件。要抑制这条，把源文件路径加进 `[ignore].patterns`。"
+        }
+      },
+      "duplicate": {
+        "title": "重复文件",
+        "message": "{{file_count}} 个文件内容完全相同（原件「{{original}}」）",
+        "suggestion": "保留「{{original_path}}」，其余 {{other_count}} 个删除或合并"
+      },
+      "missing_reference": {
+        "title": "引用丢失",
+        "message": "引用了 GUID「{{guid}}」，项目里找不到对应资产",
+        "suggestion": "要么目标被删了而这个文件没跟着改，要么它的 .meta 丢了。重新导入目标资产，或者在 Unity 里修掉这条引用。"
       }
     }
   },

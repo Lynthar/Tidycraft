@@ -281,7 +281,7 @@ mod tests {
         ("audio.stereo_sfx", &[]),
         ("audio.file_size", &["size", "max"]),
         ("texture.color_space", &["suffix"]),
-        ("duplicate", &["file_count", "original"]),
+        ("duplicate", &["file_count", "original", "original_path", "other_count"]),
         ("missing_reference", &["guid"]),
         ("pbr_set.incomplete", &["set", "channels"]),
         ("dcc_source.outdated_export", &["source", "export", "dcc", "age_value", "age_unit"]),
