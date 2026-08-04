@@ -37,6 +37,11 @@ Out-of-box `Run Analysis` therefore flags only **real bugs** — illegal charact
 
 ## Rules at a glance
 
+The identifiers below are what the app shows in the small grey badge beside
+each issue title. Issue titles and explanations follow your interface
+language, so that badge is the reliable way back to this page — the rule
+names here are English only.
+
 | Rule family | Applies to | Default severity range |
 |---|---|---|
 | `naming.*` | All assets | warning / info |
