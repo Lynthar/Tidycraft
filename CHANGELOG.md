@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-08-04
+
 ### Added
 - **A strict Content Security Policy.** The webview previously ran with no policy at all, so any script injected into it would have had the full asset protocol (every file on disk) and the whole command surface. Scripts are now restricted to the app's own bundle, and the preview chain is allowlisted precisely: thumbnails (`data:`), images and audio/video (`asset:`), and 3D model loading (which fetches over XHR, so it needs `connect-src`). Verified against a real build — note that `pnpm tauri dev` applies no CSP at all, so a CSP-breaking change cannot be caught in dev.
 - **Unused-asset detection warns when it can't be trusted.** A project set to Force Binary asset serialization stores scenes and prefabs as binary, so their references are invisible to Tidycraft — and every asset only those files referenced looked unused. The panel now counts unreadable source files and, when any exist, says so above the list with a "don't delete based on this" warning and the setting to change. This was the one place the app could talk you into deleting assets that were in use.
