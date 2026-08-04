@@ -542,6 +542,24 @@ Windows and at least one POSIX target.
   error we only log to stderr.
 - **macOS code signing.** Distribution requires Developer ID signature +
   notarization. Not set up yet.
+- **macOS icon grid.** macOS reserves a transparent margin around an app
+  icon for the shadow it draws behind it: on a 1024×1024 canvas the rounded
+  square is 824×824, centred (measure any stock app's `.icns` — they all sit
+  at 80.5%). An icon that fills its canvas renders about a quarter larger
+  than everything else in the Dock. `src-tauri/icons/icon.icns` is therefore
+  generated from `app-icon-macos.png`, the artwork inset onto that grid, and
+  **not** from `app-icon.png` — which remains the source for the Windows
+  `.ico` and the Linux PNGs, where full-bleed is the convention. Note that
+  `pnpm tauri icon` with no argument defaults to `app-icon.png` and would
+  silently undo this; regenerate the macOS set with
+  `pnpm tauri icon app-icon-macos.png -o <tmpdir>` and copy `icon.icns`
+  across. The icon in `pnpm tauri dev` comes from the same file (Tauri
+  embeds the first `.icns` in the config and sets it on the dock at
+  startup), so dev and the bundle cannot disagree here. One catch when you
+  change it: the icon is embedded by `generate_context!`, and replacing the
+  file does not make cargo consider the crate stale — the next build reuses
+  the previously embedded copy and shows the old icon. Touch a source file
+  to force the macro to re-expand before judging the result.
 - **Keyboard shortcuts display.** Detection in `useKeyboardShortcuts`
   honors both `ctrlKey` and `metaKey`, so shortcuts work on every OS.
   `formatShortcut` now reads `getPlatform()` from `lib/platform.ts` and

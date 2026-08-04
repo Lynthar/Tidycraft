@@ -49,6 +49,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **Dependency graph edges no longer curve back on themselves.** Edges entered and left the long sides of each node while the layout ran left-to-right; they now follow the layout direction.
 - **A symlinked directory no longer appears in the tree.** The tree followed links while the asset scan does not, so linked folders showed up holding files that could never be listed — and a symlink loop made the walk recurse until the OS stopped it.
 - **The largest-files list translates its type badges.**
+- **The macOS app icon no longer sits a size larger than everything else in the Dock.** macOS draws app icons on a grid that reserves a transparent margin for the shadow the system puts behind them: the rounded square occupies about 80% of the image, not all of it. Tidycraft's icon filled its canvas edge to edge, so it rendered about a quarter wider than every stock application beside it. Only the macOS icon set changed; the Windows and Linux icons keep their current framing, which those platforms expect.
 
 ### Security
 - **CSV exports can no longer carry a spreadsheet formula.** A cell beginning with `=`, `+`, `-` or `@` is executable to Excel, LibreOffice and Sheets, and file names are not chosen by whoever opens the export — an asset named `=cmd|'/c calc'!A1.png` is legal on disk and ran on open. Such values are now prefixed so they read as text. The HTML report already escaped its input; CSV was the same threat left uncovered.
