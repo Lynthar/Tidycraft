@@ -3217,6 +3217,11 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .setup(|_app| {
+            // Thumbnail keys carry the source file's mtime, so an edited image
+            // strands its old thumbnail permanently. Sweep once per launch,
+            // off the main thread: it stats every file in the cache directory.
+            std::thread::spawn(thumbnail::prune_cache);
+
             // Debug builds auto-open the inspector. `open_devtools` (and the
             // inspector itself) only exists under `debug_assertions` now that
             // the `devtools` cargo feature is off — release builds ship

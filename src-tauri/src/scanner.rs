@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use thiserror::Error;
 
-use crate::cache::{get_modified_time, ScanCache};
+use crate::cache::{mtime_nanos, ScanCache};
 
 #[derive(Error, Debug)]
 pub enum ScanError {
@@ -1072,14 +1072,14 @@ fn parse_audio_metadata(path: &Path) -> Option<AssetMetadata> {
     })
 }
 
-/// Modification time of the Unity sidecar `<file>.meta`, if present.
+/// Mtime of the Unity sidecar `<file>.meta` in nanoseconds, if present.
 /// Unity's convention is the full filename plus ".meta" (`foo.png` →
 /// `foo.png.meta`). Used by the incremental scan to fold the sidecar
 /// into the cache-invalidation key — see [`crate::cache::CacheEntry`].
-fn meta_modified_time(path: &Path) -> Option<u64> {
+fn meta_mtime_nanos(path: &Path) -> Option<u64> {
     let mut p = path.as_os_str().to_owned();
     p.push(".meta");
-    get_modified_time(Path::new(&p))
+    mtime_nanos(Path::new(&p))
 }
 
 /// Parse Unity .meta file to get GUID
@@ -1713,8 +1713,8 @@ pub fn scan_directory_incremental(
             continue;
         }
 
-        let modified = get_modified_time(entry_path).unwrap_or(0);
-        file_entries.push((entry_path.to_path_buf(), modified));
+        let modified_nanos = mtime_nanos(entry_path).unwrap_or(0);
+        file_entries.push((entry_path.to_path_buf(), modified_nanos));
     }
 
     // Collect all current file paths for pruning. Use normalized
@@ -1736,11 +1736,11 @@ pub fn scan_directory_incremental(
     let is_unity = matches!(project_type, Some(ProjectType::Unity));
     let files_to_scan: Vec<&(PathBuf, u64)> = file_entries
         .iter()
-        .filter(|(p, modified)| {
+        .filter(|(p, modified_nanos)| {
             let path_str = path_to_string(p);
             let size = p.metadata().map(|m| m.len()).unwrap_or(0);
-            let meta_modified = if is_unity { meta_modified_time(p) } else { None };
-            cache.needs_rescan(&path_str, *modified, size, meta_modified)
+            let meta_nanos = if is_unity { meta_mtime_nanos(p) } else { None };
+            cache.needs_rescan(&path_str, *modified_nanos, size, meta_nanos)
         })
         .collect();
 
@@ -1765,7 +1765,7 @@ pub fn scan_directory_incremental(
     // Parse files in parallel and collect results
     let parsed_assets: Vec<(AssetInfo, u64)> = files_to_scan
         .par_iter()
-        .filter_map(|(p, modified)| {
+        .filter_map(|(p, modified_nanos)| {
             // Check for cancellation periodically
             if let Some(ref s) = state_clone {
                 if s.is_cancelled() {
@@ -1783,7 +1783,7 @@ pub fn scan_directory_incremental(
             }
 
             parse_asset_file(p, &project_type_clone)
-                .map(|asset| (asset, *modified))
+                .map(|asset| (asset, *modified_nanos))
         })
         .collect();
 
@@ -1799,13 +1799,13 @@ pub fn scan_directory_incremental(
     // rather than carried from the filter pass — if the .meta changed in
     // between, storing the later value just means one more (correct)
     // re-parse next scan.
-    for (asset, modified) in parsed_assets {
-        let meta_modified = if is_unity {
-            meta_modified_time(Path::new(&asset.path))
+    for (asset, modified_nanos) in parsed_assets {
+        let meta_nanos = if is_unity {
+            meta_mtime_nanos(Path::new(&asset.path))
         } else {
             None
         };
-        cache.update_entry(asset, modified, meta_modified);
+        cache.update_entry(asset, modified_nanos, meta_nanos);
     }
 
     // Get all assets from cache
@@ -2775,13 +2775,52 @@ mod tests {
         assert_eq!(parse_png_color_space(&path).as_deref(), Some("sRGB"));
     }
 
-    /// Set a file's mtime a fixed number of seconds into the future so a
-    /// rewrite within the same wall-clock second still registers as a
-    /// change (cache mtimes have whole-second granularity).
+    /// Move a file's mtime a fixed number of seconds into the future. Kept in
+    /// whole seconds because the tests using it are about *what* changed (a
+    /// sidecar, an asset), not about resolution — the cache stamp itself is
+    /// nanoseconds, which `set_mtime` below exercises directly.
     fn bump_mtime(path: &Path, secs_ahead: u64) {
         let file = fs::File::options().write(true).open(path).unwrap();
         let t = std::time::SystemTime::now() + std::time::Duration::from_secs(secs_ahead);
         file.set_times(fs::FileTimes::new().set_modified(t)).unwrap();
+    }
+
+    /// Pin a file's mtime to an exact instant so a test can place two writes
+    /// inside the same wall-clock second on purpose.
+    fn set_mtime(path: &Path, secs: u64, nanos: u32) {
+        let file = fs::File::options().write(true).open(path).unwrap();
+        let t = std::time::SystemTime::UNIX_EPOCH
+            + std::time::Duration::new(secs, nanos);
+        file.set_times(fs::FileTimes::new().set_modified(t)).unwrap();
+    }
+
+    #[test]
+    fn incremental_rescan_notices_a_rewrite_inside_one_second() {
+        // A file rewritten within the same second as the mtime the cache
+        // recorded, to the same length: whole-second mtimes make that
+        // indistinguishable from no change at all, and the scan hands back
+        // metadata parsed from content that is no longer there. Both writes
+        // are pinned to one second explicitly — reading the clock would let
+        // the second roll over and pass the test for the wrong reason.
+        let dir = tempdir().unwrap();
+        let root = dir.path().to_str().unwrap();
+        let tex = dir.path().join("tex.png");
+
+        fs::write(&tex, "png data").unwrap();
+        set_mtime(&tex, 1_700_000_000, 100_000_000);
+        let (_, s1) = scan_directory_incremental(root, None, false).unwrap();
+        assert_eq!(s1.rescanned_files, 1, "first scan parses the file");
+
+        // Same length, different bytes — size cannot stand in for the mtime.
+        fs::write(&tex, "PNG DATA").unwrap();
+        set_mtime(&tex, 1_700_000_000, 900_000_000);
+        let (_, s2) = scan_directory_incremental(root, None, false).unwrap();
+        let _ = crate::cache::ScanCache::clear(root);
+        assert_eq!(
+            s2.rescanned_files, 1,
+            "a rewrite inside the recorded second must invalidate the entry"
+        );
+        assert_eq!(s2.cached_files, 0);
     }
 
     #[test]

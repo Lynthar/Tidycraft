@@ -24,7 +24,14 @@ fn get_cache_dir() -> Option<PathBuf> {
     dirs::cache_dir().map(|p| p.join("tidycraft").join("thumbnails"))
 }
 
-/// Generate a cache key from file path and modification time
+/// Generate a cache key from a file's path, mtime and size.
+///
+/// The mtime goes in at nanosecond resolution: whole seconds cannot separate
+/// a source image from the version that replaced it later in the same second,
+/// and the stale thumbnail then survives until the next edit. Size is in the
+/// key for the filesystems that only store whole seconds anyway (HFS+, some
+/// network mounts), where it is the only part of the key such a rewrite can
+/// still move.
 fn get_cache_key(path: &Path, max_size: u32) -> Option<String> {
     let metadata = path.metadata().ok()?;
     let modified = metadata.modified().ok()?;
@@ -32,7 +39,8 @@ fn get_cache_key(path: &Path, max_size: u32) -> Option<String> {
 
     let mut hasher = Sha256::new();
     hasher.update(path.to_string_lossy().as_bytes());
-    hasher.update(duration.as_secs().to_le_bytes());
+    hasher.update((duration.as_nanos() as u64).to_le_bytes());
+    hasher.update(metadata.len().to_le_bytes());
     hasher.update(max_size.to_le_bytes());
 
     let hash = hasher.finalize();
@@ -169,6 +177,75 @@ pub fn clear_cache() -> Result<(), ThumbnailError> {
     Ok(())
 }
 
+/// Ceiling for the thumbnail cache, swept once per launch. Nothing ever
+/// removed an entry before this: keys carry the source file's mtime, so every
+/// edit to an image left its old thumbnail behind for good, and the only way
+/// to reclaim any of it was the Clear button in Settings. A 256px preview runs
+/// 30–80 KB, so this holds several thousand of them — the working set of a
+/// project or two, which is what a cache is for.
+const CACHE_MAX_BYTES: u64 = 256 * 1024 * 1024;
+
+/// Delete cache files, oldest first, until the directory fits in `max_bytes`.
+/// Returns the bytes reclaimed.
+///
+/// Age is when the thumbnail was *generated*, not when it was last shown: true
+/// LRU would mean writing to a file on every cache hit, and paying a write to
+/// record a read is a poor trade for a cache whose miss costs one image
+/// decode. The practical difference only shows up for a thumbnail generated
+/// long ago and viewed constantly since.
+fn prune_dir(dir: &Path, max_bytes: u64) -> std::io::Result<u64> {
+    let mut files: Vec<(SystemTime, u64, PathBuf)> = fs::read_dir(dir)?
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let meta = e.metadata().ok()?;
+            if !meta.is_file() {
+                return None;
+            }
+            Some((
+                meta.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+                meta.len(),
+                e.path(),
+            ))
+        })
+        .collect();
+
+    let mut total: u64 = files.iter().map(|(_, len, _)| len).sum();
+    if total <= max_bytes {
+        return Ok(0);
+    }
+
+    files.sort_by_key(|(modified, _, _)| *modified);
+
+    let mut freed = 0;
+    for (_, len, path) in files {
+        if total <= max_bytes {
+            break;
+        }
+        // A file that won't delete (permissions, another process) must not
+        // stop the sweep — skip it and keep going, or one stuck entry pins
+        // the whole cache above the cap forever.
+        if fs::remove_file(&path).is_ok() {
+            total -= len;
+            freed += len;
+        }
+    }
+    Ok(freed)
+}
+
+/// Bring the thumbnail cache back under its ceiling. Called once at startup,
+/// off the main thread — the sweep stats every file in the directory.
+pub fn prune_cache() {
+    let Some(dir) = get_cache_dir() else { return };
+    if !dir.exists() {
+        return;
+    }
+    match prune_dir(&dir, CACHE_MAX_BYTES) {
+        Ok(0) => {}
+        Ok(freed) => eprintln!("Thumbnail cache: reclaimed {} bytes", freed),
+        Err(e) => eprintln!("Thumbnail cache: sweep failed: {}", e),
+    }
+}
+
 /// Get cache size in bytes
 pub fn get_cache_size() -> u64 {
     let cache_dir = match get_cache_dir() {
@@ -194,6 +271,72 @@ pub fn get_cache_size() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn set_mtime(path: &Path, secs: u64, nanos: u32) {
+        let file = fs::File::options().write(true).open(path).unwrap();
+        let t = SystemTime::UNIX_EPOCH + std::time::Duration::new(secs, nanos);
+        file.set_times(fs::FileTimes::new().set_modified(t)).unwrap();
+    }
+
+    /// Write `bytes` worth of file at `name` and pin its mtime, so a test can
+    /// state the eviction order rather than hope for it.
+    fn cache_file(dir: &Path, name: &str, bytes: usize, mtime_secs: u64) {
+        let path = dir.join(name);
+        fs::write(&path, vec![0u8; bytes]).unwrap();
+        set_mtime(&path, mtime_secs, 0);
+    }
+
+    #[test]
+    fn prune_dir_drops_the_oldest_until_it_fits() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        cache_file(d, "old.png", 400, 1_000);
+        cache_file(d, "middle.png", 400, 2_000);
+        cache_file(d, "recent.png", 400, 3_000);
+
+        let freed = prune_dir(d, 900).unwrap();
+
+        assert_eq!(freed, 400, "one file is enough to get under the cap");
+        assert!(!d.join("old.png").exists(), "oldest goes first");
+        assert!(d.join("middle.png").exists());
+        assert!(d.join("recent.png").exists());
+    }
+
+    #[test]
+    fn prune_dir_leaves_a_cache_that_fits_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        cache_file(d, "a.png", 100, 1_000);
+        cache_file(d, "b.png", 100, 2_000);
+
+        assert_eq!(prune_dir(d, 1_000).unwrap(), 0);
+        assert!(d.join("a.png").exists());
+        assert!(d.join("b.png").exists());
+    }
+
+    #[test]
+    fn cache_key_separates_rewrites_inside_one_second() {
+        // Re-exporting an image over itself is a single-second operation in
+        // any art tool. A key that rounds the mtime down to the second cannot
+        // tell the new file from the old, so the preview keeps showing the
+        // image that is no longer on disk.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tex.png");
+
+        fs::write(&path, "first").unwrap();
+        set_mtime(&path, 1_700_000_000, 100_000_000);
+        let before = get_cache_key(&path, 256).unwrap();
+
+        fs::write(&path, "later").unwrap(); // same length, same second
+        set_mtime(&path, 1_700_000_000, 900_000_000);
+        assert_ne!(before, get_cache_key(&path, 256).unwrap());
+
+        // Filesystems that store only whole seconds leave the mtime halves of
+        // the key identical; size is what still moves there.
+        fs::write(&path, "longer than before").unwrap();
+        set_mtime(&path, 1_700_000_000, 100_000_000);
+        assert_ne!(before, get_cache_key(&path, 256).unwrap());
+    }
 
     #[test]
     fn generate_thumbnail_flattens_hdr_float_to_png() {

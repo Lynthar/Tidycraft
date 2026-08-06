@@ -11,16 +11,23 @@ use crate::scanner::AssetInfo;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheEntry {
     pub path: String,
-    pub modified: u64,
+    /// Mtime in **nanoseconds**, unlike the whole seconds `AssetInfo.modified`
+    /// carries for display. Seconds are too coarse to invalidate on: a file
+    /// rewritten in the same second the entry recorded, to the same length,
+    /// is indistinguishable from an untouched one, and the scan then serves
+    /// metadata parsed from content that is gone. Filesystems that only store
+    /// whole seconds (HFS+, some network mounts) still can't tell those apart
+    /// — `size` is what catches the subset of those rewrites that resize.
+    pub modified_nanos: u64,
     pub size: u64,
-    /// Modification time of the asset's Unity `.meta` sidecar at scan time
-    /// (`None` = no sidecar, or a non-Unity project where sidecars aren't
-    /// consulted). Part of the invalidation key: Unity rewriting just the
-    /// sidecar (new GUID) must re-parse the asset even though the asset
-    /// file itself is untouched — otherwise `unity_guid` and everything
-    /// built on it (dependency graph, unused-asset detection) goes stale
-    /// until the asset body changes or the cache is cleared.
-    pub meta_modified: Option<u64>,
+    /// Mtime of the asset's Unity `.meta` sidecar at scan time, nanoseconds as
+    /// above (`None` = no sidecar, or a non-Unity project where sidecars
+    /// aren't consulted). Part of the invalidation key: Unity rewriting just
+    /// the sidecar (new GUID) must re-parse the asset even though the asset
+    /// file itself is untouched — otherwise `unity_guid` and everything built
+    /// on it (dependency graph, unused-asset detection) goes stale until the
+    /// asset body changes or the cache is cleared.
+    pub meta_modified_nanos: Option<u64>,
     pub asset: AssetInfo,
 }
 
@@ -39,7 +46,8 @@ impl ScanCache {
     /// SVG dimensions before the 2026-04 pass) get rejected and re-scanned.
     /// v5: entries carry the `.meta` sidecar mtime in the invalidation key.
     /// v6: `AssetInfo` gained the required `modified` field.
-    const CACHE_VERSION: u32 = 6;
+    /// v7: mtimes in the invalidation key are nanoseconds, not seconds.
+    const CACHE_VERSION: u32 = 7;
 
     /// Create a new empty cache
     pub fn new(project_path: &str) -> Self {
@@ -101,33 +109,39 @@ impl ScanCache {
         Ok(())
     }
 
-    /// Check if a file needs re-scanning. `meta_modified` is the current
-    /// mtime of the file's `.meta` sidecar (see [`CacheEntry::meta_modified`]);
-    /// any change — created, rewritten, or deleted — invalidates the entry.
+    /// Check if a file needs re-scanning. Both mtimes are nanoseconds (see
+    /// [`CacheEntry::modified_nanos`]); `meta_modified_nanos` is the current
+    /// mtime of the file's `.meta` sidecar, where any change — created,
+    /// rewritten, or deleted — invalidates the entry.
     pub fn needs_rescan(
         &self,
         path: &str,
-        modified: u64,
+        modified_nanos: u64,
         size: u64,
-        meta_modified: Option<u64>,
+        meta_modified_nanos: Option<u64>,
     ) -> bool {
         match self.entries.get(path) {
             Some(entry) => {
-                entry.modified != modified
+                entry.modified_nanos != modified_nanos
                     || entry.size != size
-                    || entry.meta_modified != meta_modified
+                    || entry.meta_modified_nanos != meta_modified_nanos
             }
             None => true,
         }
     }
 
     /// Add or update an entry
-    pub fn update_entry(&mut self, asset: AssetInfo, modified: u64, meta_modified: Option<u64>) {
+    pub fn update_entry(
+        &mut self,
+        asset: AssetInfo,
+        modified_nanos: u64,
+        meta_modified_nanos: Option<u64>,
+    ) {
         let entry = CacheEntry {
             path: asset.path.clone(),
-            modified,
+            modified_nanos,
             size: asset.size,
-            meta_modified,
+            meta_modified_nanos,
             asset,
         };
         self.entries.insert(entry.path.clone(), entry);
@@ -155,15 +169,19 @@ impl ScanCache {
     }
 }
 
-/// Get file modification time as unix timestamp
-pub fn get_modified_time(path: &Path) -> Option<u64> {
+/// File mtime in nanoseconds since the epoch — the cache's invalidation
+/// stamp, not the whole-second `AssetInfo.modified` shown in the interface.
+/// The two are deliberately separate: one has to be precise, the other has to
+/// stay a stable number the frontend already renders. `u64` nanoseconds run
+/// out in 2554; the cast is safe for anything a filesystem will report.
+pub fn mtime_nanos(path: &Path) -> Option<u64> {
     fs::metadata(path)
         .ok()?
         .modified()
         .ok()?
         .duration_since(SystemTime::UNIX_EPOCH)
         .ok()
-        .map(|d| d.as_secs())
+        .map(|d| d.as_nanos() as u64)
 }
 
 #[cfg(test)]

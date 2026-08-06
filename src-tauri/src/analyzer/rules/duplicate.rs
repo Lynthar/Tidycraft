@@ -6,23 +6,46 @@ use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::Path;
 
-/// Calculate SHA256 hash of a file
-fn calculate_file_hash(path: &Path) -> Option<String> {
+/// How much of a file the first pass reads. Files of one size are separated
+/// by their opening bytes before anything is read in full — see
+/// [`find_duplicates`] for why size alone doesn't narrow the field.
+const PREFIX_BYTES: u64 = 8192;
+
+/// SHA256 of a file, or of its first `limit` bytes when one is given.
+fn calculate_file_hash(path: &Path, limit: Option<u64>) -> Option<String> {
     let file = File::open(path).ok()?;
     let mut reader = BufReader::new(file);
     let mut hasher = Sha256::new();
     let mut buffer = [0u8; 8192];
+    let mut remaining = limit.unwrap_or(u64::MAX);
 
-    loop {
-        let bytes_read = reader.read(&mut buffer).ok()?;
+    while remaining > 0 {
+        let want = buffer.len().min(remaining as usize);
+        let bytes_read = reader.read(&mut buffer[..want]).ok()?;
         if bytes_read == 0 {
             break;
         }
         hasher.update(&buffer[..bytes_read]);
+        remaining -= bytes_read as u64;
     }
 
     let hash = hasher.finalize();
     Some(format!("{:x}", hash))
+}
+
+/// Group by a hash, dropping every group that ends up with a single member —
+/// nothing that stands alone at any stage can be a duplicate.
+fn group_by_hash<'a>(
+    assets: Vec<&'a AssetInfo>,
+    limit: Option<u64>,
+) -> Vec<Vec<&'a AssetInfo>> {
+    let mut by_hash: HashMap<String, Vec<&AssetInfo>> = HashMap::new();
+    for asset in assets {
+        if let Some(hash) = calculate_file_hash(Path::new(&asset.path), limit) {
+            by_hash.entry(hash).or_default().push(asset);
+        }
+    }
+    by_hash.into_values().filter(|g| g.len() > 1).collect()
 }
 
 /// Root-relative form of `path` for user-facing text. Both sides come from
@@ -47,27 +70,25 @@ pub fn find_duplicates(assets: &[AssetInfo], root: &str) -> AnalysisResult {
         by_size.entry(asset.size).or_default().push(asset);
     }
 
-    // For files with same size, calculate hash
+    // Then by the first few kilobytes, and only then in full. Size on its own
+    // barely narrows a texture library: block-compressed formats give every
+    // image of the same dimensions and format exactly the same byte count, so
+    // a project with five hundred 1024² BC7 maps used to read all five hundred
+    // of them end to end on every analysis. Files that differ do so almost
+    // always in their header, and the prefix pass settles them for 8 KB each.
     for (_, same_size_assets) in by_size {
         if same_size_assets.len() < 2 {
             continue;
         }
 
-        // Calculate hashes for potential duplicates
-        let mut by_hash: HashMap<String, Vec<&AssetInfo>> = HashMap::new();
-        for asset in same_size_assets {
-            if let Some(hash) = calculate_file_hash(Path::new(&asset.path)) {
-                by_hash.entry(hash).or_default().push(asset);
-            }
-        }
+        let candidates: Vec<Vec<&AssetInfo>> = group_by_hash(same_size_assets, Some(PREFIX_BYTES))
+            .into_iter()
+            .flat_map(|group| group_by_hash(group, None))
+            .collect();
 
-        // Report duplicates (ordering fixed after the loops — both grouping
-        // maps iterate in random order)
-        for (_hash, duplicates) in by_hash {
-            if duplicates.len() < 2 {
-                continue;
-            }
-
+        // Report duplicates (ordering fixed after the loops — the grouping
+        // map iterates in random order)
+        for duplicates in candidates {
             // ONE issue per content group, carrying the full member list
             // (original first — the group arrives path-sorted from the
             // scan). An earlier revision emitted one issue per extra copy
@@ -130,4 +151,85 @@ pub fn find_duplicates(assets: &[AssetInfo], root: &str) -> AnalysisResult {
     result.issues.sort_by(|a, b| a.asset_path.cmp(&b.asset_path));
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analyzer::rules::dcc_source::tests::make_asset;
+    use crate::scanner::AssetType;
+    use std::path::PathBuf;
+
+    /// `make_asset` declares size 1 for everything, so every fixture lands in
+    /// one size bucket and reaches the hashing stages — which is the part
+    /// under test here.
+    fn write(dir: &Path, name: &str, body: Vec<u8>) -> PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, body).expect("write fixture");
+        path
+    }
+
+    fn assets(paths: &[PathBuf]) -> Vec<AssetInfo> {
+        paths
+            .iter()
+            .map(|p| make_asset(&p.to_string_lossy(), AssetType::Texture))
+            .collect()
+    }
+
+    #[test]
+    fn prefix_hash_separates_files_that_differ_early() {
+        // The whole point of the first pass: same length, different opening
+        // bytes, settled without reading either file past 8 KB.
+        let dir = tempfile::tempdir().unwrap();
+        let a = write(dir.path(), "a.dds", vec![b'a'; 40_000]);
+        let b = write(dir.path(), "b.dds", vec![b'b'; 40_000]);
+
+        let ha = calculate_file_hash(&a, Some(PREFIX_BYTES)).unwrap();
+        let hb = calculate_file_hash(&b, Some(PREFIX_BYTES)).unwrap();
+        assert_ne!(ha, hb);
+
+        assert!(find_duplicates(&assets(&[a, b]), dir.path().to_str().unwrap())
+            .issues
+            .is_empty());
+    }
+
+    #[test]
+    fn files_sharing_a_prefix_are_still_compared_in_full() {
+        // Guards the second pass. Two files with an identical 8 KB header and
+        // different bodies hash the same in the first pass, so dropping the
+        // full comparison would report them as duplicates of each other —
+        // and this rule's suggestion is to delete one of them.
+        let dir = tempfile::tempdir().unwrap();
+        let mut body_a = vec![0u8; PREFIX_BYTES as usize];
+        let mut body_b = body_a.clone();
+        body_a.extend_from_slice(&[1u8; 4_000]);
+        body_b.extend_from_slice(&[2u8; 4_000]);
+        let a = write(dir.path(), "a.dds", body_a);
+        let b = write(dir.path(), "b.dds", body_b);
+
+        assert_eq!(
+            calculate_file_hash(&a, Some(PREFIX_BYTES)),
+            calculate_file_hash(&b, Some(PREFIX_BYTES)),
+            "fixture must collide in the first pass or it tests nothing"
+        );
+        assert_ne!(
+            calculate_file_hash(&a, None),
+            calculate_file_hash(&b, None)
+        );
+        assert!(find_duplicates(&assets(&[a, b]), dir.path().to_str().unwrap())
+            .issues
+            .is_empty());
+    }
+
+    #[test]
+    fn identical_files_larger_than_the_prefix_are_reported_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let body: Vec<u8> = (0..30_000u32).map(|i| i as u8).collect();
+        let a = write(dir.path(), "a.dds", body.clone());
+        let b = write(dir.path(), "b.dds", body);
+
+        let issues = find_duplicates(&assets(&[a, b]), dir.path().to_str().unwrap()).issues;
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].related_paths.as_ref().unwrap().len(), 2);
+    }
 }
