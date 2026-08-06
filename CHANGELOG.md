@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+- **AI tagging rules that never ran now say so.** A `tidycraft.ai.toml` the app cannot parse falls back to the built-in suggestions, and a rule whose pattern this engine will not compile is skipped. Both were reported to standard error, which a bundled application has nowhere to write. The two kinds of suggestion look identical on screen, so the fallback read as a working rule set — and, since the same unreadable file also makes the panel report that you have never run learning, it went on inviting you to run it again with no hint why. Both now appear above the suggestions, with the reason.
+
+### Fixed
+- **The 3D preview's vertex and mesh counts follow the interface language.** The line under a model read "768 vertices • 1 meshes" whatever the language was set to — untranslated, and wrong about the plural for the single-mesh models that make up most of them. It was written out twice, once under the inline preview and once in the fullscreen header, and both copies were equally wrong.
+- **Closing a project stops its scan.** Closing dropped the project's state but not the scan running against it, so the walk continued to the end: on a large project, minutes of disk and CPU spent building a result nobody was left to receive.
+
 ## [0.8.3] - 2026-08-04
 
 ### Added

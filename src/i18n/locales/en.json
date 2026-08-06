@@ -509,7 +509,11 @@
     "gridTitle": "Toggle grid (G)",
     "backgroundTitle": "Toggle background (L)",
     "resetTitle": "Reset view (R)",
-    "closeTitle": "Close (Esc)"
+    "closeTitle": "Close (Esc)",
+    "statsVertices_one": "{{count, number}} vertex",
+    "statsVertices_other": "{{count, number}} vertices",
+    "statsMeshes_one": "{{count, number}} mesh",
+    "statsMeshes_other": "{{count, number}} meshes"
   },
   "commandPalette": {
     "placeholder": "Type a command or search…",
@@ -581,7 +585,10 @@
     "ctaBody": "Sample your project's filenames + tag system, infer naming and directory conventions, then generate local heuristic rules that replace the generic matches below. ~$0.05 one-time, then free.",
     "ctaButton": "Run AI Learning",
     "heuristicDivider": "Heuristic fallback (filename / dimension / path)",
-    "applyFailed": "Couldn't apply tags: {{reason}}"
+    "applyFailed": "Couldn't apply tags: {{reason}}",
+    "warnTitle": "Some AI rules didn't run",
+    "warnRulesUnreadable": "tidycraft.ai.toml couldn't be read, so these are built-in suggestions. Re-run AI Learning to rewrite the file.",
+    "warnInvalidPattern": "Rule pattern {{pattern}} didn't compile here, so it matched nothing."
   },
   "learnSetup": {
     "title": "AI Learning Setup",

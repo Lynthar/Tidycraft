@@ -238,6 +238,25 @@ sibling_dirs = ["sources", "_source", "src"]
 | `models/sources/character.blend` | `models/sources/`, `models/`, `models/_source/`, `models/src/` |
 | `Characters/Hero/sources/Hero.blend` | (the `sources/` parent), `Characters/Hero/`, `Characters/Hero/_source/`, `Characters/Hero/src/` |
 
+**Limitation — the search only goes up.** Candidates are the source's own directory plus directories found by walking towards the project root. A subdirectory of the source's directory is never one, so this layout is invisible to the rule no matter how `sibling_dirs` is configured:
+
+```
+models/hero.blend          ← source
+models/exported/hero.fbx   ← never paired with it
+```
+
+`exported/` sits below `models/`, not beside it, and `models` isn't a sibling-named directory, so nothing expands. The equivalent layout that does work puts the source in a sibling-named directory and names the export directory in `sibling_dirs`:
+
+```toml
+[dcc_source.lookup]
+sibling_dirs = ["sources", "exported"]
+```
+
+```
+models/sources/hero.blend
+models/exported/hero.fbx   ← paired
+```
+
 **To suppress**:
 - Add the source path to `[ignore].patterns` to drop it before analysis.
 - Or set `enabled = false` to turn the rule off entirely.

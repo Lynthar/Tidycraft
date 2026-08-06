@@ -199,6 +199,14 @@ fn read_mtime_secs(path: &str) -> Option<u64> {
 /// the same grandparent — handles the `art/sources/x.blend` ↔
 /// `art/exports/x.fbx` layout when both names are listed.
 ///
+/// The walk only ever goes UP. No subdirectory of the source's own
+/// directory is a candidate, so `models/hero.blend` never pairs with
+/// `models/exported/hero.fbx` whatever `sibling_dirs` holds — `exported/`
+/// sits below `models/`, not beside it, and `models` isn't sibling-named so
+/// nothing expands. Documented as a limitation in `docs/analyzer-rules.md`;
+/// the layout that does work is to put the source in a sibling-named dir
+/// (`models/sources/hero.blend`) and list `exported` in `sibling_dirs`.
+///
 /// Examples (with default `sibling_dirs = ["sources", "_source", "src"]`):
 /// - `source_parent="/proj/models"` (no match in ancestors) →
 ///   `["/proj/models"]` (just same_dir, no sibling expansion)
@@ -490,6 +498,28 @@ pub(crate) mod tests {
         assert!(!cfg.enabled);
         let r = find_dcc_source_issues(&assets, &cfg);
         assert_eq!(r.issue_count, 0);
+    }
+
+    /// Both halves of the "search only goes up" limitation in
+    /// `docs/analyzer-rules.md`. The doc tells users to restructure around
+    /// this, so the claim and the workaround both need to stay true.
+    #[test]
+    fn an_export_subdirectory_is_unreachable_a_sibling_one_is_not() {
+        let lookup = DccLookup {
+            same_dir: true,
+            sibling_dirs: vec!["sources".into(), "exported".into()],
+        };
+
+        // models/hero.blend looking for models/exported/hero.fbx: the
+        // export dir is below the source's dir, so it is never a candidate.
+        assert_eq!(
+            candidate_dirs("/proj/models", &lookup),
+            vec!["/proj/models".to_string()]
+        );
+
+        // Same pair, source moved into the sibling-named dir: now reachable.
+        assert!(candidate_dirs("/proj/models/sources", &lookup)
+            .contains(&"/proj/models/exported".to_string()));
     }
 
     #[test]

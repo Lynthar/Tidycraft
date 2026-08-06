@@ -136,9 +136,71 @@ pub fn register(project_id: String, root_path: String) -> Arc<Mutex<ProjectState
     entry
 }
 
+/// Drop a project's state, cancelling any scan still running for it.
+///
+/// The cancel is the whole reason this isn't a one-line `remove`: the scan
+/// holds its own clone of the `Arc<ScanState>` for its entire run, so after
+/// the registry entry is gone nothing can reach the flag and the walk
+/// finishes at its own pace — minutes, on a project big enough for the user
+/// to have given up and closed it. The scan then returns `Cancelled`, whose
+/// error path is a no-op in the frontend because the closed project is
+/// already out of the projects Map.
+///
+/// The `remove` releases the registry lock before the project lock is taken
+/// (registry → project is the order `with_mut` uses; taking them the other
+/// way round would stall every project on one busy one).
 pub fn unregister(project_id: &str) -> bool {
-    let mut map = registry().lock();
-    map.remove(project_id).is_some()
+    let removed = registry().lock().remove(project_id);
+    let Some(entry) = removed else {
+        return false;
+    };
+    if let Some(scan) = entry.lock().scan_state.as_ref() {
+        scan.cancel();
+    }
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    /// Closing a project has to stop its scan, not just forget about it.
+    /// `scan_project_incremental` clones the `Arc<ScanState>` before it starts
+    /// and holds that clone for the whole run, so once the registry entry is
+    /// gone the cancel flag is unreachable — a big project would keep walking
+    /// the disk with nobody left to want the result.
+    #[test]
+    fn unregister_cancels_an_in_flight_scan() {
+        let dir = tempdir().unwrap();
+        let id = "test_unregister_cancels_in_flight_scan";
+        register(id.to_string(), dir.path().to_string_lossy().to_string());
+
+        // Stand in for the scan's own handle on the state.
+        let scan = Arc::new(ScanState::new());
+        with_mut(id, |s| {
+            s.scan_state = Some(scan.clone());
+            Ok(())
+        })
+        .unwrap();
+        assert!(!scan.is_cancelled());
+
+        assert!(unregister(id));
+        assert!(
+            scan.is_cancelled(),
+            "closing the project left its scan running"
+        );
+    }
+
+    #[test]
+    fn unregister_reports_whether_it_removed_anything() {
+        let dir = tempdir().unwrap();
+        let id = "test_unregister_return_value";
+        assert!(!unregister(id), "nothing registered under this id yet");
+        register(id.to_string(), dir.path().to_string_lossy().to_string());
+        assert!(unregister(id));
+        assert!(!unregister(id), "second unregister has nothing to remove");
+    }
 }
 
 pub fn get(project_id: &str) -> Option<Arc<Mutex<ProjectState>>> {

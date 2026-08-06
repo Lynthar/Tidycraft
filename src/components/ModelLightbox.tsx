@@ -1,20 +1,22 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
-import { FBXLoader } from "three/addons/loaders/FBXLoader.js";
-import { MTLLoader } from "three/addons/loaders/MTLLoader.js";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { X, RotateCcw, Box, Grid3X3, Sun, Moon } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { buildTextureUrlResolver } from "../lib/modelUrlResolver";
-import { dirname } from "../lib/pathUtils";
+import {
+  disposeSceneContents,
+  fitObjectToView,
+  fixMaterials,
+  loadModel,
+  releaseRenderer,
+  setupAnimations,
+  type ModelError,
+  type ModelStats,
+} from "../lib/modelLoading";
 
-// Mirrors ModelViewer3D's list — see that file for why `.blend` is in
-// here (it routes the user into a clear error message rather than a
-// silent placeholder).
-const SUPPORTED_FORMATS = ["gltf", "glb", "fbx", "obj", "dae", "3ds", "blend", "vox"];
+/// Largest dimension the loaded model is scaled to, in world units. Bigger
+/// than ModelViewer3D's because this grid is bigger and the view is further out.
+const FIT_SIZE = 3;
 
 interface ModelLightboxProps {
   isOpen: boolean;
@@ -27,21 +29,7 @@ interface ModelLightboxProps {
   onClose: () => void;
 }
 
-interface LoadingStats {
-  format: string;
-  vertexCount: number;
-  meshCount: number;
-}
-
-// Error stored as an i18n key (+ optional fallback) rather than a
-// pre-translated string, so it re-translates on a language switch
-// without re-running the WebGL setup effect — which would otherwise
-// tear down and rebuild the whole scene just to relabel one message.
-// Mirrors ModelViewer3D. Rendered via t(error.key, error.fallback).
-interface ModelError {
-  key: string;
-  fallback?: string;
-}
+type LoadingStats = ModelStats & { format: string };
 
 export function ModelLightbox({ isOpen, filePath, extension, vertexCount, modelName, onClose }: ModelLightboxProps) {
   const { t } = useTranslation();
@@ -84,142 +72,17 @@ export function ModelLightbox({ isOpen, filePath, extension, vertexCount, modelN
       controlsRef.current = null;
     }
     if (rendererRef.current) {
-      rendererRef.current.dispose();
-      // dispose() frees GPU buffers but does NOT release the WebGL context;
-      // browsers cap active contexts (~16/page), so without this, repeatedly
-      // opening/closing the lightbox exhausts them and the browser force-loses
-      // the oldest ("Too many active WebGL contexts") → black preview.
-      // Mirrors ModelViewer3D's cleanup.
-      rendererRef.current.forceContextLoss();
-      const domElement = rendererRef.current.domElement;
-      if (domElement && domElement.parentNode) {
-        domElement.parentNode.removeChild(domElement);
-      }
+      releaseRenderer(rendererRef.current);
       rendererRef.current = null;
     }
     if (sceneRef.current) {
-      sceneRef.current.traverse((object) => {
-        if (object instanceof THREE.Mesh) {
-          object.geometry?.dispose();
-          if (Array.isArray(object.material)) {
-            object.material.forEach((m) => m.dispose());
-          } else if (object.material) {
-            object.material.dispose();
-          }
-        }
-      });
-      sceneRef.current.clear();
+      disposeSceneContents(sceneRef.current);
       sceneRef.current = null;
     }
     cameraRef.current = null;
     gridRef.current = null;
     lightsRef.current = [];
   }, []);
-
-  // Fix materials for models
-  const fixMaterials = (object: THREE.Object3D): { meshCount: number; vertexCount: number } => {
-    let meshCount = 0;
-    let vertexCount = 0;
-
-    object.traverse((child) => {
-      if (child instanceof THREE.Mesh) {
-        meshCount++;
-
-        if (child.geometry) {
-          const posAttr = child.geometry.getAttribute("position");
-          if (posAttr) {
-            vertexCount += posAttr.count;
-          }
-        }
-
-        const ensureMaterial = (mat: THREE.Material | null): THREE.Material => {
-          if (!mat) {
-            return new THREE.MeshStandardMaterial({
-              color: 0x888888,
-              metalness: 0.3,
-              roughness: 0.7,
-              side: THREE.DoubleSide,
-            });
-          }
-
-          // See ModelViewer3D.fixMaterials for why `vertexColors` is
-          // preserved across these conversions — OBJLoader sets it true
-          // for OBJs with inline `v x y z r g b` lines and we'd
-          // otherwise render those (and unlit GLTFs) flat gray.
-          if (mat instanceof THREE.MeshBasicMaterial && !mat.map) {
-            return new THREE.MeshStandardMaterial({
-              color: mat.color || 0x888888,
-              metalness: 0.3,
-              roughness: 0.7,
-              side: THREE.DoubleSide,
-              vertexColors: mat.vertexColors,
-            });
-          }
-
-          if (mat instanceof THREE.MeshPhongMaterial) {
-            return new THREE.MeshStandardMaterial({
-              color: mat.color || 0x888888,
-              map: mat.map,
-              normalMap: mat.normalMap,
-              metalness: 0.3,
-              roughness: 0.7,
-              side: THREE.DoubleSide,
-              vertexColors: mat.vertexColors,
-            });
-          }
-
-          if (mat instanceof THREE.MeshLambertMaterial) {
-            return new THREE.MeshStandardMaterial({
-              color: mat.color || 0x888888,
-              map: mat.map,
-              metalness: 0.1,
-              roughness: 0.9,
-              side: THREE.DoubleSide,
-              vertexColors: mat.vertexColors,
-            });
-          }
-
-          if (mat.transparent && mat.opacity === 0) {
-            mat.opacity = 1;
-            mat.transparent = false;
-          }
-
-          mat.side = THREE.DoubleSide;
-          mat.needsUpdate = true;
-
-          return mat;
-        };
-
-        if (Array.isArray(child.material)) {
-          child.material = child.material.map(ensureMaterial);
-        } else {
-          child.material = ensureMaterial(child.material);
-        }
-
-        child.castShadow = true;
-        child.receiveShadow = true;
-      }
-    });
-
-    return { meshCount, vertexCount };
-  };
-
-  // Setup animations
-  const setupAnimations = (object: THREE.Object3D): THREE.AnimationMixer | null => {
-    const animations = (object as THREE.Object3D & { animations?: THREE.AnimationClip[] }).animations;
-    if (!animations || animations.length === 0) {
-      return null;
-    }
-
-    const mixer = new THREE.AnimationMixer(object);
-    const clip = animations[0];
-    if (clip) {
-      const action = mixer.clipAction(clip);
-      action.play();
-    }
-
-    return mixer;
-  };
 
   // Handle keyboard events
   useEffect(() => {
@@ -283,6 +146,7 @@ export function ModelLightbox({ isOpen, filePath, extension, vertexCount, modelN
     // callback still in flight from the previous model).
     cleanup();
     const runId = runIdRef.current;
+    const isStale = () => runIdRef.current !== runId;
 
     setIsLoading(true);
     setError(null);
@@ -359,197 +223,38 @@ export function ModelLightbox({ isOpen, filePath, extension, vertexCount, modelN
     scene.add(gridHelper);
     gridRef.current = gridHelper;
 
-    // Load model
-    const modelUrl = convertFileSrc(filePath);
     const ext = extension.toLowerCase();
-    const dir = dirname(filePath);
-    const modelDir = dir ? `${dir}/` : "";
-    const resourcePath = convertFileSrc(modelDir);
 
-    const onLoad = (object: THREE.Object3D) => {
-      if (runIdRef.current !== runId) return;
+    void loadModel({
+      filePath,
+      extension,
+      isStale,
+      label: "ModelLightbox",
+      onLoad: (object) => {
+        if (isStale()) return;
 
-      const modelStats = fixMaterials(object);
+        const modelStats = fixMaterials(object);
+        fitObjectToView(object, FIT_SIZE);
+        scene.add(object);
 
-      // Center + fit. Order matters: scale BEFORE the position offset —
-      // see the long-form comment in ModelViewer3D for the math. Without
-      // this order, FBX/DAE/OBJ models whose mesh sits far from its
-      // local origin (e.g. voxel exports with verts at y≈57) drift off
-      // the grid by `(scale - 1) * center`.
-      const box = new THREE.Box3().setFromObject(object);
-      const center = box.getCenter(new THREE.Vector3());
-      const size = box.getSize(new THREE.Vector3());
-      const maxDim = Math.max(size.x, size.y, size.z);
-      const scale = maxDim > 0 ? 3 / maxDim : 1;
-
-      object.scale.multiplyScalar(scale);
-      object.position.sub(center.multiplyScalar(scale));
-
-      scene.add(object);
-
-      // Setup animations
-      const mixer = setupAnimations(object);
-      if (mixer) {
-        mixerRef.current = mixer;
-      }
-
-      setStats({
-        format: ext.toUpperCase(),
-        vertexCount: modelStats.vertexCount,
-        meshCount: modelStats.meshCount,
-      });
-
-      setIsLoading(false);
-    };
-
-    const onError = (err: unknown) => {
-      if (runIdRef.current !== runId) return;
-      console.error("Failed to load model:", err);
-      const message = err instanceof Error ? err.message : String(err);
-
-      if (message.includes("404") || message.includes("not found")) {
-        setError({ key: "modelViewer.fileNotFound", fallback: "File not found" });
-      } else if (
-        ext === "fbx" &&
-        (message.includes("Cannot read properties of undefined") ||
-          message.includes("parseUVs"))
-      ) {
-        setError({ key: "modelViewer.fbxIncompatible" });
-      } else if (message.includes("parse") || message.includes("invalid")) {
-        setError({ key: "modelViewer.parseError", fallback: "Failed to parse model file" });
-      } else {
-        setError({ key: "modelViewer.loadError", fallback: "Failed to load model" });
-      }
-      setIsLoading(false);
-    };
-
-    if (!SUPPORTED_FORMATS.includes(ext)) {
-      setError({
-        key: "modelViewer.unsupportedFormat",
-        fallback: `Format .${ext} not supported`,
-      });
-      setIsLoading(false);
-    } else {
-      (async () => {
-        const urlModifier = await buildTextureUrlResolver(filePath);
-        if (runIdRef.current !== runId) return;
-
-        const loadingManager = new THREE.LoadingManager();
-        loadingManager.setURLModifier(urlModifier);
-        loadingManager.resolveURL = urlModifier;
-
-        try {
-          if (ext === "gltf" || ext === "glb") {
-            const loader = new GLTFLoader(loadingManager);
-            loader.setResourcePath(resourcePath);
-            loader.load(modelUrl, (gltf) => onLoad(gltf.scene), undefined, onError);
-          } else if (ext === "obj") {
-            // See ModelViewer3D for the full rationale — same idea:
-            // pre-fetch the OBJ to honor its actual `mtllib` reference
-            // and to skip MTL entirely (no spurious 500) when none is
-            // declared.
-            let objText: string;
-            try {
-              const resp = await fetch(modelUrl);
-              if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-              objText = await resp.text();
-            } catch (err) {
-              onError(err);
-              return;
-            }
-            if (runIdRef.current !== runId) return;
-
-            const mtllibMatch = objText.match(/^mtllib\s+(.+?)\s*$/m);
-            const objLoader = new OBJLoader(loadingManager);
-
-            const finalize = () => {
-              try {
-                onLoad(objLoader.parse(objText));
-              } catch (parseErr) {
-                onError(parseErr);
-              }
-            };
-
-            if (mtllibMatch) {
-              const mtlName = mtllibMatch[1].trim().replace(/\\/g, "/");
-              const mtlAbs = dir ? `${dir}/${mtlName}` : mtlName;
-              const mtlUrl = convertFileSrc(mtlAbs);
-
-              const mtlLoader = new MTLLoader(loadingManager);
-              mtlLoader.setResourcePath(resourcePath);
-              mtlLoader.load(
-                mtlUrl,
-                (materials) => {
-                  materials.preload();
-                  objLoader.setMaterials(materials);
-                  finalize();
-                },
-                undefined,
-                () => finalize()
-              );
-            } else {
-              finalize();
-            }
-          } else if (ext === "fbx") {
-            const loader = new FBXLoader(loadingManager);
-            loader.setResourcePath(resourcePath);
-            loader.load(modelUrl, onLoad, undefined, onError);
-          } else if (ext === "dae") {
-            const { ColladaLoader } = await import("three/addons/loaders/ColladaLoader.js");
-            if (runIdRef.current !== runId) return;
-            const loader = new ColladaLoader(loadingManager);
-            loader.setResourcePath(resourcePath);
-            loader.load(modelUrl, (collada) => onLoad(collada.scene), undefined, onError);
-          } else if (ext === "3ds") {
-            const { TDSLoader } = await import("three/addons/loaders/TDSLoader.js");
-            if (runIdRef.current !== runId) return;
-            const loader = new TDSLoader(loadingManager);
-            loader.setResourcePath(resourcePath);
-            loader.load(modelUrl, onLoad, undefined, onError);
-          } else if (ext === "vox") {
-            // See ModelViewer3D for the full rationale — r182 VOXLoader
-            // returns `{ chunks, scene }` and v150 files have a null
-            // scene that we must rebuild from chunks via `buildMesh`.
-            const { VOXLoader, buildMesh } = await import(
-              "three/addons/loaders/VOXLoader.js"
-            );
-            if (runIdRef.current !== runId) return;
-            const loader = new VOXLoader(loadingManager);
-            loader.load(
-              modelUrl,
-              (result) => {
-                if (runIdRef.current !== runId) return;
-                let root: THREE.Object3D | null = result.scene;
-                if (!root) {
-                  if (!result.chunks || result.chunks.length === 0) {
-                    onError(new Error("Empty VOX file"));
-                    return;
-                  }
-                  const group = new THREE.Group();
-                  for (const chunk of result.chunks) {
-                    group.add(buildMesh(chunk));
-                  }
-                  root = group;
-                }
-                onLoad(root);
-              },
-              undefined,
-              onError
-            );
-          } else if (ext === "blend") {
-            if (runIdRef.current !== runId) return;
-            setError({ key: "modelViewer.blendUnsupported" });
-            setIsLoading(false);
-          }
-        } catch (err) {
-          onError(err);
+        const mixer = setupAnimations(object);
+        if (mixer) {
+          mixerRef.current = mixer;
         }
-      })();
-    }
+
+        setStats({ format: ext.toUpperCase(), ...modelStats });
+        setIsLoading(false);
+      },
+      onFailure: (modelError) => {
+        if (isStale()) return;
+        setError(modelError);
+        setIsLoading(false);
+      },
+    });
 
     // Animation loop
     const animate = () => {
-      if (runIdRef.current !== runId) return;
+      if (isStale()) return;
       animationIdRef.current = requestAnimationFrame(animate);
 
       if (mixerRef.current) {
@@ -608,7 +313,11 @@ export function ModelLightbox({ isOpen, filePath, extension, vertexCount, modelN
         <div className="flex items-center gap-1">
           {stats && (
             <span className="text-xs text-white/60 mr-4">
-              {stats.format} • {(vertexCount ?? stats.vertexCount).toLocaleString()} vertices • {stats.meshCount} meshes
+              {stats.format} •{" "}
+              {t("modelViewer.statsVertices", {
+                count: vertexCount ?? stats.vertexCount,
+              })}{" "}
+              • {t("modelViewer.statsMeshes", { count: stats.meshCount })}
             </span>
           )}
           <button

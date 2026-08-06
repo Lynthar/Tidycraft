@@ -1,22 +1,22 @@
 import { useRef, useEffect, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import { OBJLoader } from "three/addons/loaders/OBJLoader.js";
-import { FBXLoader } from "three/addons/loaders/FBXLoader.js";
-import { MTLLoader } from "three/addons/loaders/MTLLoader.js";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { RotateCcw, Box, Maximize2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { buildTextureUrlResolver } from "../lib/modelUrlResolver";
-import { dirname } from "../lib/pathUtils";
+import {
+  disposeSceneContents,
+  fitObjectToView,
+  fixMaterials,
+  loadModel,
+  releaseRenderer,
+  setupAnimations,
+  type ModelError,
+  type ModelStats,
+} from "../lib/modelLoading";
 
-// Supported 3D model formats. `.blend` is in the list so AssetPreview
-// routes the file into this component (rather than the box-icon
-// fallback) — we then short-circuit to an actionable "export to GLB"
-// message inside the dispatch below. Real loading is impossible: .blend
-// is Blender's private binary format with no web loader.
-const SUPPORTED_FORMATS = ["gltf", "glb", "fbx", "obj", "dae", "3ds", "blend", "vox"];
+/// Largest dimension the loaded model is scaled to, in world units. The
+/// lightbox uses a larger value against its larger grid.
+const FIT_SIZE = 2;
 
 interface ModelViewer3DProps {
   filePath: string;
@@ -31,21 +31,7 @@ interface ModelViewer3DProps {
   onFullscreen?: () => void;
 }
 
-interface LoadingStats {
-  format: string;
-  vertexCount: number;
-  meshCount: number;
-}
-
-// Error stored as an i18n key (+ optional fallback) rather than a
-// pre-translated string, so it re-translates on a language switch
-// without re-running the WebGL setup effect — which would otherwise
-// tear down and rebuild the whole scene just to relabel one message.
-// Rendered via t(error.key, error.fallback) in the JSX below.
-interface ModelError {
-  key: string;
-  fallback?: string;
-}
+type LoadingStats = ModelStats & { format: string };
 
 export function ModelViewer3D({ filePath, extension, vertexCount, onFullscreen }: ModelViewer3DProps) {
   const { t } = useTranslation();
@@ -87,149 +73,14 @@ export function ModelViewer3D({ filePath, extension, vertexCount, onFullscreen }
       controlsRef.current = null;
     }
     if (rendererRef.current) {
-      rendererRef.current.dispose();
-      // dispose() frees GPU buffers but does NOT release the WebGL context;
-      // browsers cap active contexts (~16/page) so without this, swapping
-      // between many model previews exhausts them and the oldest get
-      // force-lost by the browser ("Too many active WebGL contexts").
-      rendererRef.current.forceContextLoss();
-      const domElement = rendererRef.current.domElement;
-      if (domElement && domElement.parentNode) {
-        domElement.parentNode.removeChild(domElement);
-      }
+      releaseRenderer(rendererRef.current);
       rendererRef.current = null;
     }
     if (sceneRef.current) {
-      sceneRef.current.traverse((object) => {
-        if (object instanceof THREE.Mesh) {
-          object.geometry?.dispose();
-          if (Array.isArray(object.material)) {
-            object.material.forEach((m) => m.dispose());
-          } else if (object.material) {
-            object.material.dispose();
-          }
-        }
-      });
-      sceneRef.current.clear();
+      disposeSceneContents(sceneRef.current);
       sceneRef.current = null;
     }
     cameraRef.current = null;
-  };
-
-  // Fix materials for models that lack proper materials
-  const fixMaterials = (object: THREE.Object3D): { meshCount: number; vertexCount: number } => {
-    let meshCount = 0;
-    let vertexCount = 0;
-
-    object.traverse((child) => {
-      if (child instanceof THREE.Mesh) {
-        meshCount++;
-
-        // Count vertices
-        if (child.geometry) {
-          const posAttr = child.geometry.getAttribute("position");
-          if (posAttr) {
-            vertexCount += posAttr.count;
-          }
-        }
-
-        // Ensure mesh has valid material
-        const ensureMaterial = (mat: THREE.Material | null): THREE.Material => {
-          if (!mat) {
-            return new THREE.MeshStandardMaterial({
-              color: 0x888888,
-              metalness: 0.3,
-              roughness: 0.7,
-              side: THREE.DoubleSide,
-            });
-          }
-
-          // Fix invisible materials - MeshBasicMaterial without texture.
-          // Preserve `vertexColors` so OBJ files with inline vertex
-          // colors (and any unlit GLTF using KHR_materials_unlit) keep
-          // their colors after the conversion.
-          if (mat instanceof THREE.MeshBasicMaterial && !mat.map) {
-            return new THREE.MeshStandardMaterial({
-              color: mat.color || 0x888888,
-              metalness: 0.3,
-              roughness: 0.7,
-              side: THREE.DoubleSide,
-              vertexColors: mat.vertexColors,
-            });
-          }
-
-          // Convert MeshPhongMaterial (common in FBX, and what OBJLoader
-          // creates for OBJs with no `mtllib`) to MeshStandardMaterial.
-          // `vertexColors` is preserved because OBJLoader sets it true
-          // when the OBJ has 6-value `v x y z r g b` lines — without
-          // this, voxel-style OBJs render flat gray.
-          if (mat instanceof THREE.MeshPhongMaterial) {
-            const stdMat = new THREE.MeshStandardMaterial({
-              color: mat.color || 0x888888,
-              map: mat.map,
-              normalMap: mat.normalMap,
-              metalness: 0.3,
-              roughness: 0.7,
-              side: THREE.DoubleSide,
-              vertexColors: mat.vertexColors,
-            });
-            return stdMat;
-          }
-
-          // Convert MeshLambertMaterial to MeshStandardMaterial
-          if (mat instanceof THREE.MeshLambertMaterial) {
-            return new THREE.MeshStandardMaterial({
-              color: mat.color || 0x888888,
-              map: mat.map,
-              metalness: 0.1,
-              roughness: 0.9,
-              side: THREE.DoubleSide,
-              vertexColors: mat.vertexColors,
-            });
-          }
-
-          // Fix transparent materials with zero opacity
-          if (mat.transparent && mat.opacity === 0) {
-            mat.opacity = 1;
-            mat.transparent = false;
-          }
-
-          // Show both sides
-          mat.side = THREE.DoubleSide;
-          mat.needsUpdate = true;
-
-          return mat;
-        };
-
-        if (Array.isArray(child.material)) {
-          child.material = child.material.map(ensureMaterial);
-        } else {
-          child.material = ensureMaterial(child.material);
-        }
-
-        child.castShadow = true;
-        child.receiveShadow = true;
-      }
-    });
-
-    return { meshCount, vertexCount };
-  };
-
-  // Setup animations if available
-  const setupAnimations = (object: THREE.Object3D): THREE.AnimationMixer | null => {
-    const animations = (object as THREE.Object3D & { animations?: THREE.AnimationClip[] }).animations;
-    if (!animations || animations.length === 0) {
-      return null;
-    }
-
-    const mixer = new THREE.AnimationMixer(object);
-    const clip = animations[0];
-    if (clip) {
-      const action = mixer.clipAction(clip);
-      action.play();
-    }
-
-    return mixer;
   };
 
   useEffect(() => {
@@ -239,6 +90,7 @@ export function ModelViewer3D({ filePath, extension, vertexCount, onFullscreen }
     // callback still in flight from the previous model).
     cleanup();
     const runId = runIdRef.current;
+    const isStale = () => runIdRef.current !== runId;
 
     setIsLoading(true);
     setError(null);
@@ -296,243 +148,38 @@ export function ModelViewer3D({ filePath, extension, vertexCount, onFullscreen }
     const gridHelper = new THREE.GridHelper(10, 10, 0x444444, 0x333333);
     scene.add(gridHelper);
 
-    // Load model based on extension
-    const modelUrl = convertFileSrc(filePath);
     const ext = extension.toLowerCase();
 
-    // Calculate resource path for textures (model's directory converted to asset:// URL)
-    const dir = dirname(filePath);
-    const modelDir = dir ? `${dir}/` : "";
-    const resourcePath = convertFileSrc(modelDir);
+    void loadModel({
+      filePath,
+      extension,
+      isStale,
+      label: "ModelViewer3D",
+      onLoad: (object) => {
+        if (isStale()) return;
 
-    const onLoad = (object: THREE.Object3D) => {
-      if (runIdRef.current !== runId) return;
+        const modelStats = fixMaterials(object);
+        fitObjectToView(object, FIT_SIZE);
+        scene.add(object);
 
-      // Fix materials and get stats
-      const modelStats = fixMaterials(object);
-
-      // Center + fit. Order matters: scale BEFORE the position offset,
-      // because the resulting world transform is T·S, so a mesh ends up at
-      // `position + scale * localCenter`. Translating first only happens
-      // to look right when localCenter is already near the hierarchy root
-      // (typical of GLTF/GLB/OBJ); FBX and DAE often place the mesh node
-      // far from its root, and the previous order then drifted the model
-      // off the grid by `(scale - 1) * center`.
-      const box = new THREE.Box3().setFromObject(object);
-      const center = box.getCenter(new THREE.Vector3());
-      const size = box.getSize(new THREE.Vector3());
-      const maxDim = Math.max(size.x, size.y, size.z);
-      const scale = maxDim > 0 ? 2 / maxDim : 1;
-
-      object.scale.multiplyScalar(scale);
-      object.position.sub(center.multiplyScalar(scale));
-
-      scene.add(object);
-
-      // Setup animations if available
-      const mixer = setupAnimations(object);
-      if (mixer) {
-        mixerRef.current = mixer;
-      }
-
-      // Set stats
-      setStats({
-        format: ext.toUpperCase(),
-        vertexCount: modelStats.vertexCount,
-        meshCount: modelStats.meshCount,
-      });
-
-      setIsLoading(false);
-    };
-
-    const onError = (err: unknown) => {
-      if (runIdRef.current !== runId) return;
-      console.error(`[ModelViewer3D] Failed to load ${ext.toUpperCase()} model:`, {
-        filePath,
-        modelUrl,
-        error: err,
-      });
-      const message = err instanceof Error ? err.message : String(err);
-
-      // Provide more helpful error messages
-      if (message.includes("404") || message.includes("not found")) {
-        setError({ key: "modelViewer.fileNotFound", fallback: "File not found" });
-      } else if (
-        // three.js's FBXLoader is a reverse-engineered parser that
-        // doesn't cover every UV/MappingInformationType combination
-        // Autodesk DCC tools emit. The failure mode is a cryptic
-        // `Cannot read properties of undefined (reading 'a')` from
-        // GeometryParser.parseUVs. We can't fix the parser, but we can
-        // tell the user a path forward (re-export as GLB).
-        ext === "fbx" &&
-        (message.includes("Cannot read properties of undefined") ||
-          message.includes("parseUVs"))
-      ) {
-        setError({ key: "modelViewer.fbxIncompatible" });
-      } else if (message.includes("parse") || message.includes("invalid")) {
-        setError({ key: "modelViewer.parseError", fallback: "Failed to parse model file" });
-      } else {
-        setError({ key: "modelViewer.loadError", fallback: "Failed to load model" });
-      }
-      setIsLoading(false);
-    };
-
-    if (!SUPPORTED_FORMATS.includes(ext)) {
-      setError({
-        key: "modelViewer.unsupportedFormat",
-        fallback: `Format .${ext} not supported. Use GLTF, GLB, FBX, or OBJ.`,
-      });
-      setIsLoading(false);
-    } else {
-      // Kick off loading in an async IIFE so we can await the sibling-texture
-      // scan before wiring the URL modifier. The scan is a single filesystem
-      // walk of the model's directory, typically <10ms.
-      (async () => {
-        const urlModifier = await buildTextureUrlResolver(filePath);
-        if (runIdRef.current !== runId) return;
-
-        const loadingManager = new THREE.LoadingManager();
-        loadingManager.setURLModifier(urlModifier);
-        // Some Three.js loaders use resolveURL instead of the URL modifier; set both.
-        loadingManager.resolveURL = urlModifier;
-
-        try {
-          if (ext === "gltf" || ext === "glb") {
-            const loader = new GLTFLoader(loadingManager);
-            loader.setResourcePath(resourcePath);
-            loader.load(
-              modelUrl,
-              (gltf) => onLoad(gltf.scene),
-              undefined,
-              onError
-            );
-          } else if (ext === "obj") {
-            // Pre-fetch the OBJ text so we can (a) honor the actual
-            // `mtllib` filename instead of guessing `<basename>.mtl` —
-            // OBJ allows arbitrary names like `mtllib materials.mtl` —
-            // and (b) skip the MTL request entirely when no `mtllib`
-            // line is present. The previous blind attempt at `.mtl`
-            // produced a console-polluting 500 from the asset protocol
-            // (the silent fallback rendered the OBJ correctly, but the
-            // log noise was confusing). Using `parse(text)` avoids a
-            // second fetch by OBJLoader.
-            let objText: string;
-            try {
-              const resp = await fetch(modelUrl);
-              if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-              objText = await resp.text();
-            } catch (err) {
-              onError(err);
-              return;
-            }
-            if (runIdRef.current !== runId) return;
-
-            const mtllibMatch = objText.match(/^mtllib\s+(.+?)\s*$/m);
-            const objLoader = new OBJLoader(loadingManager);
-
-            const finalize = () => {
-              try {
-                onLoad(objLoader.parse(objText));
-              } catch (parseErr) {
-                onError(parseErr);
-              }
-            };
-
-            if (mtllibMatch) {
-              const mtlName = mtllibMatch[1].trim().replace(/\\/g, "/");
-              const mtlAbs = dir ? `${dir}/${mtlName}` : mtlName;
-              const mtlUrl = convertFileSrc(mtlAbs);
-
-              const mtlLoader = new MTLLoader(loadingManager);
-              mtlLoader.setResourcePath(resourcePath);
-              mtlLoader.load(
-                mtlUrl,
-                (materials) => {
-                  materials.preload();
-                  objLoader.setMaterials(materials);
-                  finalize();
-                },
-                undefined,
-                () => finalize()
-              );
-            } else {
-              finalize();
-            }
-          } else if (ext === "fbx") {
-            const loader = new FBXLoader(loadingManager);
-            loader.setResourcePath(resourcePath);
-            loader.load(modelUrl, onLoad, undefined, onError);
-          } else if (ext === "dae") {
-            const { ColladaLoader } = await import("three/addons/loaders/ColladaLoader.js");
-            if (runIdRef.current !== runId) return;
-            const loader = new ColladaLoader(loadingManager);
-            loader.setResourcePath(resourcePath);
-            loader.load(
-              modelUrl,
-              (collada) => onLoad(collada.scene),
-              undefined,
-              onError
-            );
-          } else if (ext === "3ds") {
-            const { TDSLoader } = await import("three/addons/loaders/TDSLoader.js");
-            if (runIdRef.current !== runId) return;
-            const loader = new TDSLoader(loadingManager);
-            loader.setResourcePath(resourcePath);
-            loader.load(modelUrl, onLoad, undefined, onError);
-          } else if (ext === "vox") {
-            // VOXLoader (r182) returns `{ chunks, scene }`. Modern files
-            // with nTRN/nGRP/nSHP nodes populate `scene` directly; older
-            // v150 single-model exports (e.g. plain MagicaVoxel saves)
-            // only carry SIZE/XYZI/RGBA chunks → `scene` is null at
-            // runtime even though @types/three claims Object3D. Fall
-            // back to manual `buildMesh` per chunk so both shapes load.
-            // VOX is self-contained (palette + voxel data, no external
-            // textures), so no setResourcePath is needed; buildMesh
-            // already centers the geometry and emits a vertex-color
-            // MeshStandardMaterial that survives fixMaterials intact.
-            const { VOXLoader, buildMesh } = await import(
-              "three/addons/loaders/VOXLoader.js"
-            );
-            if (runIdRef.current !== runId) return;
-            const loader = new VOXLoader(loadingManager);
-            loader.load(
-              modelUrl,
-              (result) => {
-                if (runIdRef.current !== runId) return;
-                let root: THREE.Object3D | null = result.scene;
-                if (!root) {
-                  if (!result.chunks || result.chunks.length === 0) {
-                    onError(new Error("Empty VOX file"));
-                    return;
-                  }
-                  const group = new THREE.Group();
-                  for (const chunk of result.chunks) {
-                    group.add(buildMesh(chunk));
-                  }
-                  root = group;
-                }
-                onLoad(root);
-              },
-              undefined,
-              onError
-            );
-          } else if (ext === "blend") {
-            // .blend is Blender's private binary format — no web loader
-            // exists. We surface a clear "export to GLB" message rather
-            // than fail mysteriously or fall through to "unsupported".
-            if (runIdRef.current !== runId) return;
-            setError({ key: "modelViewer.blendUnsupported" });
-            setIsLoading(false);
-          }
-        } catch (err) {
-          onError(err);
+        const mixer = setupAnimations(object);
+        if (mixer) {
+          mixerRef.current = mixer;
         }
-      })();
-    }
+
+        setStats({ format: ext.toUpperCase(), ...modelStats });
+        setIsLoading(false);
+      },
+      onFailure: (modelError) => {
+        if (isStale()) return;
+        setError(modelError);
+        setIsLoading(false);
+      },
+    });
 
     // Animation loop
     const animate = () => {
-      if (runIdRef.current !== runId) return;
+      if (isStale()) return;
       animationIdRef.current = requestAnimationFrame(animate);
 
       // Update animation mixer if present
@@ -607,7 +254,11 @@ export function ModelViewer3D({ filePath, extension, vertexCount, onFullscreen }
           <div>{t("modelViewer.controls", "Drag to rotate • Scroll to zoom")}</div>
           {stats && (
             <div className="text-[10px] text-text-secondary/70">
-              {stats.format} • {(vertexCount ?? stats.vertexCount).toLocaleString()} vertices • {stats.meshCount} meshes
+              {stats.format} •{" "}
+              {t("modelViewer.statsVertices", {
+                count: vertexCount ?? stats.vertexCount,
+              })}{" "}
+              • {t("modelViewer.statsMeshes", { count: stats.meshCount })}
             </div>
           )}
         </div>

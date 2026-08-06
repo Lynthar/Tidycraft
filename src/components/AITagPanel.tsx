@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Sparkles, X, RotateCw, Eye, Play } from "lucide-react";
+import { Sparkles, X, RotateCw, Eye, Play, AlertTriangle } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { useUiStore, type AiRulesDoc, type AiLearningResult } from "../stores/uiStore";
@@ -15,6 +15,20 @@ interface TagGroup {
   confidence: number;
   hint: string;
   samples: string[];
+}
+
+/// Mirrors `analyzer::rule_suggest::RuleWarning` — AI rules that exist but
+/// didn't run. Worth rendering because nothing else in this panel would show
+/// it: rule groups and heuristic groups look identical, so a fallback reads
+/// as a working rule set. `kind` is the serde tag; keep both arms in step
+/// with the Rust enum.
+type RuleWarning =
+  | { kind: "rules_unreadable"; detail: string }
+  | { kind: "invalid_pattern"; pattern: string; detail: string };
+
+interface TagSuggestions {
+  groups: TagGroup[];
+  warnings: RuleWarning[];
 }
 
 /// Map the Rust-side hint string to an i18n key. Backend uses fixed English
@@ -40,6 +54,7 @@ export function AITagPanel() {
   const setSelectedPaths = useSelectionStore((s) => s.setSelectedPaths);
 
   const [groups, setGroups] = useState<TagGroup[] | null>(null);
+  const [warnings, setWarnings] = useState<RuleWarning[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /// Per-card pending state — disables buttons while an Apply / Apply-all is
@@ -111,6 +126,7 @@ export function AITagPanel() {
     if (!aiPanelOpen) return;
     if (!activeProjectId || !scanResult) {
       setGroups([]);
+      setWarnings([]);
       setGeneratedAt(new Date());
       return;
     }
@@ -119,14 +135,16 @@ export function AITagPanel() {
     setError(null);
     (async () => {
       try {
-        const result = await invoke<TagGroup[]>("suggest_tags", {
+        const result = await invoke<TagSuggestions>("suggest_tags", {
           projectId: activeProjectId,
         });
         if (cancelled) return;
-        setGroups(result);
+        setGroups(result.groups);
+        setWarnings(result.warnings);
         setGeneratedAt(new Date());
       } catch (err) {
         if (cancelled) return;
+        setWarnings([]);
         setError(String(err));
       } finally {
         if (!cancelled) setLoading(false);
@@ -141,6 +159,7 @@ export function AITagPanel() {
   useEffect(() => {
     if (!aiPanelOpen) {
       setGroups(null);
+      setWarnings([]);
       setError(null);
       setPending(new Set());
       setApplyingAll(false);
@@ -322,6 +341,59 @@ export function AITagPanel() {
         </div>
 
         <div className="tc-aitag-list">
+          {/* Rules that exist but didn't run. Sits above the CTA because it
+              also explains it: a rules file this panel can't read makes the
+              probe report "never learned", so the user is otherwise invited
+              to run learning they already ran, with no hint why. */}
+          {!loading && warnings.length > 0 && (
+            <div
+              className="rounded-md p-2.5 mb-2 text-xs space-y-1"
+              style={{
+                background: "color-mix(in oklch, var(--warn) 10%, transparent)",
+                border:
+                  "1px solid color-mix(in oklch, var(--warn) 35%, transparent)",
+                color: "var(--text-2)",
+              }}
+            >
+              <div
+                className="flex items-center gap-1.5 font-semibold"
+                style={{ color: "var(--warn)" }}
+              >
+                <AlertTriangle size={13} className="shrink-0" />
+                {t("aiTagPanel.warnTitle")}
+              </div>
+              {warnings.map((w, i) => (
+                <div key={i}>
+                  <div>
+                    {w.kind === "rules_unreadable"
+                      ? t("aiTagPanel.warnRulesUnreadable")
+                      : t("aiTagPanel.warnInvalidPattern", {
+                          pattern: w.pattern,
+                        })}
+                  </div>
+                  {/* The engine's own words, unedited. Both the toml parser
+                      and the regex parser answer with a caret diagram
+                      several lines tall, and the useful line is the last
+                      one for regex but the first for toml — so neither
+                      truncating nor inlining works. `pre` + horizontal
+                      scroll keeps the carets under what they point at
+                      inside a 320px panel. */}
+                  <pre
+                    className="font-mono mt-1 px-1.5 py-1 rounded overflow-x-auto"
+                    style={{
+                      fontSize: 10,
+                      lineHeight: 1.45,
+                      background:
+                        "color-mix(in oklch, var(--warn) 8%, transparent)",
+                      color: "var(--text-3)",
+                    }}
+                  >
+                    {w.detail.trimEnd()}
+                  </pre>
+                </div>
+              ))}
+            </div>
+          )}
           {/* "Run AI Learning" CTA — shown only when the rules probe
               has completed AND no rules exist yet. Sits above the
               heuristic suggestions (which still render below it as

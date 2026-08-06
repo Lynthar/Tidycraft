@@ -16,6 +16,7 @@
 use std::collections::{HashMap, HashSet};
 
 use regex::Regex;
+use serde::Serialize;
 
 use crate::scanner::ScanResult;
 
@@ -49,20 +50,61 @@ fn stem(name: &str) -> &str {
     }
 }
 
+/// A non-fatal problem that stopped AI-learned rules from running as
+/// written.
+///
+/// These reached `eprintln!` and nowhere else, which in a shipped app means
+/// nowhere at all — a Finder-launched `.app` has no stderr attached to
+/// anything. Nor does the panel give the user another signal to read: rule
+/// groups and heuristic groups render identically, so falling back looks
+/// exactly like a rule set that happened to produce these groups. They now
+/// ride back with the suggestions and the panel states them.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RuleWarning {
+    /// `tidycraft.ai.toml` is there but unreadable or malformed: every rule
+    /// in it was skipped and the heuristic suggester ran in their place.
+    RulesUnreadable { detail: String },
+    /// One `filename_regex` rule's pattern didn't compile, so that rule
+    /// matched nothing. The review panel pre-validates with JS `RegExp`,
+    /// which accepts what this engine rejects (backreferences `\1`,
+    /// look-around `(?=`) — those pass review and land here.
+    InvalidPattern { pattern: String, detail: String },
+}
+
+/// What `suggest_tags` hands the panel: the groups to render, plus whatever
+/// the user needs to know about rules that didn't run.
+#[derive(Debug, Serialize)]
+pub struct TagSuggestions {
+    pub groups: Vec<TagGroup>,
+    pub warnings: Vec<RuleWarning>,
+}
+
 /// Load AI-derived rules from `<root>/tidycraft.ai.toml` and run them.
-/// Falls back to `HeuristicSuggester` when no rules file is present or
-/// the rules list is empty (i.e. user hasn't run AI Learning yet).
-/// Errors propagate only for genuinely corrupt rule files; the caller
-/// in `lib.rs::suggest_tags` logs + falls back further so the UI never
-/// breaks.
-pub fn load_or_fallback(
-    scan: &ScanResult,
-    project_root: &std::path::Path,
-) -> Result<Vec<TagGroup>, String> {
-    let doc = crate::llm::rule_store::AiRulesDoc::load(project_root)?;
-    match doc {
-        Some(d) if !d.rules.is_empty() => Ok(RuleSuggester::new(d.rules).suggest(scan)),
-        _ => Ok(super::tag_suggest::HeuristicSuggester.suggest(scan)),
+/// Falls back to `HeuristicSuggester` when there is nothing to run — no
+/// rules file (the user hasn't run AI Learning yet) or an empty rule list.
+///
+/// A corrupt rules file falls back the same way rather than failing the
+/// call, so the panel still shows something, but it comes back as a
+/// `RulesUnreadable` warning instead of vanishing.
+pub fn load_or_fallback(scan: &ScanResult, project_root: &std::path::Path) -> TagSuggestions {
+    match crate::llm::rule_store::AiRulesDoc::load(project_root) {
+        Ok(Some(d)) if !d.rules.is_empty() => {
+            let suggester = RuleSuggester::new(d.rules);
+            let groups = suggester.suggest(scan);
+            TagSuggestions {
+                groups,
+                warnings: suggester.warnings,
+            }
+        }
+        Ok(_) => TagSuggestions {
+            groups: super::tag_suggest::HeuristicSuggester.suggest(scan),
+            warnings: Vec::new(),
+        },
+        Err(detail) => TagSuggestions {
+            groups: super::tag_suggest::HeuristicSuggester.suggest(scan),
+            warnings: vec![RuleWarning::RulesUnreadable { detail }],
+        },
     }
 }
 
@@ -76,40 +118,55 @@ struct CompiledRule {
 
 pub struct RuleSuggester {
     rules: Vec<CompiledRule>,
+    /// Patterns that failed to compile, in rule order. Read by
+    /// `load_or_fallback` on its way back to the panel.
+    warnings: Vec<RuleWarning>,
 }
 
 impl RuleSuggester {
     pub fn new(rules: Vec<LearnedRule>) -> Self {
-        let compiled = rules.into_iter().map(compile_one).collect();
-        Self { rules: compiled }
+        let mut warnings = Vec::new();
+        let compiled = rules
+            .into_iter()
+            .map(|rule| {
+                let (compiled, warning) = compile_one(rule);
+                warnings.extend(warning);
+                compiled
+            })
+            .collect();
+        Self {
+            rules: compiled,
+            warnings,
+        }
     }
 }
 
 /// Compile one rule. For `FilenameRegex`, attempts `Regex::new`; on
-/// failure logs a one-shot warning and stores `None` so the rule
-/// silent-skips at match time. We deliberately do NOT propagate the
-/// error — a single malformed pattern shouldn't poison the whole rule
-/// set when the rest are usable. The LearnReviewPanel runs a similar
-/// validity check on the UI side via JS `RegExp` — close enough for
-/// the simple patterns the LLM emits, but the dialects diverge both
-/// ways: JS accepts what this engine rejects (backreferences `\1`,
-/// look-around `(?=`), and those land here and silent-skip; while this
-/// engine accepts what JS rejects (`(?P<name>...)` named groups), so
-/// the panel can warn about a pattern that compiles fine here.
-fn compile_one(rule: LearnedRule) -> CompiledRule {
-    let regex = match &rule {
+/// failure returns a `None` regex so the rule skips at match time, plus
+/// the warning that says so. We deliberately do NOT propagate the error —
+/// a single malformed pattern shouldn't poison the whole rule set when the
+/// rest are usable. The LearnReviewPanel runs a similar validity check on
+/// the UI side via JS `RegExp` — close enough for the simple patterns the
+/// LLM emits, but the dialects diverge both ways: JS accepts what this
+/// engine rejects (backreferences `\1`, look-around `(?=`), and those land
+/// here and skip; while this engine accepts what JS rejects
+/// (`(?P<name>...)` named groups), so the panel can warn about a pattern
+/// that compiles fine here.
+fn compile_one(rule: LearnedRule) -> (CompiledRule, Option<RuleWarning>) {
+    let (regex, warning) = match &rule {
         LearnedRule::FilenameRegex { pattern, .. } => match Regex::new(pattern) {
-            Ok(r) => Some(r),
-            Err(e) => {
-                eprintln!(
-                    "[rule_suggest] skipping invalid regex pattern {pattern:?}: {e}"
-                );
-                None
-            }
+            Ok(r) => (Some(r), None),
+            Err(e) => (
+                None,
+                Some(RuleWarning::InvalidPattern {
+                    pattern: pattern.clone(),
+                    detail: e.to_string(),
+                }),
+            ),
         },
-        _ => None,
+        _ => (None, None),
     };
-    CompiledRule { rule, regex }
+    (CompiledRule { rule, regex }, warning)
 }
 
 struct GroupAcc {
@@ -443,9 +500,12 @@ mod tests {
     }
 
     #[test]
-    fn invalid_regex_silently_skipped_other_rules_still_fire() {
+    fn invalid_regex_is_skipped_and_reported_other_rules_still_fire() {
         // A malformed regex should NOT poison the whole call — it's
-        // skipped at compile time, the remaining rules carry on.
+        // skipped at compile time, the remaining rules carry on. But the
+        // skip has to be visible: the user saved that rule and would
+        // otherwise just see one fewer group, with no way to tell whether
+        // the rule is broken or simply matched nothing.
         let s = scan("/p", &["/p/SM_Sword.fbx", "/p/T_Hero.png"]);
         let rules = vec![
             LearnedRule::FilenameRegex {
@@ -459,9 +519,128 @@ mod tests {
                 confidence: 0.99,
             },
         ];
-        let groups = RuleSuggester::new(rules).suggest(&s);
+        let suggester = RuleSuggester::new(rules);
+        let groups = suggester.suggest(&s);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].name, "hero");
+
+        assert_eq!(suggester.warnings.len(), 1);
+        match &suggester.warnings[0] {
+            RuleWarning::InvalidPattern { pattern, detail } => {
+                assert_eq!(pattern, "[unbalanced(");
+                assert!(!detail.is_empty(), "the compile error explains the fix");
+            }
+            other => panic!("expected InvalidPattern, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_rule_set_that_compiles_reports_nothing() {
+        let rules = vec![
+            LearnedRule::FilenameRegex {
+                pattern: r"(^|/)SM_[^/]*\.fbx$".into(),
+                tags: vec!["static-mesh".into()],
+                confidence: 0.9,
+            },
+            LearnedRule::FilenameToken {
+                pattern: "Hero".into(),
+                tags: vec!["hero".into()],
+                confidence: 0.99,
+            },
+        ];
+        assert!(RuleSuggester::new(rules).warnings.is_empty());
+    }
+
+    /// A pattern JS `RegExp` accepts but Rust's engine does not. This is the
+    /// path a real dead rule takes: the review panel's syntax check passes
+    /// it, the user saves it, and it matches nothing forever.
+    #[test]
+    fn a_lookahead_survives_review_and_is_reported_here() {
+        let rules = vec![LearnedRule::FilenameRegex {
+            pattern: r"^(?=.*Hero).*\.png$".into(),
+            tags: vec!["hero".into()],
+            confidence: 0.9,
+        }];
+        let warnings = RuleSuggester::new(rules).warnings;
+        assert_eq!(warnings.len(), 1, "look-around must not compile here");
+        assert!(matches!(
+            warnings[0],
+            RuleWarning::InvalidPattern { .. }
+        ));
+    }
+
+    #[test]
+    fn a_corrupt_rules_file_falls_back_to_heuristics_and_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("tidycraft.ai.toml"),
+            "this is not = = valid toml",
+        )
+        .unwrap();
+
+        let root = crate::scanner::path_to_string(dir.path());
+        let out = load_or_fallback(&heuristic_friendly_scan(&root), dir.path());
+
+        assert_eq!(out.warnings.len(), 1);
+        assert!(matches!(
+            out.warnings[0],
+            RuleWarning::RulesUnreadable { .. }
+        ));
+        // Fallback still ran — the panel is not left empty.
+        assert!(!out.groups.is_empty());
+    }
+
+    #[test]
+    fn no_rules_file_falls_back_without_a_warning() {
+        // The overwhelmingly common case: the user has never run AI
+        // Learning. Nothing is wrong, so nothing may be reported.
+        let dir = tempfile::tempdir().unwrap();
+        let root = crate::scanner::path_to_string(dir.path());
+        assert!(load_or_fallback(&heuristic_friendly_scan(&root), dir.path())
+            .warnings
+            .is_empty());
+    }
+
+    /// `AITagPanel.tsx` mirrors this enum by hand and branches on the exact
+    /// `kind` strings — there is no codegen between the two sides. Renaming
+    /// a variant without touching the mirror would take the wrong branch and
+    /// render an interpolated `undefined`, which is how the warning would
+    /// end up as unreadable as the stderr line it replaced.
+    #[test]
+    fn warning_wire_shape_matches_the_frontends_mirror() {
+        let unreadable = serde_json::to_value(RuleWarning::RulesUnreadable {
+            detail: "expected `=`".into(),
+        })
+        .unwrap();
+        assert_eq!(unreadable["kind"], "rules_unreadable");
+        assert_eq!(unreadable["detail"], "expected `=`");
+
+        let invalid = serde_json::to_value(RuleWarning::InvalidPattern {
+            pattern: "[unbalanced(".into(),
+            detail: "unclosed character class".into(),
+        })
+        .unwrap();
+        assert_eq!(invalid["kind"], "invalid_pattern");
+        assert_eq!(invalid["pattern"], "[unbalanced(");
+        assert_eq!(invalid["detail"], "unclosed character class");
+
+        let envelope = serde_json::to_value(TagSuggestions {
+            groups: Vec::new(),
+            warnings: Vec::new(),
+        })
+        .unwrap();
+        assert!(envelope["groups"].is_array());
+        assert!(envelope["warnings"].is_array());
+    }
+
+    /// Enough files sharing a filename token to clear `MIN_TOKEN_HITS`, so
+    /// the heuristic fallback actually produces a group to assert on.
+    fn heuristic_friendly_scan(root: &str) -> ScanResult {
+        let paths: Vec<String> = ["Hero", "Villain", "Rock", "Tree"]
+            .iter()
+            .map(|n| format!("{root}/T_{n}_BaseColor.png"))
+            .collect();
+        scan(root, &paths.iter().map(|p| p.as_str()).collect::<Vec<_>>())
     }
 
     #[test]

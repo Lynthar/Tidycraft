@@ -15,7 +15,6 @@ mod unreal;
 mod watcher;
 
 use analyzer::rules::RuleConfig;
-use analyzer::tag_suggest::{HeuristicSuggester, TagGroup, TagSuggester};
 use analyzer::{AnalysisResult, Analyzer};
 use cache::ScanCache;
 use git::{GitInfo, GitManager};
@@ -1014,7 +1013,7 @@ fn read_project_config(project_id: String) -> Result<Option<String>, String> {
 // ============ Tag Suggestions ============
 
 #[tauri::command]
-fn suggest_tags(project_id: String) -> Result<Vec<TagGroup>, String> {
+fn suggest_tags(project_id: String) -> Result<analyzer::rule_suggest::TagSuggestions, String> {
     project::with_mut(&project_id, |state| {
         // Snapshot the names of tags already created (e.g. from a previous
         // suggest+apply round). We compare against `<group_name> (suggested)`
@@ -1039,22 +1038,16 @@ fn suggest_tags(project_id: String) -> Result<Vec<TagGroup>, String> {
         // Fallback to heuristic suggester when:
         //   - no `tidycraft.ai.toml` exists yet (user hasn't run learning)
         //   - the file exists but the rule list is empty
-        //   - the file is corrupt (load error) — we log + fall back
-        //     rather than failing the whole call so AITagPanel still
-        //     shows *something*.
-        let mut groups: Vec<TagGroup> =
-            match analyzer::rule_suggest::load_or_fallback(scan, root) {
-                Ok(g) => g,
-                Err(e) => {
-                    eprintln!("[suggest_tags] AI rule load failed, falling back: {e}");
-                    HeuristicSuggester.suggest(scan)
-                }
-            };
+        //   - the file is corrupt (load error) — we fall back rather than
+        //     failing the whole call so AITagPanel still shows *something*,
+        //     and report it in `warnings` so the fallback isn't mistaken
+        //     for a working rule set.
+        let mut suggestions = analyzer::rule_suggest::load_or_fallback(scan, root);
 
-        groups.retain(|g| {
+        suggestions.groups.retain(|g| {
             !already_suggested.contains(&format!("{} (suggested)", g.name))
         });
-        Ok(groups)
+        Ok(suggestions)
     })
 }
 
@@ -3989,4 +3982,63 @@ mod tests {
         let (_, message) = localized_issue_cells(&issue, Some(&templates));
         assert_eq!(html_escape(&message), "文件名含禁用字符 &lt;");
     }
+
+    /// End of the wire the panel actually reads: a real corrupt rules file on
+    /// disk, through the real command (registry, tags snapshot, the
+    /// already-suggested filter), serialized the way Tauri serializes it.
+    /// `rule_suggest`'s own tests cover the decision; this covers the plumbing
+    /// between it and the frontend, which is the part with no type checking
+    /// across it.
+    #[test]
+    fn suggest_tags_reports_a_corrupt_rules_file_over_the_wire() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("tidycraft.ai.toml"),
+            "rules = this is not toml",
+        )
+        .unwrap();
+
+        // Enough shared-token files for the heuristic fallback to produce a
+        // group, so an empty `groups` can't mask a missing fallback.
+        let assets: Vec<scanner::AssetInfo> = ["Hero", "Villain", "Rock", "Tree"]
+            .iter()
+            .map(|n| {
+                let p = dir.path().join(format!("T_{n}_BaseColor.png"));
+                std::fs::write(&p, "x").unwrap();
+                unity_asset(&p, scanner::AssetType::Texture, None)
+            })
+            .collect();
+
+        let project_id = "test_suggest_tags_corrupt_rules";
+        project::register(
+            project_id.to_string(),
+            scanner::path_to_string(dir.path()),
+        );
+        project::with_mut(project_id, |s| {
+            s.cached_scan = Some(scan_of(dir.path(), assets));
+            Ok(())
+        })
+        .unwrap();
+
+        let out = suggest_tags(project_id.to_string()).unwrap();
+        project::unregister(project_id);
+
+        let json = serde_json::to_value(&out).unwrap();
+        assert_eq!(
+            json["warnings"][0]["kind"], "rules_unreadable",
+            "the panel has nothing else to tell the user by"
+        );
+        assert!(
+            json["warnings"][0]["detail"]
+                .as_str()
+                .is_some_and(|d| !d.is_empty()),
+            "the parse error is what makes the file fixable"
+        );
+        assert!(
+            json["groups"].as_array().is_some_and(|g| !g.is_empty()),
+            "fallback still has to fill the panel"
+        );
+    }
 }
+
