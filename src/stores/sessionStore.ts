@@ -17,7 +17,9 @@ interface SessionState {
   markRestored: () => void;
 }
 
-export const useSessionStore = create<SessionState>()(
+// Not exported: the store is an implementation detail of `restoreSession` and
+// the persistence hooks below. Nothing outside this file subscribes to it.
+const useSessionStore = create<SessionState>()(
   persist(
     (set) => ({
       openProjectPaths: [],

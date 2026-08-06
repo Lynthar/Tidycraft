@@ -209,7 +209,6 @@ pub fn get_unreal_asset_type(path: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
     use tempfile::tempdir;
 
     #[test]

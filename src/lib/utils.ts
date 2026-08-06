@@ -15,23 +15,6 @@ export function formatFileSize(bytes: number): string {
   return `${(bytes / Math.pow(k, i)).toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
 }
 
-export function getAssetTypeColor(type: string): string {
-  const colors: Record<string, string> = {
-    texture: "text-green-400",
-    model: "text-blue-400",
-    audio: "text-yellow-400",
-    video: "text-rose-400",
-    animation: "text-purple-400",
-    material: "text-pink-400",
-    prefab: "text-cyan-400",
-    scene: "text-orange-400",
-    script: "text-red-400",
-    data: "text-gray-400",
-    other: "text-gray-400",
-  };
-  return colors[type] || "text-gray-400";
-}
-
 export function formatDuration(seconds: number): string {
   // Sub-10s clips (most SFX) need sub-second precision: floor-based m:ss
   // renders a real 0.4s sound as "0:00". Show one decimal below 10s, and

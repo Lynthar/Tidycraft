@@ -120,12 +120,10 @@ export function RenameDialog({
     }
   };
 
+  // Enter only: Escape belongs to ModalShell, which takes it on the window in
+  // the capture phase and stops propagation, so a handler here never sees it.
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !isRenaming) {
-      handleRename();
-    } else if (e.key === "Escape") {
-      onClose();
-    }
+    if (e.key === "Enter" && !isRenaming) handleRename();
   };
 
   if (!isOpen) return null;

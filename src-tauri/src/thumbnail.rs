@@ -160,7 +160,6 @@ fn generate_thumbnail(path: &Path, max_size: u32) -> Result<Vec<u8>, ThumbnailEr
 }
 
 /// Clear the thumbnail cache
-#[allow(dead_code)]
 pub fn clear_cache() -> Result<(), ThumbnailError> {
     if let Some(cache_dir) = get_cache_dir() {
         if cache_dir.exists() {
@@ -171,7 +170,6 @@ pub fn clear_cache() -> Result<(), ThumbnailError> {
 }
 
 /// Get cache size in bytes
-#[allow(dead_code)]
 pub fn get_cache_size() -> u64 {
     let cache_dir = match get_cache_dir() {
         Some(dir) => dir,

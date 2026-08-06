@@ -160,15 +160,6 @@ export function MoveCopyDialog({
     }
   }, [isOpen, scanResult]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !isWorking) onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [isOpen, isWorking, onClose]);
-
   if (!isOpen) return null;
 
   const count = paths.length;

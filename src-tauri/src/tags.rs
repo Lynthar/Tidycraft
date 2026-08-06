@@ -196,7 +196,6 @@ impl TagsData {
     }
 
     /// Get all assets with a specific tag
-    #[allow(dead_code)]
     pub fn get_assets_with_tag(&self, tag_id: &str) -> Vec<String> {
         // Sorted for determinism. `asset_tags` is a HashMap, so its iteration
         // order is randomized per process; these paths feed the per-asset LLM

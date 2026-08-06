@@ -36,14 +36,6 @@ export function getExtension(path: string): string {
   return path.slice(lastDot).toLowerCase();
 }
 
-/// Filename minus its extension — for `"a/b/wood.png"` returns `"wood"`.
-/// Dotfiles (no extension) keep their full name.
-export function basenameWithoutExt(path: string): string {
-  const name = basename(path);
-  const lastDot = name.lastIndexOf(".");
-  return lastDot > 0 ? name.slice(0, lastDot) : name;
-}
-
 /// Project-relative form of `path` when it lives under `root`; otherwise the
 /// input unchanged. Accepts either separator on both sides and compares the
 /// prefix case-insensitively (Windows drive-letter / user-folder casing can
