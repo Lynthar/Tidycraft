@@ -167,7 +167,11 @@ The frontend and backend communicate exclusively through two mechanisms:
   `rule_suggest::load_or_fallback`.
 - **`cache.rs`** — Disk-backed scan cache. File at
   `dirs::cache_dir()/tidycraft/scans/<sha256-prefix>.json`, keyed by
-  (mtime, size). Incremental scans reuse cached entries for unchanged files.
+  (mtime in nanoseconds, size, `.meta` sidecar mtime). Incremental scans reuse
+  cached entries for unchanged files. The nanoseconds matter: whole seconds
+  cannot distinguish a file from the same-length version that replaced it
+  later in the same second. Changing the key means bumping `CACHE_VERSION`,
+  which costs every user one full rescan.
 - **`unity.rs` / `unreal.rs` / `godot.rs`** — Engine-specific parsers. Unity
   parses `.meta` / `.prefab` / `.unity` / `.mat` YAML via line-level string
   scanning (regex-lite, brittle — tracked as tech debt). Unreal reads
@@ -180,7 +184,9 @@ The frontend and backend communicate exclusively through two mechanisms:
 - **`git/mod.rs`** — `libgit2` wrapper. Discovers `.git`, reports branch +
   per-file status + ahead/behind counts.
 - **`thumbnail.rs`** — On-demand base64 thumbnails for images, disk-cached by
-  (path, mtime, size).
+  (path, mtime in nanoseconds, size, requested max size). Entries are never
+  invalidated — an edited image simply gets a new key — so a startup sweep
+  trims the directory back to 256 MB, deleting the oldest first.
 - **`llm/`** — Multi-provider AI tagging, plus the AI-Learning subsystem.
   Two distinct flows share infrastructure:
   - **Per-asset tagging** (`suggest_tags`-equivalent flow). `mod.rs`
