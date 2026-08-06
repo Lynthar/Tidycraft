@@ -516,6 +516,7 @@
     "statsMeshes_other": "{{count, number}} meshes"
   },
   "commandPalette": {
+    "title": "Command palette",
     "placeholder": "Type a command or search…",
     "empty": "No matches.",
     "section": {

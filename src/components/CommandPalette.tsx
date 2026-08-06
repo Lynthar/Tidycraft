@@ -26,6 +26,7 @@ import {
   X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { ModalShell } from "./ModalShell";
 import { useProjectStore } from "../stores/projectStore";
 import { useThemeStore } from "../stores/themeStore";
 import { useUiStore } from "../stores/uiStore";
@@ -105,11 +106,41 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
   const [activeIndex, setActiveIndex] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
 
-  // Reset query + cursor each time the palette opens.
+  /// True only when the pointer's coordinates differ from the last ones seen.
+  /// Keyboard use scrolls and re-filters the list under a stationary pointer,
+  /// and WebKit answers that by re-running its hit test and synthesizing mouse
+  /// events on whichever row slid beneath it — which dragged the cursor back to
+  /// the pointer mid-navigation. Those synthetic events carry the pointer's
+  /// last known coordinates, which is what separates a real movement from the
+  /// shadow of a scroll. A ref, not state: nothing renders differently, so
+  /// re-rendering the list on every pointer movement would be pure waste.
+  const lastPointer = useRef({ x: -1, y: -1 });
+
+  const pointerMoved = (e: React.MouseEvent) => {
+    const moved =
+      e.clientX !== lastPointer.current.x || e.clientY !== lastPointer.current.y;
+    lastPointer.current = { x: e.clientX, y: e.clientY };
+    return moved;
+  };
+
+  /// Hover and the keyboard cursor paint the same highlight, so only one of
+  /// them may be lit at a time — two identical highlights say nothing about
+  /// which one Enter will run. This is the paint half, written straight to the
+  /// node for the stylesheet to read; which row the cursor occupies is decided
+  /// by `pointerMoved` and the key handler.
+  const setHoverHighlight = (on: boolean) => {
+    listRef.current?.toggleAttribute("data-hover-off", !on);
+  };
+
+  // Reset query + cursor each time the palette opens. Hover starts suspended:
+  // the list materializes under wherever the pointer already happens to sit,
+  // and letting that count as hovering would light a second row the instant the
+  // palette appeared. The pointer has to move to claim the cursor.
   useEffect(() => {
     if (cmdkOpen) {
       setQuery("");
       setActiveIndex(0);
+      setHoverHighlight(false);
     }
   }, [cmdkOpen]);
 
@@ -477,6 +508,10 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
   useEffect(() => {
     if (!cmdkOpen) return;
     const onKey = (e: KeyboardEvent) => {
+      // Any key, not just the arrows: typing re-filters the list, which slides
+      // different rows under the pointer just as scrolling does.
+      setHoverHighlight(false);
+
       if (e.key === "ArrowDown") {
         e.preventDefault();
         setActiveIndex((i) => Math.min(i + 1, filteredItems.length - 1));
@@ -493,10 +528,9 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
         e.preventDefault();
         const item = filteredItems[activeIndex];
         if (item) item.onSelect();
-      } else if (e.key === "Escape") {
-        e.preventDefault();
-        close();
       }
+      // Escape is handled by ModalShell (capture phase, stops propagation), so
+      // a branch for it here would never run.
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -520,8 +554,12 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
   let lastSection: string | null = null;
 
   return (
-    <div className="tc-overlay" onClick={close}>
-      <div className="tc-cmdk" onClick={(e) => e.stopPropagation()}>
+    <ModalShell
+      onClose={close}
+      ariaLabel={t("commandPalette.title")}
+      className="tc-overlay"
+    >
+      <div className="tc-cmdk">
         <div className="tc-cmdk-input">
           <Search size={16} />
           <input
@@ -549,7 +587,16 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
                     className="tc-cmdk-item"
                     data-active={i === activeIndex ? "true" : undefined}
                     onClick={() => it.onSelect()}
-                    onMouseEnter={() => setActiveIndex(i)}
+                    // `mousemove`, not `mouseenter`: the pointer regains the
+                    // cursor the moment it moves, even without crossing into
+                    // another row — otherwise a nudge that stays inside one row
+                    // restored the hover highlight while the keyboard's cursor
+                    // sat elsewhere, which is the two-highlights state again.
+                    onMouseMove={(e) => {
+                      if (!pointerMoved(e)) return;
+                      setHoverHighlight(true);
+                      setActiveIndex(i);
+                    }}
                   >
                     <span className="tc-cmdk-item-icon">{it.icon}</span>
                     <span className="tc-cmdk-item-label">{it.label}</span>
@@ -582,6 +629,6 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
           </span>
         </div>
       </div>
-    </div>
+    </ModalShell>
   );
 }

@@ -642,6 +642,7 @@
     "statsMeshes_other": "{{count, number}} 个网格"
   },
   "commandPalette": {
+    "title": "命令面板",
     "placeholder": "输入命令或搜索…",
     "empty": "无匹配结果。",
     "section": {

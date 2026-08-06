@@ -1710,7 +1710,11 @@
   width: 100%;
   text-align: left;
 }
-.tc-cmdk-item:hover,
+/* Hover and the keyboard cursor paint the same highlight, so only one of them
+   may be active at a time. `data-hover-off` is set by CommandPalette while the
+   keyboard is driving: without it a pointer resting over the list kept its row
+   lit, and two identical highlights gave no clue which one Enter would run. */
+.tc-cmdk-list:not([data-hover-off]) .tc-cmdk-item:hover,
 .tc-cmdk-item[data-active="true"] {
   background: var(--primary-tint);
 }

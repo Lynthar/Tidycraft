@@ -50,6 +50,30 @@ function AssetIcon({ type }: { type: AssetType }) {
   );
 }
 
+/// Props that make a header cell operable from the keyboard. The header row is
+/// a strip of flex divs rather than a real table, so the sort trigger has to be
+/// spelled out: the role, the tab stop, and Enter/Space by hand. Space is
+/// prevented from its default (scrolling the list) the way a real button does.
+///
+/// Deliberately no `aria-sort`: that attribute is only defined on
+/// `columnheader`/`rowheader`, and there is no `table`/`grid` above these divs
+/// to carry those roles. Announcing the direction properly means giving the
+/// whole virtualized list grid semantics — a much larger change than this one,
+/// and an invalid attribute in the meantime is worse than none.
+function sortableHeaderProps(activate: () => void) {
+  return {
+    role: "button",
+    tabIndex: 0,
+    onClick: activate,
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        activate();
+      }
+    },
+  };
+}
+
 /// Drag-to-resize grab handle on the right edge of a header cell. Uses
 /// document-level mousemove/mouseup so cursor leaving the handle mid-drag
 /// doesn't abort. Stops propagation to avoid triggering the parent header's
@@ -460,7 +484,7 @@ export function AssetListView({
         <div
           className="py-2 px-3 shrink-0 flex items-center gap-1 cursor-pointer hover:text-text-primary transition-colors select-none relative overflow-hidden"
           style={{ width: columnWidths.name }}
-          onClick={() => setSortField("name")}
+          {...sortableHeaderProps(() => setSortField("name"))}
         >
           <span className="truncate">{t("columns.name")}</span>
           <SortIndicator
@@ -489,9 +513,11 @@ export function AssetListView({
                   isSortable && "cursor-pointer hover:text-text-primary"
                 )}
                 style={{ width }}
-                onClick={() =>
-                  isSortable && setSortField(columnId as SortField)
-                }
+                {...(isSortable
+                  ? sortableHeaderProps(() =>
+                      setSortField(columnId as SortField)
+                    )
+                  : {})}
               >
                 <span className="truncate">{t(`columns.${columnId}`)}</span>
                 {isSortable && (
