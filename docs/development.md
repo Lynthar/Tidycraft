@@ -548,24 +548,34 @@ Windows and at least one POSIX target.
   error we only log to stderr.
 - **macOS code signing.** Distribution requires Developer ID signature +
   notarization. Not set up yet.
-- **macOS icon grid.** macOS reserves a transparent margin around an app
-  icon for the shadow it draws behind it: on a 1024×1024 canvas the rounded
-  square is 824×824, centred (measure any stock app's `.icns` — they all sit
-  at 80.5%). An icon that fills its canvas renders about a quarter larger
-  than everything else in the Dock. `src-tauri/icons/icon.icns` is therefore
-  generated from `app-icon-macos.png`, the artwork inset onto that grid, and
-  **not** from `app-icon.png` — which remains the source for the Windows
-  `.ico` and the Linux PNGs, where full-bleed is the convention. Note that
-  `pnpm tauri icon` with no argument defaults to `app-icon.png` and would
-  silently undo this; regenerate the macOS set with
-  `pnpm tauri icon app-icon-macos.png -o <tmpdir>` and copy `icon.icns`
-  across. The icon in `pnpm tauri dev` comes from the same file (Tauri
-  embeds the first `.icns` in the config and sets it on the dock at
-  startup), so dev and the bundle cannot disagree here. One catch when you
-  change it: the icon is embedded by `generate_context!`, and replacing the
-  file does not make cargo consider the crate stale — the next build reuses
-  the previously embedded copy and shows the old icon. Touch a source file
-  to force the macro to re-expand before judging the result.
+- **App icon.** `app-icon.svg` at the repo root is the master for all three
+  platforms. Regenerate with `pnpm tauri icon app-icon.svg -o <tmpdir>`, then
+  copy across only the five files `tauri.conf.json` references — `32x32.png`,
+  `128x128.png`, `128x128@2x.png`, `icon.icns`, `icon.ico`. The command emits
+  52 files; the rest are Android / iOS / Store sizes this project doesn't
+  ship. The master is a vector and not a 1024 PNG because the previous one
+  was an HTML file that only ever lived in a scratch directory and was lost —
+  its geometry had to be recovered from `BrandMark.tsx` afterwards. A single
+  vector also can't drift out of step with a rendered copy of itself.
+- **macOS Dock grid, and why this icon is exempt.** macOS reserves a
+  transparent margin around an app icon for the shadow it draws behind it: on
+  a 1024×1024 canvas the rounded square is 824×824, centred (measure any stock
+  app's `.icns` — they all sit at 80.5%), and a plated icon that fills its
+  canvas renders about a quarter larger than everything else in the Dock.
+  `f580a50` inset `icon.icns` onto that grid for exactly that reason. **That
+  grid is for plated square icons.** The mark is now transparent and
+  plateless, so it is full-bleed everywhere and there is no separate macOS
+  master. A plateless diamond does read smaller than its plated neighbours in
+  the Dock — that is a deliberate trade-off, not a regression to "fix" by
+  reinstating the inset.
+- **Icon changes need a nudge to show up.** The icon is embedded by
+  `generate_context!`, and replacing the file does not make cargo consider the
+  crate stale — the next build reuses the previously embedded copy and shows
+  the old icon. Touch a source file to force the macro to re-expand before
+  judging the result. `pnpm tauri dev` embeds the same `.icns` the bundle
+  ships (Tauri sets it on the Dock at startup), so dev and release cannot
+  disagree here. On Windows the shell also caches taskbar icons; a stale icon
+  there can outlive a correct build.
 - **Keyboard shortcuts display.** Detection in `useKeyboardShortcuts`
   honors both `ctrlKey` and `metaKey`, so shortcuts work on every OS.
   `formatShortcut` now reads `getPlatform()` from `lib/platform.ts` and

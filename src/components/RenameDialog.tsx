@@ -58,24 +58,29 @@ export function RenameDialog({
     };
   }, [isOpen, projectType, activeProjectId, assetPath]);
 
-  // Extract name without extension
+  // The input carries the WHOLE filename and the initial selection covers only
+  // the base name — Explorer / Finder behaviour, so typing replaces the name
+  // and leaves `.png` alone while editing the extension on purpose stays
+  // possible. Holding just the base name and appending a static suffix label
+  // instead invites `hero.png` -> `hero.png.png`: the habit users arrive with
+  // is to type the whole name they can see.
+  // `> 0` keeps a dotfile (`.gitignore`) all name and no extension.
   const lastDotIndex = currentName.lastIndexOf(".");
-  const nameWithoutExt = lastDotIndex > 0 ? currentName.substring(0, lastDotIndex) : currentName;
-  const extension = lastDotIndex > 0 ? currentName.substring(lastDotIndex) : "";
 
   useEffect(() => {
     if (isOpen) {
-      setNewName(nameWithoutExt);
+      setNewName(currentName);
       setError(null);
       // Focus and select text after a short delay
       setTimeout(() => {
-        if (inputRef.current) {
-          inputRef.current.focus();
-          inputRef.current.select();
-        }
+        const el = inputRef.current;
+        if (!el) return;
+        el.focus();
+        if (lastDotIndex > 0) el.setSelectionRange(0, lastDotIndex);
+        else el.select();
       }, 50);
     }
-  }, [isOpen, nameWithoutExt]);
+  }, [isOpen, currentName, lastDotIndex]);
 
   const handleRename = async () => {
     const trimmedName = newName.trim();
@@ -84,7 +89,7 @@ export function RenameDialog({
       return;
     }
 
-    if (trimmedName === nameWithoutExt) {
+    if (trimmedName === currentName) {
       onClose();
       return;
     }
@@ -105,11 +110,10 @@ export function RenameDialog({
     }
 
     try {
-      const newFullName = trimmedName + extension;
       await invoke("rename_file", {
         projectId: activeProjectId,
         oldPath: assetPath,
-        newName: newFullName,
+        newName: trimmedName,
       });
       onComplete();
       onClose();
@@ -162,23 +166,19 @@ export function RenameDialog({
             <label className="block text-sm text-text-secondary mb-1">
               {t("rename.newName", "New name")}
             </label>
-            <div className="flex items-center gap-1">
-              <input
-                ref={inputRef}
-                type="text"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                onKeyDown={handleKeyDown}
-                disabled={isRenaming}
-                className="flex-1 px-3 py-2 text-sm bg-background border border-border rounded
-                           text-text-primary focus:outline-none focus:border-primary transition-colors
-                           disabled:opacity-50"
-                placeholder={t("rename.enterName", "Enter new name...")}
-              />
-              {extension && (
-                <span className="text-sm text-text-secondary">{extension}</span>
-              )}
-            </div>
+            <input
+              ref={inputRef}
+              type="text"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={isRenaming}
+              className="w-full px-3 py-2 text-sm bg-background border border-border rounded
+                         text-text-primary focus:outline-none focus:border-primary transition-colors
+                         disabled:opacity-50"
+              placeholder={t("rename.enterName", "Enter new name...")}
+            />
+
           </div>
 
           {godotRefs && godotRefs.length > 0 && (

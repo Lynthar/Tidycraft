@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Tidycraft app icon — the "Gleam" mark: four-facet amber gem + cyan companion.
+
+  This file is the master for every platform's icon; regenerate the set with
+      pnpm tauri icon app-icon.svg
+  (see docs/development.md). Vector rather than a 1024 PNG so the source can be
+  edited and can't drift out of step with a rendered copy.
+
+  Geometry is the same one src/components/BrandMark.tsx draws in the Header, in
+  a 96-unit space: gem N(48,17) E(79,48) S(48,79) W(17,48), centre vertex
+  P(42,42). The viewBox insets that space so the gem's 62-unit diagonal spans
+  94% of the canvas — 62 / 0.94 = 65.96, origin 48 - 65.96/2 = 15.02 — leaving
+  3% a side so the four points survive rounding and circular masks. A diamond
+  carries half the area of a square with the same width, so it has to sit this
+  much larger than a square icon would to read at the same weight.
+
+  Transparent and full-bleed on all three platforms, including macOS: the
+  80.5% Dock grid that icon.icns used to be inset onto applies to plated square
+  icons, and this mark has no plate. No glow either — the amber halo was tuned
+  against a dark plate, smears on light grounds without one, and spilled past
+  the gem's own bounds, which made "how much of the canvas" unanswerable.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024"
+     viewBox="15.02 15.02 65.96 65.96">
+  <polygon points="17,48 48,17 42,42" fill="#f8d376"/>
+  <polygon points="48,17 79,48 42,42" fill="#ffb330"/>
+  <polygon points="48,79 17,48 42,42" fill="#e69825"/>
+  <polygon points="79,48 48,79 42,42" fill="#b45c03"/>
+  <path d="M17,48 L48,17 L79,48" fill="none" stroke="#f8d376" stroke-width="1.4"
+        opacity="0.5" stroke-linejoin="round"/>
+  <polygon points="69,16.5 76.5,24 69,31.5 61.5,24" fill="#6cd9d8"/>
+</svg>
