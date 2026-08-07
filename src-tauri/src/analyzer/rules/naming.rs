@@ -107,12 +107,8 @@ impl NamingRule {
     }
 
     fn check_forbidden_chars(&self, name: &str) -> Option<char> {
-        for c in name.chars() {
-            if self.config.forbidden_chars.contains(&c) {
-                return Some(c);
-            }
-        }
-        None
+        name.chars()
+            .find(|&c| self.config.forbidden_chars.contains(&c))
     }
 
     fn check_chinese(&self, name: &str) -> bool {
@@ -473,7 +469,7 @@ fn reattach_ext(stem: &str, ext: Option<&str>) -> String {
 fn collapse_and_trim(s: &str, sep: char) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
-        if c == sep && out.chars().last() == Some(sep) {
+        if c == sep && out.ends_with(sep) {
             continue;
         }
         out.push(c);

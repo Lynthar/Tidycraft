@@ -43,7 +43,7 @@ pub trait Rule: Send + Sync {
 }
 
 /// Configuration for all rules
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RuleConfig {
     #[serde(default)]
     pub naming: naming::NamingConfig,
@@ -59,20 +59,6 @@ pub struct RuleConfig {
     pub dcc_source: dcc_source::DccSourceConfig,
     #[serde(default)]
     pub ignore: IgnoreConfig,
-}
-
-impl Default for RuleConfig {
-    fn default() -> Self {
-        Self {
-            naming: naming::NamingConfig::default(),
-            texture: texture::TextureConfig::default(),
-            model: model::ModelConfig::default(),
-            audio: audio::AudioConfig::default(),
-            pbr_set: pbr_set::PbrSetConfig::default(),
-            dcc_source: dcc_source::DccSourceConfig::default(),
-            ignore: IgnoreConfig::default(),
-        }
-    }
 }
 
 impl RuleConfig {

@@ -607,21 +607,19 @@ async fn learn_project_conventions(
     Ok(result)
 }
 
+/// Everything a learning prompt is built from: the sampled directories, the
+/// `[project]` theme/goal, and the existing tag vocabulary.
+type LearningInputs = (
+    Vec<llm::learning::DirectorySample>,
+    Option<llm::project_meta::ProjectMeta>,
+    Vec<llm::ExistingTagContext>,
+);
+
 /// Snapshot + sample exactly what a learning run would send: scan / tags /
 /// root under the project lock, then `[project]` meta and the deterministic
 /// per-project sampling outside it. Shared by the real call and its cost
 /// estimator so the preview prices the ACTUAL prompt, not an approximation.
-fn build_learning_inputs(
-    project_id: &str,
-    depth: usize,
-) -> Result<
-    (
-        Vec<llm::learning::DirectorySample>,
-        Option<llm::project_meta::ProjectMeta>,
-        Vec<llm::ExistingTagContext>,
-    ),
-    String,
-> {
+fn build_learning_inputs(project_id: &str, depth: usize) -> Result<LearningInputs, String> {
     // Snapshot scan + tags + root_path inside the project lock.
     // Drop the lock before any IO (toml read) or async work
     // (provider call) — same pattern as `llm_suggest_tags`.
@@ -1583,7 +1581,7 @@ fn get_project_stats(project_id: String) -> Result<ProjectStats, String> {
             });
         }
 
-        all_files.sort_by(|a, b| b.size.cmp(&a.size));
+        all_files.sort_by_key(|f| std::cmp::Reverse(f.size));
         let largest_files: Vec<FileInfo> = all_files.into_iter().take(10).collect();
 
         Ok(ProjectStats {
@@ -2034,7 +2032,7 @@ fn apply_rename_operation(name: &str, operation: &RenameOperation) -> String {
         RenameOperation::ToLowercase => name.to_lowercase(),
         RenameOperation::ToUppercase => name.to_uppercase(),
         RenameOperation::ToTitleCase => name
-            .split(|c: char| c == '_' || c == '-' || c == ' ')
+            .split(['_', '-', ' '])
             .map(|word| {
                 let mut chars = word.chars();
                 match chars.next() {

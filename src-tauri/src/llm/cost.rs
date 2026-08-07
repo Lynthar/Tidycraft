@@ -5,8 +5,8 @@
 //! - Anthropic: https://platform.claude.com/docs/en/about-claude/pricing
 //! - Anthropic vision: https://platform.claude.com/docs/en/build-with-claude/vision
 //!   (formula `tokens ≈ width × height / 750`; the per-image cap follows the
-//!    model's maximum input resolution — 1568 at the 1568px long edge, 4784
-//!    at the 2576px high-resolution tier, which is no longer Opus-only)
+//!   model's maximum input resolution — 1568 at the 1568px long edge, 4784
+//!   at the 2576px high-resolution tier, which is no longer Opus-only)
 //! - OpenAI: https://developers.openai.com/api/docs/pricing
 //! - OpenAI vision: 32×32 patch tokenization for 5.4-mini/nano (cap 1536
 //!   patches, ×1.62 mini / ×2.46 nano multipliers), tile-based for the 4o
@@ -248,7 +248,7 @@ fn finish_estimate(p: &Pricing, input_tokens: usize, output_tokens: usize) -> Co
     let usd_cents = if total_micros == 0 {
         0
     } else {
-        ((total_micros + 9_999) / 10_000) as u32
+        total_micros.div_ceil(10_000) as u32
     };
 
     CostEstimate {

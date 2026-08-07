@@ -206,7 +206,7 @@ pub fn find_pbr_set_issues(assets: &[AssetInfo], config: &PbrSetConfig) -> Analy
         any_path_per_set
             .entry(key.clone())
             .or_insert_with(|| asset.path.clone());
-        let entry = sets.entry(key.clone()).or_insert_with(HashSet::new);
+        let entry = sets.entry(key.clone()).or_default();
 
         match role {
             RoleKind::Channel(r) => {
@@ -316,9 +316,10 @@ mod tests {
     /// `enabled = false`, and a "0 issues" assertion against a disabled rule
     /// passes vacuously without exercising any of the grouping logic.
     fn enabled_cfg() -> PbrSetConfig {
-        let mut cfg = PbrSetConfig::default();
-        cfg.enabled = true;
-        cfg
+        PbrSetConfig {
+            enabled: true,
+            ..Default::default()
+        }
     }
 
     /// The issue's `asset_path` is what the frontend's Locate jumps to. When
@@ -355,8 +356,7 @@ mod tests {
         let assets = vec![texture("/proj/T_Wood_BaseColor.png")];
         // Out-of-box default has `enabled = false` so the rule is opt-in;
         // every PBR test below explicitly enables it.
-        let mut cfg = PbrSetConfig::default();
-        cfg.enabled = true;
+        let cfg = enabled_cfg();
         let result = find_pbr_set_issues(&assets, &cfg);
         assert_eq!(result.issue_count, 1);
         assert!(result.issues[0].message.to_lowercase().contains("normal"));
@@ -380,8 +380,7 @@ mod tests {
             texture("/proj/A/T_Wood_BaseColor.png"),
             texture("/proj/B/T_Wood_Normal.png"),
         ];
-        let mut cfg = PbrSetConfig::default();
-        cfg.enabled = true;
+        let cfg = enabled_cfg();
         let result = find_pbr_set_issues(&assets, &cfg);
         assert_eq!(result.issue_count, 1);
     }
@@ -422,8 +421,13 @@ mod tests {
 
     #[test]
     fn disabled_yields_nothing() {
-        let mut cfg = PbrSetConfig::default();
-        cfg.enabled = false;
+        // Explicit even though it matches the default: this test is *about*
+        // the disabled path, so the value must not silently follow a change
+        // to `PbrSetConfig::default()`.
+        let cfg = PbrSetConfig {
+            enabled: false,
+            ..Default::default()
+        };
         let assets = vec![texture("/proj/T_Wood_BaseColor.png")];
         let result = find_pbr_set_issues(&assets, &cfg);
         assert_eq!(result.issue_count, 0);

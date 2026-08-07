@@ -160,6 +160,30 @@ pub fn unregister(project_id: &str) -> bool {
     true
 }
 
+pub fn get(project_id: &str) -> Option<Arc<Mutex<ProjectState>>> {
+    registry().lock().get(project_id).cloned()
+}
+
+/// Run a closure with mutable access to a project's state.
+pub fn with_mut<F, R>(project_id: &str, f: F) -> Result<R, String>
+where
+    F: FnOnce(&mut ProjectState) -> Result<R, String>,
+{
+    let proj = get(project_id).ok_or_else(|| format!("Project not registered: {}", project_id))?;
+    let mut state = proj.lock();
+    f(&mut state)
+}
+
+/// Run a closure with read access to a project's state.
+pub fn with_ref<F, R>(project_id: &str, f: F) -> Result<R, String>
+where
+    F: FnOnce(&ProjectState) -> Result<R, String>,
+{
+    let proj = get(project_id).ok_or_else(|| format!("Project not registered: {}", project_id))?;
+    let state = proj.lock();
+    f(&state)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -201,28 +225,4 @@ mod tests {
         assert!(unregister(id));
         assert!(!unregister(id), "second unregister has nothing to remove");
     }
-}
-
-pub fn get(project_id: &str) -> Option<Arc<Mutex<ProjectState>>> {
-    registry().lock().get(project_id).cloned()
-}
-
-/// Run a closure with mutable access to a project's state.
-pub fn with_mut<F, R>(project_id: &str, f: F) -> Result<R, String>
-where
-    F: FnOnce(&mut ProjectState) -> Result<R, String>,
-{
-    let proj = get(project_id).ok_or_else(|| format!("Project not registered: {}", project_id))?;
-    let mut state = proj.lock();
-    f(&mut state)
-}
-
-/// Run a closure with read access to a project's state.
-pub fn with_ref<F, R>(project_id: &str, f: F) -> Result<R, String>
-where
-    F: FnOnce(&ProjectState) -> Result<R, String>,
-{
-    let proj = get(project_id).ok_or_else(|| format!("Project not registered: {}", project_id))?;
-    let state = proj.lock();
-    f(&state)
 }

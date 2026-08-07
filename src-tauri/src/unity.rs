@@ -415,10 +415,8 @@ fn extract_components(content: &str) -> Vec<String> {
         let line = line.trim();
 
         // Look for MonoBehaviour components with script references
-        if line.starts_with("m_Script:") {
-            if let Some(_) = line.find("guid:") {
-                components.insert("MonoBehaviour".to_string());
-            }
+        if line.starts_with("m_Script:") && line.contains("guid:") {
+            components.insert("MonoBehaviour".to_string());
         }
 
         // Extract Unity built-in component types

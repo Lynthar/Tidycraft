@@ -164,32 +164,32 @@ impl TextureRule {
     /// historical precedence order.
     fn check_dimensions(&self, asset: &AssetInfo, width: u32, height: u32) -> Option<Issue> {
         // Check POT
-        if self.config.require_pot {
-            if !Self::is_power_of_two(width) || !Self::is_power_of_two(height) {
-                return Some(Issue {
-                    rule_id: "texture.pot".to_string(),
-                    rule_name: "Non-POT Texture".to_string(),
-                    severity: Severity::Warning,
-                    message: format!(
-                        "Texture dimensions {}x{} are not power of two",
-                        width, height
-                    ),
-                    asset_path: asset.path.clone(),
-                    suggestion: Some(format!(
-                        "Resize to {}x{}",
-                        next_power_of_two(width),
-                        next_power_of_two(height)
-                    )),
-                    auto_fixable: false,
-                    related_paths: None,
-                    args: issue_args([
-                        ("width", width.to_string()),
-                        ("height", height.to_string()),
-                        ("pot_width", next_power_of_two(width).to_string()),
-                        ("pot_height", next_power_of_two(height).to_string()),
-                    ]),
-                });
-            }
+        if self.config.require_pot
+            && (!Self::is_power_of_two(width) || !Self::is_power_of_two(height))
+        {
+            return Some(Issue {
+                rule_id: "texture.pot".to_string(),
+                rule_name: "Non-POT Texture".to_string(),
+                severity: Severity::Warning,
+                message: format!(
+                    "Texture dimensions {}x{} are not power of two",
+                    width, height
+                ),
+                asset_path: asset.path.clone(),
+                suggestion: Some(format!(
+                    "Resize to {}x{}",
+                    next_power_of_two(width),
+                    next_power_of_two(height)
+                )),
+                auto_fixable: false,
+                related_paths: None,
+                args: issue_args([
+                    ("width", width.to_string()),
+                    ("height", height.to_string()),
+                    ("pot_width", next_power_of_two(width).to_string()),
+                    ("pot_height", next_power_of_two(height).to_string()),
+                ]),
+            });
         }
 
         // Check max size

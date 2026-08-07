@@ -168,10 +168,9 @@ fn extract_autoloads(config: &HashMap<String, HashMap<String, String>>) -> Vec<G
         for (name, value) in autoload_section {
             // 格式: name="*res://path/to/script.gd" 或 name="res://path/to/script.gd"
             let value = unquote(value);
-            let (singleton, path) = if value.starts_with('*') {
-                (true, value[1..].to_string())
-            } else {
-                (false, value)
+            let (singleton, path) = match value.strip_prefix('*') {
+                Some(rest) => (true, rest.to_string()),
+                None => (false, value),
             };
 
             autoloads.push(GodotAutoload {
@@ -217,10 +216,9 @@ fn infer_godot_version(
             .next()
             .map(|c| c.is_ascii_digit())
             .unwrap_or(false)
+            && feature.contains('.')
         {
-            if feature.contains('.') {
-                return Some(feature.clone());
-            }
+            return Some(feature.clone());
         }
     }
 
@@ -876,7 +874,7 @@ config/name="Minimal"
         );
 
         let target = root.join(nfd).to_string_lossy().to_string();
-        let refs = referencing_files(root, &assets, &[target.clone()]);
+        let refs = referencing_files(root, &assets, std::slice::from_ref(&target));
         assert_eq!(
             refs.get(&target).map(Vec::as_slice),
             Some(["main.tscn".to_string()].as_slice()),

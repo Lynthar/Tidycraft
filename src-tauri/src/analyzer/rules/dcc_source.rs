@@ -372,7 +372,7 @@ pub fn find_dcc_source_issues(assets: &[AssetInfo], config: &DccSourceConfig) ->
                         Some(m) => m,
                         None => continue,
                     };
-                    if best.map_or(true, |(_, old)| mtime > old) {
+                    if best.is_none_or(|(_, old)| mtime > old) {
                         best = Some((cand, mtime));
                     }
                 }
@@ -524,9 +524,11 @@ pub(crate) mod tests {
             make_asset(&blend.to_string_lossy(), AssetType::Model),
             make_asset(&fbx.to_string_lossy(), AssetType::Model),
         ];
-        let mut cfg = DccSourceConfig::default();
-        cfg.enabled = true;
-        cfg.mtime_tolerance_secs = 5;
+        let cfg = DccSourceConfig {
+            enabled: true,
+            mtime_tolerance_secs: 5,
+            ..Default::default()
+        };
         let r = find_dcc_source_issues(&assets, &cfg);
         assert_eq!(r.issue_count, 1);
         assert_eq!(r.issues[0].rule_id, "dcc_source.outdated_export");
@@ -548,8 +550,10 @@ pub(crate) mod tests {
             make_asset(&blend.to_string_lossy(), AssetType::Model),
             make_asset(&fbx.to_string_lossy(), AssetType::Model),
         ];
-        let mut cfg = DccSourceConfig::default();
-        cfg.enabled = true;
+        let cfg = DccSourceConfig {
+            enabled: true,
+            ..Default::default()
+        };
         let r = find_dcc_source_issues(&assets, &cfg);
         assert_eq!(r.issue_count, 0);
     }
@@ -566,8 +570,10 @@ pub(crate) mod tests {
             make_asset(&blend.to_string_lossy(), AssetType::Model),
             make_asset(&fbx.to_string_lossy(), AssetType::Model),
         ];
-        let mut cfg = DccSourceConfig::default();
-        cfg.enabled = true;
+        let cfg = DccSourceConfig {
+            enabled: true,
+            ..Default::default()
+        };
         let r = find_dcc_source_issues(&assets, &cfg);
         assert_eq!(r.issue_count, 0);
     }
@@ -579,8 +585,10 @@ pub(crate) mod tests {
         let blend = dir.path().join("orphan.blend");
         write_with_mtime(&blend, 60);
         let assets = vec![make_asset(&blend.to_string_lossy(), AssetType::Model)];
-        let mut cfg = DccSourceConfig::default();
-        cfg.enabled = true;
+        let cfg = DccSourceConfig {
+            enabled: true,
+            ..Default::default()
+        };
         let r = find_dcc_source_issues(&assets, &cfg);
         assert_eq!(r.issue_count, 0);
     }
@@ -598,8 +606,10 @@ pub(crate) mod tests {
             make_asset(&txt.to_string_lossy(), AssetType::Other),
             make_asset(&png.to_string_lossy(), AssetType::Texture),
         ];
-        let mut cfg = DccSourceConfig::default();
-        cfg.enabled = true;
+        let cfg = DccSourceConfig {
+            enabled: true,
+            ..Default::default()
+        };
         let r = find_dcc_source_issues(&assets, &cfg);
         assert_eq!(r.issue_count, 0);
     }
@@ -618,8 +628,10 @@ pub(crate) mod tests {
             make_asset(&fbx.to_string_lossy(), AssetType::Model),
             make_asset(&glb.to_string_lossy(), AssetType::Model),
         ];
-        let mut cfg = DccSourceConfig::default();
-        cfg.enabled = true;
+        let cfg = DccSourceConfig {
+            enabled: true,
+            ..Default::default()
+        };
         let r = find_dcc_source_issues(&assets, &cfg);
         // Newest export (.glb) is newer than source → no warning,
         // even though .fbx alone would have triggered.
@@ -642,9 +654,11 @@ pub(crate) mod tests {
             make_asset(&blend.to_string_lossy(), AssetType::Model),
             make_asset(&fbx.to_string_lossy(), AssetType::Model),
         ];
-        let mut cfg = DccSourceConfig::default();
-        cfg.enabled = true;
-        cfg.mtime_tolerance_secs = 5;
+        let cfg = DccSourceConfig {
+            enabled: true,
+            mtime_tolerance_secs: 5,
+            ..Default::default()
+        };
         let r = find_dcc_source_issues(&assets, &cfg);
         assert_eq!(r.issue_count, 1);
         assert!(r.issues[0].message.contains("Hero.blend"));
@@ -680,9 +694,11 @@ pub(crate) mod tests {
             make_asset(&b_blend.to_string_lossy(), AssetType::Model),
             make_asset(&b_fbx.to_string_lossy(), AssetType::Model),
         ];
-        let mut cfg = DccSourceConfig::default();
-        cfg.enabled = true;
-        cfg.mtime_tolerance_secs = 5;
+        let cfg = DccSourceConfig {
+            enabled: true,
+            mtime_tolerance_secs: 5,
+            ..Default::default()
+        };
         let r = find_dcc_source_issues(&assets, &cfg);
         assert_eq!(r.issue_count, 2);
         // Path-sorted: ".../a/foo.blend" precedes ".../b/bar.blend".
@@ -713,9 +729,11 @@ pub(crate) mod tests {
             make_asset(&blend.to_string_lossy(), AssetType::Model),
             make_asset(&png.to_string_lossy(), AssetType::Texture),
         ];
-        let mut cfg = DccSourceConfig::default();
-        cfg.enabled = true;
-        cfg.mtime_tolerance_secs = 5;
+        let cfg = DccSourceConfig {
+            enabled: true,
+            mtime_tolerance_secs: 5,
+            ..Default::default()
+        };
         let r = find_dcc_source_issues(&assets, &cfg);
         assert_eq!(r.issue_count, 0);
     }
@@ -732,9 +750,11 @@ pub(crate) mod tests {
             make_asset(&psd.to_string_lossy(), AssetType::Texture),
             make_asset(&png.to_string_lossy(), AssetType::Texture),
         ];
-        let mut cfg = DccSourceConfig::default();
-        cfg.enabled = true;
-        cfg.mtime_tolerance_secs = 5;
+        let cfg = DccSourceConfig {
+            enabled: true,
+            mtime_tolerance_secs: 5,
+            ..Default::default()
+        };
         let r = find_dcc_source_issues(&assets, &cfg);
         assert_eq!(r.issue_count, 1);
         assert!(r.issues[0]

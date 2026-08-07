@@ -340,8 +340,8 @@ mod tests {
     use super::*;
     use crate::llm::TagCategory;
 
-    /// Helper: round-trip a JSON string through the response struct
-    /// + extractor. Lets us simulate full API responses in unit tests
+    /// Helper: round-trip a JSON string through the response struct and
+    /// extractor. Lets us simulate full API responses in unit tests
     /// without HTTP.
     fn parse_response_json(json: &str) -> Result<TagResponse, LLMError> {
         let parsed: AnthropicResponse =

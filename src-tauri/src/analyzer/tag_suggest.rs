@@ -275,7 +275,7 @@ fn is_useful_token(token: &str) -> bool {
     {
         return false;
     }
-    if TOKEN_STOPLIST.iter().any(|s| *s == token) {
+    if TOKEN_STOPLIST.contains(&token) {
         return false;
     }
     true

@@ -269,9 +269,7 @@ fn apply_changes(
 
         let removed: Vec<String> = removed_set.into_iter().collect();
 
-        scan_result
-            .assets
-            .sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
+        scan_result.assets.sort_by_key(|a| a.path.to_lowercase());
 
         scan_result.total_count = scan_result.assets.len();
         scan_result.total_size = scan_result.assets.iter().map(|a| a.size).sum();

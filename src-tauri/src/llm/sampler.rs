@@ -78,7 +78,7 @@ pub fn sample_directories(scan: &ScanResult, depth: usize, seed: u64) -> Vec<Dir
 fn pick_per_type<'a>(files: &[&'a AssetInfo], depth: usize, seed: u64) -> Vec<&'a AssetInfo> {
     if files.len() <= depth {
         // Take everything — sort by rank for output stability.
-        let mut copy: Vec<&AssetInfo> = files.iter().copied().collect();
+        let mut copy: Vec<&AssetInfo> = files.to_vec();
         copy.sort_by_key(|a| (rank(seed, &a.path), a.path.clone()));
         return copy;
     }

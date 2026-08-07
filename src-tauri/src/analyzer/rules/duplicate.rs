@@ -35,7 +35,7 @@ fn calculate_file_hash(path: &Path, limit: Option<u64>) -> Option<String> {
 
 /// Group by a hash, dropping every group that ends up with a single member —
 /// nothing that stands alone at any stage can be a duplicate.
-fn group_by_hash<'a>(assets: Vec<&'a AssetInfo>, limit: Option<u64>) -> Vec<Vec<&'a AssetInfo>> {
+fn group_by_hash(assets: Vec<&AssetInfo>, limit: Option<u64>) -> Vec<Vec<&AssetInfo>> {
     let mut by_hash: HashMap<String, Vec<&AssetInfo>> = HashMap::new();
     for asset in assets {
         if let Some(hash) = calculate_file_hash(Path::new(&asset.path), limit) {

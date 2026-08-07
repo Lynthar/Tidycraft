@@ -59,7 +59,7 @@ pub enum AssetType {
 /// Every field is optional and serializes as ABSENT (not `null`) when unset —
 /// the frontend's `metadata.field !== undefined` guards rely on this, and
 /// `types/asset.ts` declares the mirror fields as `field?: T`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AssetMetadata {
     // Image metadata
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -107,28 +107,6 @@ pub struct AssetMetadata {
     // extensions from its own config, NOT on this field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dcc_source_kind: Option<String>,
-}
-
-impl Default for AssetMetadata {
-    fn default() -> Self {
-        Self {
-            width: None,
-            height: None,
-            has_alpha: None,
-            vertex_count: None,
-            face_count: None,
-            material_count: None,
-            duration_secs: None,
-            sample_rate: None,
-            channels: None,
-            bit_depth: None,
-            framerate: None,
-            video_codec: None,
-            color_space: None,
-            mipmap_count: None,
-            dcc_source_kind: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -885,7 +863,7 @@ fn parse_fbx_metadata(path: &Path) -> Option<AssetMetadata> {
             TypedObjectHandle::Geometry(TypedGeometryHandle::Mesh(mesh)) => {
                 // Vertices: flat [x0, y0, z0, x1, y1, z1, ...] f64 array.
                 if let Some(verts_node) = mesh.node().children_by_name("Vertices").next() {
-                    if let Some(attr) = verts_node.attributes().get(0) {
+                    if let Some(attr) = verts_node.attributes().first() {
                         if let Ok(arr) = attr.get_arr_f64_or_type() {
                             vertex_count += (arr.len() / 3) as u64;
                         }
@@ -894,7 +872,7 @@ fn parse_fbx_metadata(path: &Path) -> Option<AssetMetadata> {
                 // PolygonVertexIndex: flat i32 array; each polygon's last
                 // index is XOR'd with -1, so counting negatives = face count.
                 if let Some(pvi_node) = mesh.node().children_by_name("PolygonVertexIndex").next() {
-                    if let Some(attr) = pvi_node.attributes().get(0) {
+                    if let Some(attr) = pvi_node.attributes().first() {
                         if let Ok(arr) = attr.get_arr_i32_or_type() {
                             face_count += arr.iter().filter(|&&v| v < 0).count() as u64;
                         }
@@ -1109,8 +1087,8 @@ fn parse_unity_meta(path: &Path) -> Option<String> {
     // Parse GUID from meta file (simple regex-like approach)
     for line in content.lines() {
         let line = line.trim();
-        if line.starts_with("guid:") {
-            return Some(line[5..].trim().to_string());
+        if let Some(guid) = line.strip_prefix("guid:") {
+            return Some(guid.trim().to_string());
         }
     }
 
@@ -1251,7 +1229,7 @@ fn build_dir_node(
             }
         }
     }
-    children.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    children.sort_by_key(|a| a.name.to_lowercase());
 
     // O(1) lookup of direct-file counts from the pre-grouped map.
     let direct = stats.get(&path_str);
@@ -1416,7 +1394,7 @@ pub fn scan_directory_with_state(
         // Hidden files and dot-directories are filtered upstream by
         // `build_walker(hidden=true)`, so no `starts_with('.')` check
         // is needed here.
-        if entry.file_type().map_or(false, |ft| ft.is_dir()) {
+        if entry.file_type().is_some_and(|ft| ft.is_dir()) {
             continue;
         }
 
@@ -1474,7 +1452,7 @@ pub fn scan_directory_with_state(
             if let Some(ref s) = state_clone {
                 s.current.store(current, Ordering::Relaxed);
                 // Only update current_file every 100 files to reduce lock contention
-                if current % 100 == 0 {
+                if current.is_multiple_of(100) {
                     *s.current_file.write() = path_to_string(entry_path);
                 }
             }
@@ -1557,7 +1535,7 @@ pub fn scan_directory_with_state(
     if assets.len() > 1000 {
         assets.par_sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
     } else {
-        assets.sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
+        assets.sort_by_key(|a| a.path.to_lowercase());
     }
 
     // Phase 3: Build directory tree
@@ -1686,7 +1664,7 @@ pub fn scan_directory_incremental(
             }
         }
 
-        if entry.file_type().map_or(false, |ft| ft.is_dir()) {
+        if entry.file_type().is_some_and(|ft| ft.is_dir()) {
             continue;
         }
 
@@ -1775,7 +1753,7 @@ pub fn scan_directory_incremental(
             let current = counter_clone.fetch_add(1, Ordering::SeqCst) + 1;
             if let Some(ref s) = state_clone {
                 s.current.store(current, Ordering::Relaxed);
-                if current % 100 == 0 {
+                if current.is_multiple_of(100) {
                     *s.current_file.write() = path_to_string(p);
                 }
             }
@@ -1812,7 +1790,7 @@ pub fn scan_directory_incremental(
     if assets.len() > 1000 {
         assets.par_sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
     } else {
-        assets.sort_by(|a, b| a.path.to_lowercase().cmp(&b.path.to_lowercase()));
+        assets.sort_by_key(|a| a.path.to_lowercase());
     }
 
     // Calculate type counts
@@ -2295,7 +2273,7 @@ mod tests {
         let pos_bytes = position_count * 12;
         let (indices_json, mode_json, idx_view, total) = match indices {
             Some((count, mode)) => (
-                format!(r#""indices": 1, "#),
+                r#""indices": 1, "#.to_string(),
                 format!(r#""mode": {}, "#, mode),
                 format!(
                     r#", {{"buffer": 0, "byteOffset": {}, "byteLength": {}}}"#,

@@ -29,8 +29,8 @@ impl ProjectMeta {
     /// Callers skip emitting the project-context block entirely in
     /// that case to save tokens.
     pub fn is_empty(&self) -> bool {
-        self.theme.as_deref().map_or(true, str::is_empty)
-            && self.goal.as_deref().map_or(true, str::is_empty)
+        self.theme.as_deref().is_none_or(str::is_empty)
+            && self.goal.as_deref().is_none_or(str::is_empty)
     }
 
     /// Parse from a TOML document. Looks for a top-level `[project]`
@@ -48,10 +48,10 @@ impl ProjectMeta {
     }
 
     fn normalize(mut self) -> Self {
-        if self.theme.as_deref().map_or(false, str::is_empty) {
+        if self.theme.as_deref().is_some_and(str::is_empty) {
             self.theme = None;
         }
-        if self.goal.as_deref().map_or(false, str::is_empty) {
+        if self.goal.as_deref().is_some_and(str::is_empty) {
             self.goal = None;
         }
         self

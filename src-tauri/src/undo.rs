@@ -292,8 +292,7 @@ impl UndoManager {
     pub fn get_last_operation_description(&self) -> Option<String> {
         self.history
             .iter()
-            .filter(|op| !op.undone)
-            .last()
+            .rfind(|op| !op.undone)
             .map(|op| op.description.clone())
     }
 
