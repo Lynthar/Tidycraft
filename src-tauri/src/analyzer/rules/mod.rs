@@ -109,9 +109,10 @@ mod tests {
     /// therefore has to stay permissive; only the rule sections are strict.
     #[test]
     fn the_project_section_still_coexists_with_the_rule_sections() {
-        let cfg =
-            RuleConfig::from_toml("[project]\ntheme = \"cyberpunk\"\n\n[texture]\nenabled = true\n")
-                .expect("[project] must not break rule parsing");
+        let cfg = RuleConfig::from_toml(
+            "[project]\ntheme = \"cyberpunk\"\n\n[texture]\nenabled = true\n",
+        )
+        .expect("[project] must not break rule parsing");
         assert!(cfg.texture.enabled);
     }
 

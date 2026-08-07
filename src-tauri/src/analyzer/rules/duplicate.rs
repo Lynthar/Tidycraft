@@ -35,10 +35,7 @@ fn calculate_file_hash(path: &Path, limit: Option<u64>) -> Option<String> {
 
 /// Group by a hash, dropping every group that ends up with a single member —
 /// nothing that stands alone at any stage can be a duplicate.
-fn group_by_hash<'a>(
-    assets: Vec<&'a AssetInfo>,
-    limit: Option<u64>,
-) -> Vec<Vec<&'a AssetInfo>> {
+fn group_by_hash<'a>(assets: Vec<&'a AssetInfo>, limit: Option<u64>) -> Vec<Vec<&'a AssetInfo>> {
     let mut by_hash: HashMap<String, Vec<&AssetInfo>> = HashMap::new();
     for asset in assets {
         if let Some(hash) = calculate_file_hash(Path::new(&asset.path), limit) {
@@ -148,7 +145,9 @@ pub fn find_duplicates(assets: &[AssetInfo], root: &str) -> AnalysisResult {
     // emits deterministically. Pin it by path. (Members within a group are
     // already path-ordered: `assets` arrives sorted from the scan, so each
     // group's "original" is the lexicographically first path.)
-    result.issues.sort_by(|a, b| a.asset_path.cmp(&b.asset_path));
+    result
+        .issues
+        .sort_by(|a, b| a.asset_path.cmp(&b.asset_path));
 
     result
 }
@@ -188,9 +187,11 @@ mod tests {
         let hb = calculate_file_hash(&b, Some(PREFIX_BYTES)).unwrap();
         assert_ne!(ha, hb);
 
-        assert!(find_duplicates(&assets(&[a, b]), dir.path().to_str().unwrap())
-            .issues
-            .is_empty());
+        assert!(
+            find_duplicates(&assets(&[a, b]), dir.path().to_str().unwrap())
+                .issues
+                .is_empty()
+        );
     }
 
     #[test]
@@ -212,13 +213,12 @@ mod tests {
             calculate_file_hash(&b, Some(PREFIX_BYTES)),
             "fixture must collide in the first pass or it tests nothing"
         );
-        assert_ne!(
-            calculate_file_hash(&a, None),
-            calculate_file_hash(&b, None)
+        assert_ne!(calculate_file_hash(&a, None), calculate_file_hash(&b, None));
+        assert!(
+            find_duplicates(&assets(&[a, b]), dir.path().to_str().unwrap())
+                .issues
+                .is_empty()
         );
-        assert!(find_duplicates(&assets(&[a, b]), dir.path().to_str().unwrap())
-            .issues
-            .is_empty());
     }
 
     #[test]

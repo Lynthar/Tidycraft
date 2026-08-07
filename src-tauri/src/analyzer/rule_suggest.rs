@@ -29,8 +29,8 @@ const SAMPLE_FILENAMES: usize = 3;
 /// Color palette mirroring `tag_suggest::PALETTE` so heuristic and rule
 /// suggestions look at home next to each other in the panel.
 const PALETTE: &[&str] = &[
-    "#7ab97a", "#c47a7a", "#7ac4c4", "#b67ac4", "#c4a87a",
-    "#5fa6cf", "#c9a558", "#8088c4", "#c87aa8", "#6589c7",
+    "#7ab97a", "#c47a7a", "#7ac4c4", "#b67ac4", "#c4a87a", "#5fa6cf", "#c9a558", "#8088c4",
+    "#c87aa8", "#6589c7",
 ];
 
 fn pick_color(name: &str) -> String {
@@ -444,10 +444,7 @@ mod tests {
     fn valid_regex_matches_relative_path() {
         // Regex applies to the project-relative path. Pattern only
         // hits the .fbx file, not the .png.
-        let s = scan(
-            "/p",
-            &["/p/SM_Sword.fbx", "/p/T_Hero_BaseColor.png"],
-        );
+        let s = scan("/p", &["/p/SM_Sword.fbx", "/p/T_Hero_BaseColor.png"]);
         let rules = vec![LearnedRule::FilenameRegex {
             pattern: r"^SM_.*\.fbx$".into(),
             tags: vec!["static-mesh".into()],
@@ -563,10 +560,7 @@ mod tests {
         }];
         let warnings = RuleSuggester::new(rules).warnings;
         assert_eq!(warnings.len(), 1, "look-around must not compile here");
-        assert!(matches!(
-            warnings[0],
-            RuleWarning::InvalidPattern { .. }
-        ));
+        assert!(matches!(warnings[0], RuleWarning::InvalidPattern { .. }));
     }
 
     #[test]
@@ -596,9 +590,11 @@ mod tests {
         // Learning. Nothing is wrong, so nothing may be reported.
         let dir = tempfile::tempdir().unwrap();
         let root = crate::scanner::path_to_string(dir.path());
-        assert!(load_or_fallback(&heuristic_friendly_scan(&root), dir.path())
-            .warnings
-            .is_empty());
+        assert!(
+            load_or_fallback(&heuristic_friendly_scan(&root), dir.path())
+                .warnings
+                .is_empty()
+        );
     }
 
     /// `AITagPanel.tsx` mirrors this enum by hand and branches on the exact
@@ -647,7 +643,11 @@ mod tests {
     fn groups_sorted_by_confidence_desc() {
         let s = scan(
             "/p",
-            &["/p/a_BaseColor.png", "/p/b_Normal.png", "/p/c_Roughness.png"],
+            &[
+                "/p/a_BaseColor.png",
+                "/p/b_Normal.png",
+                "/p/c_Roughness.png",
+            ],
         );
         let rules = vec![
             LearnedRule::FilenameToken {

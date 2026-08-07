@@ -22,7 +22,6 @@ use super::{
     TagRequest, TagResponse, Usage,
 };
 
-
 const ENDPOINT: &str = "https://api.openai.com/v1/chat/completions";
 const REQUEST_TIMEOUT_SECS: u64 = 120;
 
@@ -314,9 +313,14 @@ impl LLMProvider for OpenAIProvider {
             request.project_meta.as_ref(),
             &request.existing_tags,
         );
-        let (text, usage) =
-            send_text_chat(&api_key, &model, &endpoint, prompts::SYSTEM_PROMPT_LEARNING, &user)
-                .await?;
+        let (text, usage) = send_text_chat(
+            &api_key,
+            &model,
+            &endpoint,
+            prompts::SYSTEM_PROMPT_LEARNING,
+            &user,
+        )
+        .await?;
         let mut result: learning::LearningResult = parse_json_lenient(&text)?;
         result.drop_unknown_rules();
         result.usage = usage;
@@ -440,7 +444,10 @@ mod tests {
         let r = parse_response_json(json).unwrap();
         assert_eq!(r.suggestions.len(), 1);
         assert_eq!(r.suggestions[0].asset_path, "hero.png");
-        assert!(matches!(r.suggestions[0].tags[0].category, TagCategory::Type));
+        assert!(matches!(
+            r.suggestions[0].tags[0].category,
+            TagCategory::Type
+        ));
         assert_eq!(r.usage.input_tokens, 200);
         assert_eq!(r.usage.output_tokens, 50);
         assert!(!r.usage.cached);

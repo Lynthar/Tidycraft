@@ -169,8 +169,9 @@ fn clear_scan_cache(path: String) -> Result<(), String> {
 
 #[tauri::command]
 fn start_watching(app: AppHandle, project_id: String) -> Result<(), String> {
-    let (root_path, respect_gitignore) =
-        project::with_ref(&project_id, |s| Ok((s.root_path.clone(), s.respect_gitignore)))?;
+    let (root_path, respect_gitignore) = project::with_ref(&project_id, |s| {
+        Ok((s.root_path.clone(), s.respect_gitignore))
+    })?;
     let w = watcher::start(app, project_id.clone(), root_path, respect_gitignore)?;
     project::with_mut(&project_id, |s| {
         s.watcher = Some(w);
@@ -385,7 +386,10 @@ fn localized_issue_cells(
         Some(tpl) => render_template(tpl, args),
         None => fallback.to_string(),
     };
-    (pick("title", &issue.rule_name), pick("message", &issue.message))
+    (
+        pick("title", &issue.rule_name),
+        pick("message", &issue.message),
+    )
 }
 
 /// Main entry point for AI tagging. Loads thumbnails for the selected
@@ -423,8 +427,7 @@ async fn llm_suggest_tags(
     let context_result = project::with_mut(&project_id, |state| {
         let root = state.root_path.clone();
         let tags_data = state.ensure_tags();
-        let mut existing: Vec<llm::ExistingTagContext> =
-            Vec::with_capacity(tags_data.tags.len());
+        let mut existing: Vec<llm::ExistingTagContext> = Vec::with_capacity(tags_data.tags.len());
         for tag in &tags_data.tags {
             let mut samples = tags_data.get_assets_with_tag(&tag.id);
             samples.truncate(SAMPLES_PER_TAG);
@@ -483,11 +486,7 @@ async fn llm_suggest_tags(
             paths
                 .into_iter()
                 .map(|p| {
-                    let filename = p
-                        .rsplit(['/', '\\'])
-                        .next()
-                        .unwrap_or(&p)
-                        .to_string();
+                    let filename = p.rsplit(['/', '\\']).next().unwrap_or(&p).to_string();
                     // Thumbnail decode needs the real (absolute) path; the
                     // path we ship to the provider is project-relative so we
                     // never leak the user's drive / username / layout.
@@ -507,11 +506,7 @@ async fn llm_suggest_tags(
         asset_paths
             .into_iter()
             .map(|p| {
-                let filename = p
-                    .rsplit(['/', '\\'])
-                    .next()
-                    .unwrap_or(&p)
-                    .to_string();
+                let filename = p.rsplit(['/', '\\']).next().unwrap_or(&p).to_string();
                 llm::AssetInput {
                     path: project_relative_path(&p, &root_path),
                     filename,
@@ -633,10 +628,12 @@ fn build_learning_inputs(
     const SAMPLES_PER_TAG: usize = 5;
     let snapshot = project::with_mut(project_id, |state| {
         let root = state.root_path.clone();
-        let scan = state.cached_scan.clone().ok_or("Project hasn't been scanned yet")?;
+        let scan = state
+            .cached_scan
+            .clone()
+            .ok_or("Project hasn't been scanned yet")?;
         let tags_data = state.ensure_tags();
-        let mut existing: Vec<llm::ExistingTagContext> =
-            Vec::with_capacity(tags_data.tags.len());
+        let mut existing: Vec<llm::ExistingTagContext> = Vec::with_capacity(tags_data.tags.len());
         for tag in &tags_data.tags {
             let mut samples = tags_data.get_assets_with_tag(&tag.id);
             samples.truncate(SAMPLES_PER_TAG);
@@ -728,10 +725,7 @@ fn read_ai_rules(project_id: String) -> Result<Option<llm::rule_store::AiRulesDo
 /// pending run (re-saving edits later), preserves the on-disk doc's metadata.
 /// See `AiRulesDoc::for_save` for the exact precedence.
 #[tauri::command]
-fn save_ai_rules(
-    project_id: String,
-    rules: Vec<llm::learning::LearnedRule>,
-) -> Result<(), String> {
+fn save_ai_rules(project_id: String, rules: Vec<llm::learning::LearnedRule>) -> Result<(), String> {
     project::with_mut(&project_id, |state| {
         let root = Path::new(&state.root_path);
         let pending = state.pending_ai_rules.take();
@@ -774,11 +768,7 @@ fn read_project_meta(project_id: String) -> Result<llm::project_meta::ProjectMet
 /// users hitting "Save" before ever opening the rules editor still
 /// get the full annotated template.
 #[tauri::command]
-fn write_project_meta(
-    project_id: String,
-    theme: String,
-    goal: String,
-) -> Result<(), String> {
+fn write_project_meta(project_id: String, theme: String, goal: String) -> Result<(), String> {
     project::with_ref(&project_id, |state| {
         llm::project_meta::write_back(Path::new(&state.root_path), &theme, &goal)
     })
@@ -948,7 +938,10 @@ fn run_full_analysis(
 // on the main thread it froze the whole UI (window drag/resize) for the
 // duration. The frontend contract is unchanged — `invoke` already awaits.
 #[tauri::command(async)]
-fn analyze_assets(project_id: String, config_toml: Option<String>) -> Result<AnalysisResult, String> {
+fn analyze_assets(
+    project_id: String,
+    config_toml: Option<String>,
+) -> Result<AnalysisResult, String> {
     let config = if let Some(toml_str) = config_toml {
         RuleConfig::from_toml(&toml_str).map_err(|e| format!("Invalid config: {}", e))?
     } else {
@@ -1044,9 +1037,9 @@ fn suggest_tags(project_id: String) -> Result<analyzer::rule_suggest::TagSuggest
         //     for a working rule set.
         let mut suggestions = analyzer::rule_suggest::load_or_fallback(scan, root);
 
-        suggestions.groups.retain(|g| {
-            !already_suggested.contains(&format!("{} (suggested)", g.name))
-        });
+        suggestions
+            .groups
+            .retain(|g| !already_suggested.contains(&format!("{} (suggested)", g.name)));
         Ok(suggestions)
     })
 }
@@ -1262,8 +1255,7 @@ fn get_unity_dependencies(project_id: String) -> Result<DependencyGraph, String>
     // — and only what's left is genuinely ambiguous (no cache to check,
     // ignore-excluded, or truly deleted): one deduped `unresolved` node,
     // a warning with its edge intact, not an asserted breakage.
-    let mut unresolved_guids: std::collections::HashSet<String> =
-        std::collections::HashSet::new();
+    let mut unresolved_guids: std::collections::HashSet<String> = std::collections::HashSet::new();
     for asset in &scan_result.assets {
         if unity::is_reference_source(&asset.extension) {
             if let Some(unity_info) = unity::parse_unity_file(Path::new(&asset.path)) {
@@ -1347,11 +1339,7 @@ fn find_unused_assets(project_id: String) -> Result<UnusedAssetsResult, String> 
         }
         // Unity falls through to the GUID-based logic below.
         Some(scanner::ProjectType::Unity) => {}
-        _ => {
-            return Err(
-                "Unused-asset detection supports Unity and Godot projects".to_string(),
-            )
-        }
+        _ => return Err("Unused-asset detection supports Unity and Godot projects".to_string()),
     }
 
     let mut referenced_guids: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -1561,7 +1549,9 @@ fn get_project_stats(project_id: String) -> Result<ProjectStats, String> {
             let type_str = format!("{:?}", asset.asset_type).to_lowercase();
             *type_distribution.entry(type_str.clone()).or_insert(0) += 1;
 
-            *extension_distribution.entry(asset.extension.clone()).or_insert(0) += 1;
+            *extension_distribution
+                .entry(asset.extension.clone())
+                .or_insert(0) += 1;
 
             let size_bucket = if asset.size < 1024 {
                 "< 1 KB"
@@ -1576,7 +1566,9 @@ fn get_project_stats(project_id: String) -> Result<ProjectStats, String> {
             } else {
                 "> 10 MB"
             };
-            *size_distribution.entry(size_bucket.to_string()).or_insert(0) += 1;
+            *size_distribution
+                .entry(size_bucket.to_string())
+                .or_insert(0) += 1;
 
             if let Some(parent) = Path::new(&asset.path).parent() {
                 let dir_str = parent.to_string_lossy().to_string();
@@ -1907,8 +1899,7 @@ fn export_to_html(
                             .rsplit(['/', '\\'])
                             .next()
                             .unwrap_or(&issue.asset_path);
-                        let (title, message) =
-                            localized_issue_cells(issue, templates.as_ref());
+                        let (title, message) = localized_issue_cells(issue, templates.as_ref());
                         format!(
                             r#"<tr><td class="{}">{:?}</td><td>{}</td><td>{}</td><td>{}</td></tr>"#,
                             severity_class,
@@ -2204,7 +2195,10 @@ fn rename_batch_on_disk(
                 // Carry the Unity .meta sidecar so renamed assets keep their
                 // GUID. Best-effort: no-op without a sidecar, logs on failure.
                 if let Err(e) = meta_sidecar::carry_on_rename(path_obj, &new_path) {
-                    eprintln!("[batch_rename] .meta sidecar not carried for {}: {}", path, e);
+                    eprintln!(
+                        "[batch_rename] .meta sidecar not carried for {}: {}",
+                        path, e
+                    );
                 }
                 success_count += 1;
                 // Normalize the new path to forward slashes (scanner::path_to_string)
@@ -2252,7 +2246,11 @@ const RENAME_LOCK_CHUNK: usize = 100;
 /// slices — see that constant for why, and
 /// `commit_renames_does_not_expose_renamed_files_before_tags_follow` for the
 /// regression this shape exists to prevent.
-fn commit_renames(project_id: &str, planned: Vec<(String, String)>, label: &str) -> BatchRenameResult {
+fn commit_renames(
+    project_id: &str,
+    planned: Vec<(String, String)>,
+    label: &str,
+) -> BatchRenameResult {
     let total = planned.len();
     let mut all_done: Vec<(String, String)> = Vec::new();
     let mut result = BatchRenameResult {
@@ -2526,30 +2524,40 @@ fn open_in_editor(app: tauri::AppHandle, path: String, editor: String) -> Result
 // filename → absolute-path lookup that the frontend uses in its URL modifier.
 
 const TEXTURE_EXTS: &[&str] = &[
-    "png", "jpg", "jpeg", "tga", "bmp", "gif",
-    "dds", "hdr", "exr", "tif", "tiff", "webp", "psd",
+    "png", "jpg", "jpeg", "tga", "bmp", "gif", "dds", "hdr", "exr", "tif", "tiff", "webp", "psd",
 ];
 
 /// Subdirs to scan below the model's own directory.
 const SIBLING_SUBDIRS: &[&str] = &[
     "",
-    "Textures", "textures",
-    "Texture", "texture",
-    "Materials", "materials",
-    "Material", "material",
-    "Maps", "maps",
-    "Tex", "tex",
-    "Images", "images",
+    "Textures",
+    "textures",
+    "Texture",
+    "texture",
+    "Materials",
+    "materials",
+    "Material",
+    "material",
+    "Maps",
+    "maps",
+    "Tex",
+    "tex",
+    "Images",
+    "images",
 ];
 
 /// Subdirs to scan below the model's *parent* directory (for layouts where the
 /// textures live as a sibling of the model folder, e.g. `Models/foo.fbx` +
 /// `Textures/tex.png`).
 const PARENT_SUBDIRS: &[&str] = &[
-    "Textures", "textures",
-    "Texture", "texture",
-    "Materials", "materials",
-    "Maps", "maps",
+    "Textures",
+    "textures",
+    "Texture",
+    "texture",
+    "Materials",
+    "materials",
+    "Maps",
+    "maps",
 ];
 
 fn collect_texture_files(dir: &Path, out: &mut HashMap<String, String>) {
@@ -2651,11 +2659,7 @@ fn unix_timestamp() -> u64 {
 /// exist at the destination. Successful moves are batched into the project's
 /// undo manager so the user can revert.
 #[tauri::command]
-fn move_assets(
-    project_id: String,
-    paths: Vec<String>,
-    target_dir: String,
-) -> FileOpResult {
+fn move_assets(project_id: String, paths: Vec<String>, target_dir: String) -> FileOpResult {
     let mut successes: Vec<FileOpSuccess> = Vec::new();
     let mut errors: Vec<FileOpError> = Vec::new();
 
@@ -2705,7 +2709,10 @@ fn move_assets(
                 if dst.exists() {
                     failed.push(FileOpError {
                         path: path.clone(),
-                        message: format!("Target already exists: {}", scanner::path_to_string(&dst)),
+                        message: format!(
+                            "Target already exists: {}",
+                            scanner::path_to_string(&dst)
+                        ),
                     });
                     continue;
                 }
@@ -2715,7 +2722,10 @@ fn move_assets(
                         // Carry the Unity .meta sidecar so moved assets keep their
                         // GUID. Best-effort: no-op without a sidecar, logs on failure.
                         if let Err(e) = meta_sidecar::carry_on_rename(src, &dst) {
-                            eprintln!("[move_assets] .meta sidecar not carried for {}: {}", path, e);
+                            eprintln!(
+                                "[move_assets] .meta sidecar not carried for {}: {}",
+                                path, e
+                            );
                         }
                         moved.push(FileOpSuccess {
                             original_path: path.clone(),
@@ -2777,10 +2787,9 @@ fn move_assets(
             })
             .collect();
         let _ = project::with_mut(&project_id, |state| {
-            state.undo_manager.record_batch(
-                format!("Move {} file(s)", ops.len()),
-                ops,
-            );
+            state
+                .undo_manager
+                .record_batch(format!("Move {} file(s)", ops.len()), ops);
             Ok(())
         });
     }
@@ -2932,7 +2941,10 @@ fn delete_assets(paths: Vec<String>) -> DeleteResult {
                 // doesn't strand its sidecar. Best-effort: no-op without a
                 // sidecar, logs on failure.
                 if let Err(e) = meta_sidecar::carry_on_delete(Path::new(&path)) {
-                    eprintln!("[delete_assets] .meta sidecar not carried for {}: {}", path, e);
+                    eprintln!(
+                        "[delete_assets] .meta sidecar not carried for {}: {}",
+                        path, e
+                    );
                 }
                 success_paths.push(path);
             }
@@ -2988,7 +3000,10 @@ fn rename_file(project_id: String, old_path: String, new_name: String) -> Result
     // references don't break. Best-effort: a missing sidecar (non-Unity) is a
     // no-op, and a carry failure only logs — the rename already succeeded.
     if let Err(e) = meta_sidecar::carry_on_rename(old_path_ref, &new_path) {
-        eprintln!("[rename_file] .meta sidecar not carried for {}: {}", old_path, e);
+        eprintln!(
+            "[rename_file] .meta sidecar not carried for {}: {}",
+            old_path, e
+        );
     }
 
     let _ = project::with_mut(&project_id, |state| {
@@ -3004,9 +3019,10 @@ fn rename_file(project_id: String, old_path: String, new_name: String) -> Result
             timestamp,
         };
 
-        state
-            .undo_manager
-            .record_batch(format!("Rename {} to {}", old_name, new_name), vec![operation]);
+        state.undo_manager.record_batch(
+            format!("Rename {} to {}", old_name, new_name),
+            vec![operation],
+        );
 
         // Carry tags from the old path to the new one. Best-effort — tag
         // bookkeeping must never fail a rename that already landed on disk —
@@ -3148,7 +3164,9 @@ fn remove_tag_from_asset(
     tag_id: String,
 ) -> Result<(), String> {
     project::with_mut(&project_id, |state| {
-        state.ensure_tags().remove_tag_from_asset(&asset_path, &tag_id);
+        state
+            .ensure_tags()
+            .remove_tag_from_asset(&asset_path, &tag_id);
         state.save_tags()
     })
 }
@@ -3565,7 +3583,10 @@ mod tests {
             // no-op: target equals current name → neither success nor error
             (same.to_string_lossy().to_string(), "keep.png".to_string()),
             // path separator in the target → rejected at the IPC-safety guard
-            (bad.to_string_lossy().to_string(), "sub/evil.png".to_string()),
+            (
+                bad.to_string_lossy().to_string(),
+                "sub/evil.png".to_string(),
+            ),
         ];
         let (done, result) = rename_batch_on_disk(planned);
 
@@ -3760,9 +3781,7 @@ mod tests {
         let worker = {
             let paths = sources.clone();
             let target_dir = scanner::path_to_string(&target);
-            std::thread::spawn(move || {
-                move_assets(project_id.to_string(), paths, target_dir)
-            })
+            std::thread::spawn(move || move_assets(project_id.to_string(), paths, target_dir))
         };
 
         std::thread::sleep(std::time::Duration::from_millis(300));
@@ -3787,7 +3806,9 @@ mod tests {
             let tags = state.tags_data.as_ref().expect("tags were created above");
             for s in &result.successes {
                 assert!(
-                    tags.get_asset_tags(&s.new_path).iter().any(|t| t.id == tag_id),
+                    tags.get_asset_tags(&s.new_path)
+                        .iter()
+                        .any(|t| t.id == tag_id),
                     "tag did not follow {} → {}",
                     s.original_path,
                     s.new_path
@@ -3887,7 +3908,10 @@ mod tests {
             ]),
         };
         let templates = HashMap::from([
-            ("texture.max_size.title".to_string(), "贴图尺寸过大".to_string()),
+            (
+                "texture.max_size.title".to_string(),
+                "贴图尺寸过大".to_string(),
+            ),
             (
                 "texture.max_size.message".to_string(),
                 "贴图 {{width}}×{{height}} 超过上限 {{max}}".to_string(),
@@ -4016,10 +4040,7 @@ mod tests {
             .collect();
 
         let project_id = "test_suggest_tags_corrupt_rules";
-        project::register(
-            project_id.to_string(),
-            scanner::path_to_string(dir.path()),
-        );
+        project::register(project_id.to_string(), scanner::path_to_string(dir.path()));
         project::with_mut(project_id, |s| {
             s.cached_scan = Some(scan_of(dir.path(), assets));
             Ok(())
@@ -4046,4 +4067,3 @@ mod tests {
         );
     }
 }
-

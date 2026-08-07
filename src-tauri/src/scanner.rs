@@ -245,15 +245,14 @@ fn get_asset_type(extension: &str) -> AssetType {
         // file (1→N, paired against generated PBR textures); .sbs is
         // Substance Designer's source graph (typically produces .sbsar
         // or PNG output).
-        "png" | "jpg" | "jpeg" | "tga" | "psd" | "psb" | "tiff" | "tif" | "exr" | "hdr" | "webp"
-        | "dds" | "bmp" | "gif" | "svg" | "spp" | "sbs" => AssetType::Texture,
+        "png" | "jpg" | "jpeg" | "tga" | "psd" | "psb" | "tiff" | "tif" | "exr" | "hdr"
+        | "webp" | "dds" | "bmp" | "gif" | "svg" | "spp" | "sbs" => AssetType::Texture,
         // Models + 3D-source DCC formats. ZBrush (ztl/zpr), Maya
         // (ma/mb), 3ds Max (max), Modo (lxo), Houdini (hip/hipnc/hiplc),
         // Cinema 4D (c4d), Marvelous Designer (zprj — garment, exports
         // to obj/fbx). Blender (blend) was already in this list.
-        "fbx" | "obj" | "gltf" | "glb" | "blend" | "dae" | "3ds" | "max" | "vox"
-        | "ma" | "mb" | "ztl" | "zpr" | "lxo" | "hip" | "hipnc" | "hiplc" | "c4d"
-        | "zprj" => AssetType::Model,
+        "fbx" | "obj" | "gltf" | "glb" | "blend" | "dae" | "3ds" | "max" | "vox" | "ma" | "mb"
+        | "ztl" | "zpr" | "lxo" | "hip" | "hipnc" | "hiplc" | "c4d" | "zprj" => AssetType::Model,
         // Audio
         "wav" | "mp3" | "ogg" | "flac" | "aiff" | "aac" | "wma" => AssetType::Audio,
         // Video
@@ -324,7 +323,11 @@ pub fn dcc_source_kind_for(extension: &str) -> Option<&'static str> {
 /// both DCC sources AND parseable (`.psd` parsed via `image` would
 /// be such a case if we enabled the feature), the parsed metadata is
 /// preserved and the kind field is overlaid.
-fn parse_metadata_for(path: &Path, extension: &str, asset_type: &AssetType) -> Option<AssetMetadata> {
+fn parse_metadata_for(
+    path: &Path,
+    extension: &str,
+    asset_type: &AssetType,
+) -> Option<AssetMetadata> {
     let ext = extension.to_lowercase();
     let parsed: Option<AssetMetadata> = match asset_type {
         AssetType::Texture => match ext.as_str() {
@@ -334,8 +337,9 @@ fn parse_metadata_for(path: &Path, extension: &str, asset_type: &AssetType) -> O
                 m
             }),
             // Other formats the `image` crate fully decodes (enabled via Cargo features).
-            "jpg" | "jpeg" | "bmp" | "gif" | "tga"
-            | "tif" | "tiff" | "webp" | "hdr" | "exr" => parse_image_metadata(path),
+            "jpg" | "jpeg" | "bmp" | "gif" | "tga" | "tif" | "tiff" | "webp" | "hdr" | "exr" => {
+                parse_image_metadata(path)
+            }
             // DDS has too many compressed sub-formats for `image` to decode
             // reliably; we parse the header ourselves.
             "dds" => parse_dds_metadata(path),
@@ -830,9 +834,7 @@ fn parse_gltf_metadata(path: &Path) -> Option<AssetMetadata> {
                     use gltf::mesh::Mode;
                     face_count += match primitive.mode() {
                         Mode::Triangles => element_count / 3,
-                        Mode::TriangleStrip | Mode::TriangleFan => {
-                            element_count.saturating_sub(2)
-                        }
+                        Mode::TriangleStrip | Mode::TriangleFan => element_count.saturating_sub(2),
                         Mode::Points | Mode::Lines | Mode::LineLoop | Mode::LineStrip => 0,
                     } as u32;
                 }
@@ -991,9 +993,7 @@ fn parse_matroska_metadata(path: &Path) -> Option<AssetMetadata> {
     // Matroska stores duration in "timestamp units"; each unit is
     // `timestamp_scale` nanoseconds (default 1e6 = 1ms). Convert to seconds.
     let ts_scale = info.timestamp_scale().get() as f64;
-    let duration_secs = info
-        .duration()
-        .map(|d| d * ts_scale / 1_000_000_000.0);
+    let duration_secs = info.duration().map(|d| d * ts_scale / 1_000_000_000.0);
 
     for track in mkv.tracks() {
         if track.track_type() == TrackType::Video {
@@ -1168,9 +1168,10 @@ fn precompute_dir_stats(assets: &[AssetInfo]) -> HashMap<String, DirStats> {
             continue;
         };
         let key = path_to_string(parent);
-        let entry = map
-            .entry(key)
-            .or_insert(DirStats { file_count: 0, total_size: 0 });
+        let entry = map.entry(key).or_insert(DirStats {
+            file_count: 0,
+            total_size: 0,
+        });
         entry.file_count += 1;
         entry.total_size += asset.size;
     }
@@ -1586,10 +1587,7 @@ pub fn scan_directory_with_state(
 }
 
 /// Parse a single asset file and return AssetInfo
-pub fn parse_asset_file(
-    path: &Path,
-    project_type: &Option<ProjectType>,
-) -> Option<AssetInfo> {
+pub fn parse_asset_file(path: &Path, project_type: &Option<ProjectType>) -> Option<AssetInfo> {
     let file_name = path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -1782,8 +1780,7 @@ pub fn scan_directory_incremental(
                 }
             }
 
-            parse_asset_file(p, &project_type_clone)
-                .map(|asset| (asset, *modified_nanos))
+            parse_asset_file(p, &project_type_clone).map(|asset| (asset, *modified_nanos))
         })
         .collect();
 
@@ -1852,7 +1849,10 @@ pub fn scan_directory_incremental(
     // is a full one — but logged, because the silent version left "every scan
     // is slow" with no clue that the cache directory was unwritable.
     if let Err(e) = cache.save() {
-        eprintln!("[scan] failed to save scan cache (next scan will be full): {}", e);
+        eprintln!(
+            "[scan] failed to save scan cache (next scan will be full): {}",
+            e
+        );
     }
 
     if let Some(ref s) = state {
@@ -1917,7 +1917,11 @@ mod tests {
         assert!(
             assets_node.children.is_empty(),
             "a symlinked directory must not appear in the tree: {:?}",
-            assets_node.children.iter().map(|c| &c.name).collect::<Vec<_>>()
+            assets_node
+                .children
+                .iter()
+                .map(|c| &c.name)
+                .collect::<Vec<_>>()
         );
     }
 
@@ -1968,7 +1972,9 @@ mod tests {
     fn test_get_asset_type_dcc_source_models() {
         // Newly-recognized 3D-source DCC formats. They land under
         // AssetType::Model (orthogonal axis from dcc_source_kind).
-        for ext in ["ma", "mb", "ztl", "zpr", "lxo", "hip", "hipnc", "hiplc", "c4d", "zprj"] {
+        for ext in [
+            "ma", "mb", "ztl", "zpr", "lxo", "hip", "hipnc", "hiplc", "c4d", "zprj",
+        ] {
             assert!(
                 matches!(get_asset_type(ext), AssetType::Model),
                 "{ext} should classify as Model"
@@ -2011,7 +2017,9 @@ mod tests {
     fn test_dcc_source_kind_none_for_runtime_formats() {
         // Runtime exports / regular assets are not labelled — they're
         // identified by being on the "after" side of a source/export pair.
-        for ext in ["fbx", "glb", "gltf", "obj", "png", "jpg", "wav", "mp3", "json"] {
+        for ext in [
+            "fbx", "glb", "gltf", "obj", "png", "jpg", "wav", "mp3", "json",
+        ] {
             assert_eq!(
                 dcc_source_kind_for(ext),
                 None,
@@ -2090,7 +2098,7 @@ mod tests {
         buf[0..4].copy_from_slice(b"DDS ");
         buf[4..8].copy_from_slice(&124u32.to_le_bytes()); // dwSize
         buf[12..16].copy_from_slice(&height.to_le_bytes()); // dwHeight
-        buf[16..20].copy_from_slice(&width.to_le_bytes());  // dwWidth
+        buf[16..20].copy_from_slice(&width.to_le_bytes()); // dwWidth
         buf[76..80].copy_from_slice(&32u32.to_le_bytes()); // ddspf.dwSize
         let flags: u32 = if alpha { 0x1 } else { 0 };
         buf[80..84].copy_from_slice(&flags.to_le_bytes());
@@ -2156,13 +2164,22 @@ mod tests {
             ..Default::default()
         })
         .unwrap();
-        assert!(json.contains("\"width\":64"), "set field must serialize: {json}");
+        assert!(
+            json.contains("\"width\":64"),
+            "set field must serialize: {json}"
+        );
         // None fields must be ABSENT on the wire, not `null` — the frontend's
         // `!== undefined` guards treat null as a real value and render
         // "-bit" / "0.0 kHz" / "null" garbage rows, and types/asset.ts
         // declares these as `field?: T` (absent), not `T | null`.
-        assert!(!json.contains("null"), "no field may serialize as null: {json}");
-        assert!(!json.contains("sample_rate"), "unset field must be absent: {json}");
+        assert!(
+            !json.contains("null"),
+            "no field may serialize as null: {json}"
+        );
+        assert!(
+            !json.contains("sample_rate"),
+            "unset field must be absent: {json}"
+        );
     }
 
     /// Legacy header with a FourCC pixel format (compressed DDS). The
@@ -2227,7 +2244,11 @@ mod tests {
     #[test]
     fn test_obj_material_count_counts_materials_not_meshes() {
         let dir = tempdir().unwrap();
-        fs::write(dir.path().join("scene.mtl"), "newmtl shared\nKd 1.0 0.0 0.0\n").unwrap();
+        fs::write(
+            dir.path().join("scene.mtl"),
+            "newmtl shared\nKd 1.0 0.0 0.0\n",
+        )
+        .unwrap();
         let obj_path = dir.path().join("scene.obj");
         fs::write(
             &obj_path,
@@ -2350,8 +2371,9 @@ mod tests {
 
         let state = Arc::new(ScanState::new());
         state.cancel();
-        let err = scan_directory_with_state(dir.path().to_str().unwrap(), Some(state.clone()), true)
-            .expect_err("pre-cancelled scan must not complete");
+        let err =
+            scan_directory_with_state(dir.path().to_str().unwrap(), Some(state.clone()), true)
+                .expect_err("pre-cancelled scan must not complete");
         assert!(matches!(err, ScanError::Cancelled));
         // The progress reporter treats Cancelled as terminal and stops
         // emitting; the scan must actually record it instead of bailing with
@@ -2782,16 +2804,17 @@ mod tests {
     fn bump_mtime(path: &Path, secs_ahead: u64) {
         let file = fs::File::options().write(true).open(path).unwrap();
         let t = std::time::SystemTime::now() + std::time::Duration::from_secs(secs_ahead);
-        file.set_times(fs::FileTimes::new().set_modified(t)).unwrap();
+        file.set_times(fs::FileTimes::new().set_modified(t))
+            .unwrap();
     }
 
     /// Pin a file's mtime to an exact instant so a test can place two writes
     /// inside the same wall-clock second on purpose.
     fn set_mtime(path: &Path, secs: u64, nanos: u32) {
         let file = fs::File::options().write(true).open(path).unwrap();
-        let t = std::time::SystemTime::UNIX_EPOCH
-            + std::time::Duration::new(secs, nanos);
-        file.set_times(fs::FileTimes::new().set_modified(t)).unwrap();
+        let t = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(secs, nanos);
+        file.set_times(fs::FileTimes::new().set_modified(t))
+            .unwrap();
     }
 
     #[test]
@@ -2901,8 +2924,7 @@ mod tests {
         fs::write(dir.path().join("Assets").join("a.png"), "x").unwrap();
 
         // gitignore respected → Library/ neither walked nor shown.
-        let result =
-            scan_directory_with_state(dir.path().to_str().unwrap(), None, true).unwrap();
+        let result = scan_directory_with_state(dir.path().to_str().unwrap(), None, true).unwrap();
         let names: Vec<&str> = result
             .directory_tree
             .children

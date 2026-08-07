@@ -43,10 +43,7 @@ pub fn find_missing_references(
     }
 
     // Build the set of GUIDs that DO exist in the project.
-    let known_guids: HashSet<String> = known
-        .iter()
-        .filter_map(|a| a.unity_guid.clone())
-        .collect();
+    let known_guids: HashSet<String> = known.iter().filter_map(|a| a.unity_guid.clone()).collect();
 
     if known_guids.is_empty() {
         return result; // No .meta files scanned — Unity project state is empty or unusual.
@@ -94,10 +91,7 @@ pub fn find_missing_references(
                 rule_id: "missing_reference".to_string(),
                 rule_name: "Missing Reference".to_string(),
                 severity: Severity::Warning,
-                message: format!(
-                    "References GUID `{}` which is not in the project",
-                    r.guid
-                ),
+                message: format!("References GUID `{}` which is not in the project", r.guid),
                 asset_path: asset.path.clone(),
                 suggestion: Some(
                     "Either the target was deleted without updating this file, or its \
@@ -141,7 +135,11 @@ pub(crate) mod tests {
         }
     }
 
-    pub(crate) fn prefab_referencing(dir: &std::path::Path, name: &str, refs: &[&str]) -> AssetInfo {
+    pub(crate) fn prefab_referencing(
+        dir: &std::path::Path,
+        name: &str,
+        refs: &[&str],
+    ) -> AssetInfo {
         let mut content = String::from("--- !u!1 &1\nGameObject:\n  m_Name: Test\n");
         for g in refs {
             content.push_str(&format!(
@@ -236,7 +234,12 @@ pub(crate) mod tests {
                 ],
             ),
         ];
-        let r = find_missing_references(&assets, &assets, &Some(ProjectType::Unity), &unity::PackageGuidIndex::default());
+        let r = find_missing_references(
+            &assets,
+            &assets,
+            &Some(ProjectType::Unity),
+            &unity::PackageGuidIndex::default(),
+        );
         assert_eq!(r.issue_count, 1);
         assert!(r.issues[0].message.contains("22222222"));
     }
@@ -253,7 +256,12 @@ pub(crate) mod tests {
                 "99999999999999999999999999999999",
             ],
         )];
-        let r = find_missing_references(&assets, &assets, &Some(ProjectType::Unity), &unity::PackageGuidIndex::default());
+        let r = find_missing_references(
+            &assets,
+            &assets,
+            &Some(ProjectType::Unity),
+            &unity::PackageGuidIndex::default(),
+        );
         assert_eq!(r.issue_count, 1);
     }
 
@@ -265,7 +273,12 @@ pub(crate) mod tests {
             "x.prefab",
             &["99999999999999999999999999999999"],
         )];
-        let r = find_missing_references(&assets, &assets, &Some(ProjectType::Unreal), &unity::PackageGuidIndex::default());
+        let r = find_missing_references(
+            &assets,
+            &assets,
+            &Some(ProjectType::Unreal),
+            &unity::PackageGuidIndex::default(),
+        );
         assert_eq!(r.issue_count, 0);
     }
 
@@ -280,7 +293,12 @@ pub(crate) mod tests {
                 &["00000000000000000000000000000000"],
             ),
         ];
-        let r = find_missing_references(&assets, &assets, &Some(ProjectType::Unity), &unity::PackageGuidIndex::default());
+        let r = find_missing_references(
+            &assets,
+            &assets,
+            &Some(ProjectType::Unity),
+            &unity::PackageGuidIndex::default(),
+        );
         assert_eq!(r.issue_count, 0);
     }
 
@@ -320,7 +338,12 @@ pub(crate) mod tests {
 
     #[test]
     fn empty_project_reports_nothing() {
-        let r = find_missing_references(&[], &[], &Some(ProjectType::Unity), &unity::PackageGuidIndex::default());
+        let r = find_missing_references(
+            &[],
+            &[],
+            &Some(ProjectType::Unity),
+            &unity::PackageGuidIndex::default(),
+        );
         assert_eq!(r.issue_count, 0);
     }
 
@@ -342,7 +365,12 @@ pub(crate) mod tests {
                 ],
             ),
         ];
-        let r = find_missing_references(&assets, &assets, &Some(ProjectType::Unity), &unity::PackageGuidIndex::default());
+        let r = find_missing_references(
+            &assets,
+            &assets,
+            &Some(ProjectType::Unity),
+            &unity::PackageGuidIndex::default(),
+        );
         assert_eq!(r.issue_count, 0);
     }
 
@@ -363,7 +391,12 @@ pub(crate) mod tests {
                 ],
             ),
         ];
-        let r = find_missing_references(&assets, &assets, &Some(ProjectType::Unity), &unity::PackageGuidIndex::default());
+        let r = find_missing_references(
+            &assets,
+            &assets,
+            &Some(ProjectType::Unity),
+            &unity::PackageGuidIndex::default(),
+        );
         assert_eq!(r.issue_count, 3);
     }
 
@@ -381,7 +414,12 @@ pub(crate) mod tests {
                 &["22222222222222222222222222222222"],
             ),
         ];
-        let r = find_missing_references(&assets, &assets, &Some(ProjectType::Unity), &unity::PackageGuidIndex::default());
+        let r = find_missing_references(
+            &assets,
+            &assets,
+            &Some(ProjectType::Unity),
+            &unity::PackageGuidIndex::default(),
+        );
         assert_eq!(r.issue_count, 1);
         assert!(matches!(r.issues[0].severity, Severity::Warning));
     }

@@ -188,10 +188,7 @@ pub fn find_pbr_set_issues(assets: &[AssetInfo], config: &PbrSetConfig) -> Analy
             .and_then(|p| p.to_str())
             .unwrap_or("")
             .to_string();
-        let stem_owned: String = match Path::new(&asset.name)
-            .file_stem()
-            .and_then(|s| s.to_str())
-        {
+        let stem_owned: String = match Path::new(&asset.name).file_stem().and_then(|s| s.to_str()) {
             Some(s) => s.to_string(),
             None => continue,
         };
@@ -230,11 +227,7 @@ pub fn find_pbr_set_issues(assets: &[AssetInfo], config: &PbrSetConfig) -> Analy
         }
     }
 
-    let required: Vec<String> = config
-        .required
-        .iter()
-        .map(|r| r.to_lowercase())
-        .collect();
+    let required: Vec<String> = config.required.iter().map(|r| r.to_lowercase()).collect();
 
     // Sort keys so issue order is stable across runs (HashMap iteration
     // is otherwise nondeterministic and would churn the issue list).
@@ -398,13 +391,7 @@ mod tests {
         // Custom config: require all three of metallic / roughness / ao —
         // satisfied by a single `_ORM` packed map.
         let mut cfg = enabled_cfg();
-        cfg.required = vec_str(&[
-            "basecolor",
-            "normal",
-            "roughness",
-            "metallic",
-            "ao",
-        ]);
+        cfg.required = vec_str(&["basecolor", "normal", "roughness", "metallic", "ao"]);
         let assets = vec![
             texture("/proj/T_Wood_BaseColor.png"),
             texture("/proj/T_Wood_Normal.png"),

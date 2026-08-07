@@ -158,7 +158,11 @@ impl NamingRule {
     /// (`t_rock.png`) then violated naming.prefix, whose answer was
     /// `T_t_rock.png`… the two rules generated each other's violations and the
     /// name grew on every pass. See `case_fix_under_a_prefix_converges`.
-    fn split_required_prefix<'a>(&self, stem: &'a str, asset_type: &AssetType) -> (&'a str, &'a str) {
+    fn split_required_prefix<'a>(
+        &self,
+        stem: &'a str,
+        asset_type: &AssetType,
+    ) -> (&'a str, &'a str) {
         if let Some(prefix) = self.required_prefix(asset_type) {
             if let Some(tail) = stem.strip_prefix(prefix.as_str()) {
                 return (&stem[..prefix.len()], tail);
@@ -328,11 +332,13 @@ impl Rule for NamingRule {
                 severity: Severity::Warning,
                 message: format!(
                     "File name is {} characters, max allowed is {}",
-                    char_count,
-                    self.config.max_length
+                    char_count, self.config.max_length
                 ),
                 asset_path: asset.path.clone(),
-                suggestion: Some(format!("Shorten the file name to {} characters", self.config.max_length)),
+                suggestion: Some(format!(
+                    "Shorten the file name to {} characters",
+                    self.config.max_length
+                )),
                 auto_fixable: false,
                 related_paths: None,
                 args: issue_args([
@@ -394,10 +400,7 @@ impl Rule for NamingRule {
                     suggestion: Some(format!("Rename to {}{}", prefix, name)),
                     auto_fixable: true,
                     related_paths: None,
-                    args: issue_args([
-                        ("prefix", prefix.to_string()),
-                        ("name", name.to_string()),
-                    ]),
+                    args: issue_args([("prefix", prefix.to_string()), ("name", name.to_string())]),
                 });
             }
         }
@@ -439,7 +442,8 @@ fn is_pascal_case(s: &str) -> bool {
 }
 
 fn is_snake_case(s: &str) -> bool {
-    s.chars().all(|c| c.is_lowercase() || c.is_numeric() || c == '_')
+    s.chars()
+        .all(|c| c.is_lowercase() || c.is_numeric() || c == '_')
 }
 
 fn is_camel_case(s: &str) -> bool {
@@ -452,7 +456,8 @@ fn is_camel_case(s: &str) -> bool {
 
 fn is_kebab_case(s: &str) -> bool {
     // Same leniency level as is_snake_case, with `-` as the separator.
-    s.chars().all(|c| c.is_lowercase() || c.is_numeric() || c == '-')
+    s.chars()
+        .all(|c| c.is_lowercase() || c.is_numeric() || c == '-')
 }
 
 /// Reattach an extension (without its dot) to a rewritten stem. Mirrors the
@@ -531,13 +536,27 @@ fn to_case_style(stem: &str, style: &str) -> Option<String> {
         return None;
     }
     let out = match style {
-        "snake_case" => words.iter().map(|w| w.to_lowercase()).collect::<Vec<_>>().join("_"),
-        "kebab-case" => words.iter().map(|w| w.to_lowercase()).collect::<Vec<_>>().join("-"),
+        "snake_case" => words
+            .iter()
+            .map(|w| w.to_lowercase())
+            .collect::<Vec<_>>()
+            .join("_"),
+        "kebab-case" => words
+            .iter()
+            .map(|w| w.to_lowercase())
+            .collect::<Vec<_>>()
+            .join("-"),
         "PascalCase" => words.iter().map(|w| capitalize(w)).collect::<String>(),
         "camelCase" => words
             .iter()
             .enumerate()
-            .map(|(i, w)| if i == 0 { w.to_lowercase() } else { capitalize(w) })
+            .map(|(i, w)| {
+                if i == 0 {
+                    w.to_lowercase()
+                } else {
+                    capitalize(w)
+                }
+            })
             .collect::<String>(),
         _ => return None, // "any" or unknown — no canonical form
     };
@@ -700,10 +719,20 @@ mod tests {
         // .blend is AssetType::Model and .psd is AssetType::Texture, but both
         // carry dcc_source_kind — the prefix convention must not apply.
         assert!(rule
-            .check(&asset("rock.blend", "blend", AssetType::Model, Some("blender")))
+            .check(&asset(
+                "rock.blend",
+                "blend",
+                AssetType::Model,
+                Some("blender")
+            ))
             .is_none());
         assert!(rule
-            .check(&asset("rock.psd", "psd", AssetType::Texture, Some("photoshop")))
+            .check(&asset(
+                "rock.psd",
+                "psd",
+                AssetType::Texture,
+                Some("photoshop")
+            ))
             .is_none());
     }
 
@@ -739,7 +768,12 @@ mod tests {
     #[test]
     fn fix_forbidden_replaces_spaces_with_underscores() {
         assert_eq!(
-            default_rule().suggest_compliant_name(&asset("my file.png", "png", AssetType::Texture, None)),
+            default_rule().suggest_compliant_name(&asset(
+                "my file.png",
+                "png",
+                AssetType::Texture,
+                None
+            )),
             Some("my_file.png".to_string())
         );
     }
@@ -783,7 +817,12 @@ mod tests {
     fn fix_forbidden_returns_none_for_degenerate_stem() {
         // "***" is all forbidden characters -> nothing survives -> no fix.
         assert_eq!(
-            default_rule().suggest_compliant_name(&asset("***.png", "png", AssetType::Texture, None)),
+            default_rule().suggest_compliant_name(&asset(
+                "***.png",
+                "png",
+                AssetType::Texture,
+                None
+            )),
             None
         );
     }
@@ -927,7 +966,12 @@ mod tests {
         );
         // Same name under a roomy limit fixes normally.
         assert_eq!(
-            prefix_rule().suggest_compliant_name(&asset("123456.png", "png", AssetType::Texture, None)),
+            prefix_rule().suggest_compliant_name(&asset(
+                "123456.png",
+                "png",
+                AssetType::Texture,
+                None
+            )),
             Some("T_123456.png".to_string())
         );
 
@@ -939,11 +983,21 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(
-            tight_case.suggest_compliant_name(&asset("MyFiles.png", "png", AssetType::Texture, None)),
+            tight_case.suggest_compliant_name(&asset(
+                "MyFiles.png",
+                "png",
+                AssetType::Texture,
+                None
+            )),
             None
         );
         assert_eq!(
-            cased_rule("snake_case").suggest_compliant_name(&asset("MyFiles.png", "png", AssetType::Texture, None)),
+            cased_rule("snake_case").suggest_compliant_name(&asset(
+                "MyFiles.png",
+                "png",
+                AssetType::Texture,
+                None
+            )),
             Some("my_files.png".to_string())
         );
     }
@@ -970,7 +1024,12 @@ mod tests {
         );
         // Already compliant -> nothing to propose.
         assert_eq!(
-            default_rule().suggest_compliant_name(&asset("clean_name.png", "png", AssetType::Texture, None)),
+            default_rule().suggest_compliant_name(&asset(
+                "clean_name.png",
+                "png",
+                AssetType::Texture,
+                None
+            )),
             None
         );
     }

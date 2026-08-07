@@ -193,7 +193,10 @@ impl UndoManager {
             return;
         };
         if let Err(e) = Self::write_history_to(path, &self.history) {
-            eprintln!("[undo] failed to persist history to {}: {e}", path.display());
+            eprintln!(
+                "[undo] failed to persist history to {}: {e}",
+                path.display()
+            );
         }
     }
 
@@ -224,10 +227,7 @@ impl UndoManager {
     /// 撤销最近一次未撤销的操作
     pub fn undo_last(&mut self) -> Option<UndoResult> {
         // 查找最近一个未撤销的操作
-        let index = self
-            .history
-            .iter()
-            .rposition(|op| !op.undone)?;
+        let index = self.history.iter().rposition(|op| !op.undone)?;
 
         let batch = &self.history[index];
         let description = batch.description.clone();
@@ -259,10 +259,7 @@ impl UndoManager {
     /// 获取撤销历史列表
     pub fn get_history(&self) -> Vec<HistoryEntry> {
         // 找到最近一个未撤销的操作的索引
-        let last_undoable_index = self
-            .history
-            .iter()
-            .rposition(|op| !op.undone);
+        let last_undoable_index = self.history.iter().rposition(|op| !op.undone);
 
         self.history
             .iter()
@@ -622,7 +619,11 @@ mod tests {
     fn a_partial_undo_still_consumes_the_batch() {
         let dir = tempfile::tempdir().unwrap();
         let moved = create_test_file(dir.path(), "renamed.png");
-        let original = dir.path().join("original.png").to_string_lossy().to_string();
+        let original = dir
+            .path()
+            .join("original.png")
+            .to_string_lossy()
+            .to_string();
 
         let mut manager = UndoManager::new(10);
         manager.record_batch(
@@ -1013,8 +1014,17 @@ mod tests {
             "Rename".to_string(),
             vec![FileOperation {
                 operation_type: OperationType::Rename,
-                original_path: dir.path().join("gone_orig.txt").to_string_lossy().to_string(),
-                new_path: Some(dir.path().join("gone_new.txt").to_string_lossy().to_string()),
+                original_path: dir
+                    .path()
+                    .join("gone_orig.txt")
+                    .to_string_lossy()
+                    .to_string(),
+                new_path: Some(
+                    dir.path()
+                        .join("gone_new.txt")
+                        .to_string_lossy()
+                        .to_string(),
+                ),
                 timestamp: current_timestamp(),
             }],
         );

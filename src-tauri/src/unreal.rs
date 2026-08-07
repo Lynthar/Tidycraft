@@ -146,7 +146,10 @@ pub fn parse_uproject(path: &Path) -> Option<UnrealProjectInfo> {
                 enabled: p.enabled,
             }),
             Err(e) => {
-                eprintln!("[unreal] skipping a Plugins entry in {}: {e}", path.display());
+                eprintln!(
+                    "[unreal] skipping a Plugins entry in {}: {e}",
+                    path.display()
+                );
                 None
             }
         })
@@ -163,7 +166,10 @@ pub fn parse_uproject(path: &Path) -> Option<UnrealProjectInfo> {
                 loading_phase: m.loading_phase,
             }),
             Err(e) => {
-                eprintln!("[unreal] skipping a Modules entry in {}: {e}", path.display());
+                eprintln!(
+                    "[unreal] skipping a Modules entry in {}: {e}",
+                    path.display()
+                );
                 None
             }
         })
@@ -364,8 +370,14 @@ mod tests {
         assert_eq!(info.modules[0].module_type, "Runtime");
 
         assert_eq!(info.plugins.len(), 2);
-        assert!(info.plugins.iter().any(|p| p.name == "Paper2D" && p.enabled));
-        assert!(info.plugins.iter().any(|p| p.name == "SteamVR" && !p.enabled));
+        assert!(info
+            .plugins
+            .iter()
+            .any(|p| p.name == "Paper2D" && p.enabled));
+        assert!(info
+            .plugins
+            .iter()
+            .any(|p| p.name == "SteamVR" && !p.enabled));
 
         assert_eq!(info.target_platforms, vec!["Windows", "Linux"]);
         assert!(!info.is_enterprise_project);
@@ -401,9 +413,6 @@ mod tests {
             get_unreal_asset_type(Path::new("level.umap")),
             Some("Map".to_string())
         );
-        assert_eq!(
-            get_unreal_asset_type(Path::new("script.cpp")),
-            None
-        );
+        assert_eq!(get_unreal_asset_type(Path::new("script.cpp")), None);
     }
 }

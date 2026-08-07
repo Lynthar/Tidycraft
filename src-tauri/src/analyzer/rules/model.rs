@@ -139,7 +139,9 @@ impl Rule for ModelRule {
                         material_count, self.config.max_materials
                     ),
                     asset_path: asset.path.clone(),
-                    suggestion: Some("Consider combining materials to reduce draw calls".to_string()),
+                    suggestion: Some(
+                        "Consider combining materials to reduce draw calls".to_string(),
+                    ),
                     auto_fixable: false,
                     related_paths: None,
                     args: issue_args([

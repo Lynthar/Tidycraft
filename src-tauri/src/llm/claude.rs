@@ -19,7 +19,6 @@ use super::{
     TagRequest, TagResponse, Usage,
 };
 
-
 const ENDPOINT: &str = "https://api.anthropic.com/v1/messages";
 const API_VERSION: &str = "2023-06-01";
 const MAX_OUTPUT_TOKENS: u32 = 4096;

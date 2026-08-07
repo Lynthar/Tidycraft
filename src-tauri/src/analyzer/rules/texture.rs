@@ -137,8 +137,14 @@ impl Rule for TextureRule {
                 auto_fixable: false,
                 related_paths: None,
                 args: issue_args([
-                    ("size", format!("{:.2}", asset.size as f64 / 1024.0 / 1024.0)),
-                    ("max", format!("{:.2}", self.config.max_file_size as f64 / 1024.0 / 1024.0)),
+                    (
+                        "size",
+                        format!("{:.2}", asset.size as f64 / 1024.0 / 1024.0),
+                    ),
+                    (
+                        "max",
+                        format!("{:.2}", self.config.max_file_size as f64 / 1024.0 / 1024.0),
+                    ),
                 ]),
             });
         }
@@ -244,10 +250,7 @@ impl TextureRule {
                 suggestion: None,
                 auto_fixable: false,
                 related_paths: None,
-                args: issue_args([
-                    ("width", width.to_string()),
-                    ("height", height.to_string()),
-                ]),
+                args: issue_args([("width", width.to_string()), ("height", height.to_string())]),
             });
         }
 
@@ -334,7 +337,10 @@ mod tests {
         // Over the default 10 MB cap: must fire even though the old
         // `width?` early-return used to exempt exactly these files.
         let issue = rule.check(&psd_without_dims(11 * 1024 * 1024));
-        assert_eq!(issue.expect("expected an issue").rule_id, "texture.file_size");
+        assert_eq!(
+            issue.expect("expected an issue").rule_id,
+            "texture.file_size"
+        );
         // Under the cap: silent.
         assert!(rule.check(&psd_without_dims(1024)).is_none());
     }

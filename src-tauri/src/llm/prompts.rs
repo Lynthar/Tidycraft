@@ -9,9 +9,7 @@
 
 use std::fmt::Write;
 
-use super::{
-    learning::DirectorySample, project_meta::ProjectMeta, AssetInput, ExistingTagContext,
-};
+use super::{learning::DirectorySample, project_meta::ProjectMeta, AssetInput, ExistingTagContext};
 
 /// Cache-busting prompt version — see module-level doc.
 ///
@@ -164,8 +162,7 @@ pub fn build_user_prompt(
     existing_tags: &[ExistingTagContext],
     include_thumbnails: bool,
 ) -> String {
-    let mut out =
-        String::with_capacity(128 + assets.len() * 96 + existing_tags.len() * 80);
+    let mut out = String::with_capacity(128 + assets.len() * 96 + existing_tags.len() * 80);
 
     // ---- Project context block ----
     if let Some(meta) = project_ctx {
@@ -292,7 +289,10 @@ pub fn build_learning_prompt(
 
     // ---- Directory samples ----
     if samples.is_empty() {
-        let _ = writeln!(out, "Directory samples: No directory samples — nothing to analyze.");
+        let _ = writeln!(
+            out,
+            "Directory samples: No directory samples — nothing to analyze."
+        );
         return out;
     }
     let _ = writeln!(out, "Directory samples:");
@@ -313,7 +313,10 @@ pub fn build_learning_prompt(
         }
     }
     let _ = writeln!(out);
-    let _ = writeln!(out, "Analyze this project per the schema in the system prompt.");
+    let _ = writeln!(
+        out,
+        "Analyze this project per the schema in the system prompt."
+    );
     out
 }
 
@@ -470,11 +473,7 @@ mod tests {
                     ("SM_Hero_Body.fbx", "fbx", "model"),
                 ],
             ),
-            dir_sample(
-                "Weapons/Sword",
-                4,
-                &[("SM_BroadSword.fbx", "fbx", "model")],
-            ),
+            dir_sample("Weapons/Sword", 4, &[("SM_BroadSword.fbx", "fbx", "model")]),
         ];
         let p = build_learning_prompt(&samples, None, &[]);
         assert!(p.contains("Characters/Hero"));

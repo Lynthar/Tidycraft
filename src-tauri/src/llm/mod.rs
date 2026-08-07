@@ -339,9 +339,7 @@ pub fn parse_suggestions(text: &str) -> Result<Vec<TagSuggestion>, LLMError> {
 /// `parse_suggestions` builds on this by wrapping the parse target in
 /// a `{ suggestions: T }` envelope; `learn_project` passes
 /// `LearningResult` directly.
-pub fn parse_json_lenient<T: serde::de::DeserializeOwned>(
-    text: &str,
-) -> Result<T, LLMError> {
+pub fn parse_json_lenient<T: serde::de::DeserializeOwned>(text: &str) -> Result<T, LLMError> {
     if let Ok(v) = serde_json::from_str::<T>(text) {
         return Ok(v);
     }
@@ -563,7 +561,13 @@ mod tests {
             );
             assert!(msg.contains("overloaded"), "{status}: says why: {msg}");
             // The frontend dispatches on substrings; these would misroute it.
-            for misleading in ["Network", "Could not reach", "timed out", "Rate limit", "quota"] {
+            for misleading in [
+                "Network",
+                "Could not reach",
+                "timed out",
+                "Rate limit",
+                "quota",
+            ] {
                 assert!(
                     !msg.contains(misleading),
                     "{status} message must not contain {misleading:?}: {msg}"
@@ -695,7 +699,11 @@ That's it!"#;
         // The model answered out of order AND skipped b.png — index-zipping
         // would cache c's suggestion under a's key and a's under b's key.
         let assets = vec![asset("a/a.png"), asset("a/b.png"), asset("a/c.png")];
-        let keys = vec!["key-a".to_string(), "key-b".to_string(), "key-c".to_string()];
+        let keys = vec![
+            "key-a".to_string(),
+            "key-b".to_string(),
+            "key-c".to_string(),
+        ];
         let fresh = vec![suggestion("a/c.png"), suggestion("a/a.png")];
 
         let pairs = pair_suggestions_with_keys(&fresh, &assets, &keys);
@@ -815,7 +823,13 @@ That's it!"#;
         let ctx = cache::hash_context(None, &[]);
         for a in &assets {
             cache::remove(&cache::cache_key(
-                None, &a.filename, &a.path, "claude", &model, 1, &ctx,
+                None,
+                &a.filename,
+                &a.path,
+                "claude",
+                &model,
+                1,
+                &ctx,
             ));
         }
     }

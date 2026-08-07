@@ -134,16 +134,12 @@ impl Analyzer {
 
         // Add model rules
         if config.model.enabled {
-            analyzer.add_rule(Box::new(rules::model::ModelRule::new(
-                config.model.clone(),
-            )));
+            analyzer.add_rule(Box::new(rules::model::ModelRule::new(config.model.clone())));
         }
 
         // Add audio rules
         if config.audio.enabled {
-            analyzer.add_rule(Box::new(rules::audio::AudioRule::new(
-                config.audio.clone(),
-            )));
+            analyzer.add_rule(Box::new(rules::audio::AudioRule::new(config.audio.clone())));
         }
 
         analyzer
@@ -263,7 +259,10 @@ mod tests {
     /// `zh.json` literally — they have to be pointed at the new file too.
     const RULE_ARGS: &[(&str, &[&str])] = &[
         ("texture.file_size", &["size", "max"]),
-        ("texture.pot", &["width", "height", "pot_width", "pot_height"]),
+        (
+            "texture.pot",
+            &["width", "height", "pot_width", "pot_height"],
+        ),
         ("texture.max_size", &["width", "height", "max"]),
         ("texture.min_size", &["width", "height", "min"]),
         ("texture.non_square", &["width", "height"]),
@@ -281,10 +280,16 @@ mod tests {
         ("audio.stereo_sfx", &[]),
         ("audio.file_size", &["size", "max"]),
         ("texture.color_space", &["suffix"]),
-        ("duplicate", &["file_count", "original", "original_path", "other_count"]),
+        (
+            "duplicate",
+            &["file_count", "original", "original_path", "other_count"],
+        ),
         ("missing_reference", &["guid"]),
         ("pbr_set.incomplete", &["set", "channels"]),
-        ("dcc_source.outdated_export", &["source", "export", "dcc", "age_value", "age_unit"]),
+        (
+            "dcc_source.outdated_export",
+            &["source", "export", "dcc", "age_value", "age_unit"],
+        ),
     ];
 
     /// Run every rule against a fixture built to trigger it, and collect the
@@ -389,15 +394,26 @@ mod tests {
         let long_name = format!("{}.png", "a".repeat(80));
         let cases: Vec<(NamingConfig, String)> = vec![
             (
-                NamingConfig { enabled: true, max_length: 32, ..NamingConfig::default() },
+                NamingConfig {
+                    enabled: true,
+                    max_length: 32,
+                    ..NamingConfig::default()
+                },
                 long_name,
             ),
             (
-                NamingConfig { enabled: true, ..NamingConfig::default() },
+                NamingConfig {
+                    enabled: true,
+                    ..NamingConfig::default()
+                },
                 "he<ro.png".to_string(),
             ),
             (
-                NamingConfig { enabled: true, forbid_chinese: true, ..NamingConfig::default() },
+                NamingConfig {
+                    enabled: true,
+                    forbid_chinese: true,
+                    ..NamingConfig::default()
+                },
                 "英雄.png".to_string(),
             ),
             (
@@ -421,7 +437,11 @@ mod tests {
             .into_iter()
             .filter_map(|(cfg, name)| {
                 let rule = NamingRule::new(cfg);
-                rule.check(&texture_asset(&name, 1024, crate::scanner::AssetMetadata::default()))
+                rule.check(&texture_asset(
+                    &name,
+                    1024,
+                    crate::scanner::AssetMetadata::default(),
+                ))
             })
             .collect()
     }
@@ -502,7 +522,11 @@ mod tests {
             mk("ambience.wav", 1024, meta(22050, None, 1)),
             mk("sword_hit.wav", 1024, meta(44100, Some(12.0), 1)),
             mk("ui_click.wav", 1024, meta(44100, Some(0.3), 2)),
-            mk("music_loop.wav", 11 * 1024 * 1024, meta(44100, Some(60.0), 2)),
+            mk(
+                "music_loop.wav",
+                11 * 1024 * 1024,
+                meta(44100, Some(60.0), 2),
+            ),
         ]
         .iter()
         .filter_map(|a| rule.check(a))
@@ -626,9 +650,14 @@ mod tests {
         // unchecked, and the locale gate would silently skip it.
         let found = harvest();
         let declared: BTreeSet<&str> = RULE_ARGS.iter().map(|(id, _)| *id).collect();
-        let undeclared: Vec<&String> =
-            found.keys().filter(|id| !declared.contains(id.as_str())).collect();
-        assert!(undeclared.is_empty(), "rules emitted but not declared: {undeclared:?}");
+        let undeclared: Vec<&String> = found
+            .keys()
+            .filter(|id| !declared.contains(id.as_str()))
+            .collect();
+        assert!(
+            undeclared.is_empty(),
+            "rules emitted but not declared: {undeclared:?}"
+        );
         // Guards the harvest, not the analyzer: nothing here counts rule_id
         // construction sites, so a 24th rule with no fixture in `harvest()`
         // reaches neither of the checks above. Bump this by hand when adding a
@@ -835,8 +864,8 @@ mod tests {
         // translations reference. A typo here renders as a literal `{{witdh}}`
         // on screen and in the exported report, since neither end substitutes
         // unknown names.
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../src/i18n/locales/zh.json");
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/i18n/locales/zh.json");
         let raw = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
         let doc: serde_json::Value = serde_json::from_str(&raw).expect("zh.json parses");
@@ -859,7 +888,9 @@ mod tests {
                 continue; // this rule is not translated yet — falls back to English
             }
             for field in ["title", "message", "suggestion"] {
-                let Some(tpl) = node[field].as_str() else { continue };
+                let Some(tpl) = node[field].as_str() else {
+                    continue;
+                };
                 for name in placeholders(tpl) {
                     assert!(
                         allowed.contains(name.as_str()),
@@ -883,8 +914,8 @@ mod tests {
         // looks up. The panel then renders English (i18next misses) while the
         // exported report renders Chinese, with every other gate green.
         // A misspelled or undeclared id sits inert the same way.
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../src/i18n/locales/zh.json");
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/i18n/locales/zh.json");
         let raw = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
         let doc: serde_json::Value = serde_json::from_str(&raw).expect("zh.json parses");

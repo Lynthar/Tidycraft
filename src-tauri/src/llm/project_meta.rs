@@ -142,7 +142,10 @@ enabled = true
 "#;
         let m = ProjectMeta::from_toml(toml_str).unwrap();
         assert_eq!(m.theme.as_deref(), Some("Cyberpunk RPG"));
-        assert_eq!(m.goal.as_deref(), Some("Asset library for characters and props"));
+        assert_eq!(
+            m.goal.as_deref(),
+            Some("Asset library for characters and props")
+        );
         assert!(!m.is_empty());
     }
 
@@ -294,8 +297,7 @@ random_extra = "should-not-fail"
         // normalizes empty back to None so the prompt builder
         // skips the project-context block.
         write_back(dir.path(), "", "").unwrap();
-        let content =
-            std::fs::read_to_string(dir.path().join("tidycraft.toml")).unwrap();
+        let content = std::fs::read_to_string(dir.path().join("tidycraft.toml")).unwrap();
         let meta = ProjectMeta::from_toml(&content).unwrap();
         assert!(meta.is_empty());
     }

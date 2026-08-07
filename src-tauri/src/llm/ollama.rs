@@ -82,8 +82,7 @@ const IMAGE_TOKENS_EST: usize = 1_610;
 /// Context window for a request whose text totals `prompt_chars` and which
 /// carries `image_count` attached images.
 fn num_ctx_for(prompt_chars: usize, image_count: usize) -> usize {
-    let est_prompt_tokens =
-        prompt_chars / 4 + image_count.saturating_mul(IMAGE_TOKENS_EST);
+    let est_prompt_tokens = prompt_chars / 4 + image_count.saturating_mul(IMAGE_TOKENS_EST);
     let with_headroom = est_prompt_tokens.saturating_add(2_048); // response + slack
     if with_headroom > NUM_CTX_MAX {
         // Still truncated, but no longer silently: the ceiling is a guess at
@@ -244,7 +243,9 @@ async fn call_ollama(
 
     let resp = client.post(&url).json(&body).send().await.map_err(|e| {
         if e.is_timeout() {
-            LLMError::Network(format!("Ollama request timed out after {REQUEST_TIMEOUT_SECS}s"))
+            LLMError::Network(format!(
+                "Ollama request timed out after {REQUEST_TIMEOUT_SECS}s"
+            ))
         } else if e.is_connect() {
             // Most user-facing failure: Ollama isn't running. Surface
             // the endpoint we tried so the user can verify with
@@ -358,7 +359,9 @@ async fn send_text_chat(
         .map_err(|e| LLMError::Network(e.to_string()))?;
     let resp = client.post(&url).json(&body).send().await.map_err(|e| {
         if e.is_timeout() {
-            LLMError::Network(format!("Ollama request timed out after {REQUEST_TIMEOUT_SECS}s"))
+            LLMError::Network(format!(
+                "Ollama request timed out after {REQUEST_TIMEOUT_SECS}s"
+            ))
         } else if e.is_connect() {
             LLMError::Network(format!("Could not reach Ollama at {url} ({e})"))
         } else {
@@ -519,7 +522,10 @@ mod tests {
         let msgs = build_messages(&assets, None, &[], true);
         assert_eq!(msgs.len(), 2);
         assert_eq!(msgs[0].role, "system");
-        assert!(msgs[0].images.is_empty(), "system msg must not carry images");
+        assert!(
+            msgs[0].images.is_empty(),
+            "system msg must not carry images"
+        );
         assert_eq!(msgs[1].role, "user");
         assert_eq!(msgs[1].images, vec!["AAA".to_string(), "BBB".to_string()]);
     }
@@ -551,7 +557,10 @@ mod tests {
             LLMError::Other(msg) => {
                 assert!(msg.contains("qwen2.5vl:32b"), "names the model: {msg}");
                 assert!(msg.contains("ollama pull"), "suggests the fix: {msg}");
-                assert!(!msg.contains("Network"), "must not trip the network hint: {msg}");
+                assert!(
+                    !msg.contains("Network"),
+                    "must not trip the network hint: {msg}"
+                );
             }
             other => panic!("expected LLMError::Other, got {other:?}"),
         }

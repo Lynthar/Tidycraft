@@ -110,11 +110,7 @@ impl AiRulesDoc {
     ///    file); metadata is stamped "unknown" with the current time.
     ///
     /// `rules` (the user's edited list) always replaces the doc's rules.
-    pub fn for_save(
-        pending: Option<Self>,
-        on_disk: Option<Self>,
-        rules: Vec<LearnedRule>,
-    ) -> Self {
+    pub fn for_save(pending: Option<Self>, on_disk: Option<Self>, rules: Vec<LearnedRule>) -> Self {
         let mut doc = pending.or(on_disk).unwrap_or_else(|| AiRulesDoc {
             last_learned: chrono::Utc::now().to_rfc3339(),
             prompt_version: super::learning::LEARNING_PROMPT_VERSION,

@@ -200,7 +200,9 @@ impl Rule for AudioRule {
                         message: "Sound effect is stereo, mono is recommended for 3D audio"
                             .to_string(),
                         asset_path: asset.path.clone(),
-                        suggestion: Some("Convert to mono for better 3D spatialization".to_string()),
+                        suggestion: Some(
+                            "Convert to mono for better 3D spatialization".to_string(),
+                        ),
                         auto_fixable: false,
                         related_paths: None,
                         // Nothing to interpolate — the message is a fixed
@@ -227,7 +229,10 @@ impl Rule for AudioRule {
                 auto_fixable: false,
                 related_paths: None,
                 args: issue_args([
-                    ("size", format!("{:.2}", asset.size as f64 / 1024.0 / 1024.0)),
+                    (
+                        "size",
+                        format!("{:.2}", asset.size as f64 / 1024.0 / 1024.0),
+                    ),
                     (
                         "max",
                         format!("{:.2}", self.config.max_file_size as f64 / 1024.0 / 1024.0),
@@ -276,7 +281,9 @@ mod tests {
     #[test]
     fn non_listed_sample_rate_still_reports() {
         let rule = AudioRule::new(AudioConfig::default());
-        let issue = rule.check(&audio_asset(22050)).expect("22.05 kHz is non-standard");
+        let issue = rule
+            .check(&audio_asset(22050))
+            .expect("22.05 kHz is non-standard");
         assert_eq!(issue.rule_id, "audio.sample_rate");
         assert!(issue.suggestion.expect("has suggestion").contains("44100"));
         // The allowed rates must be joined ("44100, 48000"), not Rust's

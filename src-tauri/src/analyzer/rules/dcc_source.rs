@@ -158,11 +158,7 @@ fn default_mappings() -> Vec<DccMapping> {
             &["png", "tga", "jpg", "tif", "tiff", "exr"],
         ),
         m("substance_designer", &["sbs"], &["sbsar", "png", "tga"]),
-        m(
-            "photoshop",
-            &["psd", "psb"],
-            &["png", "jpg", "tga", "webp"],
-        ),
+        m("photoshop", &["psd", "psb"], &["png", "jpg", "tga", "webp"]),
     ]
 }
 
@@ -275,10 +271,7 @@ fn candidate_dirs(source_parent: &str, lookup: &DccLookup) -> Vec<String> {
 
 /// Find which mapping owns the given source extension. Returns `None`
 /// when the extension isn't a configured DCC source.
-fn mapping_for_source<'a>(
-    mappings: &'a [DccMapping],
-    ext: &str,
-) -> Option<&'a DccMapping> {
+fn mapping_for_source<'a>(mappings: &'a [DccMapping], ext: &str) -> Option<&'a DccMapping> {
     let ext_lower = ext.to_lowercase();
     mappings
         .iter()
@@ -301,10 +294,7 @@ fn humanize_seconds(secs: u64) -> (u64, &'static str) {
     }
 }
 
-pub fn find_dcc_source_issues(
-    assets: &[AssetInfo],
-    config: &DccSourceConfig,
-) -> AnalysisResult {
+pub fn find_dcc_source_issues(assets: &[AssetInfo], config: &DccSourceConfig) -> AnalysisResult {
     let mut result = AnalysisResult::new();
     if !config.enabled || config.mappings.is_empty() {
         return result;
@@ -698,8 +688,14 @@ pub(crate) mod tests {
         // Path-sorted: ".../a/foo.blend" precedes ".../b/bar.blend".
         let p0 = r.issues[0].asset_path.replace('\\', "/");
         let p1 = r.issues[1].asset_path.replace('\\', "/");
-        assert!(p0.contains("/a/"), "expected first issue under /a/, got {p0}");
-        assert!(p1.contains("/b/"), "expected second issue under /b/, got {p1}");
+        assert!(
+            p0.contains("/a/"),
+            "expected first issue under /a/, got {p0}"
+        );
+        assert!(
+            p1.contains("/b/"),
+            "expected second issue under /b/, got {p1}"
+        );
     }
 
     #[test]
@@ -741,6 +737,10 @@ pub(crate) mod tests {
         cfg.mtime_tolerance_secs = 5;
         let r = find_dcc_source_issues(&assets, &cfg);
         assert_eq!(r.issue_count, 1);
-        assert!(r.issues[0].suggestion.as_deref().unwrap().contains("photoshop"));
+        assert!(r.issues[0]
+            .suggestion
+            .as_deref()
+            .unwrap()
+            .contains("photoshop"));
     }
 }

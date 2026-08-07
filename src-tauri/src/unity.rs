@@ -62,15 +62,8 @@ impl UnityFileType {
             // makes every asset only it references show up as unused, and the
             // unused list is what people delete from. A type wrongly included
             // costs one file read that turns up no guids.
-            "spriteatlas"
-            | "spriteatlasv2"
-            | "terrainlayer"
-            | "playable"
-            | "shadervariants"
-            | "guiskin"
-            | "fontsettings"
-            | "flare"
-            | "preset" => UnityFileType::Asset,
+            "spriteatlas" | "spriteatlasv2" | "terrainlayer" | "playable" | "shadervariants"
+            | "guiskin" | "fontsettings" | "flare" | "preset" => UnityFileType::Asset,
             _ => UnityFileType::Unknown,
         }
     }
@@ -285,9 +278,7 @@ fn collect_package_metas(dir: &Path, package: &str, map: &mut HashMap<String, Pa
         let path = entry.path();
         if ft.is_dir() {
             collect_package_metas(&path, package, map);
-        } else if ft.is_file()
-            && path.extension().and_then(|e| e.to_str()) == Some("meta")
-        {
+        } else if ft.is_file() && path.extension().and_then(|e| e.to_str()) == Some("meta") {
             if let Some(guid) = read_meta_guid_head(&path) {
                 // file_stem of "Lit.shader.meta" is "Lit.shader" — the asset
                 // the sidecar describes.
@@ -527,9 +518,15 @@ mod tests {
 
     #[test]
     fn test_file_type() {
-        assert_eq!(UnityFileType::from_extension("prefab"), UnityFileType::Prefab);
+        assert_eq!(
+            UnityFileType::from_extension("prefab"),
+            UnityFileType::Prefab
+        );
         assert_eq!(UnityFileType::from_extension("unity"), UnityFileType::Scene);
-        assert_eq!(UnityFileType::from_extension("mat"), UnityFileType::Material);
+        assert_eq!(
+            UnityFileType::from_extension("mat"),
+            UnityFileType::Material
+        );
     }
 
     #[test]
@@ -541,7 +538,10 @@ mod tests {
             UnityFileType::from_extension("overrideController"),
             UnityFileType::Controller
         );
-        assert_eq!(UnityFileType::from_extension("PREFAB"), UnityFileType::Prefab);
+        assert_eq!(
+            UnityFileType::from_extension("PREFAB"),
+            UnityFileType::Prefab
+        );
         assert_eq!(UnityFileType::from_extension("Anim"), UnityFileType::Anim);
     }
 
@@ -617,13 +617,21 @@ mod tests {
         )
         .unwrap();
         // Malformed guid line → skipped, not indexed.
-        fs::write(tmp.join("Broken.cs.meta"), "fileFormatVersion: 2\nguid: nope\n").unwrap();
+        fs::write(
+            tmp.join("Broken.cs.meta"),
+            "fileFormatVersion: 2\nguid: nope\n",
+        )
+        .unwrap();
 
         let index = build_package_guid_index(dir.path());
-        let lit = index.get("dddddddddddddddddddddddddddddd01").expect("indexed");
+        let lit = index
+            .get("dddddddddddddddddddddddddddddd01")
+            .expect("indexed");
         assert_eq!(lit.package, "com.example.renderpipe");
         assert_eq!(lit.file_name, "Lit.shader");
-        let runner = index.get("dddddddddddddddddddddddddddddd02").expect("indexed");
+        let runner = index
+            .get("dddddddddddddddddddddddddddddd02")
+            .expect("indexed");
         assert_eq!(runner.package, "com.example.tools");
         assert_eq!(runner.file_name, "Runner.cs");
         // The malformed guid line was skipped, not indexed under garbage.
@@ -672,7 +680,10 @@ mod tests {
         let components = extract_components(content);
         // Deduped (two Transforms → one) and alphabetically sorted, so the
         // preview panel's list is stable across runs.
-        assert_eq!(components, vec!["MeshRenderer", "MonoBehaviour", "Transform"]);
+        assert_eq!(
+            components,
+            vec!["MeshRenderer", "MonoBehaviour", "Transform"]
+        );
     }
 
     #[test]
@@ -700,7 +711,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let settings = dir.path().join("ProjectSettings");
         fs::create_dir(&settings).unwrap();
-        fs::write(settings.join("ProjectVersion.txt"), "m_EditorVersion: 5.6.7f1\n").unwrap();
+        fs::write(
+            settings.join("ProjectVersion.txt"),
+            "m_EditorVersion: 5.6.7f1\n",
+        )
+        .unwrap();
 
         let info = parse_project_version(dir.path()).expect("should parse");
         assert_eq!(info.editor_version, "5.6.7f1");

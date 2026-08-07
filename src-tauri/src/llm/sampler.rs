@@ -261,7 +261,10 @@ mod tests {
             .iter()
             .map(|f| f.asset_type.as_str())
             .collect();
-        assert!(types.contains(&"model"), "expected fbx picked, got {types:?}");
+        assert!(
+            types.contains(&"model"),
+            "expected fbx picked, got {types:?}"
+        );
         assert!(
             types.contains(&"texture"),
             "expected at least one png picked, got {types:?}"
@@ -332,7 +335,10 @@ mod tests {
         let c = sample_directories(&s, 5, 999);
         let names_a: Vec<_> = a[0].files.iter().map(|f| &f.filename).collect();
         let names_c: Vec<_> = c[0].files.iter().map(|f| &f.filename).collect();
-        assert_ne!(names_a, names_c, "different seeds should yield different picks");
+        assert_ne!(
+            names_a, names_c,
+            "different seeds should yield different picks"
+        );
     }
 
     #[test]

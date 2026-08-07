@@ -120,8 +120,18 @@ const TOKEN_STOPLIST: &[&str] = &[
 /// Directory names that appear at the top of nearly every project and don't
 /// help narrow anything down. Compared case-insensitively.
 const PATH_STOPLIST: &[&str] = &[
-    "assets", "content", "src", "source", "sources", "resources",
-    "data", "files", "project", "projects", "import", "imports",
+    "assets",
+    "content",
+    "src",
+    "source",
+    "sources",
+    "resources",
+    "data",
+    "files",
+    "project",
+    "projects",
+    "import",
+    "imports",
 ];
 
 /// PBR channel-role recognition for the dimension+channel tag source.
@@ -261,9 +271,7 @@ fn is_useful_token(token: &str) -> bool {
         return false;
     }
     // "v01", "v2", … — version markers don't help group assets.
-    if token.starts_with('v')
-        && token[1..].chars().all(|c| c.is_ascii_digit())
-        && token.len() <= 4
+    if token.starts_with('v') && token[1..].chars().all(|c| c.is_ascii_digit()) && token.len() <= 4
     {
         return false;
     }
@@ -576,8 +584,14 @@ mod tests {
     #[test]
     fn tokenize_basic() {
         assert_eq!(tokenize_stem("foo_bar"), vec!["foo", "bar"]);
-        assert_eq!(tokenize_stem("tex-diffuse-01"), vec!["tex", "diffuse", "01"]);
-        assert_eq!(tokenize_stem("PlayerController"), vec!["player", "controller"]);
+        assert_eq!(
+            tokenize_stem("tex-diffuse-01"),
+            vec!["tex", "diffuse", "01"]
+        );
+        assert_eq!(
+            tokenize_stem("PlayerController"),
+            vec!["player", "controller"]
+        );
         assert_eq!(tokenize_stem("Shield Hero"), vec!["shield", "hero"]);
     }
 
@@ -648,10 +662,26 @@ mod tests {
     #[test]
     fn filename_source_groups_by_token() {
         let scan = fixture_scan(vec![
-            asset("/proj/a/hero_diffuse.png", "hero_diffuse.png", AssetType::Texture),
-            asset("/proj/a/hero_normal.png", "hero_normal.png", AssetType::Texture),
-            asset("/proj/a/hero_specular.png", "hero_specular.png", AssetType::Texture),
-            asset("/proj/b/villain_one.png", "villain_one.png", AssetType::Texture),
+            asset(
+                "/proj/a/hero_diffuse.png",
+                "hero_diffuse.png",
+                AssetType::Texture,
+            ),
+            asset(
+                "/proj/a/hero_normal.png",
+                "hero_normal.png",
+                AssetType::Texture,
+            ),
+            asset(
+                "/proj/a/hero_specular.png",
+                "hero_specular.png",
+                AssetType::Texture,
+            ),
+            asset(
+                "/proj/b/villain_one.png",
+                "villain_one.png",
+                AssetType::Texture,
+            ),
         ]);
         let groups = HeuristicSuggester.suggest(&scan);
         let names: Vec<&str> = groups.iter().map(|g| g.name.as_str()).collect();
@@ -666,9 +696,21 @@ mod tests {
         // token group "Tree" over the SAME files — one pile, two near-synonym
         // labels. They must collapse into a single suggestion.
         let scan = fixture_scan(vec![
-            asset("/proj/Trees/tree_oak.png", "tree_oak.png", AssetType::Texture),
-            asset("/proj/Trees/tree_pine.png", "tree_pine.png", AssetType::Texture),
-            asset("/proj/Trees/tree_birch.png", "tree_birch.png", AssetType::Texture),
+            asset(
+                "/proj/Trees/tree_oak.png",
+                "tree_oak.png",
+                AssetType::Texture,
+            ),
+            asset(
+                "/proj/Trees/tree_pine.png",
+                "tree_pine.png",
+                AssetType::Texture,
+            ),
+            asset(
+                "/proj/Trees/tree_birch.png",
+                "tree_birch.png",
+                AssetType::Texture,
+            ),
         ]);
         let groups = HeuristicSuggester.suggest(&scan);
         let over_all_three = groups.iter().filter(|g| g.file_paths.len() == 3).count();
@@ -683,9 +725,21 @@ mod tests {
         // every hero_knight_*.png) are two useful tags — identical file sets
         // must NOT collapse them, since neither name is a prefix of the other.
         let scan2 = fixture_scan(vec![
-            asset("/proj/aa/hero_knight_a.png", "hero_knight_a.png", AssetType::Texture),
-            asset("/proj/bb/hero_knight_b.png", "hero_knight_b.png", AssetType::Texture),
-            asset("/proj/cc/hero_knight_c.png", "hero_knight_c.png", AssetType::Texture),
+            asset(
+                "/proj/aa/hero_knight_a.png",
+                "hero_knight_a.png",
+                AssetType::Texture,
+            ),
+            asset(
+                "/proj/bb/hero_knight_b.png",
+                "hero_knight_b.png",
+                AssetType::Texture,
+            ),
+            asset(
+                "/proj/cc/hero_knight_c.png",
+                "hero_knight_c.png",
+                AssetType::Texture,
+            ),
         ]);
         let groups2 = HeuristicSuggester.suggest(&scan2);
         let names: Vec<&str> = groups2.iter().map(|g| g.name.as_str()).collect();
@@ -774,14 +828,20 @@ mod tests {
         }
         let scan = fixture_scan(assets);
         let groups = HeuristicSuggester.suggest(&scan);
-        assert!(groups.iter().any(|g| g.name == "1024px" && g.hint == HINT_DIMENSION));
+        assert!(groups
+            .iter()
+            .any(|g| g.name == "1024px" && g.hint == HINT_DIMENSION));
     }
 
     #[test]
     fn path_source_groups_by_dir() {
         let scan = fixture_scan(vec![
             asset("/proj/Characters/hero.fbx", "hero.fbx", AssetType::Model),
-            asset("/proj/Characters/villain.fbx", "villain.fbx", AssetType::Model),
+            asset(
+                "/proj/Characters/villain.fbx",
+                "villain.fbx",
+                AssetType::Model,
+            ),
             asset("/proj/Characters/npc.fbx", "npc.fbx", AssetType::Model),
             asset("/proj/Props/barrel.fbx", "barrel.fbx", AssetType::Model),
         ]);

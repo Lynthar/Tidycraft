@@ -66,13 +66,9 @@ pub fn start(
 
     let (tx, rx) = mpsc::channel::<DebounceEventResult>();
 
-    let mut debouncer = new_debouncer(
-        DEBOUNCE_WINDOW,
-        None,
-        move |result: DebounceEventResult| {
-            let _ = tx.send(result);
-        },
-    )
+    let mut debouncer = new_debouncer(DEBOUNCE_WINDOW, None, move |result: DebounceEventResult| {
+        let _ = tx.send(result);
+    })
     .map_err(|e| format!("Failed to create watcher: {}", e))?;
 
     debouncer
@@ -138,8 +134,7 @@ pub fn start(
                 continue;
             }
 
-            let payload =
-                apply_changes(&thread_project_id, &filtered, ignore_matcher.as_ref());
+            let payload = apply_changes(&thread_project_id, &filtered, ignore_matcher.as_ref());
 
             if let Ok(ev) = payload {
                 let _ = app.emit(&event_name, &ev);
@@ -193,7 +188,11 @@ fn apply_changes(
         .iter()
         .map(|path| {
             if path.is_file() {
-                (path.clone(), scanner::parse_asset_file(path, &project_type), false)
+                (
+                    path.clone(),
+                    scanner::parse_asset_file(path, &project_type),
+                    false,
+                )
             } else {
                 (path.clone(), None, !path.exists())
             }
@@ -411,10 +410,7 @@ mod tests {
     #[test]
     fn trackable_skips_hidden_components() {
         let root = Path::new("/proj");
-        assert!(!is_trackable_path(
-            Path::new("/proj/.git/HEAD"),
-            root
-        ));
+        assert!(!is_trackable_path(Path::new("/proj/.git/HEAD"), root));
         assert!(!is_trackable_path(
             Path::new("/proj/sub/.hidden/file.png"),
             root
@@ -440,10 +436,7 @@ mod tests {
     #[test]
     fn trackable_skips_meta_and_dotfiles() {
         let root = Path::new("/proj");
-        assert!(!is_trackable_path(
-            Path::new("/proj/foo.png.meta"),
-            root
-        ));
+        assert!(!is_trackable_path(Path::new("/proj/foo.png.meta"), root));
         assert!(!is_trackable_path(Path::new("/proj/.env"), root));
     }
 
@@ -485,7 +478,10 @@ mod tests {
     fn path_shape_trackable_still_rejects_hidden_meta_and_outside_root() {
         let root = Path::new("/proj");
         assert!(!path_shape_trackable(Path::new("/proj/.git/HEAD"), root));
-        assert!(!path_shape_trackable(Path::new("/proj/sub/.hidden/file.png"), root));
+        assert!(!path_shape_trackable(
+            Path::new("/proj/sub/.hidden/file.png"),
+            root
+        ));
         assert!(!path_shape_trackable(Path::new("/proj/tex.png.meta"), root));
         assert!(!path_shape_trackable(Path::new("/other/foo.png"), root));
     }
@@ -507,6 +503,9 @@ mod tests {
         // A deleted `/proj/Tex` must not sweep away `/proj/Textures/*`,
         // and `/proj/Models` must not match a sibling `/proj/ModelsX/*`.
         assert!(!path_within("/proj/Textures/t.png", Path::new("/proj/Tex")));
-        assert!(!path_within("/proj/ModelsX/y.png", Path::new("/proj/Models")));
+        assert!(!path_within(
+            "/proj/ModelsX/y.png",
+            Path::new("/proj/Models")
+        ));
     }
 }

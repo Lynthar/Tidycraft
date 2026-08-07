@@ -152,10 +152,7 @@ fn parse_godot_config(content: &str) -> HashMap<String, HashMap<String, String>>
                 section.insert(key, value);
             } else {
                 // 如果没有 section（文件开头），使用空字符串作为 section
-                result
-                    .entry(String::new())
-                    .or_default()
-                    .insert(key, value);
+                result.entry(String::new()).or_default().insert(key, value);
             }
         }
     }
@@ -334,7 +331,10 @@ pub fn is_godot_metadata(extension: &str) -> bool {
 /// Forward-slashed to match the paths written into scene files.
 pub fn asset_to_res_path(abs: &str, root: &Path) -> Option<String> {
     let rel = Path::new(abs).strip_prefix(root).ok()?;
-    Some(format!("res://{}", rel.to_string_lossy().replace('\\', "/")))
+    Some(format!(
+        "res://{}",
+        rel.to_string_lossy().replace('\\', "/")
+    ))
 }
 
 /// Inverse of `asset_to_res_path`: the absolute filesystem path a `res://`
@@ -486,8 +486,7 @@ pub fn referencing_files(
     // project.godot: quoted res:// values (main scene / icon / splash / ...)
     // plus autoloads, whose leading `*` hides them from the quoted scan.
     if let Ok(content) = fs::read_to_string(root.join("project.godot")) {
-        let mut refs: HashSet<String> =
-            extract_res_references(&content, &re).into_iter().collect();
+        let mut refs: HashSet<String> = extract_res_references(&content, &re).into_iter().collect();
         for autoload in extract_autoloads(&parse_godot_config(&content)) {
             refs.insert(autoload.path);
         }
@@ -808,7 +807,10 @@ config/name="Minimal"
             mk("main.tscn", "tscn"),
             mk("hero.png", "png"),
             mk("orphan.png", "png"),
-            AssetInfo { asset_type: AssetType::Scene, ..mk("level_2.tscn", "tscn") },
+            AssetInfo {
+                asset_type: AssetType::Scene,
+                ..mk("level_2.tscn", "tscn")
+            },
         ];
 
         let unused = find_unused_godot_assets(&root.to_string_lossy(), &assets);
@@ -949,9 +951,15 @@ config/name="Minimal"
         assert_eq!(refs.get(&targets[0]).map(Vec::len), Some(1));
         assert!(refs[&targets[0]][0].ends_with("main.tscn"));
         // main.tscn ← project.godot (main scene).
-        assert_eq!(refs.get(&targets[1]), Some(&vec!["project.godot".to_string()]));
+        assert_eq!(
+            refs.get(&targets[1]),
+            Some(&vec!["project.godot".to_string()])
+        );
         // boot.gd ← project.godot (autoload, `*`-prefixed value).
-        assert_eq!(refs.get(&targets[2]), Some(&vec!["project.godot".to_string()]));
+        assert_eq!(
+            refs.get(&targets[2]),
+            Some(&vec!["project.godot".to_string()])
+        );
         // orphan.png ← nobody: absent, not an empty entry.
         assert!(!refs.contains_key(&targets[3]));
     }

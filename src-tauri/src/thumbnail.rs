@@ -97,8 +97,8 @@ pub fn get_thumbnail_base64(path: &str, max_size: u32) -> Result<String, Thumbna
     // range when written out as 8-bit PNG, but a slightly compressed
     // preview is more useful than no preview.
     match extension.as_str() {
-        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "tga"
-        | "tiff" | "tif" | "webp" | "hdr" | "exr" => {}
+        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "tga" | "tiff" | "tif" | "webp" | "hdr"
+        | "exr" => {}
         _ => return Err(ThumbnailError::UnsupportedFormat),
     }
 
@@ -275,7 +275,8 @@ mod tests {
     fn set_mtime(path: &Path, secs: u64, nanos: u32) {
         let file = fs::File::options().write(true).open(path).unwrap();
         let t = SystemTime::UNIX_EPOCH + std::time::Duration::new(secs, nanos);
-        file.set_times(fs::FileTimes::new().set_modified(t)).unwrap();
+        file.set_times(fs::FileTimes::new().set_modified(t))
+            .unwrap();
     }
 
     /// Write `bytes` worth of file at `name` and pin its mtime, so a test can

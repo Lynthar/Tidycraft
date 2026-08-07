@@ -115,9 +115,8 @@ pub fn get(key: &str) -> Option<TagSuggestion> {
 /// user. Most callers ignore the error after logging — a missed cache
 /// write costs at most one extra API call next time.
 pub fn save(key: &str, suggestion: &TagSuggestion) -> io::Result<()> {
-    let dir = cache_dir().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::NotFound, "no system cache dir available")
-    })?;
+    let dir = cache_dir()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no system cache dir available"))?;
     fs::create_dir_all(&dir)?;
     let path = dir.join(format!("{key}.json"));
     let content = serde_json::to_string(suggestion)
@@ -195,25 +194,129 @@ mod tests {
 
     #[test]
     fn key_is_deterministic() {
-        let k1 = cache_key(Some("abcd"), "x.png", "a/x.png", "claude", "sonnet", 1, "ctx");
-        let k2 = cache_key(Some("abcd"), "x.png", "a/x.png", "claude", "sonnet", 1, "ctx");
+        let k1 = cache_key(
+            Some("abcd"),
+            "x.png",
+            "a/x.png",
+            "claude",
+            "sonnet",
+            1,
+            "ctx",
+        );
+        let k2 = cache_key(
+            Some("abcd"),
+            "x.png",
+            "a/x.png",
+            "claude",
+            "sonnet",
+            1,
+            "ctx",
+        );
         assert_eq!(k1, k2);
         assert_eq!(k1.len(), 64); // SHA256 hex
     }
 
     #[test]
     fn key_changes_when_any_component_changes() {
-        let base = cache_key(Some("abcd"), "x.png", "a/x.png", "claude", "sonnet", 1, "ctx");
+        let base = cache_key(
+            Some("abcd"),
+            "x.png",
+            "a/x.png",
+            "claude",
+            "sonnet",
+            1,
+            "ctx",
+        );
         // Each change must move the key.
-        assert_ne!(base, cache_key(Some("ABCD"), "x.png", "a/x.png", "claude", "sonnet", 1, "ctx"));
-        assert_ne!(base, cache_key(Some("abcd"), "y.png", "a/x.png", "claude", "sonnet", 1, "ctx"));
-        assert_ne!(base, cache_key(Some("abcd"), "x.png", "b/x.png", "claude", "sonnet", 1, "ctx"));
-        assert_ne!(base, cache_key(Some("abcd"), "x.png", "a/x.png", "openai", "sonnet", 1, "ctx"));
-        assert_ne!(base, cache_key(Some("abcd"), "x.png", "a/x.png", "claude", "haiku", 1, "ctx"));
-        assert_ne!(base, cache_key(Some("abcd"), "x.png", "a/x.png", "claude", "sonnet", 2, "ctx"));
-        assert_ne!(base, cache_key(None,         "x.png", "a/x.png", "claude", "sonnet", 1, "ctx"));
+        assert_ne!(
+            base,
+            cache_key(
+                Some("ABCD"),
+                "x.png",
+                "a/x.png",
+                "claude",
+                "sonnet",
+                1,
+                "ctx"
+            )
+        );
+        assert_ne!(
+            base,
+            cache_key(
+                Some("abcd"),
+                "y.png",
+                "a/x.png",
+                "claude",
+                "sonnet",
+                1,
+                "ctx"
+            )
+        );
+        assert_ne!(
+            base,
+            cache_key(
+                Some("abcd"),
+                "x.png",
+                "b/x.png",
+                "claude",
+                "sonnet",
+                1,
+                "ctx"
+            )
+        );
+        assert_ne!(
+            base,
+            cache_key(
+                Some("abcd"),
+                "x.png",
+                "a/x.png",
+                "openai",
+                "sonnet",
+                1,
+                "ctx"
+            )
+        );
+        assert_ne!(
+            base,
+            cache_key(
+                Some("abcd"),
+                "x.png",
+                "a/x.png",
+                "claude",
+                "haiku",
+                1,
+                "ctx"
+            )
+        );
+        assert_ne!(
+            base,
+            cache_key(
+                Some("abcd"),
+                "x.png",
+                "a/x.png",
+                "claude",
+                "sonnet",
+                2,
+                "ctx"
+            )
+        );
+        assert_ne!(
+            base,
+            cache_key(None, "x.png", "a/x.png", "claude", "sonnet", 1, "ctx")
+        );
         // Project/tag context is part of the key too.
-        assert_ne!(base, cache_key(Some("abcd"), "x.png", "a/x.png", "claude", "sonnet", 1, "ctx2"));
+        assert_ne!(
+            base,
+            cache_key(
+                Some("abcd"),
+                "x.png",
+                "a/x.png",
+                "claude",
+                "sonnet",
+                1,
+                "ctx2"
+            )
+        );
     }
 
     #[test]

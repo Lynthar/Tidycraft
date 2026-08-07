@@ -53,13 +53,25 @@ impl Default for TextureColorSpaceConfig {
 /// dominant normal-map shorthand and an sRGB-de-gammaed normal map is the
 /// worst-case corruption this rule exists to catch.
 const DATA_HINTS: &[&str] = &[
-    "_n", "_normal", "_norm", "_nrm",
-    "_rough", "_roughness",
-    "_metal", "_metallic",
-    "_ao", "_mask",
-    "_data", "_lin", "_linear",
-    "_height", "_disp", "_displacement",
-    "_orm", "_mra", "_rma",
+    "_n",
+    "_normal",
+    "_norm",
+    "_nrm",
+    "_rough",
+    "_roughness",
+    "_metal",
+    "_metallic",
+    "_ao",
+    "_mask",
+    "_data",
+    "_lin",
+    "_linear",
+    "_height",
+    "_disp",
+    "_displacement",
+    "_orm",
+    "_mra",
+    "_rma",
 ];
 
 pub struct TextureColorSpaceRule;

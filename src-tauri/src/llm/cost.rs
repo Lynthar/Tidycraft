@@ -215,8 +215,8 @@ pub fn estimate_cost(request: &TagRequest) -> CostEstimate {
     // so the tag/sample terms only sharpen estimates for callers that do.
     let mut input_tokens = super::prompts::SYSTEM_PROMPT.len() / CHARS_PER_TOKEN;
     if let Some(meta) = &request.project_ctx {
-        let chars = meta.theme.as_deref().map_or(0, str::len)
-            + meta.goal.as_deref().map_or(0, str::len);
+        let chars =
+            meta.theme.as_deref().map_or(0, str::len) + meta.goal.as_deref().map_or(0, str::len);
         input_tokens = input_tokens.saturating_add(chars / CHARS_PER_TOKEN);
     }
     for tag in &request.existing_tags {
@@ -386,7 +386,10 @@ mod tests {
     fn every_offered_claude_model_is_priced() {
         for model in ["claude-sonnet-5", "claude-haiku-4-5", "claude-opus-5"] {
             let p = pricing(model).unwrap_or_else(|| panic!("{model} has no pricing entry"));
-            assert!(p.input_per_m > 0 && p.output_per_m > 0, "{model} priced at zero");
+            assert!(
+                p.input_per_m > 0 && p.output_per_m > 0,
+                "{model} priced at zero"
+            );
             assert!(
                 estimate_image_tokens(512, 512, model) > 0,
                 "{model} has no vision rule"
