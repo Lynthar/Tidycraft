@@ -102,6 +102,12 @@ const HINT_DIMENSION: &str = "dimension";
 const HINT_PATH: &str = "path segment";
 
 /// Tokens that recur across many filenames but carry no taxonomic value.
+///
+/// `rustfmt::skip` because the two groups are semantic, not cosmetic: greedy
+/// reflow packs the rows and leaves `// workflow noise` trailing the *last
+/// file-format entry*, where it labels the wrong line. Keep the group headers
+/// on their own lines when adding tokens.
+#[rustfmt::skip]
 const TOKEN_STOPLIST: &[&str] = &[
     // file-format-ish noise
     "tex", "texture", "model", "asset", "assets", "img", "image",
