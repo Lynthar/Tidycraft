@@ -317,6 +317,12 @@ pub fn get_godot_resource_type(path: &Path) -> Option<GodotResourceType> {
 /// (texture import settings), `.uid` (4.4 script UID sidecar), `.godot`
 /// (project.godot / editor config), `.cfg` (export presets / editor config).
 /// Excluded from unused-asset reporting.
+///
+/// In practice only `.godot` and `.cfg` reach the callers: `.import` and
+/// `.uid` are per-asset sidecars and the scanner already keeps them out of the
+/// asset list (see `crate::sidecar`). They stay listed here anyway — this
+/// answers "is this Godot metadata", and an answer that quietly depended on
+/// another module's filter would be wrong the moment that filter moved.
 pub fn is_godot_metadata(extension: &str) -> bool {
     matches!(
         extension.to_lowercase().as_str(),
@@ -879,6 +885,66 @@ config/name="Minimal"
             refs.get(&target).map(Vec::as_slice),
             Some(["main.tscn".to_string()].as_slice()),
             "the rename guard must see main.tscn's reference"
+        );
+    }
+
+    /// Both Godot consumers read `project.godot` straight off disk rather than
+    /// looking it up in the scan's asset list. That independence is what makes
+    /// it safe for the scanner to drop files from that list, so pin it: a
+    /// refactor that "tidied" the disk read into an asset-list lookup would
+    /// turn every autoload into an unused asset (inviting deletion) and every
+    /// autoload rename into an unguarded one — both silent.
+    #[test]
+    fn project_godot_is_a_reference_source_outside_the_asset_list() {
+        use crate::scanner::AssetType;
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        fs::write(
+            root.join("project.godot"),
+            "[application]\n\
+             config/name=\"G\"\n\
+             run/main_scene=\"res://main.tscn\"\n\
+             \n\
+             [autoload]\n\
+             GameState=\"*res://autoload/game_state.gd\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("autoload")).unwrap();
+        fs::write(root.join("autoload").join("game_state.gd"), "extends Node").unwrap();
+        fs::write(root.join("main.tscn"), "[gd_scene]\n").unwrap();
+
+        let mk = |rel: &Path, ext: &str, asset_type: AssetType| AssetInfo {
+            path: root.join(rel).to_string_lossy().to_string(),
+            name: rel.file_name().unwrap().to_string_lossy().to_string(),
+            extension: ext.to_string(),
+            asset_type,
+            size: 1,
+            modified: 0,
+            metadata: None,
+            unity_guid: None,
+        };
+
+        // Deliberately WITHOUT project.godot: this is the list a scan hands
+        // over, and the point is that the references survive its absence.
+        let script = Path::new("autoload").join("game_state.gd");
+        let assets = vec![
+            mk(&script, "gd", AssetType::Script),
+            mk(Path::new("main.tscn"), "tscn", AssetType::Scene),
+        ];
+
+        let unused = find_unused_godot_assets(&root.to_string_lossy(), &assets);
+        assert!(
+            unused.is_empty(),
+            "the autoload is referenced by project.godot: {unused:?}"
+        );
+
+        let target = root.join(&script).to_string_lossy().to_string();
+        let refs = referencing_files(root, &assets, std::slice::from_ref(&target));
+        assert_eq!(
+            refs.get(&target).map(Vec::as_slice),
+            Some(["project.godot".to_string()].as_slice()),
+            "the rename guard must attribute the autoload reference to project.godot"
         );
     }
 

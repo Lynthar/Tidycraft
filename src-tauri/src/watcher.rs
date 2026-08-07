@@ -102,6 +102,11 @@ pub fn start(
                     // re-parsed. `is_trackable_path` below drops sidecars, so
                     // without this the cached `unity_guid` goes stale until
                     // the next full rescan whenever Unity (re)generates one.
+                    //
+                    // Godot's `.import` / `.uid` get no such remap on purpose:
+                    // `AssetInfo` has no field derived from them, so a change
+                    // to one leaves every value we hold correct. They are
+                    // simply dropped by the filter below.
                     if let Some(host) = meta_host_path(path) {
                         candidates.insert(host);
                     } else {
@@ -334,7 +339,7 @@ fn meta_host_path(path: &Path) -> Option<PathBuf> {
 
 /// Path-shape checks shared by tracked asset files and tracked-path
 /// *deletions*: the path is inside `root`, has no hidden path components, and
-/// its file name is neither a dotfile nor a `.meta` sidecar. Unlike
+/// its file name is neither a dotfile nor an engine sidecar. Unlike
 /// `is_trackable_path` this does NOT require an extension — a deleted directory
 /// (which macOS surfaces as a single event on the extensionless directory
 /// path, never per-child removals) must still be processed so its tracked
@@ -353,11 +358,13 @@ fn path_shape_trackable(path: &Path, root: &Path) -> bool {
     }
 
     let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    !(file_name.is_empty() || file_name.starts_with('.') || file_name.ends_with(".meta"))
+    !(file_name.is_empty()
+        || file_name.starts_with('.')
+        || crate::sidecar::is_sidecar_name(file_name))
 }
 
 /// Mirrors the scanner's discovery filters: skip hidden path components (e.g.
-/// `.git/`, `.vscode/`), `.meta` sidecars, and files without an extension.
+/// `.git/`, `.vscode/`), engine sidecars, and files without an extension.
 fn is_trackable_path(path: &Path, root: &Path) -> bool {
     path_shape_trackable(path, root) && path.extension().is_some()
 }
@@ -436,6 +443,18 @@ mod tests {
         let root = Path::new("/proj");
         assert!(!is_trackable_path(Path::new("/proj/foo.png.meta"), root));
         assert!(!is_trackable_path(Path::new("/proj/.env"), root));
+    }
+
+    /// The watcher's filter has to agree with the scanner's, or a sidecar the
+    /// scan refused to list gets added back the moment the engine touches it.
+    #[test]
+    fn trackable_skips_godot_sidecars() {
+        let root = Path::new("/proj");
+        assert!(!is_trackable_path(Path::new("/proj/hero.png.import"), root));
+        assert!(!is_trackable_path(Path::new("/proj/player.gd.uid"), root));
+        // The assets themselves stay tracked.
+        assert!(is_trackable_path(Path::new("/proj/hero.png"), root));
+        assert!(is_trackable_path(Path::new("/proj/player.gd"), root));
     }
 
     #[test]

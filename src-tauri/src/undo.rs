@@ -395,12 +395,13 @@ fn execute_single_undo(operation: &FileOperation) -> Result<(), String> {
                     new_path, operation.original_path, e
                 )
             })?;
-            // 撤销也要对称连带 Unity .meta —— 否则把主文件名改回去却把
-            // sidecar 留在新名上,反而制造孤儿 + 断引用。Best-effort:
-            // 连带失败只记录,不回滚已成功的主文件还原。
-            if let Err(e) = crate::meta_sidecar::carry_on_rename(src, dst) {
+            // 撤销也要对称连带引擎 sidecar(Unity .meta / Godot .import
+            // .uid)—— 否则把主文件名改回去却把 sidecar 留在新名上,反而
+            // 制造孤儿 + 断引用。Best-effort: 连带失败只记录,不回滚已成功
+            // 的主文件还原。
+            if let Err(e) = crate::sidecar::carry_on_rename(src, dst) {
                 eprintln!(
-                    "[undo] .meta sidecar not carried back for {}: {}",
+                    "[undo] engine sidecar not carried back for {}: {}",
                     new_path, e
                 );
             }
@@ -445,10 +446,10 @@ fn execute_single_undo(operation: &FileOperation) -> Result<(), String> {
                     new_path, operation.original_path, e
                 )
             })?;
-            // 移动撤销同样对称连带 Unity .meta(见 Rename 分支说明)。
-            if let Err(e) = crate::meta_sidecar::carry_on_rename(src, dst) {
+            // 移动撤销同样对称连带引擎 sidecar(见 Rename 分支说明)。
+            if let Err(e) = crate::sidecar::carry_on_rename(src, dst) {
                 eprintln!(
-                    "[undo] .meta sidecar not carried back for {}: {}",
+                    "[undo] engine sidecar not carried back for {}: {}",
                     new_path, e
                 );
             }
@@ -764,41 +765,43 @@ mod tests {
     }
 
     #[test]
-    fn test_undo_rename_carries_meta_sidecar() {
-        // Undoing a rename must move the Unity .meta sidecar back too —
-        // otherwise the revert strands the sidecar on the new name and breaks
-        // GUID references, the very thing the forward op was careful to avoid.
-        let dir = tempdir().unwrap();
-        let original = dir.path().join("a.txt");
-        let renamed = dir.path().join("b.txt");
-        fs::write(&original, "asset").unwrap();
-        fs::write(crate::meta_sidecar::sidecar_path(&original), "guid: 1").unwrap();
-        // Simulate the forward rename having already carried the sidecar.
-        fs::rename(&original, &renamed).unwrap();
-        fs::rename(
-            crate::meta_sidecar::sidecar_path(&original),
-            crate::meta_sidecar::sidecar_path(&renamed),
-        )
-        .unwrap();
+    fn test_undo_rename_carries_engine_sidecars() {
+        // Undoing a rename must move the engine sidecar back too — otherwise
+        // the revert strands it on the new name and breaks the GUID / UID
+        // references the forward op was careful to preserve. Run per suffix so
+        // Godot's two are covered by the same guarantee as Unity's `.meta`,
+        // rather than by a test that only ever saw `.meta`.
+        for suffix in [".meta", ".import", ".uid"] {
+            let dir = tempdir().unwrap();
+            let original = dir.path().join("a.txt");
+            let renamed = dir.path().join("b.txt");
+            let side_of = |p: &Path| crate::sidecar::sidecar_path(p, suffix);
 
-        let mut manager = UndoManager::new(10);
-        manager.record_batch(
-            "Rename".to_string(),
-            vec![FileOperation {
-                operation_type: OperationType::Rename,
-                original_path: original.to_string_lossy().to_string(),
-                new_path: Some(renamed.to_string_lossy().to_string()),
-                timestamp: current_timestamp(),
-            }],
-        );
+            fs::write(&original, "asset").unwrap();
+            fs::write(side_of(&original), "identity").unwrap();
+            // Simulate the forward rename having already carried the sidecar.
+            fs::rename(&original, &renamed).unwrap();
+            fs::rename(side_of(&original), side_of(&renamed)).unwrap();
 
-        let result = manager.undo_last().unwrap();
-        assert!(result.success);
-        // Both the asset and its sidecar are back at the original name.
-        assert!(original.exists());
-        assert!(crate::meta_sidecar::sidecar_path(&original).exists());
-        assert!(!renamed.exists());
-        assert!(!crate::meta_sidecar::sidecar_path(&renamed).exists());
+            let mut manager = UndoManager::new(10);
+            manager.record_batch(
+                "Rename".to_string(),
+                vec![FileOperation {
+                    operation_type: OperationType::Rename,
+                    original_path: original.to_string_lossy().to_string(),
+                    new_path: Some(renamed.to_string_lossy().to_string()),
+                    timestamp: current_timestamp(),
+                }],
+            );
+
+            let result = manager.undo_last().unwrap();
+            assert!(result.success, "{suffix}");
+            // Both the asset and its sidecar are back at the original name.
+            assert!(original.exists(), "{suffix}");
+            assert!(side_of(&original).exists(), "{suffix} not carried back");
+            assert!(!renamed.exists(), "{suffix}");
+            assert!(!side_of(&renamed).exists(), "{suffix} left behind");
+        }
     }
 
     #[test]

@@ -1404,9 +1404,12 @@ pub fn scan_directory_with_state(
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        // Unity per-asset metadata files — surfaced via the matching
-        // asset's `unity_guid`, not as their own asset entries.
-        if file_name.ends_with(".meta") {
+        // Engine sidecars (Unity `.meta`, Godot `.import` / `.uid`) are
+        // per-asset metadata, not assets. Godot writes one `.import` per
+        // imported file and one `.uid` per script, so listing them roughly
+        // doubles the asset count with files the user can't act on. Same
+        // list the file ops carry — see `crate::sidecar`.
+        if crate::sidecar::is_sidecar_name(&file_name) {
             continue;
         }
 
@@ -1675,8 +1678,9 @@ pub fn scan_directory_incremental(
             .unwrap_or_default();
 
         // Hidden files / dirs filtered upstream by build_walker(hidden=true);
-        // .meta is Unity per-asset metadata (surfaced via unity_guid).
-        if file_name.ends_with(".meta") {
+        // engine sidecars are per-asset metadata, not assets (see
+        // `crate::sidecar` and the matching filter in the full scan).
+        if crate::sidecar::is_sidecar_name(&file_name) {
             continue;
         }
 
@@ -1708,7 +1712,10 @@ pub fn scan_directory_incremental(
 
     // Determine which files need scanning. Sidecar mtimes only matter for
     // Unity projects (the only place `.meta` is parsed) — everyone else
-    // skips the extra stat per file.
+    // skips the extra stat per file. Godot's `.import` / `.uid` are carried
+    // and hidden like `.meta`, but deliberately NOT stat'd here: no
+    // `AssetInfo` field is parsed out of them, so a touched `.import` has
+    // nothing to invalidate.
     let is_unity = matches!(project_type, Some(ProjectType::Unity));
     let files_to_scan: Vec<&(PathBuf, u64)> = file_entries
         .iter()
@@ -2529,6 +2536,36 @@ mod tests {
         assert!(result.is_ok());
         let scan_result = result.unwrap();
         assert_eq!(scan_result.total_count, 1);
+    }
+
+    /// Godot writes one `.import` per imported asset and (4.4+) one `.uid` per
+    /// script, so leaving them in the list roughly doubles the asset count.
+    /// Both scan paths have their own copy of the filter — assert on each, or
+    /// the incremental one can silently drift back.
+    #[test]
+    fn scans_skip_godot_sidecars() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("hero.png"), "texture").unwrap();
+        fs::write(dir.path().join("hero.png.import"), "[remap]").unwrap();
+        fs::write(dir.path().join("player.gd"), "extends Node").unwrap();
+        fs::write(dir.path().join("player.gd.uid"), "uid://abcdef").unwrap();
+
+        let root = dir.path().to_str().unwrap();
+
+        let full = scan_directory_with_state(root, None, false).unwrap();
+        assert_eq!(full.total_count, 2, "full scan listed a sidecar");
+
+        let (incremental, _) = scan_directory_incremental(root, None, false).unwrap();
+        // Clean up the on-disk cache this test created in the user cache dir.
+        let _ = crate::cache::ScanCache::clear(root);
+        assert_eq!(
+            incremental.total_count, 2,
+            "incremental scan listed a sidecar"
+        );
+
+        let mut names: Vec<&str> = full.assets.iter().map(|a| a.name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(names, ["hero.png", "player.gd"]);
     }
 
     #[test]

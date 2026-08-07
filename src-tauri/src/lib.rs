@@ -4,9 +4,9 @@ mod fs_atomic;
 mod git;
 mod godot;
 mod llm;
-mod meta_sidecar;
 mod project;
 mod scanner;
+mod sidecar;
 mod tags;
 mod thumbnail;
 mod undo;
@@ -2190,11 +2190,12 @@ fn rename_batch_on_disk(
 
         match std::fs::rename(&path, &new_path) {
             Ok(_) => {
-                // Carry the Unity .meta sidecar so renamed assets keep their
-                // GUID. Best-effort: no-op without a sidecar, logs on failure.
-                if let Err(e) = meta_sidecar::carry_on_rename(path_obj, &new_path) {
+                // Carry engine sidecars so renamed assets keep their identity
+                // (Unity GUID, Godot UID) and their import settings.
+                // Best-effort: no-op without a sidecar, logs on failure.
+                if let Err(e) = sidecar::carry_on_rename(path_obj, &new_path) {
                     eprintln!(
-                        "[batch_rename] .meta sidecar not carried for {}: {}",
+                        "[batch_rename] engine sidecar not carried for {}: {}",
                         path, e
                     );
                 }
@@ -2717,11 +2718,12 @@ fn move_assets(project_id: String, paths: Vec<String>, target_dir: String) -> Fi
 
                 match std::fs::rename(src, &dst) {
                     Ok(_) => {
-                        // Carry the Unity .meta sidecar so moved assets keep their
-                        // GUID. Best-effort: no-op without a sidecar, logs on failure.
-                        if let Err(e) = meta_sidecar::carry_on_rename(src, &dst) {
+                        // Carry engine sidecars so moved assets keep their identity
+                        // (Unity GUID, Godot UID) and their import settings.
+                        // Best-effort: no-op without a sidecar, logs on failure.
+                        if let Err(e) = sidecar::carry_on_rename(src, &dst) {
                             eprintln!(
-                                "[move_assets] .meta sidecar not carried for {}: {}",
+                                "[move_assets] engine sidecar not carried for {}: {}",
                                 path, e
                             );
                         }
@@ -2935,12 +2937,12 @@ fn delete_assets(paths: Vec<String>) -> DeleteResult {
     for path in paths {
         match trash::delete(&path) {
             Ok(_) => {
-                // Also trash the Unity .meta sidecar so deleting an asset
-                // doesn't strand its sidecar. Best-effort: no-op without a
-                // sidecar, logs on failure.
-                if let Err(e) = meta_sidecar::carry_on_delete(Path::new(&path)) {
+                // Also trash the engine sidecars so deleting an asset doesn't
+                // strand them. Best-effort: no-op without a sidecar, logs on
+                // failure.
+                if let Err(e) = sidecar::carry_on_delete(Path::new(&path)) {
                     eprintln!(
-                        "[delete_assets] .meta sidecar not carried for {}: {}",
+                        "[delete_assets] engine sidecar not carried for {}: {}",
                         path, e
                     );
                 }
@@ -2994,12 +2996,13 @@ fn rename_file(project_id: String, old_path: String, new_name: String) -> Result
 
     std::fs::rename(old_path_ref, &new_path).map_err(|e| e.to_string())?;
 
-    // Carry the Unity .meta sidecar so the renamed asset keeps its GUID and
-    // references don't break. Best-effort: a missing sidecar (non-Unity) is a
-    // no-op, and a carry failure only logs — the rename already succeeded.
-    if let Err(e) = meta_sidecar::carry_on_rename(old_path_ref, &new_path) {
+    // Carry engine sidecars so the renamed asset keeps its identity (Unity
+    // GUID, Godot UID) and references don't break. Best-effort: a missing
+    // sidecar (another engine) is a no-op, and a carry failure only logs —
+    // the rename already succeeded.
+    if let Err(e) = sidecar::carry_on_rename(old_path_ref, &new_path) {
         eprintln!(
-            "[rename_file] .meta sidecar not carried for {}: {}",
+            "[rename_file] engine sidecar not carried for {}: {}",
             old_path, e
         );
     }
