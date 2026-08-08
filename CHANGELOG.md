@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+- **Tags survive renames made outside the app.** The watcher saw an external rename as an unrelated disappearance plus appearance, and its orphan cleanup deleted the vanished path's tag bindings on the spot: renaming a tagged file in Explorer or Finder silently threw its tags away, and renaming a folder threw away the tags of everything under it. Renames are now recognized — the rename pairing the file watcher's debouncer already offers is switched on (its file-id cache was never populated, so on Windows and macOS it had nothing to match with), and a cross-directory move on Windows, which the OS reports as a plain remove plus add, is joined back by name, size and modification time when exactly one file matches. Tags follow in every recognized case, and the selection and tag panel follow with them. When several identical files move at once and there is no telling which went where, the bindings stay where they were instead of guessing — rename the files back and the tags are still there. An editor's backup-rename (`hero.png` becomes `hero.png.bak`, a fresh `hero.png` is written) keeps the tags on the living file, not the backup.
+- **A folder renamed, moved or copied in from outside the app keeps its contents listed.** The OS reports one event for the folder and none for its files, and the watcher dropped directory events on the floor: everything under the old name vanished from the asset list and nothing under the new name replaced it until the next full rescan. A renamed folder now re-keys its subtree in place, and a folder that appears wholesale — moved or copied into the project — has its files read on the spot.
+
 ## [0.8.4] - 2026-08-07
 
 ### Changed

@@ -1718,6 +1718,45 @@ pub fn parse_asset_file(path: &Path, project_type: &Option<ProjectType>) -> Opti
     })
 }
 
+/// Re-key a cached [`AssetInfo`] onto a renamed path without re-reading the
+/// file. A rename doesn't change bytes, so `size`, `modified` and the parsed
+/// `metadata` carry over; everything derived from the path itself (`path`,
+/// `name`, `extension`, `asset_type`) is recomputed. `unity_guid` is
+/// re-derived from whatever `.meta` sits beside the NEW path: an engine-driven
+/// rename moves the sidecar too (guid survives), an Explorer rename leaves it
+/// behind (guid correctly becomes `None` — the association is adjacency).
+///
+/// Callers must only use this when the extension is unchanged (case aside):
+/// `metadata`'s shape belongs to the asset type, so a `foo.png → foo.txt`
+/// rename must go through a full re-parse instead.
+pub(crate) fn rekey_asset_info(
+    old: &AssetInfo,
+    new_path: &Path,
+    project_type: &Option<ProjectType>,
+) -> AssetInfo {
+    let extension = new_path
+        .extension()
+        .map(|e| e.to_string_lossy().to_string())
+        .unwrap_or_default();
+    AssetInfo {
+        path: path_to_string(new_path),
+        name: new_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default(),
+        asset_type: get_asset_type(&extension),
+        extension,
+        size: old.size,
+        modified: old.modified,
+        metadata: old.metadata.clone(),
+        unity_guid: if matches!(project_type, Some(ProjectType::Unity)) {
+            parse_unity_meta(new_path)
+        } else {
+            None
+        },
+    }
+}
+
 /// Incremental scan — only re-parse changed files. Honors the same
 /// `respect_gitignore` semantics as `scan_directory_with_state` (they
 /// share `build_walker`). Toggling gitignore on after a previous "scan
@@ -1977,6 +2016,62 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::tempdir;
+
+    fn sample_asset(path: &str) -> AssetInfo {
+        AssetInfo {
+            path: path.to_string(),
+            name: "old.png".to_string(),
+            extension: "png".to_string(),
+            asset_type: AssetType::Texture,
+            size: 1234,
+            modified: 1_700_000_000,
+            metadata: None,
+            unity_guid: Some("stale-guid".to_string()),
+        }
+    }
+
+    #[test]
+    fn rekey_recomputes_path_fields_and_carries_content_fields() {
+        let old = sample_asset("C:/proj/old.png");
+        let rekeyed = rekey_asset_info(&old, Path::new("C:/proj/sub/new.PNG"), &None);
+
+        assert_eq!(rekeyed.path, "C:/proj/sub/new.PNG");
+        assert_eq!(rekeyed.name, "new.PNG");
+        assert_eq!(rekeyed.extension, "PNG");
+        // get_asset_type lowercases internally — type survives a case change.
+        assert_eq!(rekeyed.asset_type, AssetType::Texture);
+        assert_eq!(rekeyed.size, 1234);
+        assert_eq!(rekeyed.modified, 1_700_000_000);
+        // Non-Unity project: no guid, even though the old entry had one.
+        assert_eq!(rekeyed.unity_guid, None);
+    }
+
+    /// The guid must be re-derived from the sidecar beside the NEW path, not
+    /// carried: an Explorer rename leaves the `.meta` behind (association is
+    /// by adjacency, so the renamed file genuinely has no guid), while an
+    /// engine-driven rename moves the sidecar and the guid must follow.
+    #[test]
+    fn rekey_rederives_unity_guid_from_the_new_path() {
+        let dir = tempdir().unwrap();
+        let new_path = dir.path().join("renamed.png");
+        fs::write(&new_path, "px").unwrap();
+
+        let old = sample_asset("C:/proj/old.png");
+        let unity = Some(ProjectType::Unity);
+
+        // No .meta beside the new path → the stale guid must NOT survive.
+        let rekeyed = rekey_asset_info(&old, &new_path, &unity);
+        assert_eq!(rekeyed.unity_guid, None);
+
+        // Engine-style rename carried the sidecar → guid read from it.
+        fs::write(
+            dir.path().join("renamed.png.meta"),
+            "fileFormatVersion: 2\nguid: abc123def456\n",
+        )
+        .unwrap();
+        let rekeyed = rekey_asset_info(&old, &new_path, &unity);
+        assert_eq!(rekeyed.unity_guid.as_deref(), Some("abc123def456"));
+    }
 
     /// A symlink loop used to make `build_directory_tree` recurse forever —
     /// `Path::is_dir()` follows links, so `loop -> ..` is an infinite tree.

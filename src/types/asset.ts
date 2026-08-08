@@ -357,11 +357,24 @@ export interface FileOpResult {
 // ============ Filesystem Watcher Types ============
 
 /// Payload of the `fs-change-{projectId}` Tauri event.
+/** One external rename the watcher recognized (stitched OS pair, or a
+ *  remove+create joined by identity). The scan delta still travels as
+ *  `removed` (old path) + `updated` (new entry) — this is additive metadata
+ *  for selection re-pointing and the tag-mirror refresh; the backend already
+ *  migrated the tag bindings. */
+export interface RenamedPair {
+  from: string;
+  to: string;
+  is_dir: boolean;
+}
+
 export interface FsChangeEvent {
   /** Assets that were added or modified. Merge into scanResult.assets by `path`. */
   updated: AssetInfo[];
   /** Paths that were deleted. Remove from scanResult.assets. */
   removed: string[];
+  /** Renames recognized in this batch (see RenamedPair). */
+  renamed: RenamedPair[];
   /** Freshly rebuilt directory tree — swap wholesale. */
   directory_tree: DirectoryNode;
   total_count: number;

@@ -1,5 +1,9 @@
 import { create } from "zustand";
-import { useProjectStore } from "./projectStore";
+import {
+  useProjectStore,
+  registerSelectionSyncBridge,
+  renamedTargetFor,
+} from "./projectStore";
 
 /// Multi-selection state for the asset list / gallery, lifted out of
 /// `AssetList.tsx` so other components (AITagPanel's Preview action,
@@ -43,6 +47,24 @@ useProjectStore.subscribe((state, prev) => {
   if (state.activeProjectId !== prev.activeProjectId) {
     useSelectionStore.getState().clearSelection();
   }
+});
+
+// Follow externally renamed files/folders: applyFsChange calls this BEFORE
+// swapping scanResult, so by the time the prune subscription below runs, the
+// selection already holds the new paths and nothing is dropped as stale.
+registerSelectionSyncBridge({
+  applyRenames: (renamed) => {
+    const sel = useSelectionStore.getState().selectedPaths;
+    if (sel.size === 0) return;
+    let changed = false;
+    const next = new Set<string>();
+    for (const p of sel) {
+      const to = renamedTargetFor(p, renamed);
+      if (to) changed = true;
+      next.add(to ?? p);
+    }
+    if (changed) useSelectionStore.getState().setSelectedPaths(next);
+  },
 });
 
 // Prune selected paths that vanished from the active project's scan — deleted

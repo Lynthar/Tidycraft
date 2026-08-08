@@ -1,7 +1,11 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import type { Tag, AssetTagsMap } from "../types/asset";
-import { useProjectStore, registerTagFilterBridge } from "./projectStore";
+import {
+  useProjectStore,
+  registerTagFilterBridge,
+  registerTagsSyncBridge,
+} from "./projectStore";
 import { useToastStore } from "./toastStore";
 import i18n from "../i18n";
 
@@ -308,5 +312,14 @@ registerTagFilterBridge({
     if (!tagFilters.every((id) => tagIds.includes(id))) {
       clearTagFilters();
     }
+  },
+});
+
+// The watcher migrates tag bindings across external renames (and reaps them
+// on deletes) backend-side; re-pull the mirror so chips and filters follow
+// without a project switch. Fired only for the active project.
+registerTagsSyncBridge({
+  reloadTags: () => {
+    void useTagsStore.getState().loadTags();
   },
 });

@@ -183,6 +183,34 @@ impl TagsData {
         self.asset_tags.remove(path);
     }
 
+    /// Move every binding under directory `old_dir` to the same relative
+    /// position under `new_dir`. Used when the watcher sees a directory
+    /// renamed externally — the OS reports one event on the directory, never
+    /// per-child, so the children's bindings must be re-keyed wholesale.
+    ///
+    /// Matching is component-wise: only keys with `old_dir` + `/` as a strict
+    /// prefix move, so renaming `…/Tex` never captures `…/Textures/*`. Keys
+    /// are the scanner's normalized forward-slash paths on every platform.
+    /// Each key goes through [`Self::rename_path`], keeping its union-merge
+    /// semantics if the destination somehow already has bindings.
+    pub fn rename_dir(&mut self, old_dir: &str, new_dir: &str) {
+        if old_dir == new_dir {
+            return;
+        }
+        let prefix = format!("{}/", old_dir.trim_end_matches('/'));
+        let moved: Vec<String> = self
+            .asset_tags
+            .keys()
+            .filter(|k| k.starts_with(&prefix))
+            .cloned()
+            .collect();
+        let new_base = new_dir.trim_end_matches('/');
+        for old_key in moved {
+            let new_key = format!("{}/{}", new_base, &old_key[prefix.len()..]);
+            self.rename_path(&old_key, &new_key);
+        }
+    }
+
     /// Get tags for an asset
     pub fn get_asset_tags(&self, asset_path: &str) -> Vec<Tag> {
         if let Some(tag_ids) = self.asset_tags.get(asset_path) {
@@ -264,6 +292,39 @@ mod tests {
         let tags = data.get_asset_tags("/new.png");
         assert_eq!(tags.len(), 2);
         assert_eq!(data.get_asset_tags("/old.png").len(), 0);
+    }
+
+    #[test]
+    fn rename_dir_moves_descendants_component_wise() {
+        let mut data = TagsData::default();
+        let tag = data.create_tag("Hero".to_string(), "#ff0000".to_string());
+        data.add_tag_to_asset("C:/proj/Tex/a.png", &tag.id);
+        data.add_tag_to_asset("C:/proj/Tex/sub/deep.png", &tag.id);
+        // Sibling with the old dir as a STRING prefix — must not move.
+        data.add_tag_to_asset("C:/proj/Textures/b.png", &tag.id);
+
+        data.rename_dir("C:/proj/Tex", "C:/proj/Art");
+
+        assert_eq!(data.get_asset_tags("C:/proj/Art/a.png").len(), 1);
+        assert_eq!(data.get_asset_tags("C:/proj/Art/sub/deep.png").len(), 1);
+        assert_eq!(data.get_asset_tags("C:/proj/Tex/a.png").len(), 0);
+        // The string-prefix sibling stayed put.
+        assert_eq!(data.get_asset_tags("C:/proj/Textures/b.png").len(), 1);
+    }
+
+    #[test]
+    fn rename_dir_merges_into_existing_destination_bindings() {
+        let mut data = TagsData::default();
+        let a = data.create_tag("A".to_string(), "#aa0000".to_string());
+        let b = data.create_tag("B".to_string(), "#00aa00".to_string());
+        data.add_tag_to_asset("C:/proj/Old/x.png", &a.id);
+        data.add_tag_to_asset("C:/proj/New/x.png", &b.id);
+
+        data.rename_dir("C:/proj/Old", "C:/proj/New");
+
+        // Union at the destination, source gone — rename_path semantics.
+        assert_eq!(data.get_asset_tags("C:/proj/New/x.png").len(), 2);
+        assert_eq!(data.get_asset_tags("C:/proj/Old/x.png").len(), 0);
     }
 
     #[test]

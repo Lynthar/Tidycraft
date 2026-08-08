@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { basename, dirname } from "../lib/pathUtils";
-import type { ScanResult, AssetInfo, ScanProgress, AssetType, ProjectType, AnalysisResult, UndoResult, HistoryEntry, GitInfo, GitStatusMap, GitFileStatus, FsChangeEvent, DirectoryNode } from "../types/asset";
+import type { ScanResult, AssetInfo, ScanProgress, AssetType, ProjectType, AnalysisResult, UndoResult, HistoryEntry, GitInfo, GitStatusMap, GitFileStatus, FsChangeEvent, RenamedPair, DirectoryNode } from "../types/asset";
 import { useSettingsStore } from "./settingsStore";
 import { evictThumbs } from "../lib/thumbnailCache";
 
@@ -179,6 +179,46 @@ let tagFilterBridge: TagFilterBridge | null = null;
 export const registerTagFilterBridge = (bridge: TagFilterBridge) => {
   tagFilterBridge = bridge;
 };
+
+// Same cycle constraint, two more hooks — both fired from applyFsChange.
+interface SelectionSyncBridge {
+  /// Re-point batch-selected paths across recognized renames. Called BEFORE
+  /// the scanResult swap: selectionStore's prune subscription fires on that
+  /// swap and must see the selection already carrying the new paths, or it
+  /// prunes the old ones as stale and the selection is lost instead of
+  /// following the rename.
+  applyRenames: (renamed: RenamedPair[]) => void;
+}
+let selectionSyncBridge: SelectionSyncBridge | null = null;
+export const registerSelectionSyncBridge = (bridge: SelectionSyncBridge) => {
+  selectionSyncBridge = bridge;
+};
+
+interface TagsSyncBridge {
+  /// The backend migrated (renames) or reaped (removals) tag bindings during
+  /// an fs change — re-pull the active project's tag mirror.
+  reloadTags: () => void;
+}
+let tagsSyncBridge: TagsSyncBridge | null = null;
+export const registerTagsSyncBridge = (bridge: TagsSyncBridge) => {
+  tagsSyncBridge = bridge;
+};
+
+/// New path for `path` under this batch's renames: an exact file match, or a
+/// directory pair's prefix rewrite (component-boundary safe — `Tex` never
+/// captures `Textures/…`). Null when the path is untouched.
+export function renamedTargetFor(
+  path: string,
+  renamed: RenamedPair[]
+): string | null {
+  for (const r of renamed) {
+    if (path === r.from) return r.to;
+    if (r.is_dir && path.startsWith(r.from + "/")) {
+      return r.to + path.slice(r.from.length);
+    }
+  }
+  return null;
+}
 
 // True when a project entry is an unhydrated stub — registered (usually by
 // session restore) but never scanned — that should be lazily hydrated the
@@ -453,11 +493,14 @@ function applyFsChange(projectId: string, event: FsChangeEvent) {
     type_counts: event.type_counts,
   };
 
-  // Reconcile selectedAsset: swap to the fresh copy if it was re-parsed, or
-  // drop it if the file was deleted.
+  // Reconcile selectedAsset: follow it across a recognized rename, swap to
+  // the fresh copy if it was re-parsed, or drop it if the file was deleted.
   let newSelectedAsset = target.selectedAsset;
   if (newSelectedAsset) {
-    if (event.removed.includes(newSelectedAsset.path)) {
+    const renamedTo = renamedTargetFor(newSelectedAsset.path, event.renamed);
+    if (renamedTo) {
+      newSelectedAsset = merged.get(renamedTo) ?? null;
+    } else if (event.removed.includes(newSelectedAsset.path)) {
       newSelectedAsset = null;
     } else {
       const fresh = event.updated.find((a) => a.path === newSelectedAsset!.path);
@@ -465,10 +508,16 @@ function applyFsChange(projectId: string, event: FsChangeEvent) {
     }
   }
 
-  // Reconcile selectedDirectory: an external delete of the selected folder
-  // used to leave the list filtering against a ghost path — blank view, no
-  // explanation, and clicking the (gone) tree node couldn't fix it.
+  // Reconcile selectedDirectory: follow a renamed folder to its new path
+  // (instead of the reset-to-root below), then fall back to the root when
+  // the selected folder is genuinely gone — an external delete used to leave
+  // the list filtering against a ghost path: blank view, no explanation, and
+  // clicking the (gone) tree node couldn't fix it.
   let newSelectedDirectory = target.selectedDirectory;
+  if (newSelectedDirectory) {
+    const renamedTo = renamedTargetFor(newSelectedDirectory, event.renamed);
+    if (renamedTo) newSelectedDirectory = renamedTo;
+  }
   if (
     newSelectedDirectory &&
     !directoryExistsInTree(event.directory_tree, newSelectedDirectory)
@@ -496,7 +545,22 @@ function applyFsChange(projectId: string, event: FsChangeEvent) {
   if (state.activeProjectId === projectId) {
     Object.assign(patch, syncFromActiveProject(updated));
   }
+  // Order matters: re-point the batch selection while the OLD scanResult is
+  // still in place — selectionStore's prune subscription fires on the swap
+  // below and must find the new paths already selected (see the bridge doc).
+  if (event.renamed.length > 0 && state.activeProjectId === projectId) {
+    selectionSyncBridge?.applyRenames(event.renamed);
+  }
   useProjectStore.setState(patch);
+
+  // Tag bindings moved (renames) or were reaped (removals) on the backend;
+  // the mirror in tagsStore only reloads on project switch by itself.
+  if (
+    (event.renamed.length > 0 || event.removed.length > 0) &&
+    state.activeProjectId === projectId
+  ) {
+    tagsSyncBridge?.reloadTags();
+  }
 
   // Files changed → git status may have changed too. Debounce so that a
   // burst (e.g. batch rename, `git checkout` outside the app) collapses into
