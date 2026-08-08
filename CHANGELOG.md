@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-08-07
+
 ### Changed
 - **Godot's per-asset metadata files no longer count as assets.** A Godot project keeps one `.import` beside every imported file and, since 4.4, one `.uid` beside every script, so the asset list, the counts, the statistics and the analysis were all running at roughly twice their real size — padded with files you can neither preview nor act on. Unity's `.meta` had always been hidden this way; Godot's equivalents now are too. `project.godot` and the `.cfg` files stay listed: those are project files you may well want to find, not per-asset bookkeeping.
 - **AI tagging rules that never ran now say so.** A `tidycraft.ai.toml` the app cannot parse falls back to the built-in suggestions, and a rule whose pattern this engine will not compile is skipped. Both were reported to standard error, which a bundled application has nowhere to write. The two kinds of suggestion look identical on screen, so the fallback read as a working rule set — and, since the same unreadable file also makes the panel report that you have never run learning, it went on inviting you to run it again with no hint why. Both now appear above the suggestions, with the reason.
