@@ -6,7 +6,6 @@ import {
   useState,
 } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { invoke } from "@tauri-apps/api/core";
 import {
   Image as ImageIcon,
   Box,
@@ -35,6 +34,7 @@ import type {
 import { GitStatusBadge } from "./GitStatusBadge";
 import { DccSourceBadge } from "./DccSourceBadge";
 import { peekThumb, hasThumb, putThumb } from "../lib/thumbnailCache";
+import { requestThumbnail, THUMB_CANCELLED } from "../lib/thumbnailQueue";
 
 const CARD_MIN_WIDTH = 168;
 const CARD_GAP = 12;
@@ -80,21 +80,26 @@ function CardThumb({ asset }: CardThumbProps) {
       return;
     }
     let cancelled = false;
-    (async () => {
-      try {
-        const base64 = await invoke<string>("get_thumbnail", {
-          path: asset.path,
-          size: THUMB_SIZE,
-        });
+    const { promise, cancel } = requestThumbnail(asset.path, THUMB_SIZE);
+    promise.then(
+      (base64) => {
+        // Cached even if this card has since unmounted: the decode was
+        // already paid for, and the next mount shouldn't pay it again.
         putThumb(asset.path, base64);
         if (!cancelled) setThumb(base64);
-      } catch {
+      },
+      (err) => {
+        // A request dropped from the queue was never attempted. Recording it
+        // as a failure would tombstone the path in the cache and leave the
+        // card on its placeholder for good.
+        if (err === THUMB_CANCELLED) return;
         putThumb(asset.path, null);
         if (!cancelled) setThumb(null);
       }
-    })();
+    );
     return () => {
       cancelled = true;
+      cancel();
     };
     // `modified` is the external-edit signal: the watcher re-parses the
     // file into a fresh AssetInfo (new mtime) and evicts the path from
