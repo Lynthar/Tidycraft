@@ -1,6 +1,7 @@
 import { useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useProjectStore } from "../stores/projectStore";
+import { useSelectionStore } from "../stores/selectionStore";
 import { useUiStore, isBlockingOverlayOpen } from "../stores/uiStore";
 import { getPlatform } from "../lib/platform";
 import { menuActions } from "../lib/menuActions";
@@ -120,15 +121,30 @@ export function useKeyboardShortcuts() {
         return;
       }
 
-      // Escape: Cancel scan or clear selection. Keyboard-only semantics (no
-      // menu equivalent), so it stays here rather than in menuActions.
+      // Escape: dismiss exactly ONE thing per press, walking from the most
+      // transient state to the most expensive to recreate. One press used to
+      // clear the preview selection and the search box together — two
+      // meanings in one keystroke, and it threw away a hand-typed query along
+      // with a single click — while leaving the checkbox selection, the state
+      // with its own action bar, untouched. Keyboard-only semantics (no menu
+      // equivalent), so it stays here rather than in menuActions.
       if (key === "Escape") {
-        const { isScanning, cancelScan, setSelectedAsset, setSearchQuery } =
-          useProjectStore.getState();
+        const {
+          isScanning,
+          cancelScan,
+          selectedAsset,
+          setSelectedAsset,
+          searchQuery,
+          setSearchQuery,
+        } = useProjectStore.getState();
+        const { selectedPaths, clearSelection } = useSelectionStore.getState();
         if (isScanning) {
           cancelScan();
-        } else {
+        } else if (selectedPaths.size > 0) {
+          clearSelection();
+        } else if (selectedAsset) {
           setSelectedAsset(null);
+        } else if (searchQuery) {
           setSearchQuery("");
         }
         return;

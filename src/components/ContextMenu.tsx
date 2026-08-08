@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Copy,
   CopyPlus,
@@ -26,6 +26,9 @@ interface Position {
   x: number;
   y: number;
 }
+
+/// Breathing room between the menu and the window edge it was clamped against.
+const VIEWPORT_MARGIN = 8;
 
 interface ContextMenuProps {
   isOpen: boolean;
@@ -78,7 +81,20 @@ export function ContextMenu({
   const editorPath = ext ? externalEditors[ext] : undefined;
   const editorName = editorPath ? getEditorDisplayName(editorPath) : undefined;
   const [showTagSubmenu, setShowTagSubmenu] = useState(false);
-  const [submenuPosition, setSubmenuPosition] = useState<"right" | "left">("right");
+
+  // The menu and its submenu are both placed from measured sizes. What the menu
+  // contains varies with context — an editor mapping for this extension, and
+  // whether duplicate / move / copy / delete / AI tagging are offered at all —
+  // so the hard-coded 200×300 estimate this replaces clipped the taller
+  // variants off the screen edge, and the submenu chose its side against a
+  // 200px width it never measured.
+  const submenuAnchorRef = useRef<HTMLDivElement>(null);
+  const submenuRef = useRef<HTMLDivElement>(null);
+  const [menuSize, setMenuSize] = useState<{ width: number; height: number } | null>(null);
+  const [submenu, setSubmenu] = useState<{ side: "right" | "left"; shift: number }>({
+    side: "right",
+    shift: 0,
+  });
 
   // Debounced close so quick diagonal cursor movements between the parent
   // button and the submenu don't prematurely unmount it. Leaving fires a
@@ -130,21 +146,32 @@ export function ContextMenu({
     };
   }, [isOpen, onClose]);
 
-  // Adjust menu position to stay within viewport
-  useEffect(() => {
+  // Layout effects, not effects: the measurement has to land before the first
+  // paint, or the menu visibly jumps from wherever it was first placed to where
+  // it belongs. Keyed on the asset, not the click position — the size follows
+  // which items are offered, and re-measuring on every reposition would only
+  // re-derive the same numbers.
+  useLayoutEffect(() => {
     if (!isOpen || !menuRef.current) return;
+    const { width, height } = menuRef.current.getBoundingClientRect();
+    setMenuSize({ width, height });
+  }, [isOpen, assetPath]);
 
-    const menu = menuRef.current;
-    const rect = menu.getBoundingClientRect();
-    const viewportWidth = window.innerWidth;
-
-    // Check if submenu would overflow right side
-    if (position.x + rect.width + 200 > viewportWidth) {
-      setSubmenuPosition("left");
-    } else {
-      setSubmenuPosition("right");
-    }
-  }, [isOpen, position]);
+  useLayoutEffect(() => {
+    const row = submenuAnchorRef.current;
+    const panel = submenuRef.current;
+    if (!showTagSubmenu || !row || !panel) return;
+    const anchor = row.getBoundingClientRect();
+    const { width, height } = panel.getBoundingClientRect();
+    setSubmenu({
+      side: anchor.right + width + VIEWPORT_MARGIN > window.innerWidth ? "left" : "right",
+      // The panel hangs down from the row's top edge; pull it up by however
+      // much of it would hang past the bottom of the window. Derived from the
+      // ROW's position, never the panel's own — reading the panel's top would
+      // feed the shift just applied back into the next measurement.
+      shift: Math.min(0, window.innerHeight - VIEWPORT_MARGIN - (anchor.top + height)),
+    });
+  }, [showTagSubmenu, tags.length]);
 
   if (!isOpen) return null;
 
@@ -290,17 +317,26 @@ export function ContextMenu({
       : []),
   ];
 
+  // Pin the far edge inside the window rather than the near one, so the whole
+  // menu stays visible instead of only its first items. A menu taller than the
+  // window lands at the top edge — its own top is where the items begin, so
+  // that is the least-bad way to run out of room. Until the first measurement
+  // lands, the click position is the best guess available.
+  const clamp = (want: number, extent: number, viewport: number) =>
+    Math.max(VIEWPORT_MARGIN, Math.min(want, viewport - extent - VIEWPORT_MARGIN));
+
   return (
     <div
       ref={menuRef}
       className="fixed z-50 bg-card-bg border border-border rounded-lg shadow-xl py-1 min-w-[180px]"
       style={{
-        left: Math.min(position.x, window.innerWidth - 200),
-        top: Math.min(position.y, window.innerHeight - 300),
+        left: menuSize ? clamp(position.x, menuSize.width, window.innerWidth) : position.x,
+        top: menuSize ? clamp(position.y, menuSize.height, window.innerHeight) : position.y,
       }}
     >
       {/* Tag Submenu Item */}
       <div
+        ref={submenuAnchorRef}
         className="relative"
         onMouseEnter={openSubmenu}
         onMouseLeave={scheduleCloseSubmenu}
@@ -318,11 +354,13 @@ export function ContextMenu({
             diagonal cursor paths that briefly dip outside both rects. */}
         {showTagSubmenu && (
           <div
+            ref={submenuRef}
             onMouseEnter={openSubmenu}
             onMouseLeave={scheduleCloseSubmenu}
+            style={{ top: submenu.shift }}
             className={cn(
-              "absolute top-0 bg-card-bg border border-border rounded-lg shadow-xl py-1 min-w-[160px]",
-              submenuPosition === "right" ? "left-full" : "right-full"
+              "absolute bg-card-bg border border-border rounded-lg shadow-xl py-1 min-w-[160px]",
+              submenu.side === "right" ? "left-full" : "right-full"
             )}
           >
             {tags.length === 0 ? (
