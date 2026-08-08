@@ -78,9 +78,18 @@ cargo test --lib          # backend unit tests (scanner / analyzer / llm / …)
 cargo check               # fast Rust typecheck without binary
 ```
 
-There is no project-wide formatter or linter configured. `tsc` and
-`cargo check` are the only gates. Rust files follow `rustfmt` defaults; TS
-files follow the style of nearby code (2-space indent, double quotes,
+The Rust side is gated: CI runs `cargo fmt --check` and
+`cargo clippy --all-targets -- -D warnings` on all three platforms, both of
+which pass today, so run them before pushing:
+
+```bash
+cd src-tauri
+cargo fmt                                    # or --check to just report
+cargo clippy --all-targets -- -D warnings
+```
+
+The frontend has no formatter or linter — `tsc` (via `pnpm build`) is its only
+gate. TS files follow the style of nearby code (2-space indent, double quotes,
 trailing commas).
 
 ---
@@ -497,6 +506,32 @@ pattern: parent owns a nullable state object, renders the dialog
 conditionally, passes `onClose` and `onDone` callbacks. The dialog takes
 transient state (`isLoading`, inline errors) internally and resets on
 `isOpen` transitions.
+
+### Colours in a new component
+
+Use the palette, not Tailwind's default scale: `text-error` / `bg-primary` /
+`text-ink-2` and friends resolve to CSS variables that follow the theme, while
+`text-red-400` is tuned for the dark theme and drops to 2.8:1 on the light one.
+
+**An opacity modifier on a palette colour compiles to nothing.** Every colour in
+`tailwind.config.js` is a `var(--x)`, and Tailwind 3 cannot apply an alpha to
+that: `bg-error/10`, `text-warning/80` and `hover:bg-primary/30` emit no rule at
+all, and the element silently inherits whatever is behind it. Use a tint token
+(`bg-primary-soft`, `bg-primary-tint`, `bg-error-soft` and the other three
+status colours) or, when real translucency is the point, an arbitrary value:
+
+```jsx
+className="bg-[color-mix(in_oklch,var(--primary)_50%,var(--line))]"
+```
+
+Default-palette colours (`bg-black/50`) are unaffected. After renaming any
+colour class, grep `dist/assets/*.css` for the rule — a dropped class leaves no
+trace in the markup, in `tsc`, or in the console.
+
+Anything **filled** with a status colour needs a foreground that flips with the
+theme: `--err` is a light red in dark mode and a dark red in light mode, so a
+fixed `text-white` fails in one of them. That is what `text-on-error` (and
+`--on-primary` / `--on-accent`) are for.
 
 ### A new i18n string
 
