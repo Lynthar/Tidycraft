@@ -321,7 +321,7 @@ export function NamingFixDialog({ isOpen, onClose, scopePaths, onComplete }: Nam
           )}
 
           {error && (
-            <div className="flex items-center gap-2 p-3 bg-error/10 border border-error/30 rounded text-error text-sm">
+            <div className="flex items-center gap-2 p-3 bg-error-soft border border-error rounded text-error text-sm">
               <AlertCircle size={16} />
               {error}
             </div>
@@ -331,7 +331,7 @@ export function NamingFixDialog({ isOpen, onClose, scopePaths, onComplete }: Nam
             <div
               className={`flex items-center gap-2 p-3 rounded text-sm ${
                 result.error_count > 0
-                  ? "bg-warning/10 border border-warning/30 text-warning"
+                  ? "bg-warning-soft border border-warning text-warning"
                   : "bg-success-soft border border-success text-success"
               }`}
             >
@@ -345,7 +345,7 @@ export function NamingFixDialog({ isOpen, onClose, scopePaths, onComplete }: Nam
           )}
 
           {result && result.errors.length > 0 && (
-            <div className="max-h-32 overflow-auto p-3 bg-error/10 border border-error/30 rounded text-error text-sm">
+            <div className="max-h-32 overflow-auto p-3 bg-error-soft border border-error rounded text-error text-sm">
               <div className="font-medium mb-1">{t("namingFix.errors")}</div>
               <ul className="space-y-1">
                 {result.errors.map((e, i) => (
@@ -377,7 +377,7 @@ export function NamingFixDialog({ isOpen, onClose, scopePaths, onComplete }: Nam
           <button
             onClick={handleApply}
             disabled={isApplying || changedCount === 0 || result !== null}
-            className="flex items-center gap-2 px-4 py-2 text-sm bg-primary text-[var(--on-primary)] rounded hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-2 px-4 py-2 text-sm bg-primary text-[var(--on-primary)] rounded hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isApplying ? (
               <>

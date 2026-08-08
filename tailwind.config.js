@@ -16,6 +16,11 @@ export default {
           DEFAULT: "var(--color-primary)",
           hover: "var(--color-primary-hover)",
           glow: "var(--color-primary-glow)",
+          // Same reason as the status tints below: `bg-primary/20` emits no
+          // rule, so the two tint steps the design system already defines have
+          // to be reachable by name.
+          soft: "var(--primary-soft)",
+          tint: "var(--primary-tint)",
         },
         success: "var(--color-success)",
         warning: "var(--color-warning)",

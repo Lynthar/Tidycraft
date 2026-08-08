@@ -324,7 +324,7 @@ export function BatchRenameDialog({
                     {previews.slice(0, 50).map((preview, index) => (
                       <tr
                         key={index}
-                        className={preview.will_change ? "bg-primary/10" : ""}
+                        className={preview.will_change ? "bg-primary-tint" : ""}
                       >
                         <td className="p-2 border-b border-border truncate max-w-[200px]">
                           {preview.original_name}
@@ -373,7 +373,7 @@ export function BatchRenameDialog({
 
           {/* Error */}
           {error && (
-            <div className="flex items-center gap-2 p-3 bg-error/10 border border-error/30 rounded text-error text-sm">
+            <div className="flex items-center gap-2 p-3 bg-error-soft border border-error rounded text-error text-sm">
               <AlertCircle size={16} />
               {error}
             </div>
@@ -384,7 +384,7 @@ export function BatchRenameDialog({
             <div
               className={`flex items-center gap-2 p-3 rounded text-sm ${
                 result.error_count > 0
-                  ? "bg-warning/10 border border-warning/30 text-warning"
+                  ? "bg-warning-soft border border-warning text-warning"
                   : "bg-success-soft border border-success text-success"
               }`}
             >
@@ -399,7 +399,7 @@ export function BatchRenameDialog({
           {/* Per-file failure details — the whole reason the dialog stays
               open on partial failure. */}
           {result && result.errors.length > 0 && (
-            <div className="max-h-32 overflow-auto p-3 bg-error/10 border border-error/30 rounded text-error text-sm">
+            <div className="max-h-32 overflow-auto p-3 bg-error-soft border border-error rounded text-error text-sm">
               <div className="font-medium mb-1">{t("batchRename.errors", "Errors")}</div>
               <ul className="space-y-1">
                 {result.errors.map((e, i) => (
@@ -423,7 +423,7 @@ export function BatchRenameDialog({
           <button
             onClick={handleExecute}
             disabled={isLoading || changedCount === 0}
-            className="flex items-center gap-2 px-4 py-2 text-sm bg-primary text-[var(--on-primary)] rounded hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-2 px-4 py-2 text-sm bg-primary text-[var(--on-primary)] rounded hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isLoading ? (
               <>

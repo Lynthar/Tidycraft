@@ -73,7 +73,7 @@ function TreeRow({
         }}
         className={cn(
           "flex items-center gap-1 px-2 py-1 text-sm rounded cursor-pointer select-none",
-          isSelected && "bg-primary/20 text-primary",
+          isSelected && "bg-primary-soft text-primary",
           !isSelected && !isDisabled && "hover:bg-background text-text-primary",
           isDisabled && "opacity-40 cursor-not-allowed"
         )}
@@ -320,8 +320,8 @@ export function MoveCopyDialog({
               className={cn(
                 "px-3 py-1.5 text-sm rounded font-medium transition-colors",
                 isWorking || !selectedPath
-                  ? "bg-primary/50 text-[var(--on-primary)] cursor-not-allowed"
-                  : "bg-primary hover:bg-primary/90 text-[var(--on-primary)]"
+                  ? "bg-primary opacity-50 text-[var(--on-primary)] cursor-not-allowed"
+                  : "bg-primary hover:bg-primary-hover text-[var(--on-primary)]"
               )}
             >
               {isWorking ? workingLabel : confirmLabel}

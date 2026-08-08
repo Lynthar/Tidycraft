@@ -41,7 +41,7 @@ export function SearchHistory({ isVisible, onSelect, onClose, searchQuery }: Sea
       className="absolute left-0 right-0 top-full mt-1 bg-card-bg border border-border rounded-lg shadow-lg z-50 overflow-hidden"
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-background/50">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-background">
         <span className="text-xs text-text-secondary flex items-center gap-1.5">
           <Clock size={12} />
           {t("search.recentSearches", "Recent Searches")}

@@ -369,7 +369,7 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
             </h3>
             {engineVersion && (
               <span
-                className="px-1.5 py-0.5 text-[10px] font-mono rounded bg-primary/20 text-primary"
+                className="px-1.5 py-0.5 text-[10px] font-mono rounded bg-primary-soft text-primary"
                 title={engineVersionTitle}
               >
                 {engineVersion}
@@ -390,7 +390,7 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
       <div className="grid grid-cols-4 gap-4">
         <div className="bg-card-bg border border-border rounded-lg p-4">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-primary/20 rounded-lg">
+            <div className="p-2 bg-primary-soft rounded-lg">
               <Files className="text-primary" size={24} />
             </div>
             <div>
@@ -414,7 +414,7 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
 
         <div className="bg-card-bg border border-border rounded-lg p-4">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-warning/20 rounded-lg">
+            <div className="p-2 bg-warning-soft rounded-lg">
               <AlertTriangle className="text-warning" size={24} />
             </div>
             <div>
@@ -542,7 +542,7 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
             <button
               onClick={scanUnused}
               disabled={unusedLoading}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-primary/20 text-primary rounded hover:bg-primary/30 transition-colors disabled:opacity-50"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-primary-soft text-primary rounded hover:brightness-95 transition-[filter] disabled:opacity-50"
             >
               {unusedLoading
                 ? t("stats.scanningUnused")
@@ -599,14 +599,14 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
       <div className="flex gap-2">
         <button
           onClick={onExportJson}
-          className="flex items-center gap-2 px-4 py-2 bg-primary/20 text-primary rounded hover:bg-primary/30 transition-colors"
+          className="flex items-center gap-2 px-4 py-2 bg-primary-soft text-primary rounded hover:brightness-95 transition-[filter]"
         >
           <FileDown size={16} />
           {t("stats.exportJson")}
         </button>
         <button
           onClick={onExportCsv}
-          className="flex items-center gap-2 px-4 py-2 bg-primary/20 text-primary rounded hover:bg-primary/30 transition-colors"
+          className="flex items-center gap-2 px-4 py-2 bg-primary-soft text-primary rounded hover:brightness-95 transition-[filter]"
         >
           <FileDown size={16} />
           {t("stats.exportCsv")}

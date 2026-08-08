@@ -266,7 +266,7 @@ export function ModelViewer3D({ filePath, extension, vertexCount, onFullscreen }
         <div className="text-xs text-text-secondary space-y-0.5">
           <div>{t("modelViewer.controls", "Drag to rotate • Scroll to zoom")}</div>
           {stats && (
-            <div className="text-[10px] text-text-secondary/70">
+            <div className="text-[10px] text-ink-3">
               {stats.format} •{" "}
               {t("modelViewer.statsVertices", {
                 count: vertexCount ?? stats.vertexCount,

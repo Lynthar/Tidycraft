@@ -125,7 +125,7 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
                       />
                       <button
                         onClick={handleSaveEdit}
-                        className="p-1 rounded hover:bg-primary/20 text-primary"
+                        className="p-1 rounded hover:bg-primary-soft text-primary"
                       >
                         <Check size={16} />
                       </button>
@@ -215,7 +215,7 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
                 />
                 <button
                   onClick={handleCreate}
-                  className="p-1 rounded hover:bg-primary/20 text-primary"
+                  className="p-1 rounded hover:bg-primary-soft text-primary"
                 >
                   <Check size={16} />
                 </button>

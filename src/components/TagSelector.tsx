@@ -62,7 +62,7 @@ export function TagSelector({ assetPath, assetTags, onOpenManager }: TagSelector
                     onClick={() => handleToggleTag(tag.id)}
                     className={cn(
                       "flex items-center gap-2 w-full px-3 py-2 text-sm text-left hover:bg-background transition-colors",
-                      isSelected && "bg-primary/10"
+                      isSelected && "bg-primary-tint"
                     )}
                   >
                     <span
@@ -151,7 +151,7 @@ export function BatchTagSelector({ selectedPaths, onOpenManager }: BatchTagSelec
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-primary/20 text-primary rounded hover:bg-primary/30 transition-colors"
+        className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-primary-soft text-primary rounded hover:brightness-95 transition-[filter]"
       >
         <TagIcon size={14} />
         {t("tags.addTag")}

@@ -252,7 +252,7 @@ function App() {
           >
             <Sidebar />
           </Panel>
-          <Separator className="w-1 bg-border hover:bg-primary/50 active:bg-primary transition-colors cursor-col-resize" />
+          <Separator className="w-1 bg-border hover:bg-[color-mix(in_oklch,var(--primary)_50%,var(--line))] active:bg-primary transition-colors cursor-col-resize" />
 
           <Panel
             id="main"
@@ -265,7 +265,7 @@ function App() {
             </main>
           </Panel>
 
-          <Separator className="w-1 bg-border hover:bg-primary/50 active:bg-primary transition-colors cursor-col-resize" />
+          <Separator className="w-1 bg-border hover:bg-[color-mix(in_oklch,var(--primary)_50%,var(--line))] active:bg-primary transition-colors cursor-col-resize" />
           <Panel
             id="preview"
             panelRef={previewPanelRef}

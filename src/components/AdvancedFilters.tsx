@@ -141,8 +141,8 @@ export function AdvancedFiltersPanel() {
         onClick={() => setIsOpen(!isOpen)}
         className={`flex items-center gap-1.5 px-2.5 py-1.5 text-sm rounded border transition-colors ${
           hasActiveFilters
-            ? "bg-primary/10 border-primary text-primary"
-            : "bg-background border-border text-text-secondary hover:text-text-primary hover:border-primary/50"
+            ? "bg-primary-tint border-primary text-primary"
+            : "bg-background border-border text-text-secondary hover:text-text-primary hover:border-primary"
         }`}
       >
         <Filter size={14} />
@@ -418,7 +418,7 @@ export function AdvancedFiltersPanel() {
                     className={`px-2 py-1 text-xs rounded transition-colors ${
                       advancedFilters.extensions.includes(ext)
                         ? "bg-primary text-[var(--on-primary)]"
-                        : "bg-background text-text-secondary hover:text-text-primary hover:bg-background/80"
+                        : "bg-background text-text-secondary hover:text-text-primary hover:bg-panel-hover"
                     }`}
                   >
                     .{ext}

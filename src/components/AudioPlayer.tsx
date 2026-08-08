@@ -231,7 +231,7 @@ export function AudioPlayer({ filePath }: AudioPlayerProps) {
         {!isPlaying && (
           <div className="absolute inset-0 flex items-center justify-center">
             <div
-              className="p-3 bg-primary/20 rounded-full cursor-pointer hover:bg-primary/30 transition-colors"
+              className="p-3 bg-primary-soft rounded-full cursor-pointer hover:brightness-95 transition-[filter]"
               onClick={togglePlay}
             >
               <Play size={32} className="text-primary" />

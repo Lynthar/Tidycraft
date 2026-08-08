@@ -210,7 +210,7 @@ export function RenameDialog({
           )}
 
           {error && (
-            <div className="flex items-center gap-2 p-2 mb-4 bg-error/10 border border-error/30 rounded text-sm text-error">
+            <div className="flex items-center gap-2 p-2 mb-4 bg-error-soft border border-error rounded text-sm text-error">
               <AlertCircle size={14} />
               {error}
             </div>
@@ -229,7 +229,7 @@ export function RenameDialog({
           <button
             onClick={handleRename}
             disabled={isRenaming || !newName.trim()}
-            className="px-4 py-2 text-sm bg-primary text-[var(--on-primary)] rounded hover:bg-primary/90 transition-colors disabled:opacity-50"
+            className="px-4 py-2 text-sm bg-primary text-[var(--on-primary)] rounded hover:bg-primary-hover transition-colors disabled:opacity-50"
           >
             {isRenaming ? t("batchRename.renaming") : t("contextMenu.rename")}
           </button>
