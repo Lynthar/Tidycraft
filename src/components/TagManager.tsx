@@ -173,7 +173,7 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
                     </button>
                     <button
                       onClick={() => handleDelete(tag.id)}
-                      className="p-1 rounded hover:bg-red-500/20 text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="p-1 rounded hover:bg-error-soft text-error opacity-0 group-hover:opacity-100 transition-opacity"
                     >
                       <Trash2 size={14} />
                     </button>

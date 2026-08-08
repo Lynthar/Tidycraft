@@ -402,8 +402,8 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
 
         <div className="bg-card-bg border border-border rounded-lg p-4">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-blue-500/20 rounded-lg">
-              <HardDrive className="text-blue-400" size={24} />
+            <div className="p-2 bg-info-soft rounded-lg">
+              <HardDrive className="text-info" size={24} />
             </div>
             <div>
               <p className="text-2xl font-bold text-text-primary">{formatFileSize(stats.total_size)}</p>
@@ -426,8 +426,8 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
 
         <div className="bg-card-bg border border-border rounded-lg p-4">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-green-500/20 rounded-lg">
-              <CheckCircle className="text-green-400" size={24} />
+            <div className="p-2 bg-success-soft rounded-lg">
+              <CheckCircle className="text-success" size={24} />
             </div>
             <div>
               <p className="text-2xl font-bold text-text-primary">{passCount}</p>
@@ -613,7 +613,7 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
         </button>
         <button
           onClick={onExportHtml}
-          className="flex items-center gap-2 px-4 py-2 bg-green-500/20 text-green-400 rounded hover:bg-green-500/30 transition-colors"
+          className="flex items-center gap-2 px-4 py-2 bg-success-soft text-success rounded hover:brightness-95 transition-[filter]"
         >
           <FileDown size={16} />
           {t("stats.exportHtml")}

@@ -99,9 +99,9 @@ function TreeRow({
           <span className="w-4" />
         )}
         {isExpanded && hasChildren ? (
-          <FolderOpen size={14} className="text-yellow-400 shrink-0" />
+          <FolderOpen size={14} className="text-warning shrink-0" />
         ) : (
-          <Folder size={14} className="text-yellow-400/80 shrink-0" />
+          <Folder size={14} className="text-warning shrink-0" />
         )}
         <span className="truncate flex-1">{node.name}</span>
         <span className="text-xs text-text-secondary">{node.file_count}</span>
@@ -285,18 +285,18 @@ export function MoveCopyDialog({
           </div>
 
           {errors.length > 0 && (
-            <div className="border border-red-400/40 bg-red-400/10 rounded p-3 space-y-2">
-              <div className="flex items-center gap-2 text-red-400 font-medium text-sm">
+            <div className="border border-error bg-error-soft rounded p-3 space-y-2">
+              <div className="flex items-center gap-2 text-error font-medium text-sm">
                 <AlertCircle size={14} />
                 {t("moveCopy.errorsTitle")}
               </div>
-              <ul className="text-xs text-red-300 space-y-1 max-h-32 overflow-auto">
+              <ul className="text-xs text-error space-y-1 max-h-32 overflow-auto">
                 {errors.map((e, i) => (
                   <li key={i} className="font-mono">
                     <span className="truncate block" title={e.path}>
                       {e.path ? basename(e.path) : "(unknown)"}
                     </span>
-                    <span className="text-red-400/80">{e.message}</span>
+                    <span className="text-error">{e.message}</span>
                   </li>
                 ))}
               </ul>

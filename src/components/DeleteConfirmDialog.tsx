@@ -88,7 +88,7 @@ export function DeleteConfirmDialog({
     >
       <div className="bg-card-bg border border-border rounded-lg shadow-2xl w-[480px] max-h-[80vh] flex flex-col">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-          <div className="flex items-center gap-2 text-red-400">
+          <div className="flex items-center gap-2 text-error">
             <Trash2 size={18} />
             <h3 className="font-medium text-text-primary">{title}</h3>
           </div>
@@ -118,18 +118,18 @@ export function DeleteConfirmDialog({
           </ul>
 
           {errors.length > 0 && (
-            <div className="border border-red-400/40 bg-red-400/10 rounded p-3 space-y-2">
-              <div className="flex items-center gap-2 text-red-400 font-medium text-sm">
+            <div className="border border-error bg-error-soft rounded p-3 space-y-2">
+              <div className="flex items-center gap-2 text-error font-medium text-sm">
                 <AlertCircle size={14} />
                 {t("deleteConfirm.errorsTitle")}
               </div>
-              <ul className="text-xs text-red-300 space-y-1 max-h-32 overflow-auto">
+              <ul className="text-xs text-error space-y-1 max-h-32 overflow-auto">
                 {errors.map((e, i) => (
                   <li key={i} className="font-mono">
                     <span className="truncate block" title={e.path}>
                       {e.path ? basename(e.path) : "(unknown)"}
                     </span>
-                    <span className="text-red-400/80">{e.message}</span>
+                    <span className="text-error">{e.message}</span>
                   </li>
                 ))}
               </ul>
@@ -153,8 +153,8 @@ export function DeleteConfirmDialog({
               className={cn(
                 "px-3 py-1.5 text-sm rounded font-medium transition-colors",
                 isDeleting
-                  ? "bg-red-400/50 text-white cursor-not-allowed"
-                  : "bg-red-500 hover:bg-red-600 text-white"
+                  ? "bg-error-soft text-error cursor-not-allowed"
+                  : "bg-error hover:brightness-105 text-on-error"
               )}
             >
               {isDeleting ? t("deleteConfirm.deleting") : t("deleteConfirm.confirm")}

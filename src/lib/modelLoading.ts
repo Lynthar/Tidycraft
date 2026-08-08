@@ -42,6 +42,20 @@ export const SUPPORTED_MODEL_FORMATS = [
   "vox",
 ];
 
+/// The 3D scene's backdrop — one pair of values for both viewers, as a CSS hex
+/// string because `THREE.Color` takes one. The inline viewer picks by app theme;
+/// the lightbox keeps its own light/dark toggle over the same pair.
+///
+/// Deliberately NOT design tokens, and deliberately not used by the loading /
+/// error overlays either: this is the inside of a render target. The overlays
+/// are app chrome and use theme tokens, which also keeps their text paired with
+/// their own background — the lightbox's backdrop toggle is independent of the
+/// theme, and no single red satisfies 4.5:1 against both backdrops at once.
+export const VIEWER_BACKDROP = {
+  dark: "#1a1a1a",
+  light: "#f0f0f0",
+} as const;
+
 export interface ModelStats {
   meshCount: number;
   vertexCount: number;

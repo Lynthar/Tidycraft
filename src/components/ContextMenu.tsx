@@ -412,7 +412,7 @@ export function ContextMenu({
             onClick={item.onClick}
             className={cn(
               "flex items-center gap-2 w-full px-3 py-1.5 text-sm text-left hover:bg-background transition-colors",
-              (item as { danger?: boolean }).danger && "text-red-400 hover:text-red-300",
+              (item as { danger?: boolean }).danger && "text-error",
               (item as { muted?: boolean }).muted && "italic text-text-secondary"
             )}
           >

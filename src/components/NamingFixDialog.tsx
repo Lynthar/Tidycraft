@@ -332,7 +332,7 @@ export function NamingFixDialog({ isOpen, onClose, scopePaths, onComplete }: Nam
               className={`flex items-center gap-2 p-3 rounded text-sm ${
                 result.error_count > 0
                   ? "bg-warning/10 border border-warning/30 text-warning"
-                  : "bg-green-500/10 border border-green-500/30 text-green-400"
+                  : "bg-success-soft border border-success text-success"
               }`}
             >
               <Check size={16} />

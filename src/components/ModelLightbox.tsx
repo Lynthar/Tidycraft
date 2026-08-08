@@ -10,9 +10,11 @@ import {
   loadModel,
   releaseRenderer,
   setupAnimations,
+  VIEWER_BACKDROP,
   type ModelError,
   type ModelStats,
 } from "../lib/modelLoading";
+import { useThemeStore } from "../stores/themeStore";
 
 /// Largest dimension the loaded model is scaled to, in world units. Bigger
 /// than ModelViewer3D's because this grid is bigger and the view is further out.
@@ -54,7 +56,12 @@ export function ModelLightbox({ isOpen, filePath, extension, vertexCount, modelN
   const [error, setError] = useState<ModelError | null>(null);
   const [stats, setStats] = useState<LoadingStats | null>(null);
   const [showGrid, setShowGrid] = useState(true);
-  const [darkMode, setDarkMode] = useState(true);
+  // The 3D backdrop is the user's to choose here (the Sun/Moon button below),
+  // but it starts where the app already is: a light-theme user opening the
+  // lightbox used to get an unconditionally black viewport under a button
+  // offering to turn the lights ON.
+  const appTheme = useThemeStore((s) => s.theme);
+  const [darkMode, setDarkMode] = useState(appTheme === "dark");
 
   // Clean up Three.js resources
   const cleanup = useCallback(() => {
@@ -127,7 +134,9 @@ export function ModelLightbox({ isOpen, filePath, extension, vertexCount, modelN
   // Toggle dark/light mode
   useEffect(() => {
     if (sceneRef.current) {
-      sceneRef.current.background = new THREE.Color(darkMode ? 0x1a1a1a : 0xf0f0f0);
+      sceneRef.current.background = new THREE.Color(
+        VIEWER_BACKDROP[darkMode ? "dark" : "light"]
+      );
     }
     if (gridRef.current) {
       gridRef.current.material.opacity = darkMode ? 0.3 : 0.5;
@@ -157,7 +166,7 @@ export function ModelLightbox({ isOpen, filePath, extension, vertexCount, modelN
 
     // Create scene
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(darkMode ? 0x1a1a1a : 0xf0f0f0);
+    scene.background = new THREE.Color(VIEWER_BACKDROP[darkMode ? "dark" : "light"]);
     sceneRef.current = scene;
 
     // Create camera
@@ -357,16 +366,16 @@ export function ModelLightbox({ isOpen, filePath, extension, vertexCount, modelN
         className="flex-1 overflow-hidden relative"
       >
         {isLoading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-[#1a1a1a] z-10">
-            <div className="text-center text-white/70">
+          <div className="absolute inset-0 flex items-center justify-center bg-panel z-10">
+            <div className="text-center text-ink-2">
               <Box size={48} className="mx-auto mb-3 animate-pulse text-[var(--accent)]" />
               <span className="text-sm">{t("modelViewer.loading", "Loading model...")}</span>
             </div>
           </div>
         )}
         {error && (
-          <div className="absolute inset-0 flex items-center justify-center bg-[#1a1a1a] z-10">
-            <div className="text-center text-red-400 px-4">
+          <div className="absolute inset-0 flex items-center justify-center bg-panel z-10">
+            <div className="text-center text-error px-4">
               <Box size={48} className="mx-auto mb-3 opacity-50" />
               <span className="text-sm">
                 {error.fallback ? t(error.key, error.fallback) : t(error.key)}

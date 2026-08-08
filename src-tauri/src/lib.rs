@@ -1670,6 +1670,95 @@ fn export_issues_to_json(project_id: String) -> Result<String, String> {
     })
 }
 
+/// The report's stylesheet, kept out of the `format!` template so a test can
+/// read it directly (`every_asset_type_has_a_report_badge_rule`). Lifting it
+/// out also drops the doubled braces the template otherwise needs.
+const REPORT_STYLE: &str = r#"    <style>
+        /* Palette lifted from src/styles/redesign-tokens-v2.css — the app's
+           OKLCH tokens converted to hex, because a standalone report cannot
+           read the app's stylesheet. It replaces a second, unrelated palette
+           (indigo accent, Tailwind-default type colours) that shared nothing
+           with the interface the report came out of.
+
+           Light is the default: a report gets printed, attached and forwarded,
+           and whoever opens it is often not whoever exported it. Dark follows
+           the reader's system, and print forces light back — `prefers-color-
+           scheme: dark` still matches while printing. */
+        :root {
+            --bg: #fcf9f7; --panel: #ffffff; --line: #e5e0dc;
+            --text: #201914; --text-2: #59514b;
+            --primary: #c26300;
+            --err: #cc3336; --warn: #b79500; --info: #008aaf;
+            --c-texture: #de602f; --c-model: #009365; --c-audio: #9457ce;
+            --c-video: #e14660; --c-animation: #009c7b; --c-material: #a98900;
+            --c-prefab: #5671d8; --c-scene: #b950b2; --c-script: #0083c9;
+            --c-data: #008a77; --c-other: #756d69;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #0b0907; --panel: #1d1a18; --line: #36322f;
+                --text: #f4f1ed; --text-2: #b7b0a9;
+                --primary: #e69825;
+                --err: #ff5f5b; --warn: #e9c100; --info: #09b7dc;
+                --c-texture: #ff8a5e; --c-model: #1fc893; --c-audio: #c189fc;
+                --c-video: #ff6d80; --c-animation: #00cfac; --c-material: #d6b529;
+                --c-prefab: #7e9dff; --c-scene: #e57fdd; --c-script: #39b5ff;
+                --c-data: #2fbda7; --c-other: #98918d;
+            }
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); padding: 2rem; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        h1 { color: var(--primary); margin-bottom: 0.5rem; }
+        h2 { color: var(--text); margin: 2rem 0 1rem; border-bottom: 1px solid var(--line); padding-bottom: 0.5rem; }
+        .meta { color: var(--text-2); margin-bottom: 2rem; }
+        .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem; }
+        .card { background: var(--panel); border-radius: 8px; padding: 1.5rem; border: 1px solid var(--line); }
+        .card-value { font-size: 2rem; font-weight: bold; color: var(--primary); }
+        .card-label { color: var(--text-2); font-size: 0.875rem; margin-top: 0.25rem; }
+        table { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: 8px; overflow: hidden; }
+        th, td { padding: 0.75rem 1rem; text-align: left; border-bottom: 1px solid var(--line); }
+        th { background: var(--bg); font-weight: 600; }
+        tr:hover { background: var(--bg); }
+        /* Outlined rather than tinted: a tint needs a translucent copy of every
+           type colour, and the alpha-hex trick the tints used cannot be written
+           against a custom property. `currentColor` gets it from one value. */
+        .type-badge { display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 500; border: 1px solid currentColor; }
+        .texture { color: var(--c-texture); }
+        .model { color: var(--c-model); }
+        .audio { color: var(--c-audio); }
+        .video { color: var(--c-video); }
+        .animation { color: var(--c-animation); }
+        .material { color: var(--c-material); }
+        .prefab { color: var(--c-prefab); }
+        .scene { color: var(--c-scene); }
+        .script { color: var(--c-script); }
+        .data { color: var(--c-data); }
+        .other { color: var(--c-other); }
+        .severity-error { color: var(--err); }
+        .severity-warning { color: var(--warn); }
+        .severity-info { color: var(--info); }
+        .chart { display: flex; gap: 2rem; margin-bottom: 2rem; }
+        .chart-bar { flex: 1; background: var(--panel); border-radius: 8px; padding: 1rem; }
+        .bar { height: 24px; background: var(--primary); border-radius: 4px; margin-bottom: 0.5rem; transition: width 0.3s; }
+        .bar-label { display: flex; justify-content: space-between; font-size: 0.875rem; color: var(--text-2); }
+        @media print {
+            :root {
+                --bg: #ffffff; --panel: #ffffff; --line: #cccccc;
+                --text: #000000; --text-2: #444444;
+                --primary: #8a4600;
+                --err: #a3181c; --warn: #6f5a00; --info: #005a72;
+                --c-texture: #a8420f; --c-model: #006644; --c-audio: #6a34a0;
+                --c-video: #a82a42; --c-animation: #00705a; --c-material: #7a6200;
+                --c-prefab: #3a52ab; --c-scene: #8c3486; --c-script: #005f96;
+                --c-data: #00655a; --c-other: #55504d;
+            }
+            body { padding: 0; }
+            .card, table, .chart-bar { break-inside: avoid; }
+        }
+    </style>
+"#;
+
 /// `issue_limit` / `asset_limit` cap the report's table rows (Settings →
 /// Export). `None` keeps the historical defaults (100 / 500); `Some(0)`
 /// means unlimited — a 100k-file project then produces a very large file,
@@ -1754,41 +1843,7 @@ fn export_to_html(
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Tidycraft Report - {project_name}</title>
-    <style>
-        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #e4e4e7; padding: 2rem; }}
-        .container {{ max-width: 1200px; margin: 0 auto; }}
-        h1 {{ color: #6366f1; margin-bottom: 0.5rem; }}
-        h2 {{ color: #e4e4e7; margin: 2rem 0 1rem; border-bottom: 1px solid #3a3a5c; padding-bottom: 0.5rem; }}
-        .meta {{ color: #9ca3af; margin-bottom: 2rem; }}
-        .cards {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem; }}
-        .card {{ background: #252542; border-radius: 8px; padding: 1.5rem; border: 1px solid #3a3a5c; }}
-        .card-value {{ font-size: 2rem; font-weight: bold; color: #6366f1; }}
-        .card-label {{ color: #9ca3af; font-size: 0.875rem; margin-top: 0.25rem; }}
-        table {{ width: 100%; border-collapse: collapse; background: #252542; border-radius: 8px; overflow: hidden; }}
-        th, td {{ padding: 0.75rem 1rem; text-align: left; border-bottom: 1px solid #3a3a5c; }}
-        th {{ background: #1a1a2e; font-weight: 600; }}
-        tr:hover {{ background: #2a2a4a; }}
-        .type-badge {{ display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 500; }}
-        .texture {{ background: #4ade8020; color: #4ade80; }}
-        .model {{ background: #60a5fa20; color: #60a5fa; }}
-        .audio {{ background: #facc1520; color: #facc15; }}
-        .video {{ background: #fb718520; color: #fb7185; }}
-        .animation {{ background: #a78bfa20; color: #a78bfa; }}
-        .material {{ background: #f472b620; color: #f472b6; }}
-        .prefab {{ background: #22d3d120; color: #22d3d1; }}
-        .scene {{ background: #fb923c20; color: #fb923c; }}
-        .script {{ background: #ef444420; color: #ef4444; }}
-        .data {{ background: #94a3b820; color: #94a3b8; }}
-        .other {{ background: #6b728020; color: #9ca3af; }}
-        .severity-error {{ color: #ef4444; }}
-        .severity-warning {{ color: #f59e0b; }}
-        .severity-info {{ color: #3b82f6; }}
-        .chart {{ display: flex; gap: 2rem; margin-bottom: 2rem; }}
-        .chart-bar {{ flex: 1; background: #252542; border-radius: 8px; padding: 1rem; }}
-        .bar {{ height: 24px; background: #6366f1; border-radius: 4px; margin-bottom: 0.5rem; transition: width 0.3s; }}
-        .bar-label {{ display: flex; justify-content: space-between; font-size: 0.875rem; color: #9ca3af; }}
-    </style>
+{REPORT_STYLE}
 </head>
 <body>
     <div class="container">
@@ -1817,7 +1872,7 @@ fn export_to_html(
         <h2>Asset Distribution</h2>
         <div class="chart">
             <div class="chart-bar">
-                <h3 style="margin-bottom: 1rem; color: #9ca3af;">By Type</h3>
+                <h3 style="margin-bottom: 1rem; color: var(--text-2);">By Type</h3>
                 {type_bars}
             </div>
         </div>
@@ -1910,7 +1965,7 @@ fn export_to_html(
                     .collect();
                 if total > issue_cap {
                     rows.push(format!(
-                        r#"<tr><td colspan="4" style="text-align:center;color:#9ca3af;font-style:italic;">Showing first {} of {} issues — export to JSON for the complete list, or raise the limit in Settings → Export.</td></tr>"#,
+                        r#"<tr><td colspan="4" style="text-align:center;color:var(--text-2);font-style:italic;">Showing first {} of {} issues — export to JSON for the complete list, or raise the limit in Settings → Export.</td></tr>"#,
                         issue_cap, total
                     ));
                 }
@@ -1954,7 +2009,7 @@ fn export_to_html(
                     .collect();
                 if total > asset_cap {
                     rows.push(format!(
-                        r#"<tr><td colspan="4" style="text-align:center;color:#9ca3af;font-style:italic;">Showing first {} of {} assets — export to CSV or JSON for the complete list, or raise the limit in Settings → Export.</td></tr>"#,
+                        r#"<tr><td colspan="4" style="text-align:center;color:var(--text-2);font-style:italic;">Showing first {} of {} assets — export to CSV or JSON for the complete list, or raise the limit in Settings → Export.</td></tr>"#,
                         asset_cap, total
                     ));
                 }
@@ -3358,6 +3413,73 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::scanner::AssetType;
+
+    #[test]
+    fn every_asset_type_has_a_report_badge_rule() {
+        // The HTML report derives each badge's class from the variant name at
+        // runtime (`format!("{:?}", asset_type).to_lowercase()`), so a variant
+        // with no matching CSS rule ships as a silently unstyled badge. The
+        // exhaustive match makes a new variant a compile error here; the
+        // assertions then tie the derived name to the rule that must exist.
+        fn badge_class(t: &AssetType) -> &'static str {
+            match t {
+                AssetType::Texture => "texture",
+                AssetType::Model => "model",
+                AssetType::Audio => "audio",
+                AssetType::Video => "video",
+                AssetType::Animation => "animation",
+                AssetType::Material => "material",
+                AssetType::Prefab => "prefab",
+                AssetType::Scene => "scene",
+                AssetType::Script => "script",
+                AssetType::Data => "data",
+                AssetType::Other => "other",
+            }
+        }
+
+        for t in [
+            AssetType::Texture,
+            AssetType::Model,
+            AssetType::Audio,
+            AssetType::Video,
+            AssetType::Animation,
+            AssetType::Material,
+            AssetType::Prefab,
+            AssetType::Scene,
+            AssetType::Script,
+            AssetType::Data,
+            AssetType::Other,
+        ] {
+            let class = badge_class(&t);
+            assert_eq!(
+                format!("{t:?}").to_lowercase(),
+                class,
+                "the class the report emits for {t:?} is not the one declared here"
+            );
+            assert!(
+                REPORT_STYLE.contains(&format!(".{class} {{")),
+                "the report stylesheet has no rule for the {class} badge"
+            );
+            // Every badge colour must be theme-aware, i.e. declared in both the
+            // default block and the dark override. Counting occurrences of the
+            // custom property is enough: three (declare, dark, print).
+            let var = format!("--c-{class}:");
+            assert_eq!(
+                REPORT_STYLE.matches(&var).count(),
+                3,
+                "{var} should be declared in the light, dark and print palettes"
+            );
+        }
+
+        for severity in ["error", "warning", "info"] {
+            assert!(
+                REPORT_STYLE.contains(&format!(".severity-{severity} {{")),
+                "the report stylesheet has no rule for severity {severity}"
+            );
+        }
+    }
 
     #[test]
     fn rename_targets_reject_separators_and_degenerates() {

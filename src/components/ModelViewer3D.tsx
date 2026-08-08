@@ -10,9 +10,11 @@ import {
   loadModel,
   releaseRenderer,
   setupAnimations,
+  VIEWER_BACKDROP,
   type ModelError,
   type ModelStats,
 } from "../lib/modelLoading";
+import { useThemeStore } from "../stores/themeStore";
 
 /// Largest dimension the loaded model is scaled to, in world units. The
 /// lightbox uses a larger value against its larger grid.
@@ -35,6 +37,7 @@ type LoadingStats = ModelStats & { format: string };
 
 export function ModelViewer3D({ filePath, extension, vertexCount, onFullscreen }: ModelViewer3DProps) {
   const { t } = useTranslation();
+  const theme = useThemeStore((s) => s.theme);
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -101,7 +104,7 @@ export function ModelViewer3D({ filePath, extension, vertexCount, onFullscreen }
 
     // Create scene
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x1a1a1a);
+    scene.background = new THREE.Color(VIEWER_BACKDROP[theme]);
     sceneRef.current = scene;
 
     // Create camera
@@ -219,6 +222,16 @@ export function ModelViewer3D({ filePath, extension, vertexCount, onFullscreen }
     };
   }, [filePath, extension]);
 
+  // Theme is read at scene construction above but deliberately kept out of that
+  // effect's dependencies: it would tear down and rebuild the renderer, reload
+  // the model and reset the camera every time the user toggles the theme. The
+  // backdrop is the only thing that has to follow, so it follows on its own.
+  useEffect(() => {
+    if (sceneRef.current) {
+      sceneRef.current.background = new THREE.Color(VIEWER_BACKDROP[theme]);
+    }
+  }, [theme]);
+
   const resetCamera = () => {
     if (cameraRef.current && controlsRef.current) {
       cameraRef.current.position.set(2, 2, 2);
@@ -233,7 +246,7 @@ export function ModelViewer3D({ filePath, extension, vertexCount, onFullscreen }
         className="w-full aspect-square relative"
       >
         {isLoading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-[#1a1a1a] z-10">
+          <div className="absolute inset-0 flex items-center justify-center bg-panel z-10">
             <div className="text-center text-text-secondary">
               <Box size={32} className="mx-auto mb-2 animate-pulse text-[var(--accent)]" />
               <span className="text-sm">{t("modelViewer.loading", "Loading model...")}</span>
@@ -241,7 +254,7 @@ export function ModelViewer3D({ filePath, extension, vertexCount, onFullscreen }
           </div>
         )}
         {error && (
-          <div className="absolute inset-0 flex items-center justify-center bg-[#1a1a1a] z-10">
+          <div className="absolute inset-0 flex items-center justify-center bg-panel z-10">
             <div className="text-center text-error px-4">
               <Box size={32} className="mx-auto mb-2 opacity-50" />
               <span className="text-sm">{error.fallback ? t(error.key, error.fallback) : t(error.key)}</span>

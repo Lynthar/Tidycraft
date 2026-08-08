@@ -68,6 +68,18 @@
   --warn: oklch(82% 0.18 95);   /* hue 95 — vs primary 70，差 25° */
   --err:  oklch(70% 0.20 25);   /* hue 25 */
   --info: oklch(72% 0.13 220);  /* hue 220 */
+  /* 填在 --err 上的前景。与 --on-primary 同理由：--err 在深色主题是亮红、
+     在浅色主题是暗红，所以前景必须随主题翻转 —— 固定的白字在深色下只有
+     2.6:1。本对实测 6.70:1（深）/ 4.97:1（浅）。 */
+  --on-err: oklch(14% 0.04 25);
+  /* Tints for status surfaces. Solid, not alpha: Tailwind 3 cannot apply an
+     opacity modifier to a `var()` colour — `bg-err/10` compiles to nothing at
+     all — and the system already answers "how do I tint" with --primary-soft /
+     --accent-soft. Tuned against --panel-2, which is what carries them. */
+  --ok-soft:   oklch(30% 0.06 150);
+  --warn-soft: oklch(30% 0.06 95);
+  --err-soft:  oklch(30% 0.07 25);
+  --info-soft: oklch(30% 0.06 220);
 
   /* Shadows — 加深以匹配更深的背景 */
   --shadow-card: 0 1px 0 oklch(34% 0.008 50 / 0.5),
@@ -164,6 +176,11 @@
   --warn: oklch(68% 0.16 95);
   --err:  oklch(56% 0.19 25);
   --info: oklch(58% 0.13 220);
+  --on-err: oklch(99% 0.005 25);
+  --ok-soft:   oklch(94% 0.05 150);
+  --warn-soft: oklch(94% 0.05 95);
+  --err-soft:  oklch(94% 0.05 25);
+  --info-soft: oklch(94% 0.05 220);
 
   /* Shadows */
   --shadow-card: 0 1px 0 oklch(90% 0.008 60 / 0.6),

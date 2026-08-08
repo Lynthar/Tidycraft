@@ -21,6 +21,13 @@ export default {
         warning: "var(--color-warning)",
         error: "var(--color-error)",
         info: "var(--color-info)",
+        // Solid tints for status surfaces. Tailwind 3 silently drops opacity
+        // modifiers on `var()` colours (`bg-error/10` emits no rule), so a tint
+        // has to be its own token — same reason --primary-soft exists.
+        "success-soft": "var(--ok-soft)",
+        "warning-soft": "var(--warn-soft)",
+        "error-soft": "var(--err-soft)",
+        "info-soft": "var(--info-soft)",
 
         // === Redesign tokens (Forge system, OKLCH) ===
         // Surfaces
@@ -52,6 +59,9 @@ export default {
           soft: "var(--accent-soft)",
         },
         "on-accent": "var(--on-accent)",
+        // Foreground for anything filled with `error` — flips with the theme,
+        // see the --on-err note in redesign-tokens-v2.css.
+        "on-error": "var(--on-err)",
         // Asset type colors (11)
         "c-texture": "var(--c-texture)",
         "c-model": "var(--c-model)",
