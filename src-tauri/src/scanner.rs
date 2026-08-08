@@ -289,6 +289,103 @@ pub fn dcc_source_kind_for(extension: &str) -> Option<&'static str> {
     }
 }
 
+/// Size at which a mesh takes the heavy-parse gate, and how many may be
+/// parsed at once once they do.
+///
+/// Three of our geometry parsers hold the whole mesh in memory just to count
+/// it: `tobj` expands OBJ faces into a de-duplicated vertex buffer (positions,
+/// normals and texcoords, plus the `(v, vt, vn)` hash map that de-duplicates
+/// them), `fbxcel-dom` builds the entire FBX document tree, and
+/// `gltf::Gltf::open` keeps a GLB's binary chunk as a blob. Any one of those is
+/// bounded by the file — the problem is that the scan calls
+/// `parse_metadata_for` under `rayon`, so the peak is that cost times the core
+/// count, and a library with a handful of large meshes can have all of them
+/// expanded simultaneously.
+///
+/// Only files at or above the threshold take the gate. Meshes below it parse
+/// in milliseconds and keep the full width of the thread pool, so the common
+/// case is unaffected.
+const HEAVY_PARSE_THRESHOLD: u64 = 32 * 1024 * 1024;
+const HEAVY_PARSE_CONCURRENCY: usize = 2;
+
+static HEAVY_PARSE_GATE: Semaphore = Semaphore::new(HEAVY_PARSE_CONCURRENCY);
+
+/// A counting semaphore over `std::sync`.
+///
+/// `parking_lot` (used elsewhere in this file) ships no semaphore, and
+/// `tokio`'s requires an async context — the scan body runs inside
+/// `spawn_blocking`. The permit count must live in a `Mutex` rather than an
+/// atomic because `Condvar` needs one to wait on.
+///
+/// Poisoning is recovered from rather than propagated: a panic in one parser
+/// must not wedge every later scan behind a poisoned mutex, and the guarded
+/// value is a plain count that a panic cannot leave inconsistent.
+struct Semaphore {
+    permits: std::sync::Mutex<usize>,
+    released: std::sync::Condvar,
+}
+
+impl Semaphore {
+    const fn new(permits: usize) -> Self {
+        Self {
+            permits: std::sync::Mutex::new(permits),
+            released: std::sync::Condvar::new(),
+        }
+    }
+
+    /// Block until a permit is free. It is held until the returned guard drops.
+    fn acquire(&self) -> SemaphorePermit<'_> {
+        let mut permits = self.permits.lock().unwrap_or_else(|e| e.into_inner());
+        while *permits == 0 {
+            permits = self
+                .released
+                .wait(permits)
+                .unwrap_or_else(|e| e.into_inner());
+        }
+        *permits -= 1;
+        SemaphorePermit { semaphore: self }
+    }
+}
+
+struct SemaphorePermit<'a> {
+    semaphore: &'a Semaphore,
+}
+
+impl Drop for SemaphorePermit<'_> {
+    fn drop(&mut self) {
+        let mut permits = self
+            .semaphore
+            .permits
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        *permits += 1;
+        self.semaphore.released.notify_one();
+    }
+}
+
+/// Whether parsing `path` should take the gate.
+///
+/// A file we can't stat counts as small: the gate exists to bound a cost we
+/// can see, and guessing pessimistically would serialise meshes on any
+/// transient stat failure.
+fn takes_heavy_parse_gate(path: &Path) -> bool {
+    path.metadata()
+        .map(|m| m.len() >= HEAVY_PARSE_THRESHOLD)
+        .unwrap_or(false)
+}
+
+/// Run a memory-hungry geometry parser, serialising it against other large
+/// ones when the file is big enough for that to matter.
+fn parse_large_mesh<T>(path: &Path, parse: impl FnOnce() -> Option<T>) -> Option<T> {
+    if !takes_heavy_parse_gate(path) {
+        return parse();
+    }
+    // Named binding, not `_`: `let _ = guard` drops on the spot and the gate
+    // would hold nothing.
+    let _permit = HEAVY_PARSE_GATE.acquire();
+    parse()
+}
+
 /// Dispatch metadata parsing for a single asset based on its type + extension.
 /// Used by both the full scan and the incremental per-file reparse so the set
 /// of supported formats lives in one place.
@@ -326,9 +423,13 @@ fn parse_metadata_for(
             _ => None,
         },
         AssetType::Model => match ext.as_str() {
-            "gltf" | "glb" => parse_gltf_metadata(path),
-            "obj" => parse_obj_metadata(path),
-            "fbx" => parse_fbx_metadata(path),
+            // `.gltf` is JSON: `Gltf::open` reads accessor counts and leaves
+            // the (external) buffers on disk, so it stays off the gate. `.glb`
+            // carries its binary chunk inline and does not.
+            "gltf" => parse_gltf_metadata(path),
+            "glb" => parse_large_mesh(path, || parse_gltf_metadata(path)),
+            "obj" => parse_large_mesh(path, || parse_obj_metadata(path)),
+            "fbx" => parse_large_mesh(path, || parse_fbx_metadata(path)),
             _ => None,
         },
         AssetType::Audio => match ext.as_str() {
@@ -2224,6 +2325,85 @@ mod tests {
         let meta = parse_dds_metadata(&path).expect("valid DDS should parse");
         // Two-channel normal-map format — no alpha despite being compressed.
         assert_eq!(meta.has_alpha, Some(false));
+    }
+
+    #[test]
+    fn test_semaphore_admits_exactly_its_permit_count() {
+        // Exercises the primitive with its own two permits rather than the
+        // scanner's gate, so tuning HEAVY_PARSE_CONCURRENCY can't quietly
+        // turn this into a test of nothing.
+        static GATE: Semaphore = Semaphore::new(2);
+        let live = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+
+        let threads: Vec<_> = (0..8)
+            .map(|_| {
+                let live = live.clone();
+                let peak = peak.clone();
+                std::thread::spawn(move || {
+                    let _permit = GATE.acquire();
+                    let now = live.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(now, Ordering::SeqCst);
+                    // Linger until a peer arrives. Without this, a gate that
+                    // serialised everything would still pass: nothing would
+                    // force an overlap, and a peak of 1 would be reported as
+                    // a correct result.
+                    let deadline =
+                        std::time::Instant::now() + std::time::Duration::from_millis(500);
+                    while live.load(Ordering::SeqCst) < 2 && std::time::Instant::now() < deadline {
+                        std::thread::yield_now();
+                    }
+                    live.fetch_sub(1, Ordering::SeqCst);
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+
+        assert_eq!(
+            peak.load(Ordering::SeqCst),
+            2,
+            "the gate must admit two at once — no more, and no fewer"
+        );
+        assert_eq!(live.load(Ordering::SeqCst), 0, "every permit was returned");
+    }
+
+    #[test]
+    fn test_gate_triggers_on_size() {
+        let dir = tempdir().unwrap();
+
+        let small = dir.path().join("small.obj");
+        fs::write(&small, "v 0 0 0\n").unwrap();
+        assert!(!takes_heavy_parse_gate(&small));
+
+        // `set_len` gives a file of the right size without writing 32 MB of
+        // it. The threshold is inclusive, so a file exactly at it is gated —
+        // asserting on the boundary is what catches a `>` written for a `>=`.
+        let big = dir.path().join("big.obj");
+        let f = fs::File::create(&big).unwrap();
+        f.set_len(HEAVY_PARSE_THRESHOLD).unwrap();
+        drop(f);
+        assert!(takes_heavy_parse_gate(&big));
+
+        // A path that can't be stat'd must not wedge every mesh behind the
+        // gate — unsized means ungated.
+        assert!(!takes_heavy_parse_gate(&dir.path().join("gone.obj")));
+    }
+
+    #[test]
+    fn test_small_mesh_parses_on_the_ungated_path() {
+        let dir = tempdir().unwrap();
+        let obj_path = dir.path().join("small.obj");
+        fs::write(&obj_path, "o a\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").unwrap();
+
+        // Far below HEAVY_PARSE_THRESHOLD, so this goes down the ungated
+        // branch — which must still return exactly what the parser did
+        // before the gate wrapped it.
+        let meta = parse_metadata_for(&obj_path, "obj", &AssetType::Model)
+            .expect("a small OBJ still parses");
+        assert_eq!(meta.vertex_count, Some(3));
+        assert_eq!(meta.face_count, Some(1));
     }
 
     #[test]
