@@ -26,6 +26,7 @@ import { Toasts } from "./components/Toasts";
 import { exportTextFile } from "./lib/exportFile";
 import { issueTemplatesForExport } from "./lib/issueTemplates";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { registerSearchFocus } from "./lib/menuActions";
 import { useShallow } from "zustand/react/shallow";
 import { isMacOS } from "./lib/platform";
 import { version as appVersion } from "../package.json";
@@ -85,12 +86,15 @@ function App() {
     }
   }, []);
 
+  // Register the search-input focuser with the shared action layer, where
+  // both the keyboard handler and the macOS menu (Edit > Find) reach it.
+  useEffect(() => {
+    registerSearchFocus(() => searchInputRef.current?.focus());
+    return () => registerSearchFocus(null);
+  }, []);
+
   // Initialize keyboard shortcuts
-  useKeyboardShortcuts({
-    onFocusSearch: () => {
-      searchInputRef.current?.focus();
-    },
-  });
+  useKeyboardShortcuts();
 
   // The preview panel is expanded on the assets view of any scanned project
   // (AssetPreview renders its own "select an asset" empty state when nothing

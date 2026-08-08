@@ -2487,6 +2487,17 @@ fn open_with_default_app(app: tauri::AppHandle, path: String) -> Result<(), Stri
         .map_err(|e| e.to_string())
 }
 
+/// Open a URL in the default browser. The path-opening command above goes
+/// through `open_path`, which is the wrong opener half for URLs — this one
+/// exists for the macOS menu's Help links (GitHub readme / issues).
+#[tauri::command]
+fn open_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_url(&url, None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
 /// Write an export payload to a user-chosen destination. The frontend gets
 /// `path` from the native save dialog (plugin-dialog), so the user has
 /// already pointed at this exact location — the command only performs the
@@ -3308,6 +3319,7 @@ pub fn run() {
             // File System
             show_in_file_manager,
             open_with_default_app,
+            open_url,
             open_in_editor,
             rename_file,
             delete_assets,

@@ -2,18 +2,16 @@ import { useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useProjectStore } from "../stores/projectStore";
 import { useUiStore, isBlockingOverlayOpen } from "../stores/uiStore";
-import { open } from "@tauri-apps/plugin-dialog";
 import { getPlatform } from "../lib/platform";
-import { useTranslation } from "react-i18next";
+import { menuActions } from "../lib/menuActions";
 
-interface KeyboardShortcuts {
-  onOpenFolder?: () => void;
-  onFocusSearch?: () => void;
-}
-
-export function useKeyboardShortcuts({ onOpenFolder, onFocusSearch }: KeyboardShortcuts = {}) {
-  const { t } = useTranslation();
-
+export function useKeyboardShortcuts() {
+  // Keystroke ROUTING lives here (which combo, in which UI state, with what
+  // preventDefault); the ACTIONS live in `lib/menuActions.ts`, shared with
+  // the macOS menu bar — on macOS a menu accelerator consumes the keystroke
+  // before the webview sees it, so the menu path must carry the same guards
+  // and the two must never drift.
+  //
   // Store state is read via `getState()` at keystroke time rather than
   // subscribed to. This hook is mounted at the App root and needs no
   // rendering of its own, but destructuring the store subscribed App to
@@ -21,20 +19,6 @@ export function useKeyboardShortcuts({ onOpenFolder, onFocusSearch }: KeyboardSh
   // re-rendering the whole tree throughout a scan and undoing the `useShallow`
   // selectors App applies for exactly that reason. Reading on demand is also
   // always fresh, so the handler needs no dependency on the values.
-  const handleOpenFolder = useCallback(async () => {
-    if (useProjectStore.getState().isScanning) return;
-
-    const selected = await open({
-      directory: true,
-      multiple: false,
-      title: t("header.selectProjectFolder"),
-    });
-
-    if (selected && typeof selected === "string") {
-      useProjectStore.getState().openProject(selected);
-    }
-  }, [t]);
-
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
       const { key, ctrlKey, metaKey, shiftKey, altKey } = event;
@@ -59,18 +43,13 @@ export function useKeyboardShortcuts({ onOpenFolder, onFocusSearch }: KeyboardSh
 
       // Ctrl/Cmd + K: toggle the command palette. Handled before the
       // input-blur guard so it works from inside any text field too.
-      // Only OPEN it when nothing else blocking is up: otherwise the palette
-      // (z-100) stacks over an open modal (Settings / Tag Manager / the AI +
-      // learning modals, z-50) and its switch/close-project commands would run
-      // underneath that modal, so the modal's Apply/Save then writes to the
-      // wrong project. Still allow Ctrl+K to CLOSE the palette when it's the
-      // overlay that's open.
+      // The open-vs-close asymmetry (never open over a blocking modal,
+      // always allow closing) lives in the shared action.
       if (modKey && key.toLowerCase() === "k") {
-        const ui = useUiStore.getState();
-        if (ui.cmdkOpen || !isBlockingOverlayOpen()) {
+        if (useUiStore.getState().cmdkOpen || !isBlockingOverlayOpen()) {
           event.preventDefault();
-          ui.toggleCmdk();
         }
+        menuActions.toggleCommandPalette();
         return;
       }
 
@@ -96,34 +75,17 @@ export function useKeyboardShortcuts({ onOpenFolder, onFocusSearch }: KeyboardSh
         return;
       }
 
-      const {
-        projectPath,
-        isScanning,
-        rescan,
-        cancelScan,
-        runAnalysis,
-        setViewMode,
-        setSelectedAsset,
-        setSearchQuery,
-      } = useProjectStore.getState();
-
       // Ctrl/Cmd + O: Open folder
       if (modKey && key.toLowerCase() === "o") {
         event.preventDefault();
-        if (onOpenFolder) {
-          onOpenFolder();
-        } else {
-          handleOpenFolder();
-        }
+        void menuActions.openProject();
         return;
       }
 
       // Ctrl/Cmd + F: Focus search
       if (modKey && key.toLowerCase() === "f") {
         event.preventDefault();
-        if (onFocusSearch) {
-          onFocusSearch();
-        }
+        menuActions.focusSearch();
         return;
       }
 
@@ -133,18 +95,17 @@ export function useKeyboardShortcuts({ onOpenFolder, onFocusSearch }: KeyboardSh
       // typed in a field is ignored and it never opens over another modal.
       if (modKey && key === ",") {
         event.preventDefault();
-        useUiStore.getState().setSettingsOpen(true);
+        menuActions.openSettings();
         return;
       }
 
       // Ctrl/Cmd + R: Rescan (if project is open). Routes through the shared
-      // `rescan` store action so it's identical to the Header button. The old
-      // `openProject(projectPath)` (no force) was a no-op for the already-open
-      // active project, so Ctrl+R silently did nothing.
+      // `rescan` store action so it's identical to the Header button. The
+      // keystroke is only claimed when the rescan actually ran — with no
+      // project open, ⌘R keeps whatever meaning the webview gives it.
       if (modKey && key.toLowerCase() === "r" && !shiftKey) {
-        if (projectPath && !isScanning) {
+        if (menuActions.rescan()) {
           event.preventDefault();
-          rescan();
         }
         return;
       }
@@ -153,15 +114,17 @@ export function useKeyboardShortcuts({ onOpenFolder, onFocusSearch }: KeyboardSh
       // shift modifier disambiguates. Old binding was ⌘⇧A but that collides
       // with Select All in many text contexts.
       if (modKey && shiftKey && key.toLowerCase() === "r") {
-        if (projectPath && !isScanning) {
+        if (menuActions.runAnalysis()) {
           event.preventDefault();
-          runAnalysis();
         }
         return;
       }
 
-      // Escape: Cancel scan or clear selection
+      // Escape: Cancel scan or clear selection. Keyboard-only semantics (no
+      // menu equivalent), so it stays here rather than in menuActions.
       if (key === "Escape") {
+        const { isScanning, cancelScan, setSelectedAsset, setSearchQuery } =
+          useProjectStore.getState();
         if (isScanning) {
           cancelScan();
         } else {
@@ -176,22 +139,22 @@ export function useKeyboardShortcuts({ onOpenFolder, onFocusSearch }: KeyboardSh
       if (modKey && !shiftKey) {
         if (key === "1") {
           event.preventDefault();
-          setViewMode("assets");
+          menuActions.setViewMode("assets");
           return;
         }
         if (key === "2") {
           event.preventDefault();
-          setViewMode("issues");
+          menuActions.setViewMode("issues");
           return;
         }
         if (key === "3") {
           event.preventDefault();
-          setViewMode("stats");
+          menuActions.setViewMode("stats");
           return;
         }
       }
     },
-    [handleOpenFolder, onOpenFolder, onFocusSearch]
+    []
   );
 
   useEffect(() => {
