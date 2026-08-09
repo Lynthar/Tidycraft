@@ -111,7 +111,8 @@
     "typePillHint": "Click to filter · {{mod}}+Click to multi-select",
     "dccSourceFile": "Source file",
     "vertsInline": "{{n}} v",
-    "duplicateFailed": "Duplicate failed: {{reason}}"
+    "duplicateFailed": "Duplicate failed: {{reason}}",
+    "copyPathFailed": "Could not copy the path: {{reason}}"
   },
   "exportToast": {
     "saved": "Exported {{name}}",
@@ -215,6 +216,7 @@
     "openWithDefaultApp": "Open with Default App",
     "openInEditor": "Open in {{name}}",
     "openFailed": "Open failed: {{reason}}",
+    "copyFailed": "Could not copy: {{reason}}",
     "viewDependencies": "Dependency Graph",
     "dccSource": "Source tool",
     "components": "Components",

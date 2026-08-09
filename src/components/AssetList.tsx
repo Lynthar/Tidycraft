@@ -113,6 +113,16 @@ export function AssetList() {
   const addPaths = useSelectionStore((s) => s.addPaths);
   const removePaths = useSelectionStore((s) => s.removePaths);
   const clearSelection = useSelectionStore((s) => s.clearSelection);
+  // The two children that want an array rather than the Set share one
+  // snapshot, rebuilt only when the selection itself changes: selectionStore
+  // replaces the Set exactly then and leaves it alone otherwise (its prune
+  // subscription only writes when something is genuinely stale). Building it
+  // inline in the JSX instead handed them a new array on every re-render of
+  // this component — a watcher batch swapping `scanResult` is the everyday
+  // one — and BatchRenameDialog keys its preview effect on the prop, so each
+  // of those re-sent the same preview request and pushed the preview itself
+  // another debounce interval into the future.
+  const selectedPathList = useMemo(() => Array.from(selectedPaths), [selectedPaths]);
 
   const [showBatchRename, setShowBatchRename] = useState(false);
   // Shift-range anchor. Stored as a PATH, not an index: filters, search,
@@ -268,9 +278,16 @@ export function AssetList() {
         await writeText(contextMenu.asset.path);
       } catch (err) {
         console.error("Failed to copy path:", err);
+        // The menu closes on click, so a failure here left nothing at all on
+        // screen — the one case where "copy" and "nothing happened" look the
+        // same to the user.
+        pushToast({
+          kind: "error",
+          message: t("assetList.copyPathFailed", { reason: String(err) }),
+        });
       }
     }
-  }, [contextMenu.asset]);
+  }, [contextMenu.asset, pushToast, t]);
 
   const handleRevealInFileManager = useCallback(async () => {
     if (contextMenu.asset) {
@@ -487,7 +504,7 @@ export function AssetList() {
             </button>
             <span className="tc-batch-spacer" />
             <BatchTagSelector
-              selectedPaths={Array.from(selectedPaths)}
+              selectedPaths={selectedPathList}
               onOpenManager={() => setTagManagerOpen(true)}
             />
             {aiDirectModeAvailable && (
@@ -683,7 +700,7 @@ export function AssetList() {
       <BatchRenameDialog
         isOpen={showBatchRename}
         onClose={() => setShowBatchRename(false)}
-        selectedPaths={Array.from(selectedPaths)}
+        selectedPaths={selectedPathList}
         onComplete={handleRenameComplete}
       />
 

@@ -31,6 +31,10 @@ interface BatchRenameResult {
 interface BatchRenameDialogProps {
   isOpen: boolean;
   onClose: () => void;
+  /// Must keep its identity while the selection is unchanged — both effects
+  /// below are keyed on it, one of them fetching every reference in the
+  /// project. A fresh array per render turns each of them into work repeated
+  /// for nothing.
   selectedPaths: string[];
   /// Called when at least one file was renamed, so the parent refreshes
   /// the asset list / tags / undo state. `fullySucceeded` tells it whether
@@ -84,11 +88,7 @@ export function BatchRenameDialog({
     return () => {
       cancelled = true;
     };
-    // Deliberately NOT keyed on `selectedPaths`: the parent passes a fresh
-    // Array.from() every render, and the selection can't change while the
-    // modal is open anyway — keying on identity would re-scan the whole
-    // project's references on every incidental parent re-render.
-  }, [isOpen, projectType, activeProjectId]);
+  }, [isOpen, projectType, activeProjectId, selectedPaths]);
 
   // Build the operation object for the backend
   const buildOperation = () => {

@@ -111,7 +111,8 @@
     "typePillHint": "点击筛选 · {{mod}}+点击多选",
     "dccSourceFile": "源文件",
     "vertsInline": "{{n}} 顶点",
-    "duplicateFailed": "创建副本失败：{{reason}}"
+    "duplicateFailed": "创建副本失败：{{reason}}",
+    "copyPathFailed": "复制路径失败：{{reason}}"
   },
   "exportToast": {
     "saved": "已导出 {{name}}",
@@ -215,6 +216,7 @@
     "openWithDefaultApp": "用默认应用打开",
     "openInEditor": "用 {{name}} 打开",
     "openFailed": "打开失败：{{reason}}",
+    "copyFailed": "复制失败：{{reason}}",
     "viewDependencies": "依赖关系图",
     "dccSource": "来源工具",
     "components": "组件",

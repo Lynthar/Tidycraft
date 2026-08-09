@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import {
   Image,
   Box,
@@ -180,9 +181,17 @@ export function AssetPreview() {
     };
   }, [isUnityStructureFile, selectedAsset?.path, selectedAsset?.modified]);
 
+  // Goes through the clipboard plugin, the same way AssetList's context menu
+  // does. Not a portability nicety: WebKit gates `navigator.clipboard.writeText`
+  // on transient activation. Measured in the real bundle (`tauri://localhost`,
+  // CSP enforced): straight out of a click it resolves, but with no live
+  // gesture it rejects with `NotAllowedError` and the clipboard keeps its old
+  // contents — the plugin succeeds either way. So the old call worked only by
+  // accident of statement order; one `await` in front of it would have moved
+  // the write past the activation window, into a catch nobody could see.
   const copyToClipboard = async (text: string, type: "path" | "guid") => {
     try {
-      await navigator.clipboard.writeText(text);
+      await writeText(text);
       if (type === "path") {
         setCopiedPath(true);
         setTimeout(() => setCopiedPath(false), 2000);
@@ -192,6 +201,7 @@ export function AssetPreview() {
       }
     } catch (err) {
       console.error("Failed to copy:", err);
+      setErrorMsg(t("assetPreview.copyFailed", { reason: String(err) }));
     }
   };
 
