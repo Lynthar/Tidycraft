@@ -563,6 +563,26 @@ adding Vitest.
 touches paths, filesystems, or platform-specific APIs, verify on both
 Windows and at least one POSIX target.
 
+**What `pnpm tauri dev` cannot test.** In dev the page is served by Vite over
+`http://localhost:1420`; in the shipped app the webview loads it from the
+framework's own scheme. Anything the browser decides per origin therefore
+behaves differently in the two, and dev is the permissive one — it will not
+tell you that something is broken:
+
+- The Content-Security-Policy is attached only where the framework serves the
+  document itself, so **dev runs with no policy at all**. `eval` works, every
+  origin is reachable, and a change that violates the policy passes unnoticed.
+- Web APIs gated on a secure context or on a user gesture behave differently
+  once the origin changes; a loopback address is a secure context by
+  definition, so those APIs are simply available in dev.
+
+To exercise either, build and run the bundle — `pnpm tauri build --debug
+--bundles app`, then launch the app it produces (the debug profile skips the
+slow release link). Confirm you are actually in it before trusting a clean
+run: the address should be the framework's scheme rather than `localhost:1420`,
+and `new Function("return 1")` must throw, or you are looking at a policy that
+never applied.
+
 ---
 
 ## 7. Cross-Platform Gotchas
@@ -576,6 +596,14 @@ Windows and at least one POSIX target.
   can fail to resolve on certain OS / format combinations (e.g. FBX with
   embedded texture paths). Known platform limitation — don't try to fix
   by URL-escaping without testing 3D preview end-to-end.
+- **Clipboard.** Write through the clipboard plugin, never
+  `navigator.clipboard`. The browser API is gated on transient activation: it
+  resolves when called straight out of a click handler, but rejects with
+  `NotAllowedError` — leaving the clipboard untouched — as soon as the gesture
+  has expired, which one `await` placed before the call is enough to do. The
+  plugin has no such gate. Both were measured in a real bundle. Whichever you
+  use, report the failure: a copy that quietly does nothing is indistinguishable
+  from one that worked.
 - **Cross-device move.** `fs::rename` fails across filesystems on POSIX
   (EXDEV). We don't currently fall back to copy+remove. Rare in practice.
 - **Linux inotify limits.** `/proc/sys/fs/inotify/max_user_watches` caps the
