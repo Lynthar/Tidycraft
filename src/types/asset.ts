@@ -1,15 +1,24 @@
-export type AssetType =
-  | "texture"
-  | "model"
-  | "audio"
-  | "video"
-  | "animation"
-  | "material"
-  | "prefab"
-  | "scene"
-  | "script"
-  | "data"
-  | "other";
+/// The asset types the backend can emit, in the order the UI presents them.
+/// The union is derived from this list rather than declared beside it: adding
+/// a type used to mean editing the union and then four hand-kept copies of the
+/// same eleven strings — the advanced filter, the statistics palette, the
+/// command palette's filter section and the toolbar pills — with nothing to
+/// catch the one you forgot. Mirrors the Rust `AssetType` enum.
+export const ASSET_TYPES = [
+  "texture",
+  "model",
+  "audio",
+  "video",
+  "animation",
+  "material",
+  "prefab",
+  "scene",
+  "script",
+  "data",
+  "other",
+] as const;
+
+export type AssetType = (typeof ASSET_TYPES)[number];
 
 export type ProjectType = "unity" | "unreal" | "godot" | "generic";
 

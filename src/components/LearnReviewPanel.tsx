@@ -5,20 +5,12 @@ import { useTranslation } from "react-i18next";
 import { ModalShell } from "./ModalShell";
 import {
   useUiStore,
+  AI_CATEGORY_COLORS,
   type AiLearnedRule,
-  type AiTagCategory,
   type AiTagGap,
 } from "../stores/uiStore";
 import { useTagsStore } from "../stores/tagsStore";
 import { useProjectStore } from "../stores/projectStore";
-
-const CATEGORY_COLORS: Record<AiTagCategory, string> = {
-  type: "#3b82f6",
-  style: "#a855f7",
-  mood: "#f97316",
-  subject: "#10b981",
-  other: "#6b7280",
-};
 
 /// Validate a regex pattern via JS `RegExp`. Pattern syntax is close
 /// enough between JS and Rust's `regex` crate for the simple anchors /
@@ -150,7 +142,7 @@ export function LearnReviewPanel() {
         if (!selectedGaps.has(gap.label)) continue;
         if (existingTagNamesLower.has(gap.label.toLowerCase())) continue;
         try {
-          const tag = await createTag(gap.label, CATEGORY_COLORS[gap.category]);
+          const tag = await createTag(gap.label, AI_CATEGORY_COLORS[gap.category]);
           if (tag) createdCount += 1;
         } catch (e) {
           console.warn("[LearnReview] create gap failed:", gap.label, e);
@@ -304,7 +296,7 @@ export function LearnReviewPanel() {
                         style={{
                           width: 8,
                           height: 8,
-                          background: CATEGORY_COLORS[gap.category],
+                          background: AI_CATEGORY_COLORS[gap.category],
                         }}
                       />
                       <div className="flex-1 min-w-0">
@@ -478,9 +470,9 @@ export function LearnReviewPanel() {
                           key={`n-${nt.label}`}
                           className="text-xs px-1.5 py-0.5 rounded"
                           style={{
-                            background: `${CATEGORY_COLORS[nt.category]}1F`,
-                            color: CATEGORY_COLORS[nt.category],
-                            border: `1px solid ${CATEGORY_COLORS[nt.category]}55`,
+                            background: `${AI_CATEGORY_COLORS[nt.category]}1F`,
+                            color: AI_CATEGORY_COLORS[nt.category],
+                            border: `1px solid ${AI_CATEGORY_COLORS[nt.category]}55`,
                           }}
                         >
                           + {nt.label}

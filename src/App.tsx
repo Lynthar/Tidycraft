@@ -44,14 +44,16 @@ function App() {
     isAnalyzing,
     runAnalysis,
     locateAsset,
-    getProjectList,
+    isEmpty,
     activeProjectId,
   } = useProjectStore(
-    useShallow((s) => ({ scanResult: s.scanResult, viewMode: s.viewMode, analysisResult: s.analysisResult, analysisStale: s.analysisStale, isAnalyzing: s.isAnalyzing, runAnalysis: s.runAnalysis, locateAsset: s.locateAsset, getProjectList: s.getProjectList, activeProjectId: s.activeProjectId, }))
+    // `isEmpty` is derived in the selector rather than from `getProjectList()`
+    // in the body: subscribing to the getter subscribed to a function whose
+    // identity never changes, so opening or closing a project moved nothing
+    // here — it re-rendered only because some neighbouring field in this same
+    // selector usually changed at the same time.
+    useShallow((s) => ({ scanResult: s.scanResult, viewMode: s.viewMode, analysisResult: s.analysisResult, analysisStale: s.analysisStale, isAnalyzing: s.isAnalyzing, runAnalysis: s.runAnalysis, locateAsset: s.locateAsset, isEmpty: s.projects.size === 0, activeProjectId: s.activeProjectId, }))
   );
-
-  const projects = getProjectList();
-  const isEmpty = projects.length === 0;
 
   // Live-vs-snapshot arithmetic: scanResult.total_count is watcher-patched
   // while analysisResult.issues is a frozen snapshot, so a naive subtraction

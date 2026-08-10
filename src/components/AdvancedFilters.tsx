@@ -3,12 +3,7 @@ import { useShallow } from "zustand/react/shallow";
 import { Filter, X, ChevronDown, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
-import type { AssetType, GitFileStatus } from "../types/asset";
-
-const ASSET_TYPES: AssetType[] = [
-  "texture", "model", "audio", "video", "animation", "material",
-  "prefab", "scene", "script", "data", "other"
-];
+import { ASSET_TYPES, type GitFileStatus } from "../types/asset";
 
 const GIT_STATUS_FILTER_OPTIONS: GitFileStatus[] = [
   "new", "modified", "deleted", "renamed", "untracked", "conflicted",

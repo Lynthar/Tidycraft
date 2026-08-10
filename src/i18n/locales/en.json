@@ -49,7 +49,8 @@
     "removeRecent": "Remove from recent",
     "current": "current",
     "issuesCount": "{{count}} issues",
-    "empty": "No projects open"
+    "empty": "No projects open",
+    "openFailed": "Couldn't open the project: {{reason}}"
   },
   "header": {
     "openFolder": "Open Folder",

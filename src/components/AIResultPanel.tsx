@@ -4,23 +4,11 @@ import { useTranslation } from "react-i18next";
 import { ModalShell } from "./ModalShell";
 import {
   useUiStore,
+  AI_CATEGORY_COLORS,
   type AiSuggestedTag,
 } from "../stores/uiStore";
 import { useTagsStore } from "../stores/tagsStore";
 import { useProjectStore } from "../stores/projectStore";
-
-/// Per-category color so the user can scan a card and see at a glance
-/// which tags are types vs styles vs mood. These hex values match the
-/// rough vibe of `--c-texture` etc. but aren't tied to existing CSS
-/// vars because we apply them as `${color}1F` (12% alpha) backgrounds
-/// which CSS vars don't support directly.
-const CATEGORY_COLORS: Record<AiSuggestedTag["category"], string> = {
-  type: "#3b82f6", // blue
-  style: "#a855f7", // purple
-  mood: "#f97316", // orange
-  subject: "#10b981", // green
-  other: "#6b7280", // gray
-};
 
 function tagKey(assetPath: string, label: string, category: string): string {
   return `${assetPath}::${category}::${label}`;
@@ -176,7 +164,7 @@ export function AIResultPanel() {
         const fullName = label + suffix;
         let tag = existingTags.find((tt) => tt.name === fullName);
         if (!tag) {
-          const created = await createTag(fullName, CATEGORY_COLORS[category]);
+          const created = await createTag(fullName, AI_CATEGORY_COLORS[category]);
           if (created) {
             tag = created;
             existingTags.push(created);
@@ -323,7 +311,7 @@ export function AIResultPanel() {
                         ? userTags.find((tt) => tt.name === tag.label)
                         : undefined;
                       const color =
-                        matchedTag?.color ?? CATEGORY_COLORS[tag.category];
+                        matchedTag?.color ?? AI_CATEGORY_COLORS[tag.category];
                       return (
                         <button
                           key={key}

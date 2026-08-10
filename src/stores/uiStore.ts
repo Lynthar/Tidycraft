@@ -23,9 +23,24 @@ export interface AiTagSuggestion {
   tags: AiSuggestedTag[];
 }
 
+export type AiTagCategory = "type" | "style" | "mood" | "subject" | "other";
+
+/// Per-category color so the user can scan a card and see at a glance which
+/// tags are types vs styles vs mood. These hex values match the rough vibe of
+/// `--c-texture` etc. but aren't tied to existing CSS vars because both panels
+/// apply them as `${color}1F` (12% alpha) backgrounds, which CSS vars don't
+/// support directly.
+export const AI_CATEGORY_COLORS: Record<AiTagCategory, string> = {
+  type: "#3b82f6", // blue
+  style: "#a855f7", // purple
+  mood: "#f97316", // orange
+  subject: "#10b981", // green
+  other: "#6b7280", // gray
+};
+
 export interface AiSuggestedTag {
   label: string;
-  category: "type" | "style" | "mood" | "subject" | "other";
+  category: AiTagCategory;
   confidence: number;
   /** Whether this label matches an existing project tag (`existing`) or
    *  the LLM coined it fresh (`new`). Older cached responses (PROMPT_VERSION
@@ -35,8 +50,6 @@ export interface AiSuggestedTag {
 }
 
 // --- Learning mode mirrors of Rust llm::learning structs ---
-
-export type AiTagCategory = "type" | "style" | "mood" | "subject" | "other";
 
 export interface AiInferredConventions {
   naming: string;

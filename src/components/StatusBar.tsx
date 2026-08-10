@@ -72,7 +72,7 @@ export function StatusBar() {
         <span className="tc-status-err-icon">
           <AlertCircle size={13} />
         </span>
-        <span style={{ fontSize: 11.5, fontWeight: 500 }}>
+        <span className="tc-status-err-msg" title={`${t("statusBar.error")}: ${error}`}>
           {t("statusBar.error")}: {error}
         </span>
         <span className="tc-status-spacer" />

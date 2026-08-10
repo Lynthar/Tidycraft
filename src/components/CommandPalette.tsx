@@ -32,30 +32,13 @@ import { useThemeStore } from "../stores/themeStore";
 import { useUiStore } from "../stores/uiStore";
 import { formatShortcut, SHORTCUTS } from "../hooks/useKeyboardShortcuts";
 import { basename } from "../lib/pathUtils";
-import type { AssetType } from "../types/asset";
+import { ASSET_TYPES } from "../types/asset";
 
 /// Maximum number of asset quick-jump matches surfaced in one query.
 /// Cap is intentional — typical projects have 1k–50k assets and rendering
 /// thousands of <button>s would tank input responsiveness. Future expansion
 /// (fuzzy ranking, Web Worker, virtualization) can replace `.slice` here.
 const ASSET_RESULT_CAP = 50;
-
-/// Canonical asset-type order for the Filter section. Keeps the menu
-/// stable across scans regardless of which types the project happens to
-/// contain. Types absent from `scanResult.type_counts` are skipped.
-const FILTER_TYPE_ORDER: AssetType[] = [
-  "texture",
-  "model",
-  "audio",
-  "video",
-  "animation",
-  "material",
-  "prefab",
-  "scene",
-  "script",
-  "data",
-  "other",
-];
 
 interface CmdItem {
   id: string;
@@ -276,11 +259,12 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
       }
     }
 
-    // SECTION: Filter — quick-toggle by asset type. Only renders types
-    // actually present in the current scan, sorted by canonical order.
+    // SECTION: Filter — quick-toggle by asset type. Walking the canonical
+    // list keeps the menu stable across scans; types absent from the current
+    // scan's counts are skipped.
     if (hasScan && scanResult) {
       const counts = scanResult.type_counts;
-      for (const type of FILTER_TYPE_ORDER) {
+      for (const type of ASSET_TYPES) {
         const count = counts[type];
         if (!count) continue;
         const isActive = typeFilter?.includes(type) ?? false;

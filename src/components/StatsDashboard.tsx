@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
 import { useThemeStore } from "../stores/themeStore";
+import { ASSET_TYPES } from "../types/asset";
 import {
   PieChart,
   Pie,
@@ -39,14 +40,6 @@ interface ProjectStats {
   directory_sizes: Record<string, number>;
 }
 
-// Asset-type palette keys — mirror the `--c-<type>` design tokens
-// (src/styles/redesign-tokens-v2.css) so the charts share the app's colors
-// instead of a private hex set.
-const ASSET_TYPE_KEYS = [
-  "texture", "model", "audio", "video", "animation", "material",
-  "prefab", "scene", "script", "data", "other",
-] as const;
-
 interface ChartColors {
   /// `--c-<type>` resolved to a concrete value, keyed by asset type.
   types: Record<string, string>;
@@ -63,8 +56,10 @@ interface ChartColors {
 function resolveChartColors(): ChartColors {
   const cs = getComputedStyle(document.documentElement);
   const read = (name: string) => cs.getPropertyValue(name).trim();
+  // Mirrors the `--c-<type>` design tokens (src/styles/redesign-tokens-v2.css)
+  // so the charts share the app's colors instead of a private hex set.
   const types: Record<string, string> = {};
-  for (const k of ASSET_TYPE_KEYS) types[k] = read(`--c-${k}`);
+  for (const k of ASSET_TYPES) types[k] = read(`--c-${k}`);
   return {
     types,
     primary: read("--primary"),

@@ -22,30 +22,13 @@ import { BatchTagSelector } from "./TagSelector";
 import { ContextMenu } from "./ContextMenu";
 import { AssetListView } from "./AssetListView";
 import { AssetGalleryView } from "./AssetGalleryView";
-import type { AssetInfo, AssetType } from "../types/asset";
-
-/// Canonical asset-type order for the toolbar filter pills. Mirrors the
-/// CommandPalette's Filter section so the two entry points stay
-/// consistent. Types absent from `scanResult.type_counts` are skipped.
-const FILTER_TYPE_ORDER: AssetType[] = [
-  "texture",
-  "model",
-  "audio",
-  "video",
-  "animation",
-  "material",
-  "prefab",
-  "scene",
-  "script",
-  "data",
-  "other",
-];
+import { ASSET_TYPES, type AssetInfo, type AssetType } from "../types/asset";
 
 /// The "Art assets" quick-group pill: everything an artist owns, minus the
 /// code / data / misc files real engine projects interleave with them. One
 /// click gets "all art, no clutter" — the multi-select union that motivated
 /// multi-select in the first place.
-const ART_TYPE_GROUP: AssetType[] = FILTER_TYPE_ORDER.filter(
+const ART_TYPE_GROUP: AssetType[] = ASSET_TYPES.filter(
   (t) => t !== "script" && t !== "data" && t !== "other"
 );
 
@@ -597,7 +580,7 @@ export function AssetList() {
                 <span className="mono">{artCount}</span>
               </button>
             )}
-            {FILTER_TYPE_ORDER.filter(
+            {ASSET_TYPES.filter(
               (type) => (scanResult.type_counts[type] ?? 0) > 0
             ).map((type) => (
               <button

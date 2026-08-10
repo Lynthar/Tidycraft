@@ -49,7 +49,8 @@
     "removeRecent": "从最近移除",
     "current": "当前",
     "issuesCount": "{{count}} 个问题",
-    "empty": "没有打开的项目"
+    "empty": "没有打开的项目",
+    "openFailed": "打不开这个项目：{{reason}}"
   },
   "header": {
     "openFolder": "打开文件夹",

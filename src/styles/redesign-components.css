@@ -130,6 +130,7 @@
 
 .tc-scan-cancel {
   height: 22px;
+  flex-shrink: 0;
   padding: 0 10px;
   border-radius: 5px;
   font-size: 11px;
@@ -154,6 +155,21 @@
   display: grid;
   place-items: center;
   color: var(--err);
+  flex-shrink: 0;
+}
+
+/* The message is the only part of the bar allowed to shrink. A backend error
+   can be a whole failing path plus an OS message, and the bar is 28px tall
+   with no room to wrap: without `min-width: 0` a flex item refuses to go below
+   its content width, so the text pushed Retry and Dismiss off the edge. The
+   full string stays reachable through the element's title. */
+.tc-status-err-msg {
+  font-size: 11.5px;
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* =========================

@@ -4,6 +4,8 @@ import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { basename, dirname } from "../lib/pathUtils";
 import type { ScanResult, AssetInfo, ScanProgress, AssetType, ProjectType, AnalysisResult, UndoResult, HistoryEntry, GitInfo, GitStatusMap, GitFileStatus, FsChangeEvent, RenamedPair, DirectoryNode } from "../types/asset";
 import { useSettingsStore } from "./settingsStore";
+import { useToastStore } from "./toastStore";
+import i18n from "../i18n";
 import { evictThumbs } from "../lib/thumbnailCache";
 
 // Per-project filesystem-watcher unlisten handles. Kept outside the zustand
@@ -86,6 +88,33 @@ export interface AdvancedFilters {
   gitStatusFilter: GitFileStatus[];
 }
 
+/// The "nothing filtered" state, built fresh each time. Four places need it —
+/// a new project's defaults, the cleared mirror when no project is active, the
+/// store's own initial state, and the reset action — and they had been four
+/// hand-copied literals of sixteen fields. A function rather than a shared
+/// const because two of those fields are arrays: one const would hand every
+/// project the same array to hold.
+export function createDefaultAdvancedFilters(): AdvancedFilters {
+  return {
+    minSize: null,
+    maxSize: null,
+    minWidth: null,
+    maxWidth: null,
+    minHeight: null,
+    maxHeight: null,
+    minVertices: null,
+    maxVertices: null,
+    minFaces: null,
+    maxFaces: null,
+    minDuration: null,
+    maxDuration: null,
+    hasAlpha: null,
+    colorSpace: null,
+    extensions: [],
+    gitStatusFilter: [],
+  };
+}
+
 // Data for a single project
 export interface ProjectData {
   id: string;
@@ -138,24 +167,7 @@ const createDefaultProjectData = (id: string, path: string): ProjectData => ({
   typeFilter: null,
   sortField: "name",
   sortDirection: "asc",
-  advancedFilters: {
-    minSize: null,
-    maxSize: null,
-    minWidth: null,
-    maxWidth: null,
-    minHeight: null,
-    maxHeight: null,
-    minVertices: null,
-    maxVertices: null,
-    minFaces: null,
-    maxFaces: null,
-    minDuration: null,
-    maxDuration: null,
-    hasAlpha: null,
-    colorSpace: null,
-    extensions: [],
-    gitStatusFilter: [],
-  },
+  advancedFilters: createDefaultAdvancedFilters(),
   gitInfo: null,
   gitStatuses: {},
   hasCustomConfig: false,
@@ -409,24 +421,7 @@ const syncFromActiveProject = (project: ProjectData | undefined): Partial<Projec
       typeFilter: null,
       sortField: "name",
       sortDirection: "asc",
-      advancedFilters: {
-        minSize: null,
-        maxSize: null,
-        minWidth: null,
-        maxWidth: null,
-        minHeight: null,
-        maxHeight: null,
-        minVertices: null,
-        maxVertices: null,
-        minFaces: null,
-        maxFaces: null,
-        minDuration: null,
-        maxDuration: null,
-        hasAlpha: null,
-        colorSpace: null,
-        extensions: [],
-        gitStatusFilter: [],
-      },
+      advancedFilters: createDefaultAdvancedFilters(),
       gitInfo: null,
       gitStatuses: {},
       hasCustomConfig: false,
@@ -595,24 +590,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   typeFilter: null,
   sortField: "name",
   sortDirection: "asc",
-  advancedFilters: {
-    minSize: null,
-    maxSize: null,
-    minWidth: null,
-    maxWidth: null,
-    minHeight: null,
-    maxHeight: null,
-    minVertices: null,
-    maxVertices: null,
-    minFaces: null,
-    maxFaces: null,
-    minDuration: null,
-    maxDuration: null,
-    hasAlpha: null,
-    colorSpace: null,
-    extensions: [],
-    gitStatusFilter: [],
-  },
+  advancedFilters: createDefaultAdvancedFilters(),
   gitInfo: null,
   gitStatuses: {},
   hasCustomConfig: false,
@@ -656,7 +634,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       await invoke("register_project", { projectId, path });
     } catch (err) {
-      console.error("Failed to register project:", err);
+      // This runs before the project has a Map entry, so there is no
+      // per-project error slot for the status bar to render — a console line
+      // means the user clicks Open Project and watches nothing happen.
+      useToastStore.getState().push({
+        kind: "error",
+        message: i18n.t("projects.openFailed", { reason: String(err) }),
+      });
       return;
     }
 
@@ -1210,24 +1194,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   resetAdvancedFilters: () => {
     set(updateActiveProject(get(), {
-      advancedFilters: {
-        minSize: null,
-        maxSize: null,
-        minWidth: null,
-        maxWidth: null,
-        minHeight: null,
-        maxHeight: null,
-        minVertices: null,
-        maxVertices: null,
-        minFaces: null,
-        maxFaces: null,
-        minDuration: null,
-        maxDuration: null,
-        hasAlpha: null,
-        colorSpace: null,
-        extensions: [],
-        gitStatusFilter: [],
-      },
+      advancedFilters: createDefaultAdvancedFilters(),
     }));
   },
 
