@@ -69,6 +69,19 @@ impl ProjectState {
         }
     }
 
+    /// Tags, loaded from disk on first use and kept in memory after.
+    ///
+    /// Anything that *migrates* a binding — rename, move, undo, the watcher's
+    /// rename pairing — must call this unconditionally rather than skipping the
+    /// work when `tags_data` is still `None`. Skipping leaves the binding on a
+    /// path that no longer exists, and the watcher's orphan cleanup deletes it
+    /// the moment something else loads the file. Whether the tag panel happened
+    /// to be opened first is not something tag preservation may depend on, and
+    /// the load it costs is one small file, once per session.
+    ///
+    /// Deleting bindings is the one case that may stay lazy: an orphan nobody
+    /// has loaded sits harmlessly on disk, so reading the file purely to strip
+    /// it is churn (watcher.rs makes that distinction explicitly).
     pub fn ensure_tags(&mut self) -> &mut TagsData {
         if self.tags_data.is_none() {
             self.tags_data = Some(TagsData::load(Path::new(&self.root_path)));

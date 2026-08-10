@@ -2320,7 +2320,7 @@ fn commit_renames(
             // Tags follow the file across renames — same as move_assets /
             // rename_file. Paths are already normalized (scanner::path_to_string)
             // so the new key matches what the next scan produces.
-            if state.tags_data.is_some() && !done.is_empty() {
+            if !done.is_empty() {
                 let tags = state.ensure_tags();
                 for (original, new_path) in &done {
                     tags.rename_path(original, new_path);
@@ -2806,8 +2806,7 @@ fn move_assets(project_id: String, paths: Vec<String>, target_dir: String) -> Fi
             }
 
             // Tags follow the file across moves, before the lock is released.
-            // Skip if tags haven't been touched in this session (lazy load).
-            if state.tags_data.is_some() && !moved.is_empty() {
+            if !moved.is_empty() {
                 let tags = state.ensure_tags();
                 for s in &moved {
                     tags.rename_path(&s.original_path, &s.new_path);
@@ -3095,12 +3094,10 @@ fn rename_file(project_id: String, old_path: String, new_name: String) -> Result
         // bookkeeping must never fail a rename that already landed on disk —
         // but logged, not silent, so a persistently unwritable tags file is
         // diagnosable (same treatment as watcher.rs / the batch paths).
-        if state.tags_data.is_some() {
-            // new_path_str is already normalized (scanner::path_to_string above).
-            state.ensure_tags().rename_path(&old_path, &new_path_str);
-            if let Err(e) = state.save_tags() {
-                eprintln!("[rename_file] failed to save tags after rename: {}", e);
-            }
+        // new_path_str is already normalized (scanner::path_to_string above).
+        state.ensure_tags().rename_path(&old_path, &new_path_str);
+        if let Err(e) = state.save_tags() {
+            eprintln!("[rename_file] failed to save tags after rename: {}", e);
         }
         Ok(())
     });
@@ -3119,10 +3116,8 @@ fn rename_file(project_id: String, old_path: String, new_name: String) -> Result
 /// Using the real per-file result — rather than an `original.exists()` guess —
 /// also correctly handles case-only rename undos, where `new_path` still
 /// `exists()`-resolves to the restored file on case-insensitive filesystems.
-/// No-op when tags were never loaded this session (the same lazy-load guard the
-/// forward ops and the watcher cleanup use).
 fn carry_tags_after_undo(state: &mut project::ProjectState, reverted_pairs: &[(String, String)]) {
-    if reverted_pairs.is_empty() || state.tags_data.is_none() {
+    if reverted_pairs.is_empty() {
         return;
     }
     let tags = state.ensure_tags();
@@ -3953,6 +3948,69 @@ mod tests {
             Ok(())
         })
         .unwrap();
+
+        project::unregister(project_id);
+    }
+
+    /// A rename must carry the tag binding even when nothing has loaded tags in
+    /// this session. The migration used to be skipped while `tags_data` was
+    /// still `None`, which held only because every UI route to a rename passed
+    /// through the tag panel first — call order, not an invariant. Restoring a
+    /// session and renaming straight away is enough to lose the binding: it
+    /// stays on a path that no longer exists, and the first thing to load the
+    /// file hands it to the watcher's orphan cleanup, which deletes it.
+    ///
+    /// The tag is written through a detached `TagsData` so the project's own
+    /// state is genuinely unloaded when the rename arrives, and the assertion
+    /// reads the file back from disk rather than from memory — memory alone
+    /// would pass on a migration that never got saved.
+    #[test]
+    fn rename_carries_tags_that_were_never_loaded_this_session() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let root = scanner::path_to_string(dir.path());
+        let src = dir.path().join("old.png");
+        std::fs::write(&src, "x").unwrap();
+        let old_key = scanner::path_to_string(&src);
+
+        let mut on_disk = tags::TagsData::default();
+        let tag = on_disk.create_tag("never-loaded".to_string(), "#fff".to_string());
+        on_disk.add_tag_to_asset(&old_key, &tag.id);
+        on_disk.save(dir.path()).unwrap();
+
+        let project_id = "test_rename_tags_never_loaded";
+        project::register(project_id.to_string(), root);
+        project::with_ref(project_id, |state| {
+            assert!(
+                state.tags_data.is_none(),
+                "precondition: the rename must arrive with tags unloaded"
+            );
+            Ok(())
+        })
+        .unwrap();
+
+        let new_key = rename_file(
+            project_id.to_string(),
+            old_key.clone(),
+            "new.png".to_string(),
+        )
+        .unwrap();
+
+        let reloaded = tags::TagsData::load(dir.path());
+        assert!(
+            reloaded
+                .get_asset_tags(&new_key)
+                .iter()
+                .any(|t| t.id == tag.id),
+            "tag did not follow {} → {}",
+            old_key,
+            new_key
+        );
+        assert!(
+            reloaded.get_asset_tags(&old_key).is_empty(),
+            "binding was left on the old path"
+        );
 
         project::unregister(project_id);
     }
