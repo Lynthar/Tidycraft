@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import {
@@ -31,7 +31,7 @@ import { AudioPlayer } from "./AudioPlayer";
 import { ImageLightbox } from "./ImageLightbox";
 import { ModelViewer3D } from "./ModelViewer3D";
 import { ModelLightbox } from "./ModelLightbox";
-import type { AssetType, UnityFileInfo } from "../types/asset";
+import type { AssetInfo, AssetType, UnityFileInfo } from "../types/asset";
 
 const VIDEO_EXTENSIONS = ["mp4", "webm", "mov", "avi", "mkv", "m4v"];
 // `.3ds` and `.blend` are routed into ModelViewer3D too: 3ds renders
@@ -40,6 +40,15 @@ const VIDEO_EXTENSIONS = ["mp4", "webm", "mov", "avi", "mkv", "m4v"];
 // message — better than the silent box-icon fallback the user got
 // before.
 const MODEL_3D_EXTENSIONS = ["gltf", "glb", "fbx", "obj", "dae", "3ds", "blend", "vox"];
+
+// Holding an arrow key repeats the keystroke at the OS key-repeat rate —
+// well under 100ms per row once repeat kicks in — and every repeat swaps
+// `selectedAsset`. 150ms comfortably outlasts one repeat interval, so a
+// held key coalesces into a single settle instead of mounting a fresh
+// WebGL context, media element and thumbnail request per row it passes
+// over, while still being short enough that pausing on a row for a moment
+// reads as instant.
+const SETTLED_ASSET_DEBOUNCE_MS = 150;
 
 function GlyphIcon({ type, size = 11 }: { type: AssetType; size?: number }) {
   switch (type) {
@@ -76,7 +85,7 @@ export function AssetPreview() {
   }, [errorMsg]);
 
   // Mirror the fullscreen lightboxes into uiStore so global shortcut
-  // handlers (Del, Ctrl+D, Ctrl+R, arrow navigation…) are gated by
+  // handlers (Del, Ctrl+R, arrow navigation…) are gated by
   // isBlockingOverlayOpen while one is up. Their open flags are local
   // to this component; without the mirror, Del inside a lightbox used
   // to open a delete-confirm dialog hidden BEHIND it with the confirm
@@ -89,6 +98,45 @@ export function AssetPreview() {
     return () => setLightboxUiOpen(false);
   }, [anyLightboxOpen, setLightboxUiOpen]);
 
+  // Settled copy of `selectedAsset`, read only by the heavy media area
+  // further down (3D viewer, video/audio players, thumbnail fetch) and its
+  // fullscreen lightboxes. Every other section of this panel — name,
+  // metadata rows, path, tags, Unity/GUID info, the header buttons — reads
+  // `selectedAsset` directly, so the panel keeps responding instantly as
+  // the cursor moves row to row. While a run of changes is still landing,
+  // the heavy area keeps showing whichever asset it last settled on even
+  // though the metadata above it has already moved on to the new
+  // selection; that gap is the point of this debounce, not a bug to paper
+  // over with a spinner or a blanked-out panel.
+  const [settledAsset, setSettledAsset] = useState<AssetInfo | null>(null);
+  // Mirrors settledAsset so the effect below can tell "nothing has settled
+  // yet" from "something settled, another change is pending" without
+  // putting settledAsset itself in the dependency array — that would make
+  // the effect (and its cleanup) re-fire every time it updates the state.
+  const settledAssetRef = useRef<AssetInfo | null>(null);
+  useEffect(() => {
+    if (!selectedAsset) {
+      settledAssetRef.current = null;
+      setSettledAsset(null);
+      return;
+    }
+
+    if (settledAssetRef.current === null) {
+      // Leading edge: the panel was empty, so the first pick appears
+      // immediately rather than paying for a delay meant to absorb a run
+      // of further changes that hasn't happened yet.
+      settledAssetRef.current = selectedAsset;
+      setSettledAsset(selectedAsset);
+      return;
+    }
+
+    const handle = setTimeout(() => {
+      settledAssetRef.current = selectedAsset;
+      setSettledAsset(selectedAsset);
+    }, SETTLED_ASSET_DEBOUNCE_MS);
+    return () => clearTimeout(handle);
+  }, [selectedAsset]);
+
   // Look up an editor mapping for the selected asset's extension. The
   // header ⤴ button's behavior switches between "open in <editor>" and
   // "open with default app" based on whether this is set.
@@ -100,20 +148,23 @@ export function AssetPreview() {
 
   const currentAssetTags = selectedAsset ? (assetTags[selectedAsset.path] || []) : [];
 
-  const isVideo =
-    selectedAsset && VIDEO_EXTENSIONS.includes(selectedAsset.extension.toLowerCase());
-  const is3DModel =
-    selectedAsset && MODEL_3D_EXTENSIONS.includes(selectedAsset.extension.toLowerCase());
+  // Derived from the settled asset, not the live selection — see the
+  // settledAsset declaration above. Only consumed by the heavy media area
+  // and its lightboxes below.
+  const settledIsVideo =
+    settledAsset && VIDEO_EXTENSIONS.includes(settledAsset.extension.toLowerCase());
+  const settledIs3DModel =
+    settledAsset && MODEL_3D_EXTENSIONS.includes(settledAsset.extension.toLowerCase());
 
   useEffect(() => {
-    if (!selectedAsset || selectedAsset.asset_type !== "texture") {
+    if (!settledAsset || settledAsset.asset_type !== "texture") {
       setThumbnail(null);
       setLoadingThumbnail(false);
       return;
     }
 
     // Stale-response guard (same pattern as the gallery's CardThumb): a
-    // slow thumbnail for the previously selected asset must not land on
+    // slow thumbnail for the previously settled asset must not land on
     // top of the current one's — the ImageLightbox fallback consumes this
     // state too, so a stale write would survive into the lightbox.
     let cancelled = false;
@@ -121,7 +172,7 @@ export function AssetPreview() {
       setLoadingThumbnail(true);
       try {
         const base64 = await invoke<string>("get_thumbnail", {
-          path: selectedAsset.path,
+          path: settledAsset.path,
           size: 256,
         });
         if (!cancelled) setThumbnail(base64);
@@ -142,10 +193,11 @@ export function AssetPreview() {
       cancelled = true;
     };
     // `modified` re-fetches when the watcher re-parses the selected file
-    // after an external edit (applyFsChange swaps selectedAsset to the
-    // fresh copy); the backend disk cache is mtime-keyed, so this returns
-    // the regenerated image rather than the stale one.
-  }, [selectedAsset?.path, selectedAsset?.modified]);
+    // after an external edit (applyFsChange swaps selectedAsset, and
+    // settledAsset follows it once settled); the backend disk cache is
+    // mtime-keyed, so this returns the regenerated image rather than the
+    // stale one.
+  }, [settledAsset?.path, settledAsset?.modified]);
 
   // Unity structure (component list + GUID reference count) for prefab /
   // scene files, parsed on demand by `get_unity_file_info`. Same stale-
@@ -256,11 +308,19 @@ export function AssetPreview() {
   }
 
   const renderPreview = () => {
-    if (isVideo) {
-      return <VideoPlayer filePath={selectedAsset.path} />;
+    if (!settledAsset) {
+      // Only reachable for the single render between the very first-ever
+      // selection and the leading-edge effect above committing it — there
+      // is no previous asset to keep showing yet, so there is nothing to
+      // draw here for that one tick.
+      return null;
     }
 
-    if (selectedAsset.asset_type === "texture") {
+    if (settledIsVideo) {
+      return <VideoPlayer filePath={settledAsset.path} />;
+    }
+
+    if (settledAsset.asset_type === "texture") {
       if (loadingThumbnail) {
         return (
           <div
@@ -285,7 +345,7 @@ export function AssetPreview() {
           <div className="relative group">
             <img
               src={`data:image/png;base64,${thumbnail}`}
-              alt={selectedAsset.name}
+              alt={settledAsset.name}
               style={{
                 width: "100%",
                 aspectRatio: "1 / 1",
@@ -324,17 +384,17 @@ export function AssetPreview() {
       );
     }
 
-    if (selectedAsset.asset_type === "audio") {
-      return <AudioPlayer filePath={selectedAsset.path} />;
+    if (settledAsset.asset_type === "audio") {
+      return <AudioPlayer filePath={settledAsset.path} />;
     }
 
-    if (selectedAsset.asset_type === "model") {
-      if (is3DModel) {
+    if (settledAsset.asset_type === "model") {
+      if (settledIs3DModel) {
         return (
           <ModelViewer3D
-            filePath={selectedAsset.path}
-            extension={selectedAsset.extension}
-            vertexCount={selectedAsset.metadata?.vertex_count}
+            filePath={settledAsset.path}
+            extension={settledAsset.extension}
+            vertexCount={settledAsset.metadata?.vertex_count}
             onFullscreen={() => setModelLightboxOpen(true)}
           />
         );
@@ -859,25 +919,27 @@ export function AssetPreview() {
         </div>
       </div>
 
-      {/* Image Lightbox */}
-      {thumbnail && (
+      {/* Image Lightbox — mirrors the settled asset the inline thumbnail
+          above (whose click opens this) is actually showing. */}
+      {settledAsset && thumbnail && (
         <ImageLightbox
           isOpen={lightboxOpen}
-          imageSrc={convertFileSrc(selectedAsset.path)}
+          imageSrc={convertFileSrc(settledAsset.path)}
           fallbackSrc={`data:image/png;base64,${thumbnail}`}
-          imageName={selectedAsset.name}
+          imageName={settledAsset.name}
           onClose={() => setLightboxOpen(false)}
         />
       )}
 
-      {/* 3D Model Lightbox */}
-      {is3DModel && (
+      {/* 3D Model Lightbox — same settled-asset mirroring: its fullscreen
+          button lives on the settled asset's inline viewer. */}
+      {settledAsset && settledIs3DModel && (
         <ModelLightbox
           isOpen={modelLightboxOpen}
-          filePath={selectedAsset.path}
-          extension={selectedAsset.extension}
-          vertexCount={selectedAsset.metadata?.vertex_count}
-          modelName={selectedAsset.name}
+          filePath={settledAsset.path}
+          extension={settledAsset.extension}
+          vertexCount={settledAsset.metadata?.vertex_count}
+          modelName={settledAsset.name}
           onClose={() => setModelLightboxOpen(false)}
         />
       )}
