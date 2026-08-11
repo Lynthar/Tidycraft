@@ -35,6 +35,7 @@ import { GitStatusBadge } from "./GitStatusBadge";
 import { DccSourceBadge } from "./DccSourceBadge";
 import { peekThumb, hasThumb, putThumb } from "../lib/thumbnailCache";
 import { requestThumbnail, THUMB_CANCELLED } from "../lib/thumbnailQueue";
+import { intentFromMouse, type SelectIntent } from "../lib/selectIntent";
 
 const CARD_MIN_WIDTH = 168;
 const CARD_GAP = 12;
@@ -142,7 +143,7 @@ interface CardProps {
   gitStatus?: GitFileStatus;
   showGitStatusIndicators: boolean;
   assetTags: AssetTagsMap[string];
-  onClick: (asset: AssetInfo, index: number, e: React.MouseEvent) => void;
+  onClick: (asset: AssetInfo, index: number, intent: SelectIntent) => void;
   onContextMenu: (e: React.MouseEvent, asset: AssetInfo) => void;
   onCheckChange: (checked: boolean) => void;
   typeLabel: string;
@@ -183,7 +184,7 @@ function Card({
       data-selected={isSelected ? "true" : undefined}
       data-checked={isChecked ? "true" : undefined}
       data-selecting={showCheckbox ? "true" : undefined}
-      onClick={(e) => onClick(asset, index, e)}
+      onClick={(e) => onClick(asset, index, intentFromMouse(e))}
       onContextMenu={(e) => onContextMenu(e, asset)}
     >
       {/* Batch-select checkbox — top-left, revealed on hover / when checked /
@@ -199,6 +200,14 @@ function Card({
             onCheckChange(e.target.checked);
           }}
           onClick={(e) => e.stopPropagation()}
+          // Stops the click from parking DOM focus on the checkbox, matching
+          // the row checkbox in AssetListView. The gallery has no keyboard
+          // navigation yet, so nothing reads focus here today — but the
+          // checkbox would otherwise steal it the same way the list row's
+          // did before arrow keys landed, and keeping this in sync now means
+          // it's not a rediscovery the day the gallery gets its own key
+          // handler.
+          onMouseDown={(e) => e.preventDefault()}
           className="w-4 h-4 accent-primary cursor-pointer"
           aria-label={t("assetList.selectForBatch")}
         />
@@ -262,7 +271,7 @@ export interface AssetGalleryViewProps {
   showCheckbox: boolean;
   gitStatuses: GitStatusMap;
   allAssetTags: AssetTagsMap;
-  onAssetClick: (asset: AssetInfo, index: number, e: React.MouseEvent) => void;
+  onAssetClick: (asset: AssetInfo, index: number, intent: SelectIntent) => void;
   onContextMenu: (e: React.MouseEvent, asset: AssetInfo) => void;
   onCheckChange: (path: string, checked: boolean) => void;
   getTypeLabel: (type: AssetType) => string;

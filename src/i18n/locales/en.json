@@ -84,6 +84,7 @@
     "other": "Other"
   },
   "assetList": {
+    "listLabel": "Assets",
     "name": "Name",
     "type": "Type",
     "size": "Size",
@@ -113,7 +114,8 @@
     "dccSourceFile": "Source file",
     "vertsInline": "{{n}} v",
     "duplicateFailed": "Duplicate failed: {{reason}}",
-    "copyPathFailed": "Could not copy the path: {{reason}}"
+    "copyPathFailed": "Could not copy the path: {{reason}}",
+    "openFailed": "Could not open: {{reason}}"
   },
   "exportToast": {
     "saved": "Exported {{name}}",

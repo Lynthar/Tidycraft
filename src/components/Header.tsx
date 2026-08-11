@@ -24,6 +24,7 @@ import { SearchHistory } from "./SearchHistory";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { BrandMark } from "./BrandMark";
 import { useSearchHistoryStore } from "../stores/searchHistoryStore";
+import { focusAssetList } from "../lib/menuActions";
 
 interface HeaderProps {
   searchInputRef?: RefObject<HTMLInputElement>;
@@ -238,6 +239,18 @@ export function Header({ searchInputRef }: HeaderProps) {
                 } else if (e.key === "Escape") {
                   setSearchQuery("");
                   setShowSearchHistory(false);
+                } else if (e.key === "ArrowDown") {
+                  // Down out of the search box walks into the results. On a
+                  // stock Mac this is the only way in: the system's Keyboard
+                  // Navigation setting is off by default and WebKit honours
+                  // it, so Tab reaches text fields and nothing else. The
+                  // keystroke is claimed only when there was a list to enter,
+                  // and the history dropdown is dismissed by hand — it closes
+                  // on Enter, Escape and a pick, not on losing focus.
+                  if (focusAssetList()) {
+                    e.preventDefault();
+                    setShowSearchHistory(false);
+                  }
                 }
               }}
             />

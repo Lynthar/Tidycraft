@@ -28,6 +28,24 @@ export function registerSearchFocus(fn: (() => void) | null) {
   searchFocuser = fn;
 }
 
+// Same arrangement for the asset list, which the search box hands focus to on
+// a down arrow. The list registers itself rather than App registering it: the
+// slot is then empty exactly when there is no list to focus — the grid view,
+// no project open, a scan still running — and the caller can tell.
+let assetListFocuser: (() => void) | null = null;
+export function registerAssetListFocus(fn: (() => void) | null) {
+  assetListFocuser = fn;
+}
+
+/// Move keyboard focus into the asset list, reporting whether there was one to
+/// move it into. Callers use the answer to decide whether to claim the
+/// keystroke — the same did-run contract `rescan` has.
+export function focusAssetList(): boolean {
+  if (!assetListFocuser) return false;
+  assetListFocuser();
+  return true;
+}
+
 export const menuActions = {
   /// Folder picker → openProject. No-op while a scan is running (opening
   /// mid-scan would race the active project) or while an overlay is up.

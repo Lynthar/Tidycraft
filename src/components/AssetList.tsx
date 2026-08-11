@@ -23,6 +23,7 @@ import { ContextMenu } from "./ContextMenu";
 import { AssetListView } from "./AssetListView";
 import { AssetGalleryView } from "./AssetGalleryView";
 import { ASSET_TYPES, type AssetInfo, type AssetType } from "../types/asset";
+import type { SelectIntent } from "../lib/selectIntent";
 
 /// The "Art assets" quick-group pill: everything an artist owns, minus the
 /// code / data / misc files real engine projects interleave with them. One
@@ -175,27 +176,36 @@ export function AssetList() {
   );
 
   const handleAssetClick = useCallback(
-    (asset: AssetInfo, index: number, e: React.MouseEvent) => {
-      // Re-resolve the anchor path against the CURRENT view on every shift
-      // click; if the anchor was filtered/sorted out of view, fall back to a
-      // plain click instead of selecting an unrelated range (or crashing on
-      // a stale out-of-range index, as the old index-based anchor did).
-      const anchorIndex =
-        e.shiftKey && lastClickedPath !== null
-          ? assets.findIndex((a) => a.path === lastClickedPath)
-          : -1;
-      if (e.ctrlKey || e.metaKey) {
-        togglePath(asset.path);
-        setLastClickedPath(asset.path);
-      } else if (e.shiftKey && anchorIndex !== -1) {
+    (asset: AssetInfo, index: number, intent: SelectIntent) => {
+      if (intent.extend) {
+        // Re-resolve the anchor against the CURRENT view every time; if it was
+        // filtered or sorted out of view, fall back to a plain selection
+        // instead of selecting an unrelated range (or crashing on a stale
+        // out-of-range index, as the old index-based anchor did).
+        const anchorIndex =
+          lastClickedPath !== null
+            ? assets.findIndex((a) => a.path === lastClickedPath)
+            : -1;
+        if (anchorIndex === -1) {
+          setSelectedAsset(asset);
+          setLastClickedPath(asset.path);
+          return;
+        }
         const start = Math.min(anchorIndex, index);
         const end = Math.max(anchorIndex, index);
         const range: string[] = [];
         for (let i = start; i <= end; i++) range.push(assets[i].path);
         addPaths(range);
-      } else {
-        setSelectedAsset(asset);
+      }
+      if (intent.toggle) {
+        togglePath(asset.path);
         setLastClickedPath(asset.path);
+      }
+      if (intent.select) {
+        setSelectedAsset(asset);
+        // An extension leaves the anchor where the range began; moving it
+        // would make the next Shift+arrow measure from the row just walked to.
+        if (!intent.extend) setLastClickedPath(asset.path);
       }
     },
     [lastClickedPath, assets, setSelectedAsset, togglePath, addPaths]
@@ -282,15 +292,26 @@ export function AssetList() {
     }
   }, [contextMenu.asset]);
 
-  const handleOpenWithDefaultApp = useCallback(async () => {
-    if (contextMenu.asset) {
+  // Shared by the context menu and the Enter key. Failure is surfaced rather
+  // than logged: a packaged application has nowhere to show a console, and a
+  // launch that quietly does nothing looks exactly like one that worked.
+  const openWithDefaultApp = useCallback(
+    async (path: string) => {
       try {
-        await invoke("open_with_default_app", { path: contextMenu.asset.path });
+        await invoke("open_with_default_app", { path });
       } catch (err) {
-        console.error("Failed to open with default app:", err);
+        pushToast({
+          kind: "error",
+          message: t("assetList.openFailed", { reason: String(err) }),
+        });
       }
-    }
-  }, [contextMenu.asset]);
+    },
+    [pushToast, t]
+  );
+
+  const handleOpenWithDefaultApp = useCallback(() => {
+    if (contextMenu.asset) void openWithDefaultApp(contextMenu.asset.path);
+  }, [contextMenu.asset, openWithDefaultApp]);
 
   const handleRename = useCallback(() => {
     if (contextMenu.asset) {
@@ -662,6 +683,7 @@ export function AssetList() {
             onContextMenu={handleContextMenu}
             onCheckChange={handleCheckChange}
             getTypeLabel={getTypeLabel}
+            onActivate={(asset) => void openWithDefaultApp(asset.path)}
           />
         ) : (
           <AssetGalleryView

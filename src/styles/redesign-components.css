@@ -613,6 +613,18 @@
   height: 100%;
 }
 
+/* Non-scrolling frame around the list, whose only job is to carry the focus
+   ring — see the rule further down for why the ring cannot live on the
+   scrolling box itself. */
+.tc-list-frame {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
 /* Single scroll container for header + virtualized body. Both x and y
    overflow live here so the sticky header h-scrolls with the rows when
    the user resizes columns past viewport width. */
@@ -621,6 +633,41 @@
   min-height: 0;
   overflow: auto;
   position: relative;
+}
+
+/* The list keeps DOM focus on a container rather than on individual rows:
+   rows unmount as they scroll out under virtualization, which would drop
+   focus to <body> mid-navigation. The active row is named by
+   `aria-activedescendant` instead, and shown by its own `data-selected`.
+
+   Focus lives on the rows container rather than the scrolling box, because a
+   screen reader decides whether to hand the arrow keys to the page or to the
+   widget from the role of whatever holds focus, and only the list itself
+   carries that role. The container is as tall as the whole virtual list, so
+   its own outline would be drawn around thousands of pixels — the ring goes
+   on the viewport box instead. */
+.tc-list-scroll > [role="listbox"]:focus-visible {
+  outline: none;
+}
+
+/* The ring is drawn by the frame, above the scrolling box, rather than as an
+   outline on the box itself. Two things inside that box paint over its own
+   outline and took an edge each: the sticky header, which is opaque and sits
+   at z-index 5, hid the top edge, and the 8px custom scrollbar hid the right
+   one — leaving a ring with two sides, which is how it was reported.
+   Moving the outline outward instead is not an option: `.tc-main` clips at
+   its bounds and would take all four.
+
+   Anchored to the frame, which does not scroll, so it stays on the viewport
+   box while the rows move under it. */
+.tc-list-frame:has([role="listbox"]:focus-visible)::after,
+.tc-list-frame:has([role="listbox"][data-kbd-focus]:focus)::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--primary);
+  pointer-events: none;
+  z-index: 10;
 }
 
 .tc-list-header {
@@ -676,16 +723,16 @@
 }
 
 /* Batch-select checkbox lane: the 32px lane is always reserved, but the box
-   only appears on row hover, when the row is checked, while a batch selection
-   is active (data-force), or on keyboard focus — so multi-select is
-   discoverable without permanent clutter or a layout shift. */
+   only appears on row hover, when the row is checked, or while a batch
+   selection is active (data-force) — so multi-select is discoverable without
+   permanent clutter or a layout shift. There is no focus state here: the box
+   is out of the tab order, and the keyboard toggles it through the list. */
 .tc-row-check {
   opacity: 0;
   transition: opacity 120ms ease;
 }
 .tc-row:hover .tc-row-check,
 .tc-row[data-checked="true"] .tc-row-check,
-.tc-row-check:focus-within,
 .tc-row-check[data-force="true"] {
   opacity: 1;
 }

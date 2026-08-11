@@ -84,6 +84,7 @@
     "other": "其他"
   },
   "assetList": {
+    "listLabel": "资源列表",
     "name": "名称",
     "type": "类型",
     "size": "大小",
@@ -113,7 +114,8 @@
     "dccSourceFile": "源文件",
     "vertsInline": "{{n}} 顶点",
     "duplicateFailed": "创建副本失败：{{reason}}",
-    "copyPathFailed": "复制路径失败：{{reason}}"
+    "copyPathFailed": "复制路径失败：{{reason}}",
+    "openFailed": "打不开：{{reason}}"
   },
   "exportToast": {
     "saved": "已导出 {{name}}",

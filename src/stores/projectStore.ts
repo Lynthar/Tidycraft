@@ -273,6 +273,13 @@ interface ProjectState {
   /// scroll position.
   locatePulse: number;
 
+  /// Monotonic counter bumped only when the active project's previewed asset
+  /// was dropped because its file was removed (applyFsChange's `removed`
+  /// branch) — never for any other reason a selection can go away. Exists so
+  /// the asset list can restore a keyboard cursor after an external delete
+  /// without having to guess, after the fact, why the selection is gone.
+  selectionRemovedPulse: number;
+
   // Convenience getters for active project
   projectPath: string | null;
   scanResult: ScanResult | null;
@@ -491,12 +498,14 @@ function applyFsChange(projectId: string, event: FsChangeEvent) {
   // Reconcile selectedAsset: follow it across a recognized rename, swap to
   // the fresh copy if it was re-parsed, or drop it if the file was deleted.
   let newSelectedAsset = target.selectedAsset;
+  let selectionRemoved = false;
   if (newSelectedAsset) {
     const renamedTo = renamedTargetFor(newSelectedAsset.path, event.renamed);
     if (renamedTo) {
       newSelectedAsset = merged.get(renamedTo) ?? null;
     } else if (event.removed.includes(newSelectedAsset.path)) {
       newSelectedAsset = null;
+      selectionRemoved = true;
     } else {
       const fresh = event.updated.find((a) => a.path === newSelectedAsset!.path);
       if (fresh) newSelectedAsset = fresh;
@@ -539,6 +548,9 @@ function applyFsChange(projectId: string, event: FsChangeEvent) {
   };
   if (state.activeProjectId === projectId) {
     Object.assign(patch, syncFromActiveProject(updated));
+    if (selectionRemoved) {
+      patch.selectionRemovedPulse = state.selectionRemovedPulse + 1;
+    }
   }
   // Order matters: re-point the batch selection while the OLD scanResult is
   // still in place — selectionStore's prune subscription fires on the swap
@@ -573,6 +585,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   undoHistory: [],
   watcherPulse: 0,
   locatePulse: 0,
+  selectionRemovedPulse: 0,
 
   // Initial convenience fields (no active project)
   projectPath: null,
@@ -986,7 +999,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const startedProject = startState.projects.get(startedProjectId);
     if (!startedProject) return;
     /// Re-entry guard. UI surfaces this via `disabled={isAnalyzing}` on
-    /// the Sidebar button, but Ctrl+Shift+R and the CommandPalette entry
+    /// the Sidebar button, but the CommandPalette entry and the menu item
     /// don't gate on it — collapse the check here so every entry path
     /// is safe.
     if (startedProject.isAnalyzing) return;
