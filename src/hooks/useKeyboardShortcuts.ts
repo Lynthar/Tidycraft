@@ -59,10 +59,10 @@ export function useKeyboardShortcuts() {
       // out so CommandPalette.tsx can drive navigation cleanly.
       if (useUiStore.getState().cmdkOpen) return;
 
-      // Likewise, don't let global shortcuts (Ctrl+1/2/3, rescan, focus search,
-      // Escape, …) fire underneath any other blocking modal — Settings, Tag
-      // Manager, the AI / learning modals, or the dependency graph. They have
-      // their own controls and the user isn't navigating the list behind them.
+      // Likewise, don't let global shortcuts (rescan, focus search, Escape,
+      // …) fire underneath any other blocking modal — Settings, Tag Manager,
+      // the AI / learning modals, or the dependency graph. They have their
+      // own controls and the user isn't navigating the list behind them.
       if (isBlockingOverlayOpen()) return;
 
       // Ignore if user is typing in an input
@@ -111,16 +111,6 @@ export function useKeyboardShortcuts() {
         return;
       }
 
-      // Ctrl/Cmd + Shift + R: Run analysis. Note ⌘R alone is rescan; the
-      // shift modifier disambiguates. Old binding was ⌘⇧A but that collides
-      // with Select All in many text contexts.
-      if (modKey && shiftKey && key.toLowerCase() === "r") {
-        if (menuActions.runAnalysis()) {
-          event.preventDefault();
-        }
-        return;
-      }
-
       // Escape: dismiss exactly ONE thing per press, walking from the most
       // transient state to the most expensive to recreate. One press used to
       // clear the preview selection and the search box together — two
@@ -149,26 +139,6 @@ export function useKeyboardShortcuts() {
         }
         return;
       }
-
-      // Ctrl/Cmd + 1/2/3: Switch view modes. The mod key avoids stealing
-      // bare digit keys from inputs and matches the design mock's labelling.
-      if (modKey && !shiftKey) {
-        if (key === "1") {
-          event.preventDefault();
-          menuActions.setViewMode("assets");
-          return;
-        }
-        if (key === "2") {
-          event.preventDefault();
-          menuActions.setViewMode("issues");
-          return;
-        }
-        if (key === "3") {
-          event.preventDefault();
-          menuActions.setViewMode("stats");
-          return;
-        }
-      }
     },
     []
   );
@@ -186,18 +156,14 @@ export const SHORTCUTS = {
   openFolder: { key: "O", modifier: "Ctrl" },
   search: { key: "F", modifier: "Ctrl" },
   rescan: { key: "R", modifier: "Ctrl" },
-  analyze: { key: "R", modifier: "Ctrl+Shift" },
   commandPalette: { key: "K", modifier: "Ctrl" },
   settings: { key: ",", modifier: "Ctrl" },
   escape: { key: "Esc", modifier: "" },
-  viewAssets: { key: "1", modifier: "Ctrl" },
-  viewIssues: { key: "2", modifier: "Ctrl" },
-  viewStats: { key: "3", modifier: "Ctrl" },
 } as const;
 
 /// macOS Aqua HIG glyphs for modifier keys. On macOS we render shortcuts
 /// glued (no `+`) per HIG; on Windows / Linux we keep the readable
-/// "Ctrl+Shift+R" form. CommandPalette already hard-codes ⌘/⇧ glyphs;
+/// "Ctrl+O" form. CommandPalette already hard-codes ⌘/⇧ glyphs;
 /// this helper fixes the Header / Sidebar tooltips that previously
 /// always printed "Ctrl+R" regardless of platform.
 const MAC_MODIFIER_GLYPHS: Record<string, string> = {

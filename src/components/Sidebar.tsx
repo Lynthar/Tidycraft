@@ -5,7 +5,6 @@ import { TagFilterPanel } from "./TagFilterPanel";
 import { useProjectStore } from "../stores/projectStore";
 import { useShallow } from "zustand/react/shallow";
 import { useUiStore } from "../stores/uiStore";
-import { formatShortcut, SHORTCUTS } from "../hooks/useKeyboardShortcuts";
 
 export function Sidebar() {
   const { t } = useTranslation();
@@ -77,8 +76,8 @@ export function Sidebar() {
             className="tc-run-btn"
             title={
               hasCustomConfig
-                ? `${t("sidebar.runAnalysis")} (${formatShortcut(SHORTCUTS.analyze)}) — ${t("sidebar.customConfigLoaded")}`
-                : `${t("sidebar.runAnalysis")} (${formatShortcut(SHORTCUTS.analyze)})`
+                ? `${t("sidebar.runAnalysis")} — ${t("sidebar.customConfigLoaded")}`
+                : t("sidebar.runAnalysis")
             }
           >
             {isAnalyzing ? (
@@ -105,9 +104,6 @@ export function Sidebar() {
                   display: "inline-block",
                 }}
               />
-            )}
-            {!isAnalyzing && (
-              <span className="mono">{formatShortcut(SHORTCUTS.analyze)}</span>
             )}
           </button>
 

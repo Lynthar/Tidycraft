@@ -386,19 +386,19 @@ export function AssetList() {
     }
   }, [targetPathsFromContext, pushToast, t]);
 
-  // Del key triggers delete for the current multi-selection when nothing
-  // interactive has focus. We deliberately don't handle Del for the
-  // single-click `selectedAsset` — that's ambiguous with simply navigating.
-  // Ctrl/Cmd+D triggers same-dir duplicate for the same target set.
+  // The delete chord (see below for which key that is on each platform)
+  // triggers delete for the current multi-selection when nothing interactive
+  // has focus. It deliberately does not act on the single previewed
+  // `selectedAsset` — that is ambiguous with simply navigating.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA"))
         return;
 
-      // Don't fire destructive list shortcuts (Del / Ctrl+D) while any modal is
-      // open — an app-level overlay (Settings, Tag Manager, AI, …) or one of
-      // this list's own file-op dialogs (rename / batch-rename / delete / move).
+      // Don't fire the destructive shortcut while any modal is open — an
+      // app-level overlay (Settings, Tag Manager, AI, …) or one of this
+      // list's own file-op dialogs (rename / batch-rename / delete / move).
       if (
         isBlockingOverlayOpen() ||
         showBatchRename ||
@@ -408,25 +408,21 @@ export function AssetList() {
       )
         return;
 
-      if (e.key === "Delete") {
+      // macOS reports the key labelled delete on the main keyboard as
+      // `Backspace`; the one that reports `Delete` is Fn+Delete, so listening
+      // for that alone made this shortcut unreachable there. ⌘⌫ is the
+      // system's own move-to-trash chord, and requiring the modifier is what
+      // keeps a bare backspace — a key people hit to erase, and one with no
+      // undo here beyond the trash — from deleting files.
+      const deletePressed = isMacOS()
+        ? e.key === "Backspace" && e.metaKey
+        : e.key === "Delete";
+
+      if (deletePressed) {
         if (selectedPaths.size === 0) return;
         e.preventDefault();
         setDeleteDialogPaths(Array.from(selectedPaths));
         return;
-      }
-
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d" && !e.shiftKey) {
-        if (selectedPaths.size === 0) return;
-        e.preventDefault();
-        (async () => {
-          try {
-            await invoke<FileOpResult>("duplicate_assets", {
-              paths: Array.from(selectedPaths),
-            });
-          } catch (err) {
-            console.error("Failed to duplicate:", err);
-          }
-        })();
       }
     };
     window.addEventListener("keydown", onKey);

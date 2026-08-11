@@ -148,7 +148,6 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
         section: t("commandPalette.section.suggestions"),
         label: t("commandPalette.items.runAnalysis"),
         sub: t("commandPalette.items.runAnalysisSub"),
-        shortcut: formatShortcut(SHORTCUTS.analyze),
         icon: <Play size={13} />,
         onSelect: () => {
           runAnalysis();
@@ -209,7 +208,6 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
         id: "go-assets",
         section: t("commandPalette.section.navigate"),
         label: t("commandPalette.items.goAssets"),
-        shortcut: formatShortcut(SHORTCUTS.viewAssets),
         icon: <Files size={13} />,
         onSelect: () => {
           setViewMode("assets");
@@ -220,7 +218,6 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
         id: "go-issues",
         section: t("commandPalette.section.navigate"),
         label: t("commandPalette.items.goIssues"),
-        shortcut: formatShortcut(SHORTCUTS.viewIssues),
         icon: <AlertTriangle size={13} />,
         onSelect: () => {
           setViewMode("issues");
@@ -231,7 +228,6 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
         id: "go-stats",
         section: t("commandPalette.section.navigate"),
         label: t("commandPalette.items.goStats"),
-        shortcut: formatShortcut(SHORTCUTS.viewStats),
         icon: <BarChart3 size={13} />,
         onSelect: () => {
           setViewMode("stats");

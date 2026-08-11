@@ -106,7 +106,6 @@ async function buildMenu(): Promise<Menu> {
       }),
       await MenuItem.new({
         text: t("menu.runAnalysis"),
-        accelerator: "CmdOrCtrl+Shift+R",
         action: () => {
           menuActions.runAnalysis();
         },
@@ -146,17 +145,14 @@ async function buildMenu(): Promise<Menu> {
     items: [
       await MenuItem.new({
         text: t("menu.viewAssets"),
-        accelerator: "CmdOrCtrl+1",
         action: () => menuActions.setViewMode("assets"),
       }),
       await MenuItem.new({
         text: t("menu.viewIssues"),
-        accelerator: "CmdOrCtrl+2",
         action: () => menuActions.setViewMode("issues"),
       }),
       await MenuItem.new({
         text: t("menu.viewStats"),
-        accelerator: "CmdOrCtrl+3",
         action: () => menuActions.setViewMode("stats"),
       }),
       await sep(),
@@ -165,8 +161,6 @@ async function buildMenu(): Promise<Menu> {
         accelerator: "CmdOrCtrl+K",
         action: () => menuActions.toggleCommandPalette(),
       }),
-      await sep(),
-      await PredefinedMenuItem.new({ item: "Fullscreen", text: t("menu.fullscreen") }),
     ],
   });
 

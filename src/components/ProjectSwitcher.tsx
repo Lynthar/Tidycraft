@@ -161,7 +161,7 @@ export function ProjectSwitcher() {
                     data-current={p.isActive ? "true" : undefined}
                     onClick={() => handleSelect(p.id)}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
+                      if (e.key === "Enter") {
                         e.preventDefault();
                         handleSelect(p.id);
                       }
@@ -253,7 +253,7 @@ export function ProjectSwitcher() {
                       className="tc-projmenu-item"
                       onClick={() => handleOpenRecent(r.path)}
                       onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
+                        if (e.key === "Enter") {
                           e.preventDefault();
                           handleOpenRecent(r.path);
                         }

@@ -212,8 +212,8 @@ export const useUiStore = create<UiState>((set, get) => ({
 /// True when a blocking, backdrop-covered overlay is open (command palette,
 /// settings, tag manager, the AI analyze/result modals, the learning modals,
 /// the dependency graph, or a fullscreen media lightbox). Global window-level
-/// key handlers (Del, Ctrl+1/2/3, rescan, …) consult this so they don't fire
-/// underneath a modal.
+/// key handlers (delete, rescan, the command palette, …) consult this so they
+/// don't fire underneath a modal.
 ///
 /// Deliberately EXCLUDES `aiPanelOpen` — the AI Tag panel is a floating side
 /// panel with no backdrop, so the asset list behind it stays interactive.

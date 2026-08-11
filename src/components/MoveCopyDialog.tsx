@@ -66,7 +66,7 @@ function TreeRow({
         onClick={() => !isDisabled && onSelect(node.path)}
         onKeyDown={(e) => {
           if (isDisabled) return;
-          if (e.key === "Enter" || e.key === " ") {
+          if (e.key === "Enter") {
             e.preventDefault();
             onSelect(node.path);
           }

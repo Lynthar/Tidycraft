@@ -65,7 +65,7 @@ export function ModalShell({
     modalStack.push(token);
     // Tell the global shortcut layer that a blocking dialog is up. Dialogs
     // held in component-local state have no uiStore flag of their own; this
-    // is what keeps Ctrl+1/2/3, Ctrl+R and Ctrl+K from firing behind them.
+    // is what keeps Ctrl+R, Ctrl+F and Ctrl+K from firing behind them.
     const releaseShellCount = registerModalShell();
     const container = containerRef.current;
     const opener = document.activeElement as HTMLElement | null;
