@@ -182,6 +182,7 @@
 **Linux**
 
 - `.deb`：`sudo dpkg -i tidycraft_*.deb`
+- `.rpm`：`sudo rpm -i tidycraft-*.rpm`
 - `.AppImage`：`chmod +x tidycraft_*.AppImage && ./tidycraft_*.AppImage`
 
 无需额外操作,可直接运行。

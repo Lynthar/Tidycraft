@@ -1,0 +1,39 @@
+# Rust dependency-advisory audit — deliberately NOT part of ci.yml and not a
+# required check: a new RustSec advisory (exploitable here or not) should show
+# up as a red run on this workflow, not block an unrelated merge. The weekly
+# schedule is the part that matters — advisories land against dependencies
+# that haven't changed, so a push-only trigger would sleep straight through
+# them. Baseline at adoption (2026-08-15): 0 vulnerabilities, 23 allowed
+# unmaintained/unsound warnings (GTK3 bindings, fxhash, git2 advisory).
+name: Security audit
+
+on:
+  schedule:
+    - cron: '0 3 * * 1' # Mondays 03:00 UTC
+  push:
+    branches: [main]
+    paths:
+      - 'src-tauri/Cargo.lock'
+      - 'src-tauri/Cargo.toml'
+      - '.github/workflows/audit.yml'
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # Prebuilt binary — `cargo install cargo-audit` would compile for
+      # minutes and dominate the job.
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: Audit Cargo.lock
+        working-directory: src-tauri
+        run: cargo audit

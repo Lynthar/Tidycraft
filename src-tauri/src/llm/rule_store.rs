@@ -122,17 +122,6 @@ impl AiRulesDoc {
         doc.rules = rules;
         doc
     }
-
-    /// Delete the file. Used for "Clear AI rules" Settings action
-    /// (Day 8). No-op if the file doesn't exist.
-    #[allow(dead_code)]
-    pub fn clear(project_root: &Path) -> Result<(), String> {
-        let path = Self::project_path(project_root);
-        if !path.exists() {
-            return Ok(());
-        }
-        fs::remove_file(&path).map_err(|e| e.to_string())
-    }
 }
 
 #[cfg(test)]
@@ -196,22 +185,6 @@ mod tests {
         let raw = fs::read_to_string(AiRulesDoc::project_path(dir.path())).unwrap();
         assert!(raw.contains("kind = \"filename_token\""));
         assert!(raw.contains("kind = \"path_prefix\""));
-    }
-
-    #[test]
-    fn clear_removes_file() {
-        let dir = tempdir().unwrap();
-        sample_doc().save(dir.path()).unwrap();
-        assert!(AiRulesDoc::project_path(dir.path()).exists());
-        AiRulesDoc::clear(dir.path()).unwrap();
-        assert!(!AiRulesDoc::project_path(dir.path()).exists());
-    }
-
-    #[test]
-    fn clear_is_noop_when_file_absent() {
-        let dir = tempdir().unwrap();
-        // Should not error.
-        AiRulesDoc::clear(dir.path()).unwrap();
     }
 
     #[test]

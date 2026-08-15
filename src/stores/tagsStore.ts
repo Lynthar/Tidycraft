@@ -14,8 +14,7 @@ interface TagsState {
   tags: Tag[];
   assetTags: AssetTagsMap;
   isLoading: boolean;
-  tagFilter: string | null; // Single tag filter (deprecated, kept for compatibility)
-  tagFilters: string[]; // Multiple tag filters
+  tagFilters: string[]; // Active tag filters (AND semantics)
 
   // Actions
   loadTags: () => Promise<void>;
@@ -33,7 +32,6 @@ interface TagsState {
   addTagToAsset: (assetPath: string, tagId: string) => Promise<void>;
   removeTagFromAsset: (assetPath: string, tagId: string) => Promise<void>;
   addTagToAssets: (assetPaths: string[], tagId: string) => Promise<void>;
-  setTagFilter: (tagId: string | null) => void;
   toggleTagFilter: (tagId: string, multiSelect?: boolean) => void;
   clearTagFilters: () => void;
   getAssetTags: (assetPath: string) => Tag[];
@@ -66,7 +64,6 @@ export const useTagsStore = create<TagsState>((set, get) => ({
   tags: [],
   assetTags: {},
   isLoading: false,
-  tagFilter: null,
   tagFilters: [],
 
   loadTags: async () => {
@@ -96,10 +93,6 @@ export const useTagsStore = create<TagsState>((set, get) => ({
           assetTags,
           isLoading: false,
           tagFilters,
-          tagFilter:
-            state.tagFilter && valid.has(state.tagFilter)
-              ? state.tagFilter
-              : tagFilters[0] ?? null,
         };
       });
     } catch (err) {
@@ -186,8 +179,6 @@ export const useTagsStore = create<TagsState>((set, get) => ({
           ])
         ),
         tagFilters,
-        tagFilter:
-          state.tagFilter === tagId ? tagFilters[0] ?? null : state.tagFilter,
       };
     });
   },
@@ -260,32 +251,27 @@ export const useTagsStore = create<TagsState>((set, get) => ({
     }
   },
 
-  setTagFilter: (tagId: string | null) => {
-    set({ tagFilter: tagId, tagFilters: tagId ? [tagId] : [] });
-  },
-
   toggleTagFilter: (tagId: string, multiSelect = false) => {
     const { tagFilters } = get();
     if (multiSelect) {
       // Multi-select: toggle this tag in the list
       if (tagFilters.includes(tagId)) {
-        const newFilters = tagFilters.filter((id) => id !== tagId);
-        set({ tagFilters: newFilters, tagFilter: newFilters[0] || null });
+        set({ tagFilters: tagFilters.filter((id) => id !== tagId) });
       } else {
-        set({ tagFilters: [...tagFilters, tagId], tagFilter: tagId });
+        set({ tagFilters: [...tagFilters, tagId] });
       }
     } else {
       // Single select: if already selected, deselect; otherwise select only this
       if (tagFilters.length === 1 && tagFilters[0] === tagId) {
-        set({ tagFilters: [], tagFilter: null });
+        set({ tagFilters: [] });
       } else {
-        set({ tagFilters: [tagId], tagFilter: tagId });
+        set({ tagFilters: [tagId] });
       }
     }
   },
 
   clearTagFilters: () => {
-    set({ tagFilters: [], tagFilter: null });
+    set({ tagFilters: [] });
   },
 
   getAssetTags: (assetPath: string) => {

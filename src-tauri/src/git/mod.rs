@@ -206,23 +206,6 @@ impl GitManager {
         self.statuses_fresh = false;
         &self.status_cache
     }
-
-    /// Check if a path should be ignored according to .gitignore. Currently
-    /// unused but kept as a primitive for future scanner integration that
-    /// would honor `.gitignore` (e.g. an opt-in "skip ignored files" mode).
-    #[allow(dead_code)]
-    pub fn is_ignored(&self, path: &Path) -> bool {
-        let Some(repo) = &self.repo else {
-            return false;
-        };
-
-        let relative_path = match path.strip_prefix(&self.root_path) {
-            Ok(p) => p,
-            Err(_) => return false,
-        };
-
-        repo.is_path_ignored(relative_path).unwrap_or(false)
-    }
 }
 
 #[cfg(test)]

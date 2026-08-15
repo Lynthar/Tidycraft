@@ -18,7 +18,24 @@ use std::path::PathBuf;
 
 use super::TagSuggestion;
 
+// Test-only override so the disk-roundtrip tests run against a tempdir
+// instead of the developer's real cache (writing there made the test fail
+// under sandboxed runners with PermissionDenied, and a failed assertion
+// would strand artifacts in a real user directory). Thread-local because
+// `cargo test` runs tests on separate threads — a global would leak the
+// override across unrelated tests. (Plain comment: rustdoc can't attach
+// docs to a macro invocation.)
+#[cfg(test)]
+thread_local! {
+    static TEST_CACHE_DIR: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 fn cache_dir() -> Option<PathBuf> {
+    #[cfg(test)]
+    if let Some(dir) = TEST_CACHE_DIR.with(|d| d.borrow().clone()) {
+        return Some(dir);
+    }
     dirs::cache_dir().map(|p| p.join("tidycraft").join("llm"))
 }
 
@@ -361,10 +378,17 @@ mod tests {
         assert_ne!(hash_context(None, &tags), hash_context(None, &edited));
     }
 
+    /// Point this thread's cache at a fresh tempdir for the test's duration.
+    /// Returns the guard — dropping it removes the directory.
+    fn isolated_cache() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        TEST_CACHE_DIR.with(|d| *d.borrow_mut() = Some(dir.path().to_path_buf()));
+        dir
+    }
+
     #[test]
     fn save_then_get_roundtrip() {
-        // Use a unique key so this test doesn't collide with anything
-        // a developer happens to have in their real cache dir.
+        let _dir = isolated_cache();
         let key = format!("tidycraft-test-{}", uuid::Uuid::new_v4().simple());
         let suggestion = fake_suggestion("test/path.png");
 
@@ -375,15 +399,11 @@ mod tests {
         assert_eq!(loaded.tags.len(), 1);
         assert_eq!(loaded.tags[0].label, "character");
         assert!(matches!(loaded.tags[0].category, TagCategory::Type));
-
-        // Cleanup so the dev cache dir doesn't accrue test artifacts.
-        if let Some(dir) = cache_dir() {
-            let _ = fs::remove_file(dir.join(format!("{key}.json")));
-        }
     }
 
     #[test]
     fn get_returns_none_for_missing_key() {
+        let _dir = isolated_cache();
         let key = format!("tidycraft-nonexistent-{}", uuid::Uuid::new_v4().simple());
         assert!(get(&key).is_none());
     }

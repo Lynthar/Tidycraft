@@ -182,6 +182,7 @@ Grab the latest binary from [Releases](https://github.com/Lynthar/Tidycraft/rele
 **Linux**
 
 - `.deb`: `sudo dpkg -i tidycraft_*.deb`
+- `.rpm`: `sudo rpm -i tidycraft-*.rpm`
 - `.AppImage`: `chmod +x tidycraft_*.AppImage && ./tidycraft_*.AppImage`
 
 No further steps — the app runs directly.

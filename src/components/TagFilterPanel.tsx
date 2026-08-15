@@ -37,8 +37,8 @@ export function TagFilterPanel() {
   };
 
   const handleDeleteTag = async (tagId: string) => {
-    // deleteTag also prunes the id from tagFilters/tagFilter, so no dead
-    // filter is left silently hiding assets.
+    // deleteTag also prunes the id from tagFilters, so no dead filter is
+    // left silently hiding assets.
     await deleteTag(tagId);
   };
 

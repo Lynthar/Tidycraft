@@ -39,6 +39,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **Running the analysis no longer stalls everything else about the project.** The full analysis — including re-hashing every duplicate candidate and re-parsing engine files, seconds of file IO on a large project — ran while holding the project's lock, so the watcher's updates, a scan cancel and every other command on that project queued behind it; the report exporters did the same. All three now copy what they need under a brief lock and do the heavy work with the lock released. The result describes the moment the copy was taken, exactly as it already did — changes that used to queue behind the lock now simply apply while it runs, and the existing "analysis out of date" banner covers them.
 - **The batch-rename preview stops rebuilding itself for nothing.** The dialog asks the backend what each selected file would be renamed to, and re-asks whenever the selection or the operation changes. The selection was handed to it as a freshly built list on every single render of the asset list behind it — so anything that redrew that list counted as a change, and every filesystem event under the project did: one for the watcher's update, a second for the tag reload it sets off. Measured with four files selected and five files touched on disk, that was ten identical preview requests nobody asked for, each one also pushing the preview itself a further debounce interval away; the same run now issues none. The cost scaled with how many files were selected, which is exactly backwards for the case the dialog exists to serve.
 
+### Security
+- **Known-vulnerable dependencies were upgraded.** A `cargo audit` of the lockfile reported five vulnerability hits — two denial-of-service advisories against `quick-xml` (reachable twice over, through Tauri's plist handling and the Linux Wayland build chain) and an invalid-pointer advisory against `crossbeam-epoch` — none of them in a path that parses user assets, all of them still not something a release should carry. All three are now past their fixed versions, and a weekly audit workflow watches the lockfile so the next advisory is noticed without anyone remembering to look.
+
 ## [0.8.4] - 2026-08-07
 
 ### Changed
@@ -109,6 +112,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **The largest-files list translates its type badges.**
 - **The macOS app icon no longer sits a size larger than everything else in the Dock.** macOS draws app icons on a grid that reserves a transparent margin for the shadow the system puts behind them: the rounded square occupies about 80% of the image, not all of it. Tidycraft's icon filled its canvas edge to edge, so it rendered about a quarter wider than every stock application beside it. Only the macOS icon set changed; the Windows and Linux icons keep their current framing, which those platforms expect.
 
+### Security
+- **CSV exports can no longer carry a spreadsheet formula.** A cell beginning with `=`, `+`, `-` or `@` is executable to Excel, LibreOffice and Sheets, and file names are not chosen by whoever opens the export — an asset named `=cmd|'/c calc'!A1.png` is legal on disk and ran on open. Such values are now prefixed so they read as text. The HTML report already escaped its input; CSV was the same threat left uncovered.
 - Refreshed dependencies with published advisories: vite, postcss, @babel/core (build-time only, but the vite issue is exploitable against the dev server), plus serde_with and quinn-proto.
 
 ## [0.8.2] - 2026-07-27
