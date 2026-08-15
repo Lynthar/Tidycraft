@@ -47,8 +47,14 @@ fn default_enabled() -> bool {
 
 fn default_forbidden_chars() -> Vec<char> {
     vec![
-        // Awkward in shells, build scripts and asset paths.
-        ' ', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '+', '=',
+        // Awkward in shells, build scripts and asset paths. `@` is
+        // deliberately NOT here: `@2x` retina suffixes and Unity's
+        // `model@anim.fbx` animation convention make it a *convention*
+        // character, not a hazard — flagging it by default proposed a
+        // build-breaking rename of Tauri's own `128x128@2x.png` icon
+        // (2026-08 external review). Strict pipelines can add it back in
+        // tidycraft.toml.
+        ' ', '!', '#', '$', '%', '^', '&', '*', '(', ')', '+', '=',
         // Illegal in Windows filenames (`< > : " | ? *`, plus the separators
         // `/` and `\`). These are the only entries that make the rule a
         // portability check rather than a style preference: a file named with
@@ -561,6 +567,19 @@ fn to_case_style(stem: &str, style: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn default_forbidden_chars_flag_space_but_not_at() {
+        // `@` was removed from the defaults on purpose (2026-08-15): `@2x`
+        // retina icons and Unity's `model@anim.fbx` animation convention are
+        // ordinary names — with `@` listed, the default rule set proposed a
+        // build-breaking rename of this repo's own Tauri icon. Space stays:
+        // it breaks this app's own 3D-preview texture resolution (README)
+        // and Unreal asset naming.
+        let defaults = super::default_forbidden_chars();
+        assert!(defaults.contains(&' '));
+        assert!(!defaults.contains(&'@'));
+    }
+
     use super::*;
     use crate::scanner::AssetMetadata;
 

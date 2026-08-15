@@ -44,7 +44,9 @@ enabled = true
 # plus every character Windows rejects outright (`< > : " | ? *`) — a file
 # named with one of those cannot be checked out on Windows at all. (`/` and
 # `\` can't occur inside a single filename, so they aren't listed.)
-# forbidden_chars = [' ', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '+', '=', '<', '>', ':', '"', '|', '?']
+# `@` is deliberately absent (`@2x` icons, Unity's `model@anim.fbx` animation
+# convention); add it to the list if your pipeline forbids it.
+# forbidden_chars = [' ', '!', '#', '$', '%', '^', '&', '*', '(', ')', '+', '=', '<', '>', ':', '"', '|', '?']
 # Set true to forbid CJK characters in filenames. Default false (many teams
 # legitimately ship localized content).
 forbid_chinese = false

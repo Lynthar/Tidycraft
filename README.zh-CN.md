@@ -253,7 +253,8 @@ pnpm tauri build
 ```toml
 [naming]
 enabled = true
-forbidden_chars = [' ', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '+', '=']
+forbidden_chars = [' ', '!', '#', '$', '%', '^', '&', '*', '(', ')', '+', '=', '<', '>', ':', '"', '|', '?']
+# `@` 不在默认表里（`@2x` 图标、Unity 的 `model@anim.fbx` 都是正常惯例）；pipeline 禁用它就在这里加回。
 forbid_chinese = false
 max_length = 512                       # 宽松；严格 pipeline 可调到 64-96
 # texture_prefix = "T_"                # 取消注释强制纹理用此前缀

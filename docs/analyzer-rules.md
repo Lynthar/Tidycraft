@@ -61,7 +61,7 @@ names here are English only.
 | Sub-rule | Default | TOML key | When to relax |
 |---|---|---|---|
 | Max name length | 512 chars (loose) | `max_length = 64` | Strict pipelines (UE, deep nesting) |
-| Forbidden characters | space, `! @ # $ % ^ & * ( ) + =`, and the Windows-illegal `< > : " \| ?` | `forbidden_chars` | Inheriting Unity Asset Store packages or third-party samples |
+| Forbidden characters | space, `! # $ % ^ & * ( ) + =`, and the Windows-illegal `< > : " \| ?` — `@` deliberately excluded (`@2x` icons, Unity's `model@anim.fbx`) | `forbidden_chars` | Inheriting Unity Asset Store packages or third-party samples |
 | Forbid Chinese characters | false | `forbid_chinese = true` | Strict ASCII-only pipelines |
 | Required prefix per type | none | `texture_prefix = "T_"` / `model_prefix` / `audio_prefix` | Teams enforcing a naming convention |
 | Case style | any | `case_style` ∈ `"any" \| "PascalCase" \| "snake_case" \| "camelCase" \| "kebab-case"` | Mixed-case codebases |

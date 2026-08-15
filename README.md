@@ -253,7 +253,8 @@ A working starter config is at [`examples/tidycraft.example.toml`](examples/tidy
 ```toml
 [naming]
 enabled = true
-forbidden_chars = [' ', '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '+', '=', '<', '>', ':', '"', '|', '?']
+forbidden_chars = [' ', '!', '#', '$', '%', '^', '&', '*', '(', ')', '+', '=', '<', '>', ':', '"', '|', '?']
+# `@` is not in the default set (`@2x` icons, Unity's `model@anim.fbx`); add it here if your pipeline forbids it.
 forbid_chinese = false
 max_length = 512                       # loose; tighten to 64-96 for strict pipelines
 # texture_prefix = "T_"                # uncomment to require a per-type prefix

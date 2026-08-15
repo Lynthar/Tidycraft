@@ -15,8 +15,8 @@
         "title": "Tidycraft",
         "width": 1280,
         "height": 800,
-        "minWidth": 800,
-        "minHeight": 600,
+        "minWidth": 1000,
+        "minHeight": 700,
         "resizable": true,
         "fullscreen": false,
         "titleBarStyle": "Overlay"
