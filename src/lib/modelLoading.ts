@@ -211,10 +211,14 @@ export function fitObjectToView(
   object.position.sub(center.multiplyScalar(scale));
 }
 
-/// Dispose every geometry and material in the scene, then empty it. The
-/// caller still drops its own reference — this only releases GPU memory.
-export function disposeSceneContents(scene: THREE.Scene): void {
-  scene.traverse((object) => {
+/// Dispose every geometry and material under `root`. The caller still detaches
+/// the object — this only releases GPU memory.
+///
+/// Separate from `disposeSceneContents` because a viewer that keeps its scene
+/// across files has to drop the model without touching the lights and grid
+/// standing beside it.
+export function disposeObjectTree(root: THREE.Object3D): void {
+  root.traverse((object) => {
     if (object instanceof THREE.Mesh) {
       object.geometry?.dispose();
       if (Array.isArray(object.material)) {
@@ -224,6 +228,12 @@ export function disposeSceneContents(scene: THREE.Scene): void {
       }
     }
   });
+}
+
+/// Dispose every geometry and material in the scene, then empty it. The
+/// caller still drops its own reference — this only releases GPU memory.
+export function disposeSceneContents(scene: THREE.Scene): void {
+  disposeObjectTree(scene);
   scene.clear();
 }
 
