@@ -82,7 +82,27 @@ export interface ScanResult {
   total_size: number;
   type_counts: Record<string, number>;
   project_type?: ProjectType;
+  /// Always present — the backend serializes an empty array on a clean scan,
+  /// so `[]` is itself the statement "complete, trustworthy read".
+  warnings: ScanWarning[];
 }
+
+/// Mirrors `warning::ScanWarning` — serde-tagged by `kind`. A Rust test pins
+/// these strings (`warning_wire_shape_matches_the_frontends_mirror`); no
+/// codegen between the two sides, same discipline as RuleWarning.
+export type ScanWarning =
+  | { kind: "tree_walk_failed"; skipped: number; sample: string[]; detail: string }
+  | { kind: "asset_unreadable"; affected: number; sample: string[]; detail: string }
+  | { kind: "ignore_rules_unusable"; detail: string }
+  | { kind: "cache_not_saved"; detail: string };
+
+/// Session-lifetime warnings. The first two mirror `warning::ProjectWarning`;
+/// `watcher_start_failed` is born on this side of the IPC — the failed
+/// `start_watching` invoke IS the signal, so the backend never sends it.
+export type ProjectWarning =
+  | { kind: "watcher_events_dropped"; batches: number; detail: string }
+  | { kind: "tags_not_saved"; detail: string }
+  | { kind: "watcher_start_failed"; detail: string };
 
 export type ScanPhase =
   | "discovering"

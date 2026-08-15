@@ -258,6 +258,37 @@
     "retry": "Retry",
     "dismiss": "Dismiss"
   },
+  "warnings": {
+    "badgeTitle": "{{n}} warnings — click for details",
+    "tree_walk_failed": {
+      "title": "Scan incomplete",
+      "body": "{{skipped}} entries could not be read and are missing from the results ({{detail}})."
+    },
+    "asset_unreadable": {
+      "title": "Unreadable assets",
+      "body": "{{affected}} files could not be fully read; their records are missing or unreliable ({{detail}})."
+    },
+    "ignore_rules_unusable": {
+      "title": "Ignore rules not applied",
+      "body": "The project's ignore rules could not be read, so ignored files may appear ({{detail}})."
+    },
+    "cache_not_saved": {
+      "title": "Scan cache not saved",
+      "body": "The scan cache could not be written — the next scan will be a full one ({{detail}})."
+    },
+    "watcher_events_dropped": {
+      "title": "File watching missed changes",
+      "body": "{{batches}} change notifications were lost ({{detail}}). The view may be out of sync — rescan to be sure."
+    },
+    "watcher_start_failed": {
+      "title": "File watching unavailable",
+      "body": "The filesystem watcher could not start ({{detail}}). External changes will not appear until a rescan."
+    },
+    "tags_not_saved": {
+      "title": "Tags not saved",
+      "body": "Tag bindings were updated in memory but could not be written to disk: {{detail}}"
+    }
+  },
   "scanPhase": {
     "discovering": "Discovering files",
     "parsing": "Parsing assets",

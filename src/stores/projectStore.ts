@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { basename, dirname } from "../lib/pathUtils";
-import type { ScanResult, AssetInfo, ScanProgress, AssetType, ProjectType, AnalysisResult, UndoResult, HistoryEntry, GitInfo, GitStatusMap, GitFileStatus, FsChangeEvent, RenamedPair, DirectoryNode } from "../types/asset";
+import type { ScanResult, AssetInfo, ScanProgress, AssetType, ProjectType, AnalysisResult, UndoResult, HistoryEntry, GitInfo, GitStatusMap, GitFileStatus, FsChangeEvent, RenamedPair, DirectoryNode, ProjectWarning } from "../types/asset";
 import { useSettingsStore } from "./settingsStore";
 import { useToastStore } from "./toastStore";
 import i18n from "../i18n";
@@ -12,12 +12,18 @@ import { evictThumbs } from "../lib/thumbnailCache";
 // store because function references don't belong in serialized state, and
 // we need to dispose them on closeProject.
 const fsWatchers = new Map<string, UnlistenFn>();
+const warningWatchers = new Map<string, UnlistenFn>();
 
 async function stopFsWatch(projectId: string) {
   const unlisten = fsWatchers.get(projectId);
   if (unlisten) {
     unlisten();
     fsWatchers.delete(projectId);
+  }
+  const warnUnlisten = warningWatchers.get(projectId);
+  if (warnUnlisten) {
+    warnUnlisten();
+    warningWatchers.delete(projectId);
   }
   try {
     await invoke("stop_watching", { projectId });
@@ -148,6 +154,9 @@ export interface ProjectData {
   /// the UI (Sidebar Run Analysis button) so users know whether the next
   /// analysis will use custom rules or fall back to defaults.
   hasCustomConfig: boolean;
+  /// Session-lifetime degradations (watcher trouble), deduped by kind —
+  /// scan-time warnings live on scanResult.warnings and are NOT copied here.
+  projectWarnings: ProjectWarning[];
 }
 
 const createDefaultProjectData = (id: string, path: string): ProjectData => ({
@@ -171,6 +180,7 @@ const createDefaultProjectData = (id: string, path: string): ProjectData => ({
   gitInfo: null,
   gitStatuses: {},
   hasCustomConfig: false,
+  projectWarnings: [],
 });
 
 const generateProjectId = (): string => {
@@ -303,6 +313,7 @@ interface ProjectState {
   gitInfo: GitInfo | null;
   gitStatuses: GitStatusMap;
   hasCustomConfig: boolean;
+  projectWarnings: ProjectWarning[];
 
   // Multi-project actions
   openProject: (path: string, options?: { force?: boolean }) => Promise<void>;
@@ -405,6 +416,7 @@ const updateActiveProject = (
   if ('gitInfo' in updates) result.gitInfo = updates.gitInfo ?? null;
   if ('gitStatuses' in updates) result.gitStatuses = updates.gitStatuses ?? {};
   if ('hasCustomConfig' in updates) result.hasCustomConfig = updates.hasCustomConfig ?? false;
+  if ('projectWarnings' in updates) result.projectWarnings = updates.projectWarnings ?? [];
 
   return result;
 };
@@ -432,6 +444,7 @@ const syncFromActiveProject = (project: ProjectData | undefined): Partial<Projec
       gitInfo: null,
       gitStatuses: {},
       hasCustomConfig: false,
+      projectWarnings: [],
     };
   }
 
@@ -455,6 +468,7 @@ const syncFromActiveProject = (project: ProjectData | undefined): Partial<Projec
     gitInfo: project.gitInfo,
     gitStatuses: project.gitStatuses,
     hasCustomConfig: project.hasCustomConfig,
+    projectWarnings: project.projectWarnings,
   };
 };
 
@@ -465,6 +479,53 @@ const syncFromActiveProject = (project: ProjectData | undefined): Partial<Projec
 function directoryExistsInTree(tree: DirectoryNode, path: string): boolean {
   if (tree.path === path) return true;
   return tree.children.some((child) => directoryExistsInTree(child, path));
+}
+
+/// Record a session-lifetime warning against a (possibly non-active)
+/// project. Deduped by kind, latest payload wins — the backend's
+/// watcher_events_dropped carries a cumulative count, so replacing is
+/// correct and appending would double-count. tags_not_saved becomes a toast
+/// instead of a list entry: it belongs to the one operation the user just
+/// performed, not to the project's standing state.
+function recordProjectWarning(projectId: string, w: ProjectWarning) {
+  if (w.kind === "tags_not_saved") {
+    useToastStore.getState().push({
+      kind: "error",
+      message: i18n.t("warnings.tags_not_saved.body", { detail: w.detail }),
+    });
+    return;
+  }
+  const state = useProjectStore.getState();
+  const target = state.projects.get(projectId);
+  if (!target) return;
+  const kept = target.projectWarnings.filter((p) => p.kind !== w.kind);
+  const updated = { ...target, projectWarnings: [...kept, w] };
+  const newMap = new Map(state.projects);
+  newMap.set(projectId, updated);
+  const patch: Partial<ProjectState> = { projects: newMap };
+  if (state.activeProjectId === projectId) {
+    patch.projectWarnings = updated.projectWarnings;
+  }
+  useProjectStore.setState(patch);
+}
+
+/// Drop one warning kind — a successful watcher start supersedes the
+/// failure note from an earlier attempt.
+function clearProjectWarning(projectId: string, kind: ProjectWarning["kind"]) {
+  const state = useProjectStore.getState();
+  const target = state.projects.get(projectId);
+  if (!target || !target.projectWarnings.some((p) => p.kind === kind)) return;
+  const updated = {
+    ...target,
+    projectWarnings: target.projectWarnings.filter((p) => p.kind !== kind),
+  };
+  const newMap = new Map(state.projects);
+  newMap.set(projectId, updated);
+  const patch: Partial<ProjectState> = { projects: newMap };
+  if (state.activeProjectId === projectId) {
+    patch.projectWarnings = updated.projectWarnings;
+  }
+  useProjectStore.setState(patch);
 }
 
 // Apply a filesystem-change event from the backend watcher into the store.
@@ -610,6 +671,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   gitInfo: null,
   gitStatuses: {},
   hasCustomConfig: false,
+  projectWarnings: [],
 
   // Multi-project actions
   openProject: async (rawPath: string, options?: { force?: boolean }) => {
@@ -798,9 +860,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             (event) => applyFsChange(projectId, event.payload)
           );
           fsWatchers.set(projectId, fsUnlisten);
+          const warnUnlisten = await listen<ProjectWarning>(
+            `project-warning-${projectId}`,
+            (event) => recordProjectWarning(projectId, event.payload)
+          );
+          warningWatchers.set(projectId, warnUnlisten);
           await invoke("start_watching", { projectId });
+          // A successful start supersedes any earlier failure note.
+          clearProjectWarning(projectId, "watcher_start_failed");
         } catch (err) {
           console.error("Failed to start watcher:", err);
+          recordProjectWarning(projectId, {
+            kind: "watcher_start_failed",
+            detail: String(err),
+          });
           await stopFsWatch(projectId);
         }
       }

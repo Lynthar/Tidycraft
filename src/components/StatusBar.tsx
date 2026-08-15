@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { X, AlertCircle } from "lucide-react";
+import { X, AlertCircle, AlertTriangle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
 import { formatFileSize } from "../lib/utils";
 import { basename } from "../lib/pathUtils";
+import type { ScanWarning, ProjectWarning } from "../types/asset";
 
 /// How long the watcher "syncing" badge stays visible after the most recent
 /// fs-change event. Coalescing window in `watcher.rs` is 500ms, so this
@@ -26,6 +27,14 @@ export function StatusBar() {
   const watcherPulse = useProjectStore((s) => s.watcherPulse);
   const gitStatuses = useProjectStore((s) => s.gitStatuses);
   const gitIsRepo = useProjectStore((s) => s.gitInfo?.is_repo ?? false);
+  const projectWarnings = useProjectStore((s) => s.projectWarnings);
+  const [warnOpen, setWarnOpen] = useState(false);
+  // Scan-time warnings live on the scan result; session-lifetime ones on
+  // their own mirror. One badge speaks for both.
+  const warnings: (ScanWarning | ProjectWarning)[] = [
+    ...(scanResult?.warnings ?? []),
+    ...projectWarnings,
+  ];
 
   const [syncing, setSyncing] = useState(false);
   const timerRef = useRef<number | null>(null);
@@ -258,11 +267,84 @@ export function StatusBar() {
           )}
         </span>
       )}
+      {warnings.length > 0 && (
+        <span className="tc-warn-wrap">
+          <button
+            className="tc-warn-badge"
+            onClick={() => setWarnOpen((o) => !o)}
+            title={t("warnings.badgeTitle", { n: warnings.length })}
+          >
+            <AlertTriangle size={11} />
+            {warnings.length}
+          </button>
+          {warnOpen && (
+            <WarningPopover warnings={warnings} onClose={() => setWarnOpen(false)} />
+          )}
+        </span>
+      )}
       {syncing && (
         <span className="tc-watcher-pulse" title={t("statusBar.syncing")}>
           {t("statusBar.syncing")}
         </span>
       )}
     </footer>
+  );
+}
+
+/// Details for the status bar's warning badge. Deliberately NOT a ModalShell
+/// dialog: one warning is the common case, and a blocking overlay would also
+/// suppress Ctrl+1/2/3 via isBlockingOverlayOpen. Escape is handled here in
+/// the CAPTURE phase with stopPropagation so the global Escape ladder
+/// (cancel scan → clear selection → close preview → clear search, a BUBBLE
+/// listener in useKeyboardShortcuts) cannot also fire on the same press.
+function WarningPopover({
+  warnings,
+  onClose,
+}: {
+  warnings: (ScanWarning | ProjectWarning)[];
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    // mousedown, not click: the toggle button's own mousedown lands inside
+    // .tc-warn-wrap and is excluded via closest(), so clicking the badge
+    // again closes through the toggle instead of close-then-reopen.
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest(".tc-warn-wrap")) onClose();
+    };
+    window.addEventListener("keydown", onKey, true);
+    window.addEventListener("mousedown", onMouseDown);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("mousedown", onMouseDown);
+    };
+  }, [onClose]);
+
+  return (
+    <div ref={ref} className="tc-warn-popover">
+      {warnings.map((w) => (
+        <div key={w.kind} className="tc-warn-entry">
+          <div className="tc-warn-title">{t(`warnings.${w.kind}.title`)}</div>
+          <div className="tc-warn-body">{t(`warnings.${w.kind}.body`, { ...w })}</div>
+          {"sample" in w && w.sample.length > 0 && (
+            <ul className="tc-warn-sample">
+              {w.sample.map((p) => (
+                <li key={p} title={p}>
+                  {basename(p)}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ))}
+    </div>
   );
 }

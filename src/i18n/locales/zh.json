@@ -258,6 +258,37 @@
     "retry": "重试",
     "dismiss": "忽略"
   },
+  "warnings": {
+    "badgeTitle": "{{n}} 条警告——点击查看详情",
+    "tree_walk_failed": {
+      "title": "扫描不完整",
+      "body": "{{skipped}} 个条目无法读取，未包含在结果中（{{detail}}）。"
+    },
+    "asset_unreadable": {
+      "title": "资产不可读",
+      "body": "{{affected}} 个文件未能完整读取，相应记录缺失或不可靠（{{detail}}）。"
+    },
+    "ignore_rules_unusable": {
+      "title": "忽略规则未生效",
+      "body": "项目的忽略规则无法读取，被忽略的文件可能出现在列表中（{{detail}}）。"
+    },
+    "cache_not_saved": {
+      "title": "扫描缓存未保存",
+      "body": "扫描缓存写入失败——下次扫描将是全量扫描（{{detail}}）。"
+    },
+    "watcher_events_dropped": {
+      "title": "文件监听丢失了变更",
+      "body": "{{batches}} 批变更通知丢失（{{detail}}）。当前视图可能与磁盘不一致——重新扫描以确认。"
+    },
+    "watcher_start_failed": {
+      "title": "文件监听不可用",
+      "body": "文件系统监听器启动失败（{{detail}}）。外部改动在重新扫描前不会显示。"
+    },
+    "tags_not_saved": {
+      "title": "标签未保存",
+      "body": "标签已在内存中更新，但写入磁盘失败：{{detail}}"
+    }
+  },
   "scanPhase": {
     "discovering": "发现文件中",
     "parsing": "解析资产中",
