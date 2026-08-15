@@ -1,6 +1,6 @@
 use ignore::WalkBuilder;
 use image::ImageDecoder;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -11,6 +11,7 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use crate::cache::{mtime_nanos, ScanCache};
+use crate::warning::{SampledFailures, ScanWarning};
 
 #[derive(Error, Debug)]
 pub enum ScanError {
@@ -127,6 +128,10 @@ pub struct ScanResult {
     pub total_size: u64,
     pub type_counts: HashMap<String, usize>,
     pub project_type: Option<ProjectType>,
+    /// Non-fatal problems from THIS scan — what was skipped, degraded, or
+    /// not persisted. Empty means a complete, trustworthy read.
+    #[serde(default)]
+    pub warnings: Vec<crate::warning::ScanWarning>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1412,9 +1417,16 @@ impl IgnoreMatcher {
 
 /// Build an [`IgnoreMatcher`] for `root`, or `None` when `respect_gitignore`
 /// is false (the watcher then tracks everything `is_trackable_path` allows).
-pub fn build_gitignore_matcher(root: &Path, respect_gitignore: bool) -> Option<IgnoreMatcher> {
+/// Build the tree's ignore matcher. `Ok(None)` = gitignore disabled by the
+/// caller; `Err` = the rules exist but cannot be compiled, so the directory
+/// tree will stop filtering ignored entries — the scan turns that into a
+/// warning.
+pub fn build_gitignore_matcher_reported(
+    root: &Path,
+    respect_gitignore: bool,
+) -> Result<Option<IgnoreMatcher>, String> {
     if !respect_gitignore {
-        return None;
+        return Ok(None);
     }
     let mut builder = ignore::gitignore::GitignoreBuilder::new(root);
     // Mirror build_walker's root-level sources. `add` returns Some(err) for a
@@ -1424,20 +1436,38 @@ pub fn build_gitignore_matcher(root: &Path, respect_gitignore: bool) -> Option<I
     let _ = builder.add(root.join(".gitignore"));
     let _ = builder.add(root.join(".ignore"));
     let _ = builder.add(root.join(".git").join("info").join("exclude"));
-    let local = match builder.build() {
-        Ok(gi) => gi,
+    let local = builder.build().map_err(|e| e.to_string())?;
+    // `git_global(true)` equivalent — an empty matcher when none is configured.
+    let (global, _) = ignore::gitignore::Gitignore::global();
+    Ok(Some(IgnoreMatcher { local, global }))
+}
+
+/// [`build_gitignore_matcher_reported`] with the failure downgraded to a log
+/// line — the watcher has no warning channel for a matcher it builds once at
+/// start.
+pub fn build_gitignore_matcher(root: &Path, respect_gitignore: bool) -> Option<IgnoreMatcher> {
+    match build_gitignore_matcher_reported(root, respect_gitignore) {
+        Ok(m) => m,
         Err(e) => {
             eprintln!(
                 "[scanner] gitignore matcher build failed for {}: {}",
                 root.display(),
                 e
             );
-            return None;
+            None
         }
-    };
-    // `git_global(true)` equivalent — an empty matcher when none is configured.
-    let (global, _) = ignore::gitignore::Gitignore::global();
-    Some(IgnoreMatcher { local, global })
+    }
+}
+
+/// The path a walk error is about, when the error carries one. `ignore`
+/// wraps io errors in `WithPath` / `WithDepth` layers; anything else
+/// (pattern errors, bare io) has no single path to point at.
+fn walk_error_path(err: &ignore::Error) -> Option<String> {
+    match err {
+        ignore::Error::WithPath { path, .. } => Some(path_to_string(path)),
+        ignore::Error::WithDepth { err, .. } => walk_error_path(err),
+        _ => None,
+    }
 }
 
 /// Scan a directory with optional state for progress tracking and
@@ -1475,14 +1505,21 @@ pub fn scan_directory_with_state(
         *s.phase.write() = ScanPhase::Discovering;
     }
 
+    let mut warnings: Vec<ScanWarning> = Vec::new();
+    let mut walk_failures = SampledFailures::default();
     let mut file_paths: Vec<PathBuf> = Vec::new();
 
     for result in build_walker(root_path, respect_gitignore) {
         let entry = match result {
             Ok(e) => e,
             // Walk errors (permission denied on a sibling, transient IO
-            // hiccup) shouldn't poison the whole scan — skip and carry on.
-            Err(_) => continue,
+            // hiccup) shouldn't poison the whole scan — skip, but COUNT:
+            // whatever lives there is absent from the results, and "didn't
+            // read it" must stay distinguishable from "nothing there".
+            Err(e) => {
+                walk_failures.record(walk_error_path(&e).as_deref(), &e.to_string());
+                continue;
+            }
         };
 
         if let Some(ref s) = state {
@@ -1540,6 +1577,7 @@ pub fn scan_directory_with_state(
     let project_type_clone = project_type.clone();
     let counter = Arc::new(AtomicUsize::new(0));
     let counter_clone = counter.clone();
+    let parse_failures = Mutex::new(SampledFailures::default());
 
     let assets: Vec<AssetInfo> = file_paths
         .par_iter()
@@ -1572,7 +1610,18 @@ pub fn scan_directory_with_state(
                 .unwrap_or_default();
 
             // Get file metadata
-            let metadata = entry_path.metadata().ok();
+            let metadata = match entry_path.metadata() {
+                Ok(m) => Some(m),
+                Err(e) => {
+                    // The file stays in the results with zeroed size/mtime
+                    // (pre-existing behavior); the warning is what marks the
+                    // record as untrustworthy.
+                    parse_failures
+                        .lock()
+                        .record(Some(&path_to_string(entry_path)), &e.to_string());
+                    None
+                }
+            };
             let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
             let modified = metadata
                 .and_then(|m| m.modified().ok())
@@ -1647,7 +1696,13 @@ pub fn scan_directory_with_state(
         *s.phase.write() = ScanPhase::Building;
     }
 
-    let tree_ignore = build_gitignore_matcher(root_path, respect_gitignore);
+    let tree_ignore = match build_gitignore_matcher_reported(root_path, respect_gitignore) {
+        Ok(m) => m,
+        Err(detail) => {
+            warnings.push(ScanWarning::IgnoreRulesUnusable { detail });
+            None
+        }
+    };
     let directory_tree = build_directory_tree(root_path, &assets, tree_ignore.as_ref());
 
     let total_count = assets.len();
@@ -1655,6 +1710,22 @@ pub fn scan_directory_with_state(
 
     if let Some(ref s) = state {
         *s.phase.write() = ScanPhase::Completed;
+    }
+
+    if !walk_failures.is_empty() {
+        warnings.push(ScanWarning::TreeWalkFailed {
+            skipped: walk_failures.count,
+            sample: walk_failures.sample,
+            detail: walk_failures.detail.unwrap_or_default(),
+        });
+    }
+    let parse_failures = parse_failures.into_inner();
+    if !parse_failures.is_empty() {
+        warnings.push(ScanWarning::AssetUnreadable {
+            affected: parse_failures.count,
+            sample: parse_failures.sample,
+            detail: parse_failures.detail.unwrap_or_default(),
+        });
     }
 
     Ok(ScanResult {
@@ -1665,11 +1736,17 @@ pub fn scan_directory_with_state(
         total_size,
         type_counts,
         project_type,
+        warnings,
     })
 }
 
-/// Parse a single asset file and return AssetInfo
-pub fn parse_asset_file(path: &Path, project_type: &Option<ProjectType>) -> Option<AssetInfo> {
+/// Parse a single asset file. `Ok(None)` = not an asset (no extension);
+/// `Err` = the file was there at discovery but its metadata cannot be read
+/// now — the caller decides whether that is worth a warning.
+pub fn parse_asset_file_reported(
+    path: &Path,
+    project_type: &Option<ProjectType>,
+) -> Result<Option<AssetInfo>, std::io::Error> {
     let file_name = path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -1681,11 +1758,11 @@ pub fn parse_asset_file(path: &Path, project_type: &Option<ProjectType>) -> Opti
         .unwrap_or_default();
 
     if extension.is_empty() {
-        return None;
+        return Ok(None);
     }
 
-    // Get file metadata
-    let metadata = path.metadata().ok()?;
+    // Get file metadata — the one genuine IO failure point in here.
+    let metadata = path.metadata()?;
     let size = metadata.len();
     let modified = metadata
         .modified()
@@ -1706,7 +1783,7 @@ pub fn parse_asset_file(path: &Path, project_type: &Option<ProjectType>) -> Opti
         None
     };
 
-    Some(AssetInfo {
+    Ok(Some(AssetInfo {
         path: path_to_string(path),
         name: file_name,
         extension,
@@ -1715,7 +1792,13 @@ pub fn parse_asset_file(path: &Path, project_type: &Option<ProjectType>) -> Opti
         modified,
         metadata: asset_metadata,
         unity_guid,
-    })
+    }))
+}
+
+/// [`parse_asset_file_reported`] with the error dropped — the watcher's call
+/// sites patch a live scan and have nowhere to put a warning.
+pub fn parse_asset_file(path: &Path, project_type: &Option<ProjectType>) -> Option<AssetInfo> {
+    parse_asset_file_reported(path, project_type).ok().flatten()
 }
 
 /// Re-key a cached [`AssetInfo`] onto a renamed path without re-reading the
@@ -1792,12 +1875,18 @@ pub fn scan_directory_incremental(
         *s.phase.write() = ScanPhase::Discovering;
     }
 
+    let mut warnings: Vec<ScanWarning> = Vec::new();
+    let mut walk_failures = SampledFailures::default();
     let mut file_entries: Vec<(PathBuf, u64)> = Vec::new();
 
     for result in build_walker(root_path, respect_gitignore) {
         let entry = match result {
             Ok(e) => e,
-            Err(_) => continue,
+            // Same treatment as the full scan: skip, but count — see there.
+            Err(e) => {
+                walk_failures.record(walk_error_path(&e).as_deref(), &e.to_string());
+                continue;
+            }
         };
 
         if let Some(ref s) = state {
@@ -1884,6 +1973,7 @@ pub fn scan_directory_incremental(
     let project_type_clone = project_type.clone();
     let counter = Arc::new(AtomicUsize::new(0));
     let counter_clone = counter.clone();
+    let parse_failures = Mutex::new(SampledFailures::default());
 
     // Parse files in parallel and collect results
     let parsed_assets: Vec<(AssetInfo, u64)> = files_to_scan
@@ -1905,7 +1995,18 @@ pub fn scan_directory_incremental(
                 }
             }
 
-            parse_asset_file(p, &project_type_clone).map(|asset| (asset, *modified_nanos))
+            match parse_asset_file_reported(p, &project_type_clone) {
+                Ok(Some(asset)) => Some((asset, *modified_nanos)),
+                // No extension — pre-filtered at discovery, but keep the
+                // arm honest rather than unwrap.
+                Ok(None) => None,
+                Err(e) => {
+                    parse_failures
+                        .lock()
+                        .record(Some(&path_to_string(p)), &e.to_string());
+                    None
+                }
+            }
         })
         .collect();
 
@@ -1964,24 +2065,50 @@ pub fn scan_directory_incremental(
         *s.phase.write() = ScanPhase::Building;
     }
 
-    let tree_ignore = build_gitignore_matcher(root_path, respect_gitignore);
+    let tree_ignore = match build_gitignore_matcher_reported(root_path, respect_gitignore) {
+        Ok(m) => m,
+        Err(detail) => {
+            warnings.push(ScanWarning::IgnoreRulesUnusable { detail });
+            None
+        }
+    };
     let directory_tree = build_directory_tree(root_path, &assets, tree_ignore.as_ref());
 
     let total_count = assets.len();
     let total_size = assets.iter().map(|a| a.size).sum();
 
     // Save updated cache. Never fatal — a failed save just means the next scan
-    // is a full one — but logged, because the silent version left "every scan
-    // is slow" with no clue that the cache directory was unwritable.
+    // is a full one — but logged and surfaced, because the silent version left
+    // "every scan is slow" with no clue that the cache directory was
+    // unwritable.
     if let Err(e) = cache.save() {
         eprintln!(
             "[scan] failed to save scan cache (next scan will be full): {}",
             e
         );
+        warnings.push(ScanWarning::CacheNotSaved {
+            detail: e.to_string(),
+        });
     }
 
     if let Some(ref s) = state {
         *s.phase.write() = ScanPhase::Completed;
+    }
+
+    if !walk_failures.is_empty() {
+        warnings.push(ScanWarning::TreeWalkFailed {
+            skipped: walk_failures.count,
+            sample: walk_failures.sample,
+            detail: walk_failures.detail.unwrap_or_default(),
+        });
+    }
+    let parse_failures = parse_failures.into_inner();
+    if !parse_failures.is_empty() {
+        warnings.push(ScanWarning::AssetUnreadable {
+            affected: parse_failures.count,
+            sample: parse_failures.sample,
+            detail: parse_failures.detail.unwrap_or_default(),
+        });
     }
 
     let result = ScanResult {
@@ -1992,6 +2119,7 @@ pub fn scan_directory_incremental(
         total_size,
         type_counts,
         project_type,
+        warnings,
     };
 
     let stats = IncrementalStats {
@@ -2027,6 +2155,62 @@ mod tests {
             modified: 1_700_000_000,
             metadata: None,
             unity_guid: Some("stale-guid".to_string()),
+        }
+    }
+
+    #[test]
+    fn clean_scan_reports_no_warnings() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("a.png"), b"x").unwrap();
+        fs::write(dir.path().join("b.txt"), b"y").unwrap();
+        let result = scan_directory_with_state(&path_to_string(dir.path()), None, true).unwrap();
+        assert!(result.warnings.is_empty(), "{:?}", result.warnings);
+    }
+
+    #[test]
+    fn parse_failure_is_an_error_not_a_none() {
+        let missing = Path::new("/definitely/not/here.png");
+        // The reported variant keeps the io error; the old wrapper keeps its
+        // Option shape for the watcher's call sites.
+        assert!(parse_asset_file_reported(missing, &None).is_err());
+        assert!(parse_asset_file(missing, &None).is_none());
+        // No extension: not an asset, not an error.
+        let dir = tempdir().unwrap();
+        let bare = dir.path().join("README");
+        fs::write(&bare, b"x").unwrap();
+        assert!(matches!(parse_asset_file_reported(&bare, &None), Ok(None)));
+    }
+
+    /// chmod is a no-op on Windows, where this test would pass without
+    /// exercising anything — hence the gate.
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_subtree_reports_tree_walk_failed() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("ok.png"), b"x").unwrap();
+        let sub = dir.path().join("locked");
+        fs::create_dir(&sub).unwrap();
+        fs::write(sub.join("hidden.png"), b"y").unwrap();
+        fs::set_permissions(&sub, fs::Permissions::from_mode(0o000)).unwrap();
+
+        let result = scan_directory_with_state(&path_to_string(dir.path()), None, true);
+        // Restore before asserting so the tempdir can clean up either way.
+        fs::set_permissions(&sub, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let result = result.unwrap();
+        assert_eq!(result.assets.len(), 1, "only ok.png is reachable");
+        let walk = result
+            .warnings
+            .iter()
+            .find(|w| matches!(w, crate::warning::ScanWarning::TreeWalkFailed { .. }))
+            .expect("an unreadable subtree must surface as a warning");
+        if let crate::warning::ScanWarning::TreeWalkFailed {
+            skipped, detail, ..
+        } = walk
+        {
+            assert!(*skipped >= 1);
+            assert!(!detail.is_empty());
         }
     }
 

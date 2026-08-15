@@ -209,6 +209,7 @@ mod tests {
             total_size: 0,
             type_counts: HashMap::new(),
             project_type: None,
+            warnings: Vec::new(),
             assets,
         }
     }

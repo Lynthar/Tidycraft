@@ -12,6 +12,7 @@ mod thumbnail;
 mod undo;
 mod unity;
 mod unreal;
+mod warning;
 mod watcher;
 
 use analyzer::rules::RuleConfig;
@@ -935,6 +936,7 @@ fn run_full_analysis(
             total_size: scan_result.total_size,
             type_counts: scan_result.type_counts.clone(),
             project_type: scan_result.project_type.clone(),
+            warnings: scan_result.warnings.clone(),
         }
     });
     let scan_to_analyze: &ScanResult = owned_filtered.as_ref().unwrap_or(scan_result);
@@ -1706,6 +1708,41 @@ fn export_issues_to_json(project_id: String) -> Result<String, String> {
     serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
 }
 
+/// The one-line admission at the top of the HTML report when the scan under
+/// it was incomplete. Empty when there is nothing to admit — the healthy
+/// report carries no banner element at all. CacheNotSaved is deliberately
+/// not reported here: cache health changes nothing about THIS report's
+/// numbers.
+fn warning_banner_html(warnings: &[warning::ScanWarning]) -> String {
+    use warning::ScanWarning;
+    let mut unread = 0usize;
+    let mut ignore_broken = false;
+    for w in warnings {
+        match w {
+            ScanWarning::TreeWalkFailed { skipped, .. } => unread += skipped,
+            ScanWarning::AssetUnreadable { affected, .. } => unread += affected,
+            ScanWarning::IgnoreRulesUnusable { .. } => ignore_broken = true,
+            ScanWarning::CacheNotSaved { .. } => {}
+        }
+    }
+    let mut parts: Vec<String> = Vec::new();
+    if unread > 0 {
+        parts.push(format!(
+            "{unread} entries could not be read and are not reflected below"
+        ));
+    }
+    if ignore_broken {
+        parts.push("the project's ignore rules were not applied".to_string());
+    }
+    if parts.is_empty() {
+        return String::new();
+    }
+    format!(
+        "        <div class=\"warn-banner\">This report is based on an incomplete scan: {}.</div>\n",
+        parts.join("; ")
+    )
+}
+
 /// The report's stylesheet, kept out of the `format!` template so a test can
 /// read it directly (`every_asset_type_has_a_report_badge_rule`). Lifting it
 /// out also drops the doubled braces the template otherwise needs.
@@ -1748,6 +1785,7 @@ const REPORT_STYLE: &str = r#"    <style>
         h1 { color: var(--primary); margin-bottom: 0.5rem; }
         h2 { color: var(--text); margin: 2rem 0 1rem; border-bottom: 1px solid var(--line); padding-bottom: 0.5rem; }
         .meta { color: var(--text-2); margin-bottom: 2rem; }
+        .warn-banner { border: 1px solid var(--warn); color: var(--warn); background: var(--panel); border-radius: 6px; padding: 0.6rem 1rem; margin: -1rem 0 2rem; font-size: 0.9rem; }
         .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem; }
         .card { background: var(--panel); border-radius: 8px; padding: 1.5rem; border: 1px solid var(--line); }
         .card-value { font-size: 2rem; font-weight: bold; color: var(--primary); }
@@ -1874,6 +1912,7 @@ fn export_to_html(
             scan_result.total_count.saturating_sub(with_issues.len())
         };
 
+        let warning_banner = warning_banner_html(&scan_result.warnings);
         let html = format!(
             r#"<!DOCTYPE html>
 <html lang="en">
@@ -1887,7 +1926,7 @@ fn export_to_html(
     <div class="container">
         <h1>Tidycraft Report</h1>
         <p class="meta">Project: {project_name} | Generated: {date}</p>
-
+{warning_banner}
         <div class="cards">
             <div class="card">
                 <div class="card-value">{total_assets}</div>
@@ -2207,6 +2246,7 @@ fn preview_batch_rename(paths: Vec<String>, operation: RenameOperation) -> Vec<R
 
 #[tauri::command]
 fn execute_batch_rename(
+    app: AppHandle,
     project_id: String,
     paths: Vec<String>,
     operation: RenameOperation,
@@ -2226,7 +2266,12 @@ fn execute_batch_rename(
         })
         .collect();
 
-    commit_renames(&project_id, planned, "Batch rename")
+    let mut warnings = Vec::new();
+    let result = commit_renames(&project_id, planned, "Batch rename", &mut warnings);
+    for w in &warnings {
+        warning::emit_project_warning(&app, &project_id, w);
+    }
+    result
 }
 
 /// Rename a heterogeneous batch — each file to its own new *file name* within
@@ -2354,6 +2399,10 @@ fn commit_renames(
     project_id: &str,
     planned: Vec<(String, String)>,
     label: &str,
+    // Out-param rather than an AppHandle: the lock-window regression tests
+    // call this directly and have no Tauri app to hand it. The command
+    // boundary owns the emit.
+    warnings: &mut Vec<warning::ProjectWarning>,
 ) -> BatchRenameResult {
     let total = planned.len();
     let mut all_done: Vec<(String, String)> = Vec::new();
@@ -2375,11 +2424,14 @@ fn commit_renames(
                 for (original, new_path) in &done {
                     tags.rename_path(original, new_path);
                 }
-                // Logged, not swallowed: the files are already renamed, so this
+                // Logged AND surfaced: the files are already renamed, so this
                 // must not fail the command, but a silent failure here means the
-                // bindings only live in memory (watcher.rs logs the same way).
+                // bindings only live in memory (watcher.rs reports the same way).
                 if let Err(e) = state.save_tags() {
                     eprintln!("[batch_rename] failed to save tags after rename: {}", e);
+                    warnings.push(warning::ProjectWarning::TagsNotSaved {
+                        detail: e.to_string(),
+                    });
                 }
             }
             Ok((done, part))
@@ -2528,9 +2580,18 @@ fn mark_naming_fix_collisions(previews: &mut [NamingFixPreview]) {
 // probes and the undo/tags write-back) in one batch — off the main thread,
 // same rationale as delete_assets.
 #[tauri::command(async)]
-fn apply_naming_fixes(project_id: String, fixes: Vec<NamingFix>) -> BatchRenameResult {
+fn apply_naming_fixes(
+    app: AppHandle,
+    project_id: String,
+    fixes: Vec<NamingFix>,
+) -> BatchRenameResult {
     let planned: Vec<(String, String)> = fixes.into_iter().map(|f| (f.path, f.new_name)).collect();
-    commit_renames(&project_id, planned, "Fix naming")
+    let mut warnings = Vec::new();
+    let result = commit_renames(&project_id, planned, "Fix naming", &mut warnings);
+    for w in &warnings {
+        warning::emit_project_warning(&app, &project_id, w);
+    }
+    result
 }
 
 // ============ Unreal Engine Commands ============
@@ -2776,7 +2837,29 @@ fn unix_timestamp() -> u64 {
 /// exist at the destination. Successful moves are batched into the project's
 /// undo manager so the user can revert.
 #[tauri::command]
-fn move_assets(project_id: String, paths: Vec<String>, target_dir: String) -> FileOpResult {
+fn move_assets(
+    app: AppHandle,
+    project_id: String,
+    paths: Vec<String>,
+    target_dir: String,
+) -> FileOpResult {
+    let mut warnings = Vec::new();
+    let result = commit_moves(&project_id, paths, target_dir, &mut warnings);
+    for w in &warnings {
+        warning::emit_project_warning(&app, &project_id, w);
+    }
+    result
+}
+
+/// The body of `move_assets`, minus the emit — same split as
+/// `commit_renames`: the lock-window regression tests call this directly
+/// and have no Tauri app to hand an `AppHandle`.
+fn commit_moves(
+    project_id: &str,
+    paths: Vec<String>,
+    target_dir: String,
+    warnings: &mut Vec<warning::ProjectWarning>,
+) -> FileOpResult {
     let mut successes: Vec<FileOpSuccess> = Vec::new();
     let mut errors: Vec<FileOpError> = Vec::new();
 
@@ -2794,7 +2877,7 @@ fn move_assets(project_id: String, paths: Vec<String>, target_dir: String) -> Fi
     // the watcher's orphan cleanup reaps. Same shape and same reasoning as
     // `commit_renames` — see `RENAME_LOCK_CHUNK`.
     for chunk in paths.chunks(RENAME_LOCK_CHUNK) {
-        let outcome = project::with_mut(&project_id, |state| {
+        let outcome = project::with_mut(project_id, |state| {
             let mut moved: Vec<FileOpSuccess> = Vec::new();
             let mut failed: Vec<FileOpError> = Vec::new();
 
@@ -2875,11 +2958,14 @@ fn move_assets(project_id: String, paths: Vec<String>, target_dir: String) -> Fi
                 for s in &moved {
                     tags.rename_path(&s.original_path, &s.new_path);
                 }
-                // Logged, not swallowed: the move already succeeded so this
+                // Logged AND surfaced: the move already succeeded so this
                 // can't fail the command, but a silent failure leaves the
-                // bindings in memory only (watcher.rs logs the same way).
+                // bindings in memory only (watcher.rs reports the same way).
                 if let Err(e) = state.save_tags() {
                     eprintln!("[move_assets] failed to save tags after move: {}", e);
+                    warnings.push(warning::ProjectWarning::TagsNotSaved {
+                        detail: e.to_string(),
+                    });
                 }
             }
             Ok((moved, failed))
@@ -2915,7 +3001,7 @@ fn move_assets(project_id: String, paths: Vec<String>, target_dir: String) -> Fi
                 timestamp: ts,
             })
             .collect();
-        let _ = project::with_mut(&project_id, |state| {
+        let _ = project::with_mut(project_id, |state| {
             state
                 .undo_manager
                 .record_batch(format!("Move {} file(s)", ops.len()), ops);
@@ -3091,7 +3177,29 @@ fn delete_assets(paths: Vec<String>) -> DeleteResult {
 }
 
 #[tauri::command]
-fn rename_file(project_id: String, old_path: String, new_name: String) -> Result<String, String> {
+fn rename_file(
+    app: AppHandle,
+    project_id: String,
+    old_path: String,
+    new_name: String,
+) -> Result<String, String> {
+    let mut warnings = Vec::new();
+    let result = commit_single_rename(&project_id, old_path, new_name, &mut warnings);
+    for w in &warnings {
+        warning::emit_project_warning(&app, &project_id, w);
+    }
+    result
+}
+
+/// The body of `rename_file`, minus the emit — same split as
+/// `commit_renames`: tests call this directly and have no Tauri app to hand
+/// an `AppHandle`.
+fn commit_single_rename(
+    project_id: &str,
+    old_path: String,
+    new_name: String,
+    warnings: &mut Vec<warning::ProjectWarning>,
+) -> Result<String, String> {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     validate_new_name(&new_name)?;
@@ -3144,7 +3252,7 @@ fn rename_file(project_id: String, old_path: String, new_name: String) -> Result
         );
     }
 
-    let _ = project::with_mut(&project_id, |state| {
+    let _ = project::with_mut(project_id, |state| {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -3170,6 +3278,9 @@ fn rename_file(project_id: String, old_path: String, new_name: String) -> Result
         state.ensure_tags().rename_path(&old_path, &new_path_str);
         if let Err(e) = state.save_tags() {
             eprintln!("[rename_file] failed to save tags after rename: {}", e);
+            warnings.push(warning::ProjectWarning::TagsNotSaved {
+                detail: e.to_string(),
+            });
         }
         Ok(())
     });
@@ -3188,19 +3299,28 @@ fn rename_file(project_id: String, old_path: String, new_name: String) -> Result
 /// Using the real per-file result — rather than an `original.exists()` guess —
 /// also correctly handles case-only rename undos, where `new_path` still
 /// `exists()`-resolves to the restored file on case-insensitive filesystems.
-fn carry_tags_after_undo(state: &mut project::ProjectState, reverted_pairs: &[(String, String)]) {
+fn carry_tags_after_undo(
+    state: &mut project::ProjectState,
+    reverted_pairs: &[(String, String)],
+) -> Option<warning::ProjectWarning> {
     if reverted_pairs.is_empty() {
-        return;
+        return None;
     }
     let tags = state.ensure_tags();
     for (original, new_path) in reverted_pairs {
         tags.rename_path(new_path, original);
     }
-    // Worth a log line even though the undo itself succeeded: memory now says
+    // Worth surfacing even though the undo itself succeeded: memory now says
     // the bindings sit at the restored paths while disk still says the new
     // ones, and on the next launch the watcher reaps those as orphans.
-    if let Err(e) = state.save_tags() {
-        eprintln!("[undo] failed to save tags after carrying them back: {}", e);
+    match state.save_tags() {
+        Ok(()) => None,
+        Err(e) => {
+            eprintln!("[undo] failed to save tags after carrying them back: {}", e);
+            Some(warning::ProjectWarning::TagsNotSaved {
+                detail: e.to_string(),
+            })
+        }
     }
 }
 
@@ -3210,8 +3330,9 @@ fn get_undo_history(project_id: String) -> Vec<undo::HistoryEntry> {
 }
 
 #[tauri::command]
-fn undo_last_operation(project_id: String) -> Result<undo::UndoResult, String> {
-    project::with_mut(&project_id, |state| {
+fn undo_last_operation(app: AppHandle, project_id: String) -> Result<undo::UndoResult, String> {
+    let mut tags_warning: Option<warning::ProjectWarning> = None;
+    let result = project::with_mut(&project_id, |state| {
         let result = state
             .undo_manager
             .undo_last()
@@ -3219,9 +3340,14 @@ fn undo_last_operation(project_id: String) -> Result<undo::UndoResult, String> {
         // Carry tag bindings back for the files the undo actually reverted
         // (undo.rs has no access to TagsData). `reverted_pairs` excludes any
         // file whose undo failed, so their tags stay put at new_path.
-        carry_tags_after_undo(state, &result.reverted_pairs);
+        tags_warning = carry_tags_after_undo(state, &result.reverted_pairs);
         Ok(result)
-    })
+    });
+
+    if let Some(w) = &tags_warning {
+        warning::emit_project_warning(&app, &project_id, w);
+    }
+    result
 }
 
 #[tauri::command]
@@ -3483,6 +3609,46 @@ mod tests {
 
     use crate::scanner::AssetType;
 
+    /// A report that says "1,234 assets" over a scan that skipped a subtree
+    /// is lying. The banner is the admission; a healthy scan gets NO banner
+    /// element at all (not an empty one), and cache trouble alone changes
+    /// nothing about this report's numbers so it stays silent too.
+    #[test]
+    fn report_banner_admits_an_incomplete_scan() {
+        use warning::ScanWarning;
+        assert_eq!(warning_banner_html(&[]), "");
+        assert_eq!(
+            warning_banner_html(&[ScanWarning::CacheNotSaved { detail: "x".into() }]),
+            ""
+        );
+
+        let banner = warning_banner_html(&[
+            ScanWarning::TreeWalkFailed {
+                skipped: 3,
+                sample: vec![],
+                detail: "denied".into(),
+            },
+            ScanWarning::AssetUnreadable {
+                affected: 2,
+                sample: vec![],
+                detail: "gone".into(),
+            },
+            ScanWarning::IgnoreRulesUnusable {
+                detail: "bad".into(),
+            },
+        ]);
+        assert!(banner.contains(r#"class="warn-banner""#));
+        assert!(banner.contains("5 "), "3 skipped + 2 affected roll up");
+        assert!(banner.contains("ignore rules"));
+
+        assert!(
+            REPORT_STYLE.contains(".warn-banner {"),
+            "the stylesheet must style the banner it emits"
+        );
+        // Theme discipline: --warn is declared in light, dark and print.
+        assert_eq!(REPORT_STYLE.matches("--warn:").count(), 3);
+    }
+
     #[test]
     fn every_asset_type_has_a_report_badge_rule() {
         // The HTML report derives each badge's class from the variant name at
@@ -3621,6 +3787,7 @@ mod tests {
             total_size: 0,
             type_counts: HashMap::new(),
             project_type: Some(scanner::ProjectType::Unity),
+            warnings: Vec::new(),
             root_path,
             assets,
         }
@@ -3728,10 +3895,11 @@ mod tests {
         let project_id = "test_move_same_dir_alias";
         project::register(project_id.to_string(), scanner::path_to_string(dir.path()));
         let alias = sub.join("..").join("sub");
-        let result = move_assets(
-            project_id.to_string(),
+        let result = commit_moves(
+            project_id,
             vec![scanner::path_to_string(&hero)],
             scanner::path_to_string(&alias),
+            &mut Vec::new(),
         );
         project::unregister(project_id);
 
@@ -3903,7 +4071,7 @@ mod tests {
 
         let worker = {
             let planned = planned.clone();
-            std::thread::spawn(move || commit_renames(project_id, planned, "Race"))
+            std::thread::spawn(move || commit_renames(project_id, planned, "Race", &mut Vec::new()))
         };
 
         // While the lock is held, no rename may land on disk. Without the fix
@@ -3942,6 +4110,53 @@ mod tests {
         .unwrap();
 
         project::unregister(project_id);
+    }
+
+    /// The tags file lives at the project root; a read-only root makes
+    /// save_tags fail while renames inside a writable subdirectory still
+    /// succeed — the exact "operation landed, bookkeeping didn't" split the
+    /// warning exists for. chmod is a no-op on Windows.
+    #[cfg(unix)]
+    #[test]
+    fn commit_renames_reports_a_tags_save_failure_instead_of_swallowing_it() {
+        use std::os::unix::fs::PermissionsExt;
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let sub = dir.path().join("assets");
+        std::fs::create_dir(&sub).unwrap();
+        let src = sub.join("a.png");
+        std::fs::write(&src, "x").unwrap();
+        let src_key = scanner::path_to_string(&src);
+
+        let project_id = "test_commit_renames_tags_save_failure";
+        project::register(project_id.to_string(), scanner::path_to_string(dir.path()));
+        project::with_mut(project_id, |state| {
+            let tags = state.ensure_tags();
+            let tag = tags.create_tag("warn".to_string(), "#fff".to_string());
+            tags.add_tag_to_asset(&src_key, &tag.id);
+            Ok(())
+        })
+        .unwrap();
+
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
+        let mut warnings = Vec::new();
+        let result = commit_renames(
+            project_id,
+            vec![(src_key, "b.png".to_string())],
+            "Race",
+            &mut warnings,
+        );
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        project::unregister(project_id);
+
+        assert_eq!(result.success_count, 1, "the rename itself must land");
+        assert!(
+            warnings
+                .iter()
+                .any(|w| matches!(w, warning::ProjectWarning::TagsNotSaved { .. })),
+            "a failed tags save must come back as a warning, got {warnings:?}"
+        );
     }
 
     /// `move_assets` carried the identical defect as `commit_renames`: the whole
@@ -3983,7 +4198,7 @@ mod tests {
         let worker = {
             let paths = sources.clone();
             let target_dir = scanner::path_to_string(&target);
-            std::thread::spawn(move || move_assets(project_id.to_string(), paths, target_dir))
+            std::thread::spawn(move || commit_moves(project_id, paths, target_dir, &mut Vec::new()))
         };
 
         std::thread::sleep(std::time::Duration::from_millis(300));
@@ -4062,10 +4277,11 @@ mod tests {
         })
         .unwrap();
 
-        let new_key = rename_file(
-            project_id.to_string(),
+        let new_key = commit_single_rename(
+            project_id,
             old_key.clone(),
             "new.png".to_string(),
+            &mut Vec::new(),
         )
         .unwrap();
 

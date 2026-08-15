@@ -554,6 +554,7 @@ mod tests {
             total_size: 0,
             type_counts: std::collections::HashMap::new(),
             project_type: None,
+            warnings: Vec::new(),
             assets,
         }
     }

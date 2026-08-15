@@ -113,6 +113,9 @@ pub fn start(
     let event_name = format!("fs-change-{}", project_id);
 
     thread::spawn(move || {
+        // Cumulative across this watcher's lifetime; the frontend replaces
+        // its entry per event, so the latest one always carries the total.
+        let mut dropped_batches: usize = 0;
         // rx closes when the Debouncer is dropped; the loop exits cleanly.
         while let Ok(result) = rx.recv() {
             let events = match result {
@@ -121,6 +124,16 @@ pub fn start(
                     eprintln!(
                         "[watcher {}] errors from notify: {:?}",
                         thread_project_id, errors
+                    );
+                    dropped_batches += 1;
+                    let detail = errors.first().map(|e| e.to_string()).unwrap_or_default();
+                    crate::warning::emit_project_warning(
+                        &app,
+                        &thread_project_id,
+                        &crate::warning::ProjectWarning::WatcherEventsDropped {
+                            batches: dropped_batches,
+                            detail,
+                        },
                     );
                     continue;
                 }
@@ -193,16 +206,21 @@ pub fn start(
                 continue;
             }
 
+            let mut op_warnings = Vec::new();
             let payload = apply_changes(
                 &thread_project_id,
                 &pairs,
                 &filtered,
                 &thread_root,
                 ignore_matcher.as_ref(),
+                &mut op_warnings,
             );
 
             if let Ok(ev) = payload {
                 let _ = app.emit(&event_name, &ev);
+            }
+            for w in &op_warnings {
+                crate::warning::emit_project_warning(&app, &thread_project_id, w);
             }
         }
     });
@@ -483,6 +501,9 @@ fn apply_changes(
     candidates: &[PathBuf],
     root: &Path,
     ignore_matcher: Option<&scanner::IgnoreMatcher>,
+    // Out-param rather than an AppHandle: the tag-migration tests call this
+    // directly and have no Tauri app. The thread loop owns the emit.
+    warnings_out: &mut Vec<crate::warning::ProjectWarning>,
 ) -> Result<FsChangeEvent, String> {
     // ---- Phase 0: snapshot what the probe needs (brief lock) -------------
     let from_keys: HashSet<String> = pairs
@@ -853,6 +874,9 @@ fn apply_changes(
                         "[watcher] failed to save tags after rename migration: {}",
                         e
                     );
+                    warnings_out.push(crate::warning::ProjectWarning::TagsNotSaved {
+                        detail: e.to_string(),
+                    });
                 }
             } else if state.tags_data.is_some() {
                 let tags = state.ensure_tags();
@@ -861,6 +885,9 @@ fn apply_changes(
                 }
                 if let Err(e) = state.save_tags() {
                     eprintln!("[watcher] failed to save tags after orphan cleanup: {}", e);
+                    warnings_out.push(crate::warning::ProjectWarning::TagsNotSaved {
+                        detail: e.to_string(),
+                    });
                 }
             }
             Ok(())
@@ -989,6 +1016,7 @@ mod tests {
                 total_size: assets.iter().map(|a| a.size).sum(),
                 type_counts: HashMap::new(),
                 project_type: None,
+                warnings: Vec::new(),
                 assets: assets.clone(),
             });
             Ok(())
@@ -1156,7 +1184,7 @@ mod tests {
         let to = dir.path().join("knight.png");
         fs::rename(&from, &to).unwrap();
 
-        let ev = apply_changes(id, &[(from, to)], &[], dir.path(), None).unwrap();
+        let ev = apply_changes(id, &[(from, to)], &[], dir.path(), None, &mut Vec::new()).unwrap();
 
         let to_str = scanner::path_to_string(&dir.path().join("knight.png"));
         assert_eq!(ev.renamed.len(), 1);
@@ -1186,7 +1214,15 @@ mod tests {
         fs::rename(&from, &to).unwrap();
         fs::write(&from, b"fresh contents").unwrap(); // re-occupied
 
-        let ev = apply_changes(id, &[(from.clone(), to)], &[from], dir.path(), None).unwrap();
+        let ev = apply_changes(
+            id,
+            &[(from.clone(), to)],
+            &[from],
+            dir.path(),
+            None,
+            &mut Vec::new(),
+        )
+        .unwrap();
 
         // Not advertised as a rename, tags stayed at the living path.
         assert!(ev.renamed.is_empty());
@@ -1216,7 +1252,7 @@ mod tests {
         let to = dir.path().join("Art");
         fs::rename(&from, &to).unwrap();
 
-        let ev = apply_changes(id, &[(from, to)], &[], dir.path(), None).unwrap();
+        let ev = apply_changes(id, &[(from, to)], &[], dir.path(), None, &mut Vec::new()).unwrap();
 
         assert_eq!(ev.renamed.len(), 1);
         assert!(ev.renamed[0].is_dir);
@@ -1249,7 +1285,15 @@ mod tests {
         let to = to_dir.join("a.png");
         fs::rename(&from, &to).unwrap(); // preserves size + mtime
 
-        let ev = apply_changes(id, &[], &[from, to.clone()], dir.path(), None).unwrap();
+        let ev = apply_changes(
+            id,
+            &[],
+            &[from, to.clone()],
+            dir.path(),
+            None,
+            &mut Vec::new(),
+        )
+        .unwrap();
 
         let to_str = scanner::path_to_string(&to);
         assert_eq!(ev.renamed.len(), 1);
@@ -1303,7 +1347,7 @@ mod tests {
             candidates.push(to);
         }
 
-        let ev = apply_changes(id, &[], &candidates, dir.path(), None).unwrap();
+        let ev = apply_changes(id, &[], &candidates, dir.path(), None, &mut Vec::new()).unwrap();
 
         assert!(ev.renamed.is_empty(), "ambiguous moves must not pair");
         // Bindings preserved at the OLD paths — not migrated, not reaped.
@@ -1321,7 +1365,7 @@ mod tests {
         let p = dir.path().join("gone.png");
         fs::remove_file(&p).unwrap();
 
-        let ev = apply_changes(id, &[], &[p], dir.path(), None).unwrap();
+        let ev = apply_changes(id, &[], &[p], dir.path(), None, &mut Vec::new()).unwrap();
         assert!(ev.removed.contains(&paths[0]));
         assert_eq!(tags_at(id, &paths[0]), 0);
     }
@@ -1342,7 +1386,15 @@ mod tests {
         let to = hidden.join("h.png");
         fs::rename(&from, &to).unwrap();
 
-        let ev = apply_changes(id, &[(from, to.clone())], &[], dir.path(), None).unwrap();
+        let ev = apply_changes(
+            id,
+            &[(from, to.clone())],
+            &[],
+            dir.path(),
+            None,
+            &mut Vec::new(),
+        )
+        .unwrap();
 
         assert!(ev.renamed.is_empty(), "invisible target is not advertised");
         assert!(ev.removed.contains(&paths[0]));
@@ -1367,7 +1419,7 @@ mod tests {
         fs::write(pack.join("sub/two.png"), b"two").unwrap();
 
         let candidates = [pack.clone()];
-        let ev = apply_changes(id, &[], &candidates, dir.path(), None).unwrap();
+        let ev = apply_changes(id, &[], &candidates, dir.path(), None, &mut Vec::new()).unwrap();
 
         let one = scanner::path_to_string(&pack.join("one.png"));
         let two = scanner::path_to_string(&pack.join("sub/two.png"));
