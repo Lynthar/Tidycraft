@@ -140,10 +140,19 @@ fn pricing(model: &str) -> Option<Pricing> {
             output_per_m: 4_500_000,
             vision: VisionRule::OpenAIPatchBased { multiplier: 1.62 },
         }),
+        // Patch-based like its mini/nano siblings (the 85-token low-detail
+        // flat rate belongs to the gpt-4o generation; OpenAI's vision guide
+        // moved the 5.4 family to 32-px patches — verified 2026-08-15). The
+        // guide publishes multipliers only for mini (1.62) and nano (2.46);
+        // the base model's is unpublished, so 1.33 is a deliberate ceiling:
+        // it prices our 256×256 thumbnail (64 patches) at the same 85 tokens
+        // the old flat rule charged, and stays an over- rather than under-
+        // estimate for any true multiplier ≤1.33 — this estimator's policy
+        // is to err high.
         "gpt-5.4" => Some(Pricing {
             input_per_m: 2_500_000,
             output_per_m: 15_000_000,
-            vision: VisionRule::OpenAILowDetailFlat { tokens: 85 },
+            vision: VisionRule::OpenAIPatchBased { multiplier: 1.33 },
         }),
 
         // Ollama: any vision-capable tag the user might ship in. Match
@@ -202,29 +211,44 @@ pub fn estimate_image_tokens(width: u32, height: u32, model: &str) -> usize {
 /// emits — actual image dimensions aren't part of `TagRequest`. If
 /// the frontend ever switches to per-asset thumbnail sizes, plumb
 /// the dimension through `AssetInput` and update this loop.
+///
+/// The real dispatch chunks a request into ≤[`MAX_ASSETS_PER_REQUEST`]
+/// asset batches and every batch re-sends the system prompt, the project
+/// framing and the full existing-tag context — so the shared part is
+/// billed once *per chunk*, not once per run. Modeling it once per run
+/// (the old shape) under-charged exactly the runs where the shared part
+/// matters: many tags × many chunks (2026-08 external review). This
+/// estimator's stated policy is to err high, never low.
 pub fn estimate_cost(request: &TagRequest) -> CostEstimate {
     let p = match pricing(&request.model) {
         Some(p) => p,
         None => return CostEstimate::default(),
     };
 
-    // System prompt + shared context blocks (project framing, existing
-    // tags) — previously uncounted, and at ~450+ tokens they dominate the
-    // relative error for small text-only batches. `llm_estimate_cost`
-    // still passes empty context (the modal has no cheap way to size it),
-    // so the tag/sample terms only sharpen estimates for callers that do.
-    let mut input_tokens = super::prompts::SYSTEM_PROMPT.len() / CHARS_PER_TOKEN;
+    // Shared-per-chunk part: system prompt + project framing + existing-tag
+    // context. At ~450+ tokens minimum it dominates the relative error for
+    // small text-only batches.
+    let mut shared_tokens = super::prompts::SYSTEM_PROMPT.len() / CHARS_PER_TOKEN;
     if let Some(meta) = &request.project_ctx {
         let chars =
             meta.theme.as_deref().map_or(0, str::len) + meta.goal.as_deref().map_or(0, str::len);
-        input_tokens = input_tokens.saturating_add(chars / CHARS_PER_TOKEN);
+        shared_tokens = shared_tokens.saturating_add(chars / CHARS_PER_TOKEN);
     }
     for tag in &request.existing_tags {
         let chars = tag.name.len()
             + tag.description.as_deref().map_or(0, str::len)
             + tag.sample_paths.iter().map(String::len).sum::<usize>();
-        input_tokens = input_tokens.saturating_add(chars / CHARS_PER_TOKEN + 4);
+        shared_tokens = shared_tokens.saturating_add(chars / CHARS_PER_TOKEN + 4);
     }
+    // A fully-cached re-run makes zero requests, but the estimate can't see
+    // the cache — one chunk minimum keeps the empty-selection case sane.
+    let chunks = request
+        .assets
+        .len()
+        .div_ceil(super::MAX_ASSETS_PER_REQUEST)
+        .max(1);
+    let mut input_tokens = shared_tokens.saturating_mul(chunks);
+
     for asset in &request.assets {
         if request.include_thumbnails && asset.thumbnail_base64.is_some() {
             input_tokens =
@@ -349,8 +373,19 @@ mod tests {
     fn openai_low_detail_is_flat_per_size_but_priced_per_model() {
         for (w, h) in [(256, 256), (2048, 2048), (50, 50)] {
             assert_eq!(estimate_image_tokens(w, h, "gpt-4o-mini"), 2833);
-            assert_eq!(estimate_image_tokens(w, h, "gpt-5.4"), 85);
         }
+    }
+
+    /// gpt-5.4 is patch-based like its siblings (the flat 85 belongs to the
+    /// gpt-4o generation). Its multiplier is unpublished, so 1.33 is chosen
+    /// as a ceiling that prices the app's one real input — a 256×256
+    /// thumbnail, 64 patches — at the 85 tokens the old flat rule charged:
+    /// continuity for the shipped case, correct patch scaling for any other.
+    #[test]
+    fn openai_patch_based_gpt54_256_matches_old_flat_rate() {
+        assert_eq!(estimate_image_tokens(256, 256, "gpt-5.4"), 85);
+        // And it now scales with size instead of staying flat.
+        assert!(estimate_image_tokens(2048, 2048, "gpt-5.4") > 85);
     }
 
     #[test]
@@ -473,6 +508,32 @@ mod tests {
         let with = estimate_cost(&req("claude-sonnet-4-6", 10, true));
         let without = estimate_cost(&req("claude-sonnet-4-6", 10, false));
         assert!(without.input_tokens < with.input_tokens);
+    }
+
+    /// The dispatcher re-sends system prompt + project framing + tag context
+    /// with every ≤20-asset chunk, so the shared part must be billed per
+    /// chunk. Billing it once under-charged exactly the runs where it
+    /// matters (many tags × many chunks) — against this module's err-high
+    /// policy.
+    #[test]
+    fn estimate_bills_shared_context_once_per_chunk() {
+        let mut tagged = req("claude-sonnet-4-6", 40, false); // 2 chunks of 20
+        tagged.existing_tags = vec![crate::llm::ExistingTagContext {
+            name: "environment".into(),
+            description: Some("outdoor scenery, terrain, foliage".into()),
+            sample_paths: vec!["env/rock_01.png".into(), "env/tree_02.png".into()],
+        }];
+
+        let two_chunks = estimate_cost(&tagged).input_tokens;
+        tagged.assets.truncate(20); // 1 chunk
+        let one_chunk = estimate_cost(&tagged).input_tokens;
+
+        // Doubling the chunk count adds one extra copy of the shared part
+        // (system prompt + tag context), on top of the per-asset terms.
+        let per_asset_part = 20 * PROMPT_OVERHEAD_TOKENS_PER_ASSET;
+        let shared_part = one_chunk - per_asset_part;
+        assert_eq!(two_chunks, one_chunk + per_asset_part + shared_part);
+        assert!(shared_part > 300, "shared part unexpectedly tiny");
     }
 
     // ----- Learning estimator -----

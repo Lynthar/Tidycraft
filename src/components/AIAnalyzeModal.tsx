@@ -98,8 +98,10 @@ export function AIAnalyzeModal() {
     }
   }, [aiAnalyzeOpen]);
 
-  // Cost estimate fetch. Depends only on provider + model + asset count
-  // + thumbnail toggle (cost.rs ignores actual paths). Using
+  // Cost estimate fetch. Depends on provider + model + asset count +
+  // thumbnail toggle (cost.rs prices asset entries by count, not path) —
+  // plus the project, whose tag context the real request re-sends with
+  // every chunk and the estimate therefore prices too. Using
   // `paths.length` instead of `paths` itself keeps re-renders cheap when
   // a different selection of the same size opens the modal.
   useEffect(() => {
@@ -107,6 +109,7 @@ export function AIAnalyzeModal() {
     let cancelled = false;
     setLoadingCost(true);
     invoke<CostEstimate>("llm_estimate_cost", {
+      projectId: activeProjectId ?? "",
       provider,
       model: config.model,
       assetCount: paths.length,
@@ -128,7 +131,7 @@ export function AIAnalyzeModal() {
     return () => {
       cancelled = true;
     };
-  }, [aiAnalyzeOpen, provider, config?.model, paths.length, uploadThumbnails]);
+  }, [aiAnalyzeOpen, provider, config?.model, paths.length, uploadThumbnails, activeProjectId]);
 
   const handleContinue = async () => {
     if (!provider || !config || running) return;

@@ -219,10 +219,19 @@ fn clear_thumbnail_cache() -> Result<u64, String> {
 // endpoint. `llm_estimate_cost` is pure math (no network) and the cache
 // commands just read/clear a directory, so both work without a provider.
 
-/// Cost preview for the AIAnalyzeModal. Pure function — no network and
-/// no API key required.
-#[tauri::command]
+/// Cost preview for the AIAnalyzeModal. No network and no API key required.
+///
+/// Carries the SAME project framing the real request will send (existing
+/// tags + `[project]` block, via `gather_llm_context`): every ≤20-asset
+/// chunk of the real dispatch re-sends that context, so a preview built on
+/// empty context under-charged in proportion to tag count × chunk count —
+/// against the estimator's err-high policy (2026-08 external review).
+// `(async)`: the context fetch takes the project lock briefly (and may
+// first-load the tags file); a main-thread command would let a rename
+// batch holding that lock freeze the window for the wait.
+#[tauri::command(async)]
 fn llm_estimate_cost(
+    project_id: String,
     provider: String,
     model: String,
     asset_count: usize,
@@ -235,9 +244,12 @@ fn llm_estimate_cost(
     };
     let prov = llm::make_provider(&provider, cfg).map_err(String::from)?;
 
-    // Build a dummy request just to feed the cost estimator. The
-    // estimator only reads asset count + thumbnail presence + model id;
-    // the actual paths/filenames don't affect the math.
+    let (_, existing_tags, project_ctx) = gather_llm_context(&project_id);
+
+    // Dummy per-asset entries: the estimator prices assets by count +
+    // thumbnail presence (paths are covered by a per-asset overhead
+    // constant), so placeholders are fine — the context above is what has
+    // to be real.
     let assets = (0..asset_count)
         .map(|i| llm::AssetInput {
             path: format!("dummy/{i}"),
@@ -256,11 +268,8 @@ fn llm_estimate_cost(
         prompt_version: llm::prompts::PROMPT_VERSION,
         model,
         include_thumbnails: has_thumbnails,
-        // Cost estimate doesn't depend on the actual project framing
-        // (it's a function of asset count + model + thumb presence).
-        // We pass empty context to keep the math simple.
-        project_ctx: None,
-        existing_tags: Vec::new(),
+        project_ctx,
+        existing_tags,
     };
     Ok(prov.estimate_cost(&req))
 }
@@ -392,6 +401,68 @@ fn localized_issue_cells(
     )
 }
 
+/// Snapshot the project framing an LLM request carries: root path, existing
+/// tags (each with up to 5 relativized sample paths), and the `[project]`
+/// block from tidycraft.toml. Shared by `llm_suggest_tags` (the real
+/// request) and `llm_estimate_cost` (the preview) — the preview must price
+/// the same context the request will actually send.
+///
+/// Tag context is cloned inside the project lock (brief: names,
+/// descriptions, a few sample paths), the toml read happens outside it.
+/// An unregistered project (UI should always register first, but be
+/// defensive) degrades to empty context — the LLM still works, just
+/// without project framing.
+fn gather_llm_context(
+    project_id: &str,
+) -> (
+    String,
+    Vec<llm::ExistingTagContext>,
+    Option<llm::project_meta::ProjectMeta>,
+) {
+    // SAMPLES_PER_TAG: how many existing-asset paths we ship per tag.
+    // 5 is a sweet spot between giving the LLM enough usage context
+    // to infer the tag's intent and not blowing the prompt budget on
+    // a project with hundreds of tags. Less than the tag count
+    // truncates; the LLM doesn't need exhaustive samples.
+    const SAMPLES_PER_TAG: usize = 5;
+
+    let context_result = project::with_mut(project_id, |state| {
+        let root = state.root_path.clone();
+        let tags_data = state.ensure_tags();
+        let mut existing: Vec<llm::ExistingTagContext> = Vec::with_capacity(tags_data.tags.len());
+        for tag in &tags_data.tags {
+            let mut samples = tags_data.get_assets_with_tag(&tag.id);
+            samples.truncate(SAMPLES_PER_TAG);
+            existing.push(llm::ExistingTagContext {
+                name: tag.name.clone(),
+                description: tag.description.clone(),
+                sample_paths: relativize_samples(samples, &root),
+            });
+        }
+        Ok((root, existing))
+    });
+
+    let (root_path, existing_tags) = context_result.unwrap_or_else(|e| {
+        eprintln!("[llm] context fetch failed: {e}");
+        (String::new(), Vec::new())
+    });
+
+    // Read [project] from tidycraft.toml, outside the project lock to avoid
+    // holding it through file IO. Missing file / parse failure / empty meta
+    // all collapse to None — no project block.
+    let project_ctx: Option<llm::project_meta::ProjectMeta> = if root_path.is_empty() {
+        None
+    } else {
+        let toml_path = Path::new(&root_path).join("tidycraft.toml");
+        std::fs::read_to_string(&toml_path)
+            .ok()
+            .and_then(|content| llm::project_meta::ProjectMeta::from_toml(&content).ok())
+            .filter(|m| !m.is_empty())
+    };
+
+    (root_path, existing_tags, project_ctx)
+}
+
 /// Main entry point for AI tagging. Loads thumbnails for the selected
 /// assets, gathers project context (theme/goal from tidycraft.toml +
 /// existing tags with up to 5 sample paths each), then dispatches to
@@ -413,53 +484,7 @@ async fn llm_suggest_tags(
     };
     let prov = llm::make_provider(&provider, cfg).map_err(String::from)?;
 
-    // Snapshot project context inside the project lock, then drop the
-    // lock before any async work. The lock is held only briefly: we
-    // clone tag names, descriptions, and a small list of sample paths.
-    //
-    // SAMPLES_PER_TAG: how many existing-asset paths we ship per tag.
-    // 5 is a sweet spot between giving the LLM enough usage context
-    // to infer the tag's intent and not blowing the prompt budget on
-    // a project with hundreds of tags. Less than the tag count
-    // truncates; the LLM doesn't need exhaustive samples.
-    const SAMPLES_PER_TAG: usize = 5;
-
-    let context_result = project::with_mut(&project_id, |state| {
-        let root = state.root_path.clone();
-        let tags_data = state.ensure_tags();
-        let mut existing: Vec<llm::ExistingTagContext> = Vec::with_capacity(tags_data.tags.len());
-        for tag in &tags_data.tags {
-            let mut samples = tags_data.get_assets_with_tag(&tag.id);
-            samples.truncate(SAMPLES_PER_TAG);
-            existing.push(llm::ExistingTagContext {
-                name: tag.name.clone(),
-                description: tag.description.clone(),
-                sample_paths: relativize_samples(samples, &root),
-            });
-        }
-        Ok((root, existing))
-    });
-
-    // If the project somehow isn't registered (UI should always register
-    // before calling, but be defensive), fall through with empty context
-    // — the LLM still works, just without project framing.
-    let (root_path, existing_tags) = context_result.unwrap_or_else(|e| {
-        eprintln!("[llm_suggest_tags] context fetch failed: {e}");
-        (String::new(), Vec::new())
-    });
-
-    // Read [project] from tidycraft.toml. We do this outside the project
-    // lock to avoid holding it through file IO. Missing file / parse
-    // failure / empty meta all collapse to None — no project block.
-    let project_ctx: Option<llm::project_meta::ProjectMeta> = if root_path.is_empty() {
-        None
-    } else {
-        let toml_path = Path::new(&root_path).join("tidycraft.toml");
-        std::fs::read_to_string(&toml_path)
-            .ok()
-            .and_then(|content| llm::project_meta::ProjectMeta::from_toml(&content).ok())
-            .filter(|m| !m.is_empty())
-    };
+    let (root_path, existing_tags, project_ctx) = gather_llm_context(&project_id);
 
     // Load thumbnails on the blocking pool — `get_thumbnail_base64`
     // does PNG decode + resize + base64 encode, which would otherwise
@@ -931,10 +956,25 @@ fn run_full_analysis(
     result
 }
 
+/// Clone what an analysis or report export needs out of the project state,
+/// holding the project lock only for the duration of the clone. The heavy
+/// work — duplicate re-hashing, engine re-parsing, report templating — then
+/// runs with the lock released, so a seconds-long analysis can't stall the
+/// watcher, cancellation, or any other command on the same project. Same
+/// shape as `EngineScanSnapshot` (lock rule #2); the analysis simply
+/// describes the snapshot, exactly as it already did when the watcher's
+/// changes queued behind the lock instead.
+fn scan_snapshot(project_id: &str) -> Result<(ScanResult, String), String> {
+    project::with_ref(project_id, |state| {
+        let scan = state.require_scan()?;
+        Ok((scan.clone(), state.root_path.clone()))
+    })
+}
+
 // `(async)` runs this on Tauri's thread pool instead of the main thread.
-// duplicate-hashing + full Unity re-parse under the project lock is heavy;
-// on the main thread it froze the whole UI (window drag/resize) for the
-// duration. The frontend contract is unchanged — `invoke` already awaits.
+// duplicate-hashing + full Unity re-parse is heavy; on the main thread it
+// froze the whole UI (window drag/resize) for the duration. The frontend
+// contract is unchanged — `invoke` already awaits.
 #[tauri::command(async)]
 fn analyze_assets(
     project_id: String,
@@ -949,19 +989,17 @@ fn analyze_assets(
     // Build the ignore matcher up-front so a malformed pattern surfaces as
     // an error before we touch the per-project lock.
     let ignore_set = build_ignore_set(&config)?;
-    // Fetched before the lock below — see package_index_for.
+    // Fetched outside the lock — see package_index_for.
     let package_index = package_index_for(&project_id);
 
-    project::with_ref(&project_id, |state| {
-        let scan_result = state.require_scan()?;
-        Ok(run_full_analysis(
-            scan_result,
-            &state.root_path,
-            &config,
-            ignore_set.as_ref(),
-            &package_index,
-        ))
-    })
+    let (scan_result, root_path) = scan_snapshot(&project_id)?;
+    Ok(run_full_analysis(
+        &scan_result,
+        &root_path,
+        &config,
+        ignore_set.as_ref(),
+        &package_index,
+    ))
 }
 
 /// Make sure `<project_root>/tidycraft.toml` exists, writing the commented
@@ -1643,31 +1681,29 @@ fn export_to_csv(project_id: String) -> Result<String, String> {
     })
 }
 
-// `(async)`: runs a full analysis (incl. duplicate re-hashing) under the lock.
+// `(async)`: runs a full analysis (incl. duplicate re-hashing) — off the
+// main thread, and via `scan_snapshot` off the project lock too.
 #[tauri::command(async)]
 fn export_issues_to_json(project_id: String) -> Result<String, String> {
-    // Fetched before the lock below — see package_index_for.
     let package_index = package_index_for(&project_id);
-    project::with_ref(&project_id, |state| {
-        let scan_result = state.require_scan()?;
+    let (scan_result, root_path) = scan_snapshot(&project_id)?;
 
-        // Mirror the UI's Run Analysis: honor the project's tidycraft.toml
-        // (rule thresholds + [ignore].patterns) and run every phase,
-        // including the PBR-set and DCC-source cross-asset checks. Without
-        // this the exported report would silently diverge from the Issues
-        // view under any custom config.
-        let config = load_rule_config(&state.root_path)?;
-        let ignore_set = build_ignore_set(&config)?;
-        let result = run_full_analysis(
-            scan_result,
-            &state.root_path,
-            &config,
-            ignore_set.as_ref(),
-            &package_index,
-        );
+    // Mirror the UI's Run Analysis: honor the project's tidycraft.toml
+    // (rule thresholds + [ignore].patterns) and run every phase,
+    // including the PBR-set and DCC-source cross-asset checks. Without
+    // this the exported report would silently diverge from the Issues
+    // view under any custom config.
+    let config = load_rule_config(&root_path)?;
+    let ignore_set = build_ignore_set(&config)?;
+    let result = run_full_analysis(
+        &scan_result,
+        &root_path,
+        &config,
+        ignore_set.as_ref(),
+        &package_index,
+    );
 
-        serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
-    })
+    serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
 }
 
 /// The report's stylesheet, kept out of the `format!` template so a test can
@@ -1763,7 +1799,8 @@ const REPORT_STYLE: &str = r#"    <style>
 /// Export). `None` keeps the historical defaults (100 / 500); `Some(0)`
 /// means unlimited — a 100k-file project then produces a very large file,
 /// which is the user's explicit choice.
-// `(async)`: runs a full analysis (incl. duplicate re-hashing) under the lock.
+// `(async)`: runs a full analysis (incl. duplicate re-hashing) — off the
+// main thread, and via `scan_snapshot` off the project lock too.
 #[tauri::command(async)]
 fn export_to_html(
     project_id: String,
@@ -1784,19 +1821,20 @@ fn export_to_html(
 
     // Fetched before the lock below — see package_index_for.
     let package_index = package_index_for(&project_id);
-    project::with_ref(&project_id, |state| {
-        let scan_result = state.require_scan()?;
-
+    let (scan_result, root_path) = scan_snapshot(&project_id)?;
+    // Block kept (not a lock): the body below predates the de-locking and
+    // stays at its old indentation so blame survives.
+    {
         // Same analysis pipeline as Run Analysis / the JSON export, so the
         // HTML report's issue list matches the Issues view (custom config,
         // [ignore].patterns, PBR/DCC phases all applied). The asset
         // inventory cards below intentionally stay on the full scan —
         // [ignore].patterns scope analysis, not the project's file census.
-        let config = load_rule_config(&state.root_path)?;
+        let config = load_rule_config(&root_path)?;
         let ignore_set = build_ignore_set(&config)?;
         let analysis_result = run_full_analysis(
-            scan_result,
-            &state.root_path,
+            &scan_result,
+            &root_path,
             &config,
             ignore_set.as_ref(),
             &package_index,
@@ -2018,7 +2056,7 @@ fn export_to_html(
         );
 
         Ok(html)
-    })
+    }
 }
 
 // ============ Batch Operations ============
@@ -2243,6 +2281,18 @@ fn rename_batch_on_disk(
             continue;
         }
 
+        // Same guard for the engine sidecars, run BEFORE the primary rename:
+        // a stray sidecar squatting on the destination name would otherwise
+        // surface only after the main file had already moved — stranding the
+        // asset's identity (Unity silently re-GUIDs it). Refusing the whole
+        // item keeps asset + sidecar together. See sidecar::rename_conflicts.
+        let sidecar_conflicts = sidecar::rename_conflicts(path_obj, &new_path);
+        if !sidecar_conflicts.is_empty() {
+            errors.push(format!("{}: {}", name, sidecar_conflicts.join("; ")));
+            error_count += 1;
+            continue;
+        }
+
         match std::fs::rename(&path, &new_path) {
             Ok(_) => {
                 // Carry engine sidecars so renamed assets keep their identity
@@ -2408,9 +2458,11 @@ pub struct NamingFix {
 /// Compute compliant-name suggestions for every asset with an auto-fixable
 /// naming violation, using the same `tidycraft.toml` the analysis ran with.
 /// Read-only — nothing is renamed until `apply_naming_fixes`.
-// `(async)`: iterates the whole scan under the project lock — and that lock
-// may be held by an in-flight analysis for seconds, which a main-thread
-// command would turn into a whole-window freeze.
+// `(async)`: iterates the whole scan under the project lock, and that lock
+// can be held by a chunked rename/move batch — a main-thread command would
+// turn the wait into a whole-window freeze. (Analysis no longer holds the
+// lock — it runs on a `scan_snapshot` — but the iteration itself is still
+// O(assets) work that doesn't belong on the main thread.)
 #[tauri::command(async)]
 fn preview_naming_fixes(
     project_id: String,
@@ -2782,6 +2834,18 @@ fn move_assets(project_id: String, paths: Vec<String>, target_dir: String) -> Fi
                     continue;
                 }
 
+                // Sidecar pre-flight, same reasoning as rename_batch_on_disk:
+                // refuse the move outright rather than move the asset away
+                // from a .meta/.uid that can't follow it.
+                let sidecar_conflicts = sidecar::rename_conflicts(src, &dst);
+                if !sidecar_conflicts.is_empty() {
+                    failed.push(FileOpError {
+                        path: path.clone(),
+                        message: sidecar_conflicts.join("; "),
+                    });
+                    continue;
+                }
+
                 match std::fs::rename(src, &dst) {
                     Ok(_) => {
                         // Carry engine sidecars so moved assets keep their identity
@@ -3052,6 +3116,14 @@ fn rename_file(project_id: String, old_path: String, new_name: String) -> Result
     // conflict; identity is by dev+inode, not name (see execute_batch_rename).
     if new_path.exists() && !undo::paths_are_same_file(old_path_ref, &new_path) {
         return Err("A file with this name already exists".to_string());
+    }
+
+    // Engine sidecars get the same pre-flight as the file itself: refuse the
+    // rename outright rather than move the asset away from a .meta/.uid a
+    // stray destination sidecar would block (see sidecar::rename_conflicts).
+    let sidecar_conflicts = sidecar::rename_conflicts(old_path_ref, &new_path);
+    if !sidecar_conflicts.is_empty() {
+        return Err(sidecar_conflicts.join("; "));
     }
 
     // Normalize to forward slashes so the returned path, the undo record, and

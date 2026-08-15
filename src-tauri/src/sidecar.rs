@@ -22,13 +22,21 @@
 //! while the worst case for stranding it is a settings loss the user never
 //! sees.
 //!
-//! So the app's own rename / move / delete must carry the sidecars. These
-//! helpers are best-effort: a missing sidecar (wrong engine, or an asset the
-//! editor hasn't imported yet) is a silent no-op, and a carry failure is
-//! returned to the caller — which logs it — without rolling back the
-//! already-succeeded primary op (rollback can itself fail and leave a more
-//! confusing half-state). **Each suffix is attempted independently**, so one
-//! blocked sidecar never decides another's fate.
+//! So the app's own rename / move / delete must carry the sidecars. Two
+//! tiers:
+//!
+//! 1. **Pre-flight** ([`rename_conflicts`], run by callers *before* the
+//!    primary rename): the deterministic failure — a stray sidecar already
+//!    occupying the destination name — refuses the whole item up front, so
+//!    the asset never moves away from its identity.
+//! 2. **Carry** ([`carry_on_rename`] / [`carry_on_delete`], run after the
+//!    primary op): best-effort. A missing sidecar (wrong engine, or an asset
+//!    the editor hasn't imported yet) is a silent no-op, and a carry failure
+//!    (a lock or permission racing in after pre-flight) is returned to the
+//!    caller — which logs it — without rolling back the already-succeeded
+//!    primary op (rollback can itself fail and leave a more confusing
+//!    half-state). **Each suffix is attempted independently**, so one
+//!    blocked sidecar never decides another's fate.
 //!
 //! Copy / duplicate deliberately do NOT carry sidecars: a duplicated asset must
 //! receive a fresh identity, so copying `.meta` (GUID), `.uid`, or `.import`
@@ -87,7 +95,14 @@ pub fn carry_on_rename(from: &Path, to: &Path) -> Result<(), String> {
             continue;
         }
         let dst = sidecar_path(to, suffix);
-        if dst.exists() {
+        // `dst` may `exists()`-resolve to the source sidecar itself — a pure
+        // case change (hero.png → Hero.png on NTFS/APFS) or an NFC/NFD
+        // variant on macOS. Same identity rule as the main files' rename
+        // guards (see `rename_batch_on_disk`): only a genuinely *different*
+        // occupant blocks the carry; `fs::rename` fixes the case spelling
+        // fine. Without this, every case-only rename of a Unity/Godot asset
+        // reported its own sidecar as a clobber and left it behind.
+        if dst.exists() && !crate::undo::paths_are_same_file(&src, &dst) {
             errors.push(format!(
                 "destination sidecar already exists, not overwriting: {}",
                 dst.display()
@@ -106,6 +121,33 @@ pub fn carry_on_rename(from: &Path, to: &Path) -> Result<(), String> {
     } else {
         Err(errors.join("; "))
     }
+}
+
+/// The sidecar-level twin of the main files' "target already exists" guard,
+/// for callers to run BEFORE they touch the primary file: every suffix whose
+/// source sidecar exists and whose destination is occupied by a genuinely
+/// *different* file. A non-empty result means the rename would strand or
+/// split a sidecar — refusing the whole item up front turns the one
+/// deterministic carry failure (a stray sidecar squatting on the destination
+/// name) into a clean per-file error instead of a renamed asset whose
+/// identity stayed behind (Unity would silently mint it a fresh GUID). A
+/// destination that resolves to the source itself (case-only rename) is not
+/// a conflict — `carry_on_rename` handles that. Transient failures (locks,
+/// permissions racing in after this check) remain best-effort + logged, by
+/// the module-level design above.
+pub fn rename_conflicts(from: &Path, to: &Path) -> Vec<String> {
+    let mut conflicts = Vec::new();
+    for suffix in SIDECAR_SUFFIXES {
+        let src = sidecar_path(from, suffix);
+        if !src.exists() {
+            continue;
+        }
+        let dst = sidecar_path(to, suffix);
+        if dst.exists() && !crate::undo::paths_are_same_file(&src, &dst) {
+            conflicts.push(format!("sidecar target already exists: {}", dst.display()));
+        }
+    }
+    conflicts
 }
 
 /// Best-effort: send every sidecar beside `path` to the OS trash too, so
@@ -262,6 +304,68 @@ mod tests {
             fs::read_to_string(sidecar_path(&to, ".meta")).unwrap(),
             "existing"
         );
+    }
+
+    #[test]
+    fn carry_on_rename_allows_case_only_rename() {
+        // hero.png → Hero.png on a case-insensitive filesystem: the sidecar
+        // destination `exists()`-resolves to the source sidecar itself, which
+        // must NOT count as a clobber — the carry has to happen so the meta's
+        // spelling follows the asset's. (On a case-sensitive filesystem this
+        // test still passes: dst simply doesn't exist.)
+        let dir = tempdir().unwrap();
+        let from = dir.path().join("hero.png");
+        let to = dir.path().join("Hero.png");
+        fs::write(&from, "x").unwrap();
+        fs::write(sidecar_path(&from, ".meta"), "guid: 123").unwrap();
+        fs::rename(&from, &to).unwrap();
+
+        carry_on_rename(&from, &to).unwrap();
+        let carried = fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .find(|n| n.ends_with(".meta"))
+            .expect("meta still present");
+        // The stored spelling must be the new one, not the old.
+        assert_eq!(carried, "Hero.png.meta");
+    }
+
+    #[test]
+    fn rename_conflicts_reports_only_genuinely_blocked_suffixes() {
+        let dir = tempdir().unwrap();
+        let from = dir.path().join("a.png");
+        let to = dir.path().join("b.png");
+        // No sidecars at all → no conflicts.
+        assert!(rename_conflicts(&from, &to).is_empty());
+
+        // Source has a .meta, destination name is free → still no conflict.
+        fs::write(sidecar_path(&from, ".meta"), "src").unwrap();
+        assert!(rename_conflicts(&from, &to).is_empty());
+
+        // A stray .meta squats on the destination → conflict, named.
+        fs::write(sidecar_path(&to, ".meta"), "stray").unwrap();
+        let conflicts = rename_conflicts(&from, &to);
+        assert_eq!(conflicts.len(), 1);
+        assert!(conflicts[0].contains("b.png.meta"), "{}", conflicts[0]);
+
+        // A stray sidecar with NO source counterpart is not a conflict —
+        // there is nothing to carry for that suffix.
+        fs::write(sidecar_path(&to, ".uid"), "stray").unwrap();
+        assert_eq!(rename_conflicts(&from, &to).len(), 1);
+    }
+
+    #[test]
+    fn rename_conflicts_allows_case_only_rename() {
+        // Same-file destination (case-only rename) must not pre-flight-block
+        // the whole item. On a case-sensitive filesystem dst doesn't resolve
+        // and the assertion is trivially the same.
+        let dir = tempdir().unwrap();
+        let from = dir.path().join("hero.png");
+        let to = dir.path().join("Hero.png");
+        fs::write(&from, "x").unwrap();
+        fs::write(sidecar_path(&from, ".meta"), "guid").unwrap();
+        assert!(rename_conflicts(&from, &to).is_empty());
     }
 
     #[test]

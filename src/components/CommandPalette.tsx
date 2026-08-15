@@ -310,7 +310,9 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
 
     // SECTION: Resources — asset quick-jump (only when query is non-empty)
     if (hasScan && deferredQuery.trim()) {
-      const q = deferredQuery.toLowerCase();
+      // Trim before matching (same fix as getFilteredAssets): a trailing
+      // space in the palette otherwise becomes part of the needle.
+      const q = deferredQuery.trim().toLowerCase();
       const matches: typeof scanResult.assets = [];
       for (const a of scanResult.assets) {
         if (
@@ -473,7 +475,7 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
   // the same query at source so we let them through unchanged.
   const filteredItems = useMemo(() => {
     if (!deferredQuery.trim()) return items;
-    const q = deferredQuery.toLowerCase();
+    const q = deferredQuery.trim().toLowerCase();
     return items.filter((it) => {
       if (it.section === t("commandPalette.section.resources")) return true;
       return (

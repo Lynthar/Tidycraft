@@ -388,6 +388,14 @@ fn execute_single_undo(operation: &FileOperation) -> Result<(), String> {
                 ));
             }
 
+            // Sidecar 与主文件同规,且在动主文件**之前**查:回迁目的地被另一个
+            // 文件占住时整项拒绝,免得主文件回去了、sidecar 回不去(资产与身份
+            // 分家)。大小写-only 场景由 rename_conflicts 的同文件判据放行。
+            let sidecar_conflicts = crate::sidecar::rename_conflicts(src, dst);
+            if !sidecar_conflicts.is_empty() {
+                return Err(sidecar_conflicts.join("; "));
+            }
+
             // 执行重命名
             fs::rename(src, dst).map_err(|e| {
                 format!(
@@ -429,6 +437,12 @@ fn execute_single_undo(operation: &FileOperation) -> Result<(), String> {
                     "Target path already exists: {}",
                     operation.original_path
                 ));
+            }
+
+            // Sidecar 预检,理由见 Rename 分支。
+            let sidecar_conflicts = crate::sidecar::rename_conflicts(src, dst);
+            if !sidecar_conflicts.is_empty() {
+                return Err(sidecar_conflicts.join("; "));
             }
 
             // 确保目标目录存在

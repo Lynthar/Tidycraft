@@ -15,9 +15,10 @@ export function SearchHistory({ isVisible, onSelect, onClose, searchQuery }: Sea
   const { history, removeFromHistory, clearHistory } = useSearchHistoryStore();
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // Filter history based on current search query
-  const filteredHistory = searchQuery
-    ? history.filter((h) => h.toLowerCase().includes(searchQuery.toLowerCase()))
+  // Filter history based on current search query (trimmed, matching how
+  // the asset filter itself treats the query).
+  const filteredHistory = searchQuery.trim()
+    ? history.filter((h) => h.toLowerCase().includes(searchQuery.trim().toLowerCase()))
     : history;
 
   // Close when clicking outside

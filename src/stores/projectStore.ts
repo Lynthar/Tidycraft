@@ -513,10 +513,13 @@ function applyFsChange(projectId: string, event: FsChangeEvent) {
   }
 
   // Reconcile selectedDirectory: follow a renamed folder to its new path
-  // (instead of the reset-to-root below), then fall back to the root when
+  // (instead of the reset-to-whole-project below), then drop the scope when
   // the selected folder is genuinely gone — an external delete used to leave
   // the list filtering against a ghost path: blank view, no explanation, and
-  // clicking the (gone) tree node couldn't fix it.
+  // clicking the (gone) tree node couldn't fix it. The fallback is `null`,
+  // not `root_path`: "entire project" is spelled `null` everywhere else
+  // (DirectoryTree stores null for the root row), and the root-path spelling
+  // kept a pointless scope bar up over the full asset list.
   let newSelectedDirectory = target.selectedDirectory;
   if (newSelectedDirectory) {
     const renamedTo = renamedTargetFor(newSelectedDirectory, event.renamed);
@@ -526,7 +529,7 @@ function applyFsChange(projectId: string, event: FsChangeEvent) {
     newSelectedDirectory &&
     !directoryExistsInTree(event.directory_tree, newSelectedDirectory)
   ) {
-    newSelectedDirectory = newScanResult.root_path;
+    newSelectedDirectory = null;
   }
 
   const updated: ProjectData = {
@@ -1030,9 +1033,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     patchProject({ isAnalyzing: true });
 
     // Re-read config at click time (not just at scan-complete) so users
-    // can edit `tidycraft.toml` and re-run without rescanning. IO failure
-    // falls back to defaults silently — `analyze_assets` will surface
-    // toml *parse* errors via the normal error path.
+    // can edit `tidycraft.toml` and re-run without rescanning. A missing
+    // file is the normal case (arrives as `null` → defaults); a file that
+    // EXISTS but can't be read is the only thing that rejects here, and it
+    // must fail the run — the exporters error on the same condition
+    // (`load_rule_config`, whose contract says the Issues view fails the
+    // same way), and silently analyzing with default thresholds instead of
+    // the user's reads as a clean bill their config never issued.
     let configToml: string | null = null;
     let hasCustomConfig = false;
     try {
@@ -1041,7 +1048,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       });
       hasCustomConfig = configToml !== null;
     } catch (err) {
-      console.warn("Failed to read tidycraft.toml; using defaults:", err);
+      patchProject({ error: String(err), isAnalyzing: false });
+      return;
     }
 
     try {
@@ -1211,7 +1219,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }));
   },
 
-  // Undo actions (scoped to active project)
+  // Undo actions (scoped to active project).
+  //
+  // `canUndo` / `undoHistory` are GLOBAL mirror fields with no per-project
+  // copy in the Map, so every write below re-checks that the project the
+  // IPC round-trip started for is still the active one — the same
+  // stale-response rule refreshGitInfo documents. Without the check,
+  // switching projects mid-flight painted project A's undo button state
+  // and history list onto project B (clicking undo then acts on B while
+  // showing A's entries). A skipped write self-heals: Header re-runs
+  // refreshUndoState whenever projectPath changes.
   undoLastOperation: async () => {
     const { activeProjectId } = get();
     if (!activeProjectId) return null;
@@ -1219,7 +1236,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const result = await invoke<UndoResult>("undo_last_operation", { projectId: activeProjectId });
       const canUndo = await invoke<boolean>("can_undo", { projectId: activeProjectId });
       const history = await invoke<HistoryEntry[]>("get_undo_history", { projectId: activeProjectId });
-      set({ canUndo, undoHistory: history });
+      if (get().activeProjectId === activeProjectId) {
+        set({ canUndo, undoHistory: history });
+      }
       return result;
     } catch (err) {
       console.error("Failed to undo:", err);
@@ -1236,7 +1255,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     try {
       const canUndo = await invoke<boolean>("can_undo", { projectId: activeProjectId });
       const history = await invoke<HistoryEntry[]>("get_undo_history", { projectId: activeProjectId });
-      set({ canUndo, undoHistory: history });
+      if (get().activeProjectId === activeProjectId) {
+        set({ canUndo, undoHistory: history });
+      }
     } catch (err) {
       console.error("Failed to refresh undo state:", err);
     }
@@ -1247,7 +1268,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (!activeProjectId) return;
     try {
       await invoke("clear_undo_history", { projectId: activeProjectId });
-      set({ canUndo: false, undoHistory: [] });
+      if (get().activeProjectId === activeProjectId) {
+        set({ canUndo: false, undoHistory: [] });
+      }
     } catch (err) {
       console.error("Failed to clear undo history:", err);
     }
@@ -1355,9 +1378,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       });
     }
 
-    // Filter by search query
+    // Filter by search query. Trim before matching, not just in the
+    // emptiness gate: an accidental leading/trailing space (IME commit,
+    // paste) otherwise becomes part of the needle and "icon " silently
+    // matches nothing. Interior spaces still match paths literally.
     if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
+      const query = searchQuery.trim().toLowerCase();
       assets = assets.filter(
         (asset) =>
           asset.name.toLowerCase().includes(query) ||
