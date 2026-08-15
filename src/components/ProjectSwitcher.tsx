@@ -133,7 +133,12 @@ export function ProjectSwitcher() {
       </button>
 
       {isOpen && (
-        <div className="tc-projmenu" role="menu">
+        // Deliberately no role="menu": ARIA menus promise arrow-key traversal
+        // and menuitem children, and this popup has neither — it is a plain
+        // list of buttons. Claiming the pattern without its behavior reads
+        // worse in a screen reader than claiming nothing (decision 2026-08-15:
+        // keep the keyboard/a11y surface minimal while the app is early).
+        <div className="tc-projmenu">
           <div className="tc-projmenu-head">
             <span className="tc-projmenu-title">
               {t("projects.title", "Projects")}
