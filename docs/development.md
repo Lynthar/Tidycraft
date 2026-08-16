@@ -533,6 +533,33 @@ theme: `--err` is a light red in dark mode and a dark red in light mode, so a
 fixed `text-white` fails in one of them. That is what `text-on-error` (and
 `--on-primary` / `--on-accent`) are for.
 
+### Auditing the compiled palette
+
+`scripts/check-palette.mjs` turns the "grep dist after renaming" advice into a
+machine check. It parses `dist/assets/*.css` (run `pnpm build` first), resolves
+every rule's `var()` chain to a literal colour per theme, and answers the two
+questions a class rename cannot answer for itself:
+
+```sh
+node scripts/check-palette.mjs snapshot before.json   # before the change
+# ...rename classes / edit tokens, pnpm build...
+node scripts/check-palette.mjs snapshot after.json
+node scripts/check-palette.mjs compare before.json after.json map.json
+node scripts/check-palette.mjs dangling
+```
+
+`compare` maps every selector in the old snapshot through `map.json`
+(`{"bg-card-bg": "bg-panel", ...}`) and demands identical resolved values in
+both themes — a rename that lands on a *legal but wrong* class name fails here,
+which a class-name set diff can never catch. `dangling` verifies every bare
+`var()` in the product has a definition somewhere; run it whenever a token is
+deleted. `worklist` derives the class-level rename map from the product itself
+(hand-counting misses prefix combinations — it did, twice), and `rename`
+applies that map to the sources, longest name first so `bg-card-bg` can never
+match inside `bg-card-bg-hover`. Caveat printed by `snapshot`: two tokens that
+happen to share a value cannot be told apart by `compare`, so check any rename
+onto a same-valued token by hand.
+
 ### A new i18n string
 
 Add to `src/i18n/locales/en.json` and `zh.json` in parallel. Group under an
