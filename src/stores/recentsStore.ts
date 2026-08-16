@@ -1,7 +1,7 @@
 import { create } from "zustand";
-import { useProjectStore } from "./projectStore";
+import { useProjectStore, registerRecentsBridge } from "./projectStore";
 import { basename } from "../lib/pathUtils";
-import type { ProjectType } from "../types/asset";
+import type { ProjectType, ProjectPathStatus, UnavailableStatus } from "../types/asset";
 
 /// Recently-opened projects, persisted per-machine so the ProjectSwitcher can
 /// offer them again after they're closed (and after an app restart). Distinct
@@ -16,6 +16,9 @@ export interface RecentProject {
   name: string;
   engine: ProjectType | null;
   lastOpenedAt: number;
+  /// Set by the startup pre-check; deliberately NOT persisted — a stale
+  /// verdict written to localStorage would outlive the condition it describes.
+  unavailable?: UnavailableStatus | null;
 }
 
 interface RecentsState {
@@ -24,6 +27,9 @@ interface RecentsState {
   record: (project: Omit<RecentProject, "lastOpenedAt">) => void;
   remove: (path: string) => void;
   clear: () => void;
+  /// Stamp health onto the entries the startup pre-check covered. Entries the
+  /// map says nothing about are left untouched, not cleared.
+  markHealth: (health: Map<string, ProjectPathStatus>) => void;
 }
 
 function load(): RecentProject[] {
@@ -50,7 +56,17 @@ function load(): RecentProject[] {
 
 function persist(recents: RecentProject[]) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(recents));
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(
+        recents.map(({ path, name, engine, lastOpenedAt }) => ({
+          path,
+          name,
+          engine,
+          lastOpenedAt,
+        }))
+      )
+    );
   } catch {
     // Storage full / unavailable — recents are a convenience, not critical.
   }
@@ -76,6 +92,14 @@ export const useRecentsStore = create<RecentsState>((set, get) => ({
     persist([]);
     set({ recents: [] });
   },
+  markHealth: (health) => {
+    const next = get().recents.map((r) => {
+      const status = health.get(r.path);
+      return status ? { ...r, unavailable: status.kind === "ok" ? null : status } : r;
+    });
+    set({ recents: next });
+    // Not persisted — see the field comment.
+  },
 }));
 
 // Record the active project once it has a scan result (so name + engine are
@@ -94,4 +118,8 @@ useProjectStore.subscribe((state) => {
     name: basename(path) || path,
     engine: scan.project_type ?? null,
   });
+});
+
+registerRecentsBridge({
+  remove: (path: string) => useRecentsStore.getState().remove(path),
 });

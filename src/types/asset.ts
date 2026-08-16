@@ -104,6 +104,27 @@ export type ProjectWarning =
   | { kind: "tags_not_saved"; detail: string }
   | { kind: "watcher_start_failed"; detail: string };
 
+/// Mirrors `project_path::ProjectPathStatus` — serde-tagged by `kind`, pinned
+/// on the Rust side by `status_wire_shape_matches_the_frontends_mirror`.
+export type ProjectPathStatus =
+  | { kind: "ok" }
+  | { kind: "missing" }
+  | { kind: "not_a_directory" }
+  | { kind: "unreadable"; detail: string };
+
+/// The non-"ok" subset of ProjectPathStatus — what every `unavailable` field
+/// actually holds. `ok` is represented by `null` instead (see the field
+/// comments in projectStore), so this excludes it structurally: a project
+/// that IS available can no longer be typed as "unavailable: ok".
+export type UnavailableStatus = Exclude<ProjectPathStatus, { kind: "ok" }>;
+
+/// Mirrors `project_path::ProjectPathReport`. One per input path, in input
+/// order, duplicates included — look results up by `path`, not by index.
+export interface ProjectPathReport {
+  path: string;
+  status: ProjectPathStatus;
+}
+
 export type ScanPhase =
   | "discovering"
   | "parsing"

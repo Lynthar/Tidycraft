@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { useProjectStore } from "./projectStore";
+import { useProjectStore, checkPaths, toUnavailable } from "./projectStore";
+import { useRecentsStore } from "./recentsStore";
 
 /// Cross-session snapshot of which projects were open and which was active.
 /// Keeps only paths — the full ProjectData (scanResult, analysisResult, UI
@@ -93,6 +94,20 @@ export async function restoreSession(): Promise<void> {
   session.markRestored();
 
   const { openProjectPaths, activeProjectPath } = session;
+
+  // One batch for everything the switcher can show: the projects that were
+  // open last session and the recents list. Stub projects are never scanned,
+  // so without this a project whose folder is gone looks identical to a
+  // healthy one until the user clicks it. Runs ahead of the early return
+  // below so the recents list still gets marked when no projects were open
+  // last session — the common case that lands on EmptyState and invites
+  // picking from recents.
+  const recentPaths = useRecentsStore.getState().recents.map((r) => r.path);
+  const health = await checkPaths([
+    ...new Set([...openProjectPaths, ...recentPaths]),
+  ]);
+  useRecentsStore.getState().markHealth(health);
+
   if (openProjectPaths.length === 0) return;
 
   const store = useProjectStore.getState();
@@ -104,12 +119,14 @@ export async function restoreSession(): Promise<void> {
   const stubPaths = openProjectPaths.filter((p) => p !== activeProjectPath);
   await Promise.all(
     stubPaths.map((path) =>
-      store.registerProjectStub(path).catch((err) => {
-        console.warn(
-          `[sessionStore] stub registration failed for ${path}:`,
-          err
-        );
-      })
+      store
+        .registerProjectStub(path, toUnavailable(health.get(path)))
+        .catch((err) => {
+          console.warn(
+            `[sessionStore] stub registration failed for ${path}:`,
+            err
+          );
+        })
     )
   );
 

@@ -164,6 +164,7 @@ export function ProjectSwitcher() {
                     key={p.id}
                     className="tc-projmenu-item"
                     data-current={p.isActive ? "true" : undefined}
+                    data-unavailable={p.unavailable ? "true" : undefined}
                     onClick={() => handleSelect(p.id)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
@@ -196,6 +197,11 @@ export function ProjectSwitcher() {
                       <span className="tc-projmenu-path">{p.path}</span>
                     </span>
                     <span className="tc-projmenu-meta">
+                      {p.unavailable && (
+                        <span className="tc-projmenu-unavail">
+                          {t("projects.unavailable.badge")}
+                        </span>
+                      )}
                       {engine && engine !== "generic" && (
                         <span className="tc-proj-type" data-engine={engine}>
                           {engine.toUpperCase()}
@@ -256,6 +262,7 @@ export function ProjectSwitcher() {
                     <div
                       key={r.path}
                       className="tc-projmenu-item"
+                      data-unavailable={r.unavailable ? "true" : undefined}
                       onClick={() => handleOpenRecent(r.path)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") {
@@ -283,6 +290,11 @@ export function ProjectSwitcher() {
                         <span className="tc-projmenu-path">{r.path}</span>
                       </span>
                       <span className="tc-projmenu-meta">
+                        {r.unavailable && (
+                          <span className="tc-projmenu-unavail">
+                            {t("projects.unavailable.badge")}
+                          </span>
+                        )}
                         {engine && engine !== "generic" && (
                           <span className="tc-proj-type" data-engine={engine}>
                             {engine.toUpperCase()}

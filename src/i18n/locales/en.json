@@ -49,7 +49,20 @@
     "current": "current",
     "issuesCount": "{{count}} issues",
     "empty": "No projects open",
-    "openFailed": "Couldn't open the project: {{reason}}"
+    "openFailed": "Couldn't open the project: {{reason}}",
+    "unavailable": {
+      "titleMissing": "This folder is no longer where it was",
+      "titleNotADirectory": "This path is not a folder anymore",
+      "titleUnreadable": "This folder can't be read",
+      "bodyMissing": "It was moved, renamed, or deleted since you last opened it.",
+      "bodyNotADirectory": "Something else now occupies this path.",
+      "bodyUnreadable": "The folder is there, but its contents can't be listed: {{detail}}",
+      "relocate": "Locate folder…",
+      "checkAgain": "Check again",
+      "remove": "Remove from workspace",
+      "badge": "Unavailable",
+      "alreadyOpen": "{{name}} is already open in this workspace."
+    }
   },
   "header": {
     "openFolder": "Open Folder",

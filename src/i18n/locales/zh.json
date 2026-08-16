@@ -49,7 +49,20 @@
     "current": "当前",
     "issuesCount": "{{count}} 个问题",
     "empty": "没有打开的项目",
-    "openFailed": "打不开这个项目：{{reason}}"
+    "openFailed": "打不开这个项目：{{reason}}",
+    "unavailable": {
+      "titleMissing": "文件夹已不在原处",
+      "titleNotADirectory": "这个路径已经不是文件夹",
+      "titleUnreadable": "这个文件夹读不了",
+      "bodyMissing": "自上次打开以来，它被移动、改名或删除了。",
+      "bodyNotADirectory": "现在占用这个路径的是别的东西。",
+      "bodyUnreadable": "文件夹还在，但列不出里面的内容：{{detail}}",
+      "relocate": "重新定位…",
+      "checkAgain": "重新检查",
+      "remove": "从工作区移除",
+      "badge": "不可用",
+      "alreadyOpen": "{{name}} 已经在这个工作区里打开了。"
+    }
   },
   "header": {
     "openFolder": "打开文件夹",

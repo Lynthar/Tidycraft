@@ -18,6 +18,7 @@ import { AIResultPanel } from "./components/AIResultPanel";
 import { LearnSetupModal } from "./components/LearnSetupModal";
 import { LearnReviewPanel } from "./components/LearnReviewPanel";
 import { DependencyGraphModal } from "./components/DependencyGraphModal";
+import { ProjectUnavailable } from "./components/ProjectUnavailable";
 import { useProjectStore } from "./stores/projectStore";
 import { useUiStore } from "./stores/uiStore";
 import { useSettingsStore } from "./stores/settingsStore";
@@ -46,13 +47,14 @@ function App() {
     locateAsset,
     isEmpty,
     activeProjectId,
+    unavailable,
   } = useProjectStore(
     // `isEmpty` is derived in the selector rather than from `getProjectList()`
     // in the body: subscribing to the getter subscribed to a function whose
     // identity never changes, so opening or closing a project moved nothing
     // here — it re-rendered only because some neighbouring field in this same
     // selector usually changed at the same time.
-    useShallow((s) => ({ scanResult: s.scanResult, viewMode: s.viewMode, analysisResult: s.analysisResult, analysisStale: s.analysisStale, isAnalyzing: s.isAnalyzing, runAnalysis: s.runAnalysis, locateAsset: s.locateAsset, isEmpty: s.projects.size === 0, activeProjectId: s.activeProjectId, }))
+    useShallow((s) => ({ scanResult: s.scanResult, viewMode: s.viewMode, analysisResult: s.analysisResult, analysisStale: s.analysisStale, isAnalyzing: s.isAnalyzing, runAnalysis: s.runAnalysis, locateAsset: s.locateAsset, isEmpty: s.projects.size === 0, activeProjectId: s.activeProjectId, unavailable: s.unavailable, }))
   );
 
   // Live-vs-snapshot arithmetic: scanResult.total_count is watcher-patched
@@ -195,6 +197,11 @@ function App() {
   const renderMainContent = () => {
     if (isEmpty) {
       return <EmptyState />;
+    }
+    // Before the viewMode switch: an unusable folder has no assets, no issues
+    // and no stats to show, so every view would render the same lie.
+    if (unavailable) {
+      return <ProjectUnavailable />;
     }
     switch (viewMode) {
       case "assets":
