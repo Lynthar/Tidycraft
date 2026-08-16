@@ -183,22 +183,16 @@ export function Header({ searchInputRef }: HeaderProps) {
               type="button"
               onClick={handleGitRefresh}
               title={t("git.refresh")}
+              className="tc-git-refresh"
               style={{
                 background: "transparent",
                 border: 0,
                 cursor: "pointer",
                 padding: "1px 2px",
                 marginLeft: 2,
-                color: "var(--text-3)",
                 display: "inline-flex",
                 alignItems: "center",
               }}
-              onMouseEnter={(e) =>
-                (e.currentTarget.style.color = "var(--text)")
-              }
-              onMouseLeave={(e) =>
-                (e.currentTarget.style.color = "var(--text-3)")
-              }
             >
               <RefreshCw
                 size={10}
@@ -327,6 +321,7 @@ export function Header({ searchInputRef }: HeaderProps) {
                 <button
                   key={lang.code}
                   onClick={() => changeLanguage(lang.code)}
+                  className="tc-lang-item"
                   style={{
                     display: "flex",
                     alignItems: "center",
@@ -335,13 +330,9 @@ export function Header({ searchInputRef }: HeaderProps) {
                     padding: "6px 12px",
                     fontSize: 12.5,
                     textAlign: "left",
-                    color: "var(--text)",
-                    background: "transparent",
                     border: 0,
                     cursor: "pointer",
                   }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = "var(--panel-hover)")}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                 >
                   <span style={{ flex: 1 }}>{lang.label}</span>
                   {i18n.language === lang.code && (

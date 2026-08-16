@@ -392,6 +392,26 @@
   background: var(--primary-tint);
 }
 
+/* Micro refresh button in the header's git pill — hover colour is CSS's job,
+   not a pair of JS mouse handlers. */
+.tc-git-refresh {
+  color: var(--text-3);
+  transition: color 0.12s;
+}
+.tc-git-refresh:hover {
+  color: var(--text);
+}
+
+/* Row in the header's language dropdown — same rule for the hover backdrop. */
+.tc-lang-item {
+  color: var(--text);
+  background: transparent;
+  transition: background 0.12s;
+}
+.tc-lang-item:hover {
+  background: var(--panel-hover);
+}
+
 .tc-cta {
   display: inline-flex;
   align-items: center;
