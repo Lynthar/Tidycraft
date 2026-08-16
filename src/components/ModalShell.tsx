@@ -1,22 +1,9 @@
 import { useEffect, useRef } from "react";
 import { registerModalShell } from "../stores/uiStore";
 
-/// Shared behavior wrapper for every blocking modal: renders the backdrop
-/// layer and adds the things each modal previously lacked —
-///
-///   - Escape closes (global shortcuts deliberately bail while a blocking
-///     overlay is open, so without this Esc was dead in every modal)
-///   - Tab focus trap (focus cycles inside; it can no longer walk into the
-///     asset list behind the backdrop)
-///   - `role="dialog"` + `aria-modal`
-///   - initial focus (respects `autoFocus` children / `initialFocusRef`)
-///   - focus restore to the triggering element on close
-///
-/// Visuals stay with each modal: children are the untouched content card,
-/// and `className` overrides the default backdrop look when needed.
-///
-/// Callers keep their `if (!open) return null` gate — mounting the shell IS
-/// opening it; the lifecycle hooks below key off mount/unmount.
+/// Shared behavior wrapper for every blocking modal: backdrop layer, Escape to
+/// close, Tab focus trap, `role="dialog"` + `aria-modal`, initial focus and focus
+/// restore on close. Mounting the shell IS opening it; callers keep their gate.
 
 /// Stack of live shells so stacked dialogs (e.g. a confirm over a lightbox)
 /// only close the TOP one per Escape press.

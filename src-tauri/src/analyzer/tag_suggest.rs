@@ -1,23 +1,6 @@
-//! Heuristic tag suggestions.
-//!
-//! `TagSuggester` is a trait so we can later plug in an external multimodal LLM
-//! (`ExternalLLMSuggester` placeholder) without touching the call site. Phase 5
-//! ships only `HeuristicSuggester` — it groups assets by:
-//!
-//! 1. **Filename token**: split filenames on `_`/`-`/space/dot/caseBoundary,
-//!    drop noise, and surface tokens that recur across ≥3 assets.
-//! 2. **Dimension bucket** (textures only): bucket by nearest power-of-two of
-//!    `max(w,h)`, surface buckets covering ≥5 assets.
-//! 3. **Path segment**: any directory component (other than the project root
-//!    or generic container names) that appears in ≥3 asset paths.
-//!
-//! Groups are deduped by `name` (taking max confidence, union of file_paths,
-//! and preferring higher-priority hints), sorted by confidence desc, and capped
-//! at 12 entries.
-//!
-//! The frontend asks once per session via `suggest_tags`. No persistence — when
-//! the user hits Apply we go through the existing `create_tag` +
-//! `add_tag_to_assets` flow, so the suggestion side never owns tag state.
+//! Heuristic tag suggestions. `HeuristicSuggester` groups assets by filename
+//! token, texture dimension bucket and path segment, dedupes by name, sorts by
+//! confidence and caps the list. `TagSuggester` is a trait so an LLM can plug in.
 
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -33,9 +16,8 @@ pub struct TagGroup {
     pub confidence: f32,
     pub hint: String,
     /// Up to `SAMPLE_FILENAMES` filename stems from `file_paths`, picked
-    /// alphabetically for stability. Lets the UI show "matched 14 files:
-    /// tree_*, bush_*, grass_*" without making the user click into the
-    /// preview to inspect.
+    /// alphabetically for stability, so the interface can show "matched 14 files:
+    /// tree_*, bush_*, grass_*" without opening the group.
     pub samples: Vec<String>,
 }
 
@@ -102,11 +84,8 @@ const HINT_DIMENSION: &str = "dimension";
 const HINT_PATH: &str = "path segment";
 
 /// Tokens that recur across many filenames but carry no taxonomic value.
-///
-/// `rustfmt::skip` because the two groups are semantic, not cosmetic: greedy
-/// reflow packs the rows and leaves `// workflow noise` trailing the *last
-/// file-format entry*, where it labels the wrong line. Keep the group headers
-/// on their own lines when adding tokens.
+/// `rustfmt::skip` because the group headers are semantic: greedy reflow packs the
+/// rows and leaves `// workflow noise` trailing the wrong line.
 #[rustfmt::skip]
 const TOKEN_STOPLIST: &[&str] = &[
     // file-format-ish noise
@@ -134,17 +113,9 @@ const PATH_STOPLIST: &[&str] = &[
     "imports",
 ];
 
-/// PBR channel-role recognition for the dimension+channel tag source.
-/// Strict suffix matches — the segment after the LAST `_` in the stem
-/// must equal one of these aliases (case-insensitively). Single-letter
-/// suffixes (`_n`, `_r`, `_m`) are deliberately omitted because they
-/// collide too readily with non-PBR tokens (`item_n` for "item N",
-/// `arrow_r` for "right", …); users on a strict pipeline can extend
-/// this constant if their team's convention uses them.
-///
-/// Tuple is `(canonical_role, alias)`. Multiple aliases map to the same
-/// canonical role so `_BaseColor`, `_Albedo`, and `_Diffuse` all land
-/// in the same group.
+/// PBR channel-role recognition, as `(canonical_role, alias)` pairs so several
+/// aliases map to one role. Strict suffix match after the LAST `_`. Single-letter
+/// suffixes are omitted — they collide too readily with non-PBR tokens.
 const KNOWN_CHANNEL_SUFFIXES: &[(&str, &str)] = &[
     ("BaseColor", "BaseColor"),
     ("BaseColor", "Albedo"),
@@ -199,11 +170,9 @@ fn stem(name: &str) -> &str {
     }
 }
 
-/// True if `ch` is a CJK ideograph or Japanese kana — the ranges most
-/// likely to appear in game-asset filenames out of mainland CN / JP /
-/// TW shops. We use this for tokenizer boundary detection so a name
-/// like `Hero角色` splits into `["hero", "角色"]` instead of one
-/// runaway token. Korean Hangul could be added if it ever comes up.
+/// True if `ch` is a CJK ideograph or Japanese kana. Used for tokenizer boundary
+/// detection, so `Hero角色` splits into `["hero", "角色"]` rather than one runaway
+/// token.
 fn is_cjk(ch: char) -> bool {
     let code = ch as u32;
     (0x4E00..=0x9FFF).contains(&code)        // CJK Unified Ideographs
@@ -212,16 +181,9 @@ fn is_cjk(ch: char) -> bool {
         || (0x30A0..=0x30FF).contains(&code) // Katakana
 }
 
-/// Split a filename stem into normalized lowercase tokens. Recognizes
-/// `_`/`-`/`.`/space separators, camelCase / PascalCase boundaries,
-/// and the ASCII↔CJK transition.
-///
-/// Limitation: continuous CJK runs (`角色主角.png`) stay as one token.
-/// True Chinese tokenization needs a dictionary (`jieba-rs` etc.) which
-/// would balloon the binary by ~5MB; not worth it for an opt-in
-/// suggestion feature. Users on connected-CJK projects who want finer
-/// grouping can insert `_` between meaningful units in filenames, which
-/// is best practice anyway.
+/// Split a filename stem into normalized lowercase tokens. Recognizes `_`, `-`,
+/// `.` and space separators, camelCase boundaries, and the ASCII↔CJK transition.
+/// Continuous CJK runs stay as one token.
 fn tokenize_stem(s: &str) -> Vec<String> {
     let mut tokens: Vec<String> = Vec::new();
     let mut current = String::new();
@@ -260,10 +222,8 @@ fn tokenize_stem(s: &str) -> Vec<String> {
 }
 
 fn is_useful_token(token: &str) -> bool {
-    // `chars().count()` instead of `len()` because byte length lies for
-    // multi-byte characters: a single CJK ideograph has byte length 3
-    // and would slip past `len() < 2`. Single-character tokens (whether
-    // `"a"` or `"中"`) carry near-zero taxonomic value, drop them.
+    // `chars().count()`, not `len()`: byte length lies for multi-byte characters,
+    // and a single CJK ideograph would slip past a `len() < 2` check.
     if token.chars().count() < 2 {
         return false;
     }
@@ -289,12 +249,9 @@ fn dimension_bucket(w: u32, h: u32) -> Option<u32> {
     if max == 0 {
         return None;
     }
-    // Largest power of two <= max. Computed via `leading_zeros` rather than the
-    // old `while p.saturating_mul(2) <= max` loop, which spun forever when
-    // max == u32::MAX: `saturating_mul(2)` pins p at u32::MAX, so the condition
-    // stays true every iteration. A corrupt DDS header reporting 0xFFFFFFFF
-    // dimensions could trigger that infinite loop while holding the project lock.
-    // `max >= 1` here (0 returned above), so the shift distance is 0..=31.
+    // Largest power of two <= max, via `leading_zeros`. The old
+    // `while p.saturating_mul(2) <= max` loop spun forever at u32::MAX, which a
+    // corrupt DDS header can report. `max >= 1` here, so the shift is 0..=31.
     let p: u32 = 1 << (31 - max.leading_zeros());
     if p < 256 {
         return None;
@@ -302,11 +259,9 @@ fn dimension_bucket(w: u32, h: u32) -> Option<u32> {
     Some(p)
 }
 
-/// Detect a PBR channel role from a texture's filename stem. Strict
-/// `_<suffix>` matching: the substring after the LAST `_` must equal
-/// one of `KNOWN_CHANNEL_SUFFIXES`'s aliases (case-insensitive).
-/// Returns the canonical role label (already capitalized for direct
-/// tag-name display) or None when no PBR suffix is present.
+/// Detect a PBR channel role from a texture's filename stem. Strict `_<suffix>`
+/// match against `KNOWN_CHANNEL_SUFFIXES`, case-insensitive. Returns the canonical
+/// role label, already capitalized for direct display.
 fn parse_channel(stem: &str) -> Option<&'static str> {
     let last_underscore = stem.rfind('_')?;
     let suffix = &stem[last_underscore + 1..];
@@ -347,11 +302,9 @@ impl TagSuggester for HeuristicSuggester {
             return Vec::new();
         }
 
-        // Adaptive thresholds: tiny projects (< 30 assets) would
-        // otherwise produce zero suggestions because every group falls
-        // below the noise filter. Loosen so users still see something;
-        // larger projects keep the stricter baselines that matter when
-        // the result list could otherwise drown in tokens.
+        // Adaptive thresholds: on a project under 30 assets every group falls below
+        // the noise filter, so the baselines loosen. Larger projects keep the
+        // stricter ones.
         let total_assets = scan.assets.len();
         let (min_token_hits, min_dim_hits, min_path_hits) = if total_assets < 30 {
             (2usize, 3usize, 2usize)
@@ -392,12 +345,8 @@ impl TagSuggester for HeuristicSuggester {
         }
 
         // ----- Source 2: texture dimension + optional channel role -----
-        // Each texture lands in exactly one bucket, keyed by either
-        // `"{bucket}px {channel}"` or fallback `"{bucket}px"` when the
-        // stem doesn't match a known PBR suffix. The channel-aware
-        // variant gives the user actionable groups like "1024px
-        // BaseColor" instead of dumping albedos and normal maps into
-        // a single "1024px" pile.
+        // Each texture lands in exactly one bucket, keyed `"{bucket}px {channel}"`
+        // or `"{bucket}px"` when the stem matches no known PBR suffix.
         let mut dim_assets: HashMap<String, HashSet<String>> = HashMap::new();
         for asset in &scan.assets {
             if !matches!(asset.asset_type, AssetType::Texture) {
@@ -490,13 +439,9 @@ impl TagSuggester for HeuristicSuggester {
         // into the *stronger* label.
         out.sort_by(by_confidence);
 
-        // Fold near-duplicate groups into one. Different heuristics can surface
-        // the same pile of files under two near-synonym labels — a filename
-        // token ("Generated") and the directory it sits in ("Gen"), say. Two
-        // groups merge only when their file sets overlap past
-        // JACCARD_MERGE_THRESHOLD *and* one name is a prefix of the other, so
-        // genuinely-distinct tags that merely co-occur in the same files
-        // ("Hero" + "Knight" on hero_knight_*.png) are left alone.
+        // Fold near-duplicate groups into one. Two groups merge only when their file
+        // sets overlap past JACCARD_MERGE_THRESHOLD *and* one name is a prefix of the
+        // other, so distinct tags that merely co-occur are left alone.
         let mut merged: Vec<TagGroup> = Vec::with_capacity(out.len());
         for group in out {
             let dup = merged.iter().position(|kept| {
@@ -622,10 +567,8 @@ mod tests {
 
     #[test]
     fn token_filter_drops_single_cjk() {
-        // `len()` is byte length; a single ideograph has byte length 3
-        // so the old `len() < 2` check let it through. The fix uses
-        // `chars().count()` which correctly counts a single ideograph
-        // as 1 character and filters it.
+        // `len()` is byte length; a single ideograph has byte length 3, so a
+        // `len() < 2` check let it through.
         assert!(!is_useful_token("中"));
         assert!(!is_useful_token("旧"));
         assert!(is_useful_token("主角"));

@@ -1,13 +1,6 @@
 //! Anthropic Claude provider — Messages API with vision content blocks.
-//!
-//! API reference (verified 2026-05-08):
-//!   POST https://api.anthropic.com/v1/messages
-//!   Headers: x-api-key, anthropic-version, content-type
-//!   Body: { model, max_tokens, system, messages: [{ role, content: [...] }] }
-//!   Image content block: { type: "image", source: { type: "base64", media_type, data } }
-//!   Text content block:  { type: "text", text }
-//!   Response.content is an array of typed blocks; we read the first
-//!   `text` block as the model's reply.
+//! `response.content` is an array of typed blocks; the first `text` block is read
+//! as the model's reply.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -71,10 +64,9 @@ struct ImageSource {
 struct AnthropicResponse {
     content: Vec<ResponseContent>,
     usage: AnthropicUsage,
-    /// `"end_turn"` normally; `"max_tokens"` when the reply was cut off at
-    /// the output cap — surfaced as `LLMError::Truncated` so the user gets
-    /// "make a smaller request" instead of an opaque parse failure.
-    /// Optional so mock/legacy shapes without the field keep deserializing.
+    /// `"end_turn"` normally; `"max_tokens"` when the reply was cut off at the
+    /// output cap, surfaced as `LLMError::Truncated`. Optional so mock and legacy
+    /// shapes without the field keep deserializing.
     #[serde(default)]
     stop_reason: Option<String>,
 }
@@ -101,10 +93,8 @@ fn build_content_blocks(
     existing_tags: &[ExistingTagContext],
     include_thumbnails: bool,
 ) -> Vec<ContentBlock> {
-    // Anthropic recommends image-then-text. We emit every available
-    // thumbnail in input order, then a single text block listing the
-    // assets. The text-only case (no thumbnails) skips the loop and
-    // sends one Text block.
+    // Anthropic recommends image-then-text: every available thumbnail in input
+    // order, then a single text block listing the assets.
     let mut blocks: Vec<ContentBlock> = Vec::with_capacity(assets.len() + 1);
     if include_thumbnails {
         for a in assets {
@@ -127,14 +117,9 @@ fn build_content_blocks(
 
 // ---- Response → TagResponse ----
 
-/// Pull the text reply + usage out of a parsed response. Checks
-/// `stop_reason` BEFORE anything else: a `max_tokens` reply is cut off
-/// mid-generation, so downstream JSON parsing would fail by construction —
-/// and "truncated, make a smaller request" is the actionable diagnosis,
-/// where ParseError would read as model garbage. Shared by the tagging
-/// path (`extract_response`) and the learning path (`send_text_chat`).
-/// Separated from the HTTP layer so unit tests can feed in mock response
-/// shapes without spinning up a fake server.
+/// Pull the text reply and usage out of a parsed response. Checks `stop_reason`
+/// first: a `max_tokens` reply is cut mid-generation, so JSON parsing would fail
+/// by construction and "truncated" is the actionable diagnosis.
 fn extract_text_response(parsed: AnthropicResponse) -> Result<(String, Usage), LLMError> {
     if parsed.stop_reason.as_deref() == Some("max_tokens") {
         return Err(LLMError::Truncated);
@@ -275,10 +260,8 @@ impl LLMProvider for ClaudeProvider {
     }
 }
 
-/// Text-only chat (no image content blocks). Used by `learn_project`,
-/// where the LLM gets directory samples + tag context as plain text.
-/// Mirrors `call_anthropic`'s scaffolding (client / headers / error
-/// mapping) but with a simpler body.
+/// Text-only chat, used by `learn_project`. Mirrors `call_anthropic`'s
+/// scaffolding (client, headers, error mapping) with a simpler body.
 async fn send_text_chat(
     api_key: &str,
     model: &str,
@@ -419,11 +402,9 @@ mod tests {
 
     #[test]
     fn truncated_response_reports_truncation_not_parse_error() {
-        // `stop_reason: "max_tokens"` means the reply was cut mid-generation:
-        // the JSON is broken BECAUSE of the output cap, not because the model
-        // emitted garbage. Surfacing it as ParseError hides the one action
-        // that helps (smaller request) and made truncation indistinguishable
-        // from a bad response while the input tokens were still billed.
+        // `stop_reason: "max_tokens"` means the reply was cut mid-generation: the
+        // JSON is broken because of the output cap, not because the model emitted
+        // garbage, and only a smaller request helps.
         let json = r#"{
             "content": [{"type":"text","text":"{\"suggestions\":[{\"asset_pa"}],
             "stop_reason": "max_tokens",

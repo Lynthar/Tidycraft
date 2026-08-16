@@ -23,11 +23,9 @@ function TreeNode({ node, level, t }: TreeNodeProps) {
     useShallow((s) => ({ selectedDirectory: s.selectedDirectory, setSelectedDirectory: s.setSelectedDirectory }))
   );
 
-  // The root row means "entire project". Selecting it stores `null` (no
-  // directory scope) rather than the root path, so the filter pipeline,
-  // the type-pill counts, and this highlight all agree on what "no scope"
-  // looks like. `=== node.path` is kept for state persisted before this
-  // normalization.
+  // The root row means "entire project". Selecting it stores `null` rather than
+  // the root path, so the filter pipeline, the type-pill counts and this highlight
+  // all agree. `=== node.path` covers state persisted before that normalization.
   const isSelected =
     level === 0
       ? selectedDirectory === null || selectedDirectory === node.path

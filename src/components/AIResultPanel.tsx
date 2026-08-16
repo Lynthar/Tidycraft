@@ -14,23 +14,9 @@ function tagKey(assetPath: string, label: string, category: string): string {
   return `${assetPath}::${category}::${label}`;
 }
 
-/// Reviews the LLM's tag suggestions and applies the user's selection
-/// via existing `tagsStore.createTag` + `addTagToAssets`.
-///
-/// Behavior:
-///   - Default state: every returned suggestion is pre-selected.
-///   - Click a chip to toggle its inclusion in the apply set.
-///   - ONE Apply button, and it honors the chip selection ("apply
-///     everything still selected"). There is deliberately no separate
-///     "Apply all": a primary button that ignored the user's chip
-///     deselections next to a UI that presents as a selection editor
-///     applied exactly the suggestions the user had just excluded.
-///   - Tag names get a `(AI)` suffix to disambiguate from heuristic
-///     suggestions (which use `(suggested)`) and from manual tags.
-///     Same suffixed name from a previous AI run is reused, not
-///     duplicated.
-///   - Apply groups (label + category) → batched `addTagToAssets`
-///     so 50 assets × 3 tags is 3 IPC calls, not 150.
+/// Reviews the LLM's tag suggestions and applies the user's selection through
+/// `tagsStore`. One Apply button, honoring the chip selection; new labels get an
+/// `(AI)` suffix; applies are grouped so 50 assets × 3 tags is 3 IPC calls.
 export function AIResultPanel() {
   const { t } = useTranslation();
   const open = useUiStore((s) => s.aiResultOpen);
@@ -86,34 +72,24 @@ export function AIResultPanel() {
     if (!data || applying) return;
     setApplying(true);
     setApplyError(null);
-    // Pin the project this result belongs to. The panel closes on a
-    // project switch (uiStore subscription), but an already-running apply
-    // loop survives the unmount — each iteration would then re-snapshot
-    // the NEW active project id and write this result's tags into it.
+    // Pin the project this result belongs to. The panel closes on a project
+    // switch, but an already-running apply loop survives the unmount and would
+    // re-snapshot the NEW active project id on each iteration.
     const startProjectId = useProjectStore.getState().activeProjectId;
-    // The response echoes asset paths back; only paths we actually ASKED
-    // about are appliable — a hallucinated path would otherwise flow into
-    // add_tag_to_assets and mint an orphan binding for a file that isn't
-    // in the project (the cache layer already rejects these; the apply
-    // side didn't).
+    // The response echoes asset paths back; only paths actually asked about are
+    // appliable — a hallucinated path would otherwise mint an orphan binding for a
+    // file that is not in the project.
     const requested = new Set(paths);
     try {
-      // Snapshot tags once; manually push to the local array as we
-      // create new ones so subsequent dedupe finds them without
-      // re-querying the store. Note this is a local mutation, not a
-      // React state update — purely a lookup cache for this loop.
+      // Snapshot tags once, pushing newly created ones onto the local array so
+      // later dedupe finds them without re-querying the store. A local mutation,
+      // not a React state update — purely a lookup cache for this loop.
       const existingTags = [...useTagsStore.getState().tags];
       const suffix = " " + t("aiResult.tagSuffix"); // " (AI)"
 
-      // Group (label, category, source) → list of asset paths so a
-      // single tag applied to N assets goes through one batched
-      // `addTagToAssets` IPC call instead of N.
-      //
-      // `source` is part of the group key because two suggestions
-      // labeled "hero" with different `source` values mean different
-      // things: existing → use the user's existing "hero" tag id;
-      // new → create a fresh "hero (AI)" tag. We must not collapse
-      // them into one group.
+      // Group (label, category, source) → asset paths, so one tag applied to N
+      // assets is one batched call. `source` is part of the key because `existing`
+      // reuses the user's tag id while `new` mints a fresh `(AI)` one.
       type Group = {
         label: string;
         category: AiSuggestedTag["category"];
@@ -132,8 +108,8 @@ export function AIResultPanel() {
         }
         for (const tag of s.tags) {
           const key = tagKey(s.asset_path, tag.label, tag.category);
-          // The apply set is exactly the chips still selected — a chip the
-          // user toggled off is never applied (Q7 decision: no bypass).
+          // The apply set is exactly the chips still selected — a chip the user
+          // toggled off is never applied.
           if (!selected.has(key)) continue;
           const source = tag.source ?? "new";
           const groupKey = `${source}::${tag.category}::${tag.label}`;
@@ -151,12 +127,9 @@ export function AIResultPanel() {
         }
       }
 
-      // Find the `(AI)`-suffixed tag for a label, creating it only if no
-      // tag of that exact name exists yet — in the store OR created
-      // earlier in this very loop (the backend's create_tag does not
-      // dedupe by name, so every create path must check first; the
-      // hallucinated-existing fallback used to skip the check and mint
-      // duplicate "x (AI)" tags, even twice within one run).
+      // Find the `(AI)`-suffixed tag for a label, creating it only if no tag of
+      // that exact name exists yet — in the store OR earlier in this loop. The
+      // backend's create_tag does not dedupe by name, so every path must check.
       const findOrCreateSuffixed = async (
         label: string,
         category: AiSuggestedTag["category"]
@@ -183,12 +156,9 @@ export function AIResultPanel() {
         }
         let tag;
         if (source === "existing") {
-          // Match the LLM's label to an existing tag by name. Case-
-          // sensitive match — system prompt instructs the model to
-          // copy the name verbatim. If the lookup fails (model
-          // hallucinated `source: existing` against a non-existent
-          // label), gracefully fall through to the suffixed-name path
-          // so the tag still gets applied rather than dropped.
+          // Match the model's label to an existing tag by name, case-sensitively:
+          // the system prompt tells it to copy the name verbatim. A failed lookup
+          // falls through to the suffixed path so the tag is applied, not dropped.
           tag =
             existingTags.find((tt) => tt.name === label) ??
             (await findOrCreateSuffixed(label, category));
@@ -302,11 +272,9 @@ export function AIResultPanel() {
                       const key = tagKey(s.asset_path, tag.label, tag.category);
                       const isSelected = selected.has(key);
                       const isExisting = (tag.source ?? "new") === "existing";
-                      // For `existing` chips, use the user's stored color
-                      // for the matching tag so the chip matches the
-                      // post-apply look. Fall back to category color
-                      // if the lookup fails (model labeled something
-                      // `existing` but the name doesn't match any tag).
+                      // `existing` chips use the user's stored colour so the chip
+                      // matches the post-apply look, falling back to the category
+                      // colour when the lookup fails.
                       const matchedTag = isExisting
                         ? userTags.find((tt) => tt.name === tag.label)
                         : undefined;

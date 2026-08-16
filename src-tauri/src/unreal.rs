@@ -1,56 +1,42 @@
-//! Unreal Engine 项目支持模块
-//!
-//! 解析 .uproject 文件，提取项目配置信息。
-//! 为未来完整的 .uasset 解析预留扩展接口。
+//! Unreal Engine project support: parses `.uproject` for project configuration.
 
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Unreal 项目配置信息
+/// Unreal project configuration read from a `.uproject` file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnrealProjectInfo {
-    /// 项目文件路径
     pub path: String,
-    /// 项目名称（从文件名提取）
+    /// Taken from the file name.
     pub project_name: String,
-    /// 引擎版本关联（如 "5.3", "5.4"）
+    /// Associated engine version, e.g. "5.3".
     pub engine_association: Option<String>,
-    /// 项目类别
     pub category: Option<String>,
-    /// 项目描述
     pub description: Option<String>,
-    /// 启用的插件列表
     pub plugins: Vec<UnrealPlugin>,
-    /// 目标平台
     pub target_platforms: Vec<String>,
-    /// 模块列表
     pub modules: Vec<UnrealModule>,
-    /// 是否为企业项目
     pub is_enterprise_project: bool,
 }
 
-/// Unreal 插件信息
+/// One plugin entry from a `.uproject`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnrealPlugin {
-    /// 插件名称
     pub name: String,
-    /// 是否启用
     pub enabled: bool,
 }
 
-/// Unreal 模块信息
+/// One module entry from a `.uproject`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnrealModule {
-    /// 模块名称
     pub name: String,
-    /// 模块类型（Runtime, Editor, etc.）
+    /// Runtime, Editor, and so on.
     pub module_type: String,
-    /// 加载阶段
     pub loading_phase: Option<String>,
 }
 
-/// .uproject 文件的原始 JSON 结构
+/// Raw JSON shape of a `.uproject` file.
 #[derive(Debug, Deserialize)]
 struct UProjectFile {
     // Deserialized but not surfaced yet — placeholder for the planned UE
@@ -94,7 +80,7 @@ struct UProjectPlugin {
     enabled: bool,
 }
 
-/// 在项目根目录下查找 .uproject 文件
+/// Find the `.uproject` file in a project root.
 pub fn find_uproject_file(root_path: &Path) -> Option<PathBuf> {
     let entries = fs::read_dir(root_path).ok()?;
 
@@ -112,7 +98,7 @@ pub fn find_uproject_file(root_path: &Path) -> Option<PathBuf> {
     None
 }
 
-/// 解析 .uproject 文件
+/// Parse a `.uproject` file.
 pub fn parse_uproject(path: &Path) -> Option<UnrealProjectInfo> {
     let content = match fs::read_to_string(path) {
         Ok(c) => c,
@@ -124,8 +110,8 @@ pub fn parse_uproject(path: &Path) -> Option<UnrealProjectInfo> {
     let uproject: UProjectFile = match serde_json::from_str(&content) {
         Ok(u) => u,
         Err(e) => {
-            // Reaching here means the whole engine card disappears from the
-            // UI, so it must not be the silent `.ok()?` it used to be.
+            // Reaching here removes the whole engine card from the interface, so
+            // it must not be silent.
             eprintln!("[unreal] failed to parse {}: {e}", path.display());
             return None;
         }
@@ -190,17 +176,14 @@ pub fn parse_uproject(path: &Path) -> Option<UnrealProjectInfo> {
     })
 }
 
-/// 检查路径是否在 Unreal Content 目录中
-// Stub for the planned UE deep-integration; only tests call it today.
+/// Whether `path` sits inside the Unreal `Content` directory. Only tests call it.
 #[allow(dead_code)]
 pub fn is_content_path(path: &Path, project_root: &Path) -> bool {
     let content_dir = project_root.join("Content");
     path.starts_with(&content_dir)
 }
 
-/// 获取 Unreal 资源类型（基于扩展名）
-/// 预留接口，用于未来扩展 .uasset 解析
-// Stub for the planned UE deep-integration; only tests call it today.
+/// Unreal asset type from the file extension. Only tests call it.
 #[allow(dead_code)]
 pub fn get_unreal_asset_type(path: &Path) -> Option<String> {
     let ext = path.extension()?.to_str()?;
@@ -272,11 +255,9 @@ mod tests {
         assert!(info.modules.is_empty());
     }
 
-    /// One malformed entry in a list must cost that entry, not the project.
-    /// `serde_json::from_str(...).ok()?` made any missing field anywhere —
-    /// a hand-edited plugin line, a field a newer editor stopped writing —
-    /// return `None` for the whole file, and the Unreal card, engine version
-    /// and plugin list then vanish from the UI with nothing said.
+    /// One malformed entry in a list must cost that entry, not the project:
+    /// `from_str(...).ok()?` made any missing field anywhere return `None` for
+    /// the whole file, silently removing the Unreal card from the interface.
     #[test]
     fn one_malformed_plugin_entry_does_not_take_the_project_with_it() {
         let dir = tempdir().unwrap();

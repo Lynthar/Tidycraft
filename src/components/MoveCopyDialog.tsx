@@ -31,10 +31,8 @@ interface MoveCopyDialogProps {
 
 const PREVIEW_LIMIT = 5;
 
-/**
- * Recursive row for the directory tree. Parent owns the expanded set so that
- * the state persists across node re-creations (e.g. on fs-change events).
- */
+/** Recursive row for the directory tree. The parent owns the expanded set so it
+ *  persists across node re-creations, e.g. on fs-change events. */
 function TreeRow({
   node,
   depth,
@@ -140,9 +138,8 @@ export function MoveCopyDialog({
   const [errors, setErrors] = useState<FileOpResult["errors"]>([]);
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
 
-  // Compute disabled dirs: for move, can't move a file into the folder it's
-  // already in (that's a no-op at best, confusing at worst). For copy, allow
-  // same-dir — the backend will surface a "target already exists" error and
+  // Disabled dirs: a move cannot target the folder the file is already in. Copy
+  // allows the same directory — the backend surfaces "target already exists" and
   // the user can read that clearly.
   const disabledDirs = useMemo(() => {
     if (mode !== "move") return new Set<string>();

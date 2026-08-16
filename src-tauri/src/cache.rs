@@ -12,21 +12,13 @@ use crate::scanner::AssetInfo;
 pub struct CacheEntry {
     pub path: String,
     /// Mtime in **nanoseconds**, unlike the whole seconds `AssetInfo.modified`
-    /// carries for display. Seconds are too coarse to invalidate on: a file
-    /// rewritten in the same second the entry recorded, to the same length,
-    /// is indistinguishable from an untouched one, and the scan then serves
-    /// metadata parsed from content that is gone. Filesystems that only store
-    /// whole seconds (HFS+, some network mounts) still can't tell those apart
-    /// — `size` is what catches the subset of those rewrites that resize.
+    /// carries for display. Whole seconds cannot distinguish a same-length
+    /// rewrite inside the recorded second; `size` catches only resizing ones.
     pub modified_nanos: u64,
     pub size: u64,
     /// Mtime of the asset's Unity `.meta` sidecar at scan time, nanoseconds as
-    /// above (`None` = no sidecar, or a non-Unity project where sidecars
-    /// aren't consulted). Part of the invalidation key: Unity rewriting just
-    /// the sidecar (new GUID) must re-parse the asset even though the asset
-    /// file itself is untouched — otherwise `unity_guid` and everything built
-    /// on it (dependency graph, unused-asset detection) goes stale until the
-    /// asset body changes or the cache is cleared.
+    /// above (`None` = no sidecar). In the invalidation key so a sidecar-only
+    /// rewrite re-parses the asset and `unity_guid` cannot go stale.
     pub meta_modified_nanos: Option<u64>,
     pub asset: AssetInfo,
 }
@@ -41,12 +33,9 @@ pub struct ScanCache {
 }
 
 impl ScanCache {
-    /// Bump whenever the set of extracted metadata fields changes so older
-    /// caches with missing fields (e.g. FBX vertex/face before Phase 1.4a,
-    /// SVG dimensions before the 2026-04 pass) get rejected and re-scanned.
-    /// v5: entries carry the `.meta` sidecar mtime in the invalidation key.
-    /// v6: `AssetInfo` gained the required `modified` field.
-    /// v7: mtimes in the invalidation key are nanoseconds, not seconds.
+    /// Bump whenever the set of extracted metadata fields or the invalidation
+    /// key changes, so older caches are rejected and re-scanned. Costs users one
+    /// full rescan.
     const CACHE_VERSION: u32 = 7;
 
     /// Create a new empty cache
@@ -102,17 +91,13 @@ impl ScanCache {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
         // Atomic (temp + rename), matching tags.rs / undo.rs. `load()` already
-        // self-heals from a torn file (version + parse validation → None → full
-        // rescan), so this is about not paying that rescan, not about
-        // correctness.
+        // self-heals from a torn file, so this saves the rescan, not correctness.
         crate::fs_atomic::write_atomic(&cache_path, content.as_bytes())?;
         Ok(())
     }
 
-    /// Check if a file needs re-scanning. Both mtimes are nanoseconds (see
-    /// [`CacheEntry::modified_nanos`]); `meta_modified_nanos` is the current
-    /// mtime of the file's `.meta` sidecar, where any change — created,
-    /// rewritten, or deleted — invalidates the entry.
+    /// Whether a file needs re-scanning. Both mtimes are nanoseconds; any change
+    /// to the `.meta` sidecar — created, rewritten or deleted — invalidates.
     pub fn needs_rescan(
         &self,
         path: &str,
@@ -169,11 +154,9 @@ impl ScanCache {
     }
 }
 
-/// File mtime in nanoseconds since the epoch — the cache's invalidation
-/// stamp, not the whole-second `AssetInfo.modified` shown in the interface.
-/// The two are deliberately separate: one has to be precise, the other has to
-/// stay a stable number the frontend already renders. `u64` nanoseconds run
-/// out in 2554; the cast is safe for anything a filesystem will report.
+/// File mtime in nanoseconds since the epoch — the cache's invalidation stamp,
+/// distinct from the whole-second `AssetInfo.modified` the interface renders.
+/// `u64` nanoseconds run out in 2554.
 pub fn mtime_nanos(path: &Path) -> Option<u64> {
     fs::metadata(path)
         .ok()?

@@ -1,15 +1,6 @@
-//! LLM-backed asset tagging.
-//!
-//! Plumbing for the "AI Tag" flow.
-//! The user picks an asset selection in the UI; the frontend invokes
-//! `llm_estimate_cost` to render a confirm modal, then `llm_suggest_tags`
-//! once the user accepts. Each provider (Claude / OpenAI / Ollama) implements
-//! the same trait so swapping is a config change, not a code branch.
-//!
-//! Each provider implements `suggest_tags` (per-asset) and `learn_project`
-//! (Learning mode) over real HTTP. `LLMError::NotImplemented` survives only
-//! as the default trait fallback for an optional method a provider doesn't
-//! implement.
+//! LLM-backed asset tagging. The frontend calls `llm_estimate_cost` for the
+//! confirm modal, then `llm_suggest_tags`. Each provider (Claude / OpenAI /
+//! Ollama) implements the same trait, so swapping one is a config change.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -27,10 +18,8 @@ pub mod rule_store;
 pub mod sampler;
 
 // ============ Data schemas ============
-//
-// Mirrors the TS-side shapes the frontend sends/expects via `invoke()`.
-// Keep field names and snake_case in sync with `src/types/asset.ts` and
-// the `aiAnalyze`/`aiResult` UI components when those land.
+// Mirrors the TS-side shapes the frontend sends and expects via `invoke()`.
+// Keep field names and snake_case in sync with `src/types/asset.ts`.
 
 /// One LLM tagging call. The provider receives this and returns a
 /// `TagResponse` covering every asset in the same order.
@@ -50,10 +39,9 @@ pub struct TagRequest {
     /// consented to thumbnail upload.
     #[serde(default = "default_true")]
     pub include_thumbnails: bool,
-    /// Optional project framing pulled from `tidycraft.toml [project]`.
-    /// `None` (or both fields empty) → prompt builder skips the
-    /// project-context block to save tokens. Defaults to None on
-    /// deserialization for backward-compat with older request shapes.
+    /// Optional project framing pulled from `tidycraft.toml [project]`. `None`
+    /// (or both fields empty) makes the prompt builder skip the project-context
+    /// block. Defaults to None for older request shapes.
     #[serde(default)]
     pub project_ctx: Option<project_meta::ProjectMeta>,
     /// User's existing tag system. The LLM is instructed to prefer
@@ -64,11 +52,8 @@ pub struct TagRequest {
 }
 
 /// Per-tag context fed to the LLM so it can match existing project tags.
-///
-/// `description` is the user's TagManager-supplied semantic blurb (when
-/// available). `sample_paths` are up to 5 asset paths where this tag is
-/// currently applied — they let the LLM infer the tag's intent from
-/// usage even when no description is set.
+/// `description` is the user's TagManager blurb; `sample_paths` are up to 5 paths
+/// where the tag is applied, letting the model infer intent from usage.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExistingTagContext {
     pub name: String,
@@ -116,11 +101,9 @@ pub struct SuggestedTag {
     pub category: TagCategory,
     /// 0.0..=1.0; the prompt instructs models to skip tags below 0.6.
     pub confidence: f32,
-    /// Marks whether the LLM matched this tag against the user's
-    /// existing tag system or invented a new label. Frontend uses this
-    /// to skip the `(AI)` suffix and color-by-existing-tag for
-    /// `Existing` chips. Defaults to `New` on deserialization so
-    /// older cached responses (which lack the field) load cleanly.
+    /// Whether the model matched an existing project tag or invented a new label.
+    /// The frontend uses it to skip the `(AI)` suffix. Defaults to `New` on
+    /// deserialization so older cached responses still load.
     #[serde(default)]
     pub source: TagSource,
 }
@@ -151,11 +134,9 @@ pub enum TagCategory {
     Mood,
     /// Free-form noun more specific than `type` (e.g. "rusty-metal", "wolf").
     Subject,
-    /// Anything that doesn't fit the four buckets above. `serde(other)`
-    /// makes this the catch-all for values the model invents outside the
-    /// schema ("texture", "environment", …) — one out-of-vocabulary
-    /// category used to fail deserialization of the ENTIRE already-paid
-    /// response.
+    /// Anything outside the four buckets above. `serde(other)` makes this the
+    /// catch-all, so one out-of-vocabulary category cannot fail the whole
+    /// already-paid response.
     #[serde(other)]
     Other,
 }
@@ -191,34 +172,24 @@ pub enum LLMError {
     RateLimit,
     #[error("Failed to parse provider response: {0}")]
     ParseError(String),
-    /// The model hit its output-token cap mid-reply (Anthropic
-    /// `stop_reason: "max_tokens"`), so the JSON is cut off — distinct from
-    /// ParseError because the actionable fix is a smaller request, and the
-    /// input tokens were billed either way. Chunking makes this rare for
-    /// tag batches; learning's single big reply can still hit it.
+    /// The model hit its output-token cap mid-reply, so the JSON is cut off.
+    /// Distinct from ParseError because the actionable fix is a smaller request,
+    /// and the input tokens were billed either way.
     #[error("Response truncated: the model hit its output-token limit before finishing; try a smaller request")]
     Truncated,
     #[error("Provider {0} not enabled in settings")]
     ProviderDisabled(String),
-    /// Day 1 placeholder — every provider returns this until Day 2 wires
-    /// the real HTTP calls. UI shows it as a friendly "AI tagging is in
-    /// development" message.
+    /// Default trait fallback for an optional method a provider does not
+    /// implement.
     #[error("Provider not implemented yet — Day 2 work")]
     NotImplemented,
     #[error("LLM error: {0}")]
     Other(String),
 }
 
-/// Map a cloud provider's non-2xx status to an error family.
-///
-/// `provider` is the id `NoApiKey` carries (`"claude"` / `"openai"`); `label`
-/// is what the user sees in the message (`"Anthropic"` / `"OpenAI"`).
-///
-/// Shared because claude.rs and openai.rs each had two byte-identical copies
-/// of this match inline — four places to keep in step, which is three too many
-/// for a table that encodes provider behavior. Ollama keeps its own
-/// (`ollama::map_http_status`): a local server has no auth or metering, and
-/// its 404 means "model not installed", not "no such endpoint".
+/// Map a cloud provider's non-2xx status to an error family. `provider` is the id
+/// `NoApiKey` carries; `label` is what the user sees. Ollama keeps its own
+/// (`ollama::map_http_status`) — a local server has no auth or metering.
 pub(crate) fn map_cloud_http_status(
     provider: &str,
     label: &str,
@@ -228,11 +199,9 @@ pub(crate) fn map_cloud_http_status(
     match status {
         401 | 403 => LLMError::NoApiKey(provider.to_string()),
         429 => LLMError::RateLimit,
-        // 529 is Anthropic's `overloaded_error`, 503 the generic equivalent:
-        // the provider is busy, and waiting is the whole fix. Kept out of
-        // `Network` because the frontend turns any message mentioning Network
-        // / "Could not reach" / "timed out" into "check your connection" —
-        // advice that sends the user to inspect the one thing that is fine.
+        // 529 is Anthropic's `overloaded_error`, 503 the generic equivalent: the
+        // provider is busy and waiting is the fix. Kept out of `Network`, which the
+        // frontend renders as "check your connection".
         503 | 529 => LLMError::Other(format!(
             "{label} is temporarily overloaded ({status}) — wait a few seconds and try again"
         )),
@@ -266,11 +235,9 @@ pub trait LLMProvider: Send + Sync {
     /// Make the actual API call to the provider's tagging endpoint.
     async fn suggest_tags(&self, request: &TagRequest) -> Result<TagResponse, LLMError>;
 
-    /// Learning-mode call (Day 6). Sends the project samples + tag
-    /// system + project meta to the LLM and parses a `LearningResult`
-    /// (inferred conventions + sample tags + tag gaps + heuristic
-    /// rules). Default returns `NotImplemented` so future providers
-    /// can be added without forcing an immediate learn impl.
+    /// Learning-mode call: sends the project samples, tag system and project meta,
+    /// and parses a `LearningResult`. The default returns `NotImplemented` so a
+    /// provider can be added without an immediate learn impl.
     async fn learn_project(
         &self,
         _request: &learning::LearnRequest,
@@ -305,13 +272,9 @@ pub fn make_provider(id: &str, config: ProviderConfig) -> Result<Box<dyn LLMProv
 
 // ============ Shared response parser ============
 
-/// Three-tier JSON parser per plan §5.3.
-///
-/// 1. `serde_json::from_str` directly on the text.
-/// 2. Strip a ```json``` (or bare ```...```) markdown fence and retry.
-/// 3. Surface `LLMError::ParseError` with the original text so the UI
-///    can show "model output couldn't be auto-applied, here's what it
-///    said" instead of pretending nothing happened.
+/// Three-tier JSON parser: parse the text directly, retry after stripping a
+/// markdown fence, else `LLMError::ParseError` carrying the original text so the
+/// interface can show what the model actually said.
 pub fn parse_suggestions(text: &str) -> Result<Vec<TagSuggestion>, LLMError> {
     #[derive(Deserialize)]
     struct Wrapped {
@@ -331,14 +294,9 @@ pub fn parse_suggestions(text: &str) -> Result<Vec<TagSuggestion>, LLMError> {
     Err(LLMError::ParseError(text.to_string()))
 }
 
-/// Generic 2-tier parser for LLM JSON output. Tier 1: parse directly.
-/// Tier 2: strip a ```json``` (or bare ```) markdown fence and retry.
-/// On both failures returns `LLMError::ParseError(original_text)` so
-/// the UI can show "model said …" verbatim.
-///
-/// `parse_suggestions` builds on this by wrapping the parse target in
-/// a `{ suggestions: T }` envelope; `learn_project` passes
-/// `LearningResult` directly.
+/// Generic 2-tier parser for LLM JSON output: parse directly, then retry after
+/// stripping a markdown fence. On both failures returns
+/// `LLMError::ParseError(original_text)`.
 pub fn parse_json_lenient<T: serde::de::DeserializeOwned>(text: &str) -> Result<T, LLMError> {
     if let Ok(v) = serde_json::from_str::<T>(text) {
         return Ok(v);
@@ -351,10 +309,9 @@ pub fn parse_json_lenient<T: serde::de::DeserializeOwned>(text: &str) -> Result<
     Err(LLMError::ParseError(text.to_string()))
 }
 
-/// Pull the body out of a ```json ... ``` (or bare ``` ... ```) fence.
-/// Returns None if no fence found. The optional language tag must be
-/// alphanumeric (e.g. `json`); arbitrary text on the opening line is
-/// treated as content, not a tag.
+/// Pull the body out of a fenced code block, `None` when there is no fence. The
+/// optional language tag must be alphanumeric; arbitrary text on the opening line
+/// is treated as content, not a tag.
 fn strip_markdown_fence(text: &str) -> Option<&str> {
     let trimmed = text.trim();
     let start = trimmed.find("```")?;
@@ -375,13 +332,9 @@ fn strip_markdown_fence(text: &str) -> Option<&str> {
 
 // ============ Shared cache + fetcher orchestration ============
 
-/// Pair fresh suggestions with the cache keys of the assets they answer,
-/// matching by `asset_path` — NOT by position. The system prompt allows the
-/// model to skip assets it can't classify and never instructs it to preserve
-/// input order, so zip-by-index would mis-key every suggestion after a skip
-/// and persist the corruption until the context hash happens to move.
-/// Suggestions whose path matches no requested asset (hallucinations) pair
-/// with nothing and are simply not cached.
+/// Pair fresh suggestions with the cache keys of the assets they answer, matching
+/// by `asset_path` — NOT by position. The model may skip assets and is never told
+/// to preserve order. Paths matching no request pair with nothing and are dropped.
 fn pair_suggestions_with_keys<'a>(
     suggestions: &'a [TagSuggestion],
     miss_assets: &[AssetInput],
@@ -401,34 +354,14 @@ fn pair_suggestions_with_keys<'a>(
         .collect()
 }
 
-/// Upper bound on assets per provider request. The project's own cost model
-/// (`cost::OUTPUT_TOKENS_PER_ASSET` = 150) meets Claude's 4096-token output
-/// cap at ~27 assets — a single oversized request truncates mid-JSON and
-/// loses the WHOLE batch while its input tokens are still billed. 20 leaves
-/// comfortable headroom (~3000 output tokens) and also relieves Ollama's
-/// small default context. Chunks run sequentially; each completed chunk's
-/// suggestions are cached before the next request, so a mid-way failure
-/// forfeits only the remaining chunks and a retry re-pays for those alone.
+/// Upper bound on assets per provider request. At 150 output tokens per asset the
+/// 4096-token cap is met around 27 assets, and a truncated request loses the whole
+/// batch while its input is still billed. Chunks run and cache sequentially.
 const MAX_ASSETS_PER_REQUEST: usize = 20;
 
-/// Wraps a provider's actual API call with the per-asset cache.
-///
-/// Splits `request.assets` into hits (already cached) and misses, calls
-/// `fetcher` once per chunk of at most [`MAX_ASSETS_PER_REQUEST`] missing
-/// assets (sequentially), persists each chunk's fresh suggestions, then
-/// merges hits + fresh into the final `TagResponse`. The provider-level
-/// call paths only have to know how to make one batched request — caching,
-/// key generation, chunking, and merging live here.
-///
-/// `fetcher` receives an OWNED `TagRequest` (so it can ship into an async
-/// block / move into a closure freely) containing one chunk of missing
-/// assets. The model's output order is NOT trusted: suggestions are paired
-/// with cache keys by `asset_path` (see [`pair_suggestions_with_keys`]),
-/// since the prompt allows skipping unclassifiable assets and says nothing
-/// about order.
-///
-/// Returns `Usage { cached: true, tokens: 0 }` when every asset is a
-/// cache hit (fetcher is never called).
+/// Wraps a provider's call with the per-asset cache: splits assets into hits and
+/// misses, fetches each chunk of at most [`MAX_ASSETS_PER_REQUEST`] misses,
+/// persists them, then merges. `fetcher` is never called on a full cache hit.
 pub async fn suggest_with_cache<F, Fut>(
     provider_id: &str,
     request: &TagRequest,
@@ -442,12 +375,9 @@ where
     let mut miss_assets: Vec<AssetInput> = Vec::new();
     let mut miss_keys: Vec<String> = Vec::new();
 
-    // The project framing + existing-tag context is identical for every
-    // asset in the batch, so hash it once and fold it into each key. Because
-    // that context is part of the prompt, editing a tag's description,
-    // adding/removing tags, changing sample bindings, or updating [project]
-    // theme/goal now invalidates stale entries instead of returning advice
-    // generated under the old context.
+    // The project framing and existing-tag context is identical for every asset in
+    // the batch, so hash it once and fold it into each key — editing a tag or
+    // `[project]` then invalidates entries generated under the old context.
     let context_hash = cache::hash_context(request.project_ctx.as_ref(), &request.existing_tags);
 
     for a in &request.assets {
@@ -504,16 +434,9 @@ where
 
         let fresh = fetcher(chunk_request).await?;
 
-        // Persist this chunk's suggestions immediately — paired by
-        // asset_path, never by position (the model may skip or reorder).
-        // A cache save failure is non-fatal: worst case we re-bill that
-        // asset next call. Caching per chunk also means an error on a LATER
-        // chunk doesn't waste what's already been paid for.
-        //
-        // Non-fatal is not the same as invisible, though: a cache directory
-        // that is permanently unwritable means every AI tagging run pays the
-        // provider in full, forever, with nothing anywhere to explain why.
-        // `cache::save` returns the error precisely so it can be logged.
+        // Persist this chunk immediately, paired by asset_path. A save failure is
+        // non-fatal but not invisible: a permanently unwritable cache directory
+        // means every run pays the provider in full, so the error is logged.
         for (s, k) in pair_suggestions_with_keys(&fresh.suggestions, chunk_assets, chunk_keys) {
             if let Err(e) = cache::save(k, s) {
                 eprintln!("[llm] failed to cache a suggestion (key {k}): {e}");
@@ -545,11 +468,9 @@ where
 mod tests {
     use super::*;
 
-    /// 529 is Anthropic's documented `overloaded_error` and 503 is the generic
-    /// equivalent: the provider is busy and the useful response is to wait.
-    /// Both landed in `Network`, and the frontend routes any message mentioning
-    /// Network / "Could not reach" / "timed out" to "Check your connection or
-    /// endpoint" — pointing the user at the one thing that isn't wrong.
+    /// 529 is Anthropic's documented `overloaded_error` and 503 the generic
+    /// equivalent. Both landed in `Network`, which the frontend routes to "check
+    /// your connection" — pointing the user at the one thing that is not wrong.
     #[test]
     fn provider_overload_is_not_reported_as_a_network_problem() {
         for status in [503, 529] {
@@ -769,12 +690,9 @@ That's it!"#;
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::sync::{Arc, Mutex};
 
-        // 45 misses must go out as ceil(45 / MAX_ASSETS_PER_REQUEST) requests
-        // of at most MAX_ASSETS_PER_REQUEST assets each — one unchunked
-        // request would blow Claude's 4096-token output cap (~27 assets at
-        // the cost model's 150 output tokens/asset) and lose the whole batch.
-        // A uuid model string keeps this test's cache keys disjoint from
-        // anything real; entries are removed again below.
+        // 45 misses must go out as ceil(45 / MAX_ASSETS_PER_REQUEST) requests. A
+        // uuid model string keeps these cache keys disjoint from anything real;
+        // the entries are removed again below.
         let model = format!("test-chunk-{}", uuid::Uuid::new_v4().simple());
         let assets: Vec<AssetInput> = (0..45).map(|i| asset(&format!("c/a{i}.png"))).collect();
         let req = TagRequest {

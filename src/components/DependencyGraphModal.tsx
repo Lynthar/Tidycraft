@@ -15,19 +15,9 @@ const NODE_W = 180;
 const NODE_H = 40;
 const HOPS = 2;
 
-/// The center's neighborhood, walked DIRECTION-CONSISTENTLY: one sweep
-/// follows only outgoing edges ("what it uses", up to `hops` levels) and one
-/// only incoming edges ("what uses it") — a path never flips direction
-/// midway. Mixed-direction walks read as relevance but deliver siblings: any
-/// shared dependency (an atlas, a package shader) is one hop down, and the
-/// flip-back hop would drag in every OTHER user of it — on real projects
-/// that's the entire material list. Same Uses / Used-by split as Unity's own
-/// dependency viewer. Edges between reached nodes are all kept (true
-/// information); they just don't expand the set.
-///
-/// Non-`asset` nodes (package / unresolved / unscanned / missing) stay
-/// TERMINALS on top of that: nothing is known about their far side, so
-/// expansion stops at them in both sweeps.
+/// The center's neighborhood, walked DIRECTION-CONSISTENTLY: one sweep follows
+/// outgoing edges, one incoming, and a path never flips midway. Non-`asset` nodes
+/// are terminals in both sweeps. Edges between reached nodes are all kept.
 function extractSubgraph(
   graph: DependencyGraph,
   centerId: string,
@@ -70,12 +60,9 @@ function extractSubgraph(
   return { nodeIds, edges };
 }
 
-/// i18n keys per non-asset node kind: the hover explanation and the footer
-/// legend label. Colors: unresolved reads as a warning (ambiguous, not
-/// asserted broken), missing as an error (confirmed absent from disk),
-/// package and unscanned stay neutral with a dashed border — both mean
-/// "exists outside the scan", and they never co-occur (package is
-/// Unity-only, unscanned Godot-only) so the shared look stays unambiguous.
+/// i18n keys per non-asset node kind: the hover explanation and the legend label.
+/// `unresolved` reads as a warning, `missing` as an error, while `package` and
+/// `unscanned` stay neutral — both mean "exists outside the scan".
 const KIND_TIP = {
   package: "depGraph.packageTip",
   unresolved: "depGraph.unresolvedTip",
@@ -168,11 +155,9 @@ export function DependencyGraphModal() {
       .map((n) => {
         const isCenter = n.id === center.id;
         if (n.kind !== "asset") {
-          // Identity stays visible — a package node shows its file name, a
-          // Godot res:// path is actionable as-is, a Unity GUID shortens to
-          // a searchable 8-char prefix — and the explanation, the package id
-          // (when known) and the full string live in the hover title.
-          // (div styles resolve CSS var() fine, unlike SVG edge markers.)
+          // Identity stays visible — a package node shows its file name, a Godot
+          // res:// path is actionable as-is, a Unity GUID shortens to a searchable
+          // 8-char prefix — with the full string in the hover title.
           const label = (
             <span
               title={[t(KIND_TIP[n.kind]), n.detail, n.name].filter(Boolean).join("\n")}
@@ -190,11 +175,9 @@ export function DependencyGraphModal() {
           return {
             id: n.id,
             position: { x: 0, y: 0 },
-            // Match dagre's `rankdir: "LR"`. React Flow defaults to
-            // Bottom→Top handles, so on a 180×40 node the edges left and
-            // entered the middle of the *long* sides while the layout ran
-            // horizontally — every edge bent into an S. (Standard config from
-            // React Flow's own dagre example.)
+            // Match dagre's `rankdir: "LR"`. React Flow defaults to Bottom→Top
+            // handles, so on a wide node the edges entered the long sides while the
+            // layout ran horizontally and every edge bent into an S.
             sourcePosition: Position.Right,
             targetPosition: Position.Left,
             data: { label, path: n.path, kind: n.kind },
@@ -233,10 +216,9 @@ export function DependencyGraphModal() {
       id: `e${i}`,
       source: e.from,
       target: e.to,
-      // Arrowhead at the target: an edge means "source uses target", so the
-      // graph now reads directionally. No custom colour — the SVG marker
-      // attribute wouldn't resolve a CSS var() (same gotcha as recharts fills),
-      // and React Flow's default grey already matches the edge line.
+      // Arrowhead at the target: an edge means "source uses target". No custom
+      // colour — the SVG marker attribute would not resolve a CSS var(), and React
+      // Flow's default grey already matches the edge line.
       markerEnd: { type: MarkerType.ArrowClosed },
     }));
 

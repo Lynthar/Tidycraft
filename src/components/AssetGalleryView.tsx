@@ -43,11 +43,6 @@ const FOOT_HEIGHT = 52;
 /// Thumbnail render size matches AssetPreview so the disk cache is shared.
 const THUMB_SIZE = 256;
 
-/// Thumbnails live in the shared `lib/thumbnailCache` LRU (bounded; evicted by
-/// projectStore on fs-change so external edits show fresh images). Survives
-/// component remounts (e.g. switching list↔grid) so users don't re-pay the
-/// invoke roundtrip.
-
 const GLYPH_ICONS: Record<AssetType, LucideIcon> = {
   texture: ImageIcon,
   model: Box,
@@ -102,10 +97,9 @@ function CardThumb({ asset }: CardThumbProps) {
       cancelled = true;
       cancel();
     };
-    // `modified` is the external-edit signal: the watcher re-parses the
-    // file into a fresh AssetInfo (new mtime) and evicts the path from
-    // the shared cache, but a card that stayed mounted would otherwise
-    // keep its old state forever (its path/type didn't change).
+    // `modified` is the external-edit signal: the watcher re-parses the file into
+    // a fresh AssetInfo and evicts the path from the shared cache, but a card that
+    // stayed mounted would otherwise keep its old state forever.
   }, [asset.path, asset.asset_type, asset.modified]);
 
   const showImage = asset.asset_type === "texture" && typeof thumb === "string";
@@ -200,13 +194,9 @@ function Card({
             onCheckChange(e.target.checked);
           }}
           onClick={(e) => e.stopPropagation()}
-          // Stops the click from parking DOM focus on the checkbox, matching
-          // the row checkbox in AssetListView. The gallery has no keyboard
-          // navigation yet, so nothing reads focus here today — but the
-          // checkbox would otherwise steal it the same way the list row's
-          // did before arrow keys landed, and keeping this in sync now means
-          // it's not a rediscovery the day the gallery gets its own key
-          // handler.
+          // Stops the click from parking DOM focus on the checkbox, matching the
+          // row checkbox in AssetListView. Kept in sync now so it is not a
+          // rediscovery the day the gallery gets its own key handler.
           onMouseDown={(e) => e.preventDefault()}
           className="w-4 h-4 accent-primary cursor-pointer"
           aria-label={t("assetList.selectForBatch")}
@@ -340,10 +330,9 @@ export function AssetGalleryView({
     virtualizer.measure();
   }, [rowHeight, rowCount, virtualizer]);
 
-  // Scroll the selected card's ROW into view on selection change / locate
-  // pulse (this virtualizer's unit is the row of `cols` cards, not the
-  // card). Mirrors AssetListView — see the comment there for why `assets`
-  // is deliberately not a dependency.
+  // Scroll the selected card's ROW into view on selection change or locate pulse
+  // (this virtualizer's unit is the row of `cols` cards, not the card). Mirrors
+  // AssetListView — see the comment there for why `assets` is not a dependency.
   const locatePulse = useProjectStore((s) => s.locatePulse);
   useEffect(() => {
     if (!selectedAsset) return;

@@ -8,6 +8,11 @@ For the user-facing introduction, see [README.md](README.md) /
 [README.zh-CN.md](README.zh-CN.md). The README's "Roadmap" section tracks
 shipped features and the backlog. For change history, use `git log`.
 
+Source comments state only what the code does today. The reasoning behind it —
+which bug a guard prevents, what was measured, what was decided against — lives
+in [design-notes.md](design-notes.md). Read that before "simplifying" a guard
+that looks needlessly careful.
+
 ---
 
 ## 1. Design Philosophy

@@ -1,20 +1,6 @@
-//! Per-provider pricing and cost estimation.
-//!
-//! All token prices and image-tokenization rules verified from official
-//! provider docs; Anthropic figures rechecked 2026-08-02, OpenAI 2026-05-08:
-//! - Anthropic: https://platform.claude.com/docs/en/about-claude/pricing
-//! - Anthropic vision: https://platform.claude.com/docs/en/build-with-claude/vision
-//!   (formula `tokens ≈ width × height / 750`; the per-image cap follows the
-//!   model's maximum input resolution — 1568 at the 1568px long edge, 4784
-//!   at the 2576px high-resolution tier, which is no longer Opus-only)
-//! - OpenAI: https://developers.openai.com/api/docs/pricing
-//! - OpenAI vision: 32×32 patch tokenization for 5.4-mini/nano (cap 1536
-//!   patches, ×1.62 mini / ×2.46 nano multipliers), tile-based for the 4o
-//!   family — where the flat low-detail count is per *model*, not shared:
-//!   4o bills 85 and 4o-mini 2833 (33×, matching its 33×-lower token price).
-//!
-//! Rule of thumb when prices change: edit only the `pricing()` table.
-//! Every caller goes through `estimate_cost`, which routes to the table.
+//! Per-provider pricing and cost estimation. Token prices and image-tokenization
+//! rules come from the official provider docs. When prices change, edit only the
+//! `pricing()` table — every caller goes through `estimate_cost`, which reads it.
 
 use super::{CostEstimate, TagRequest};
 
@@ -32,16 +18,9 @@ enum VisionRule {
     /// Cap reflects the model's max native-resolution tokens before
     /// the API would auto-downscale the image.
     AnthropicWHOver750 { max: u32 },
-    /// OpenAI gpt-4o family at "low detail" mode: a flat count per image
-    /// regardless of size. We default to low-detail because thumbnail-sized
-    /// previews don't benefit from high-detail tiles.
-    ///
-    /// The count is flat per *size*, not per model: `gpt-4o` bills 85 while
-    /// `gpt-4o-mini` bills 2833 for the identical image. OpenAI scales the
-    /// mini count by the same ~33× that separates the two per-token prices,
-    /// so the dollar cost of an image lands in the same place on either
-    /// model — which is exactly why a single shared constant read as correct
-    /// and was 33× low.
+    /// OpenAI gpt-4o family at "low detail": a flat count per image regardless of
+    /// size. Flat per *size*, not per model — `gpt-4o` bills 85 while
+    /// `gpt-4o-mini` bills 2833 for the identical image.
     OpenAILowDetailFlat { tokens: usize },
     /// OpenAI 5.4-mini and 5.4-nano: image is covered by 32×32 patches,
     /// patch count is capped at 1536, then multiplied by a per-model
@@ -53,54 +32,39 @@ enum VisionRule {
     OllamaFree,
 }
 
-/// Boilerplate around each per-asset section of the user prompt
-/// (path/filename labels, separators, etc.). Derived empirically; the
-/// real number floats with prompt edits but is small relative to
-/// vision tokens.
+/// Boilerplate around each per-asset section of the user prompt. Derived
+/// empirically; small relative to vision tokens.
 const PROMPT_OVERHEAD_TOKENS_PER_ASSET: usize = 100;
 
-/// Output budget per asset. The system prompt instructs models to emit
-/// ~3 tags × ~30 tokens each plus JSON wrapping. 150 is a comfortable
-/// upper bound that the modal shows BEFORE the call, so a slight
-/// overestimate is preferred to surprise.
+/// Output budget per asset: roughly 3 tags × 30 tokens plus JSON wrapping. A
+/// comfortable upper bound, since the modal shows it before the call.
 const OUTPUT_TOKENS_PER_ASSET: usize = 150;
 
-/// Rough chars→tokens divisor for the learning estimator. Prompts are
-/// mostly ASCII paths and English prose, where ~4 chars/token is the
-/// standard heuristic; path-heavy text tokenizes a bit denser, which
-/// errs the estimate high — preferred for a pre-call preview.
+/// Rough chars→tokens divisor for the learning estimator. ~4 chars/token is the
+/// standard heuristic for ASCII paths and English prose; path-heavy text
+/// tokenizes denser, which errs the estimate high.
 const CHARS_PER_TOKEN: usize = 4;
 
-/// Learning output budget. One call returns ONE document, not per-asset
-/// tag lists: fixed conventions/gaps/rules sections plus terms that
-/// scale with what the prompt asks to be echoed back —
-/// `existing_tag_meanings` covers every user tag, and `sample_tags`
-/// carries one entry (path echo + matched/suggested tags) per sampled
-/// file.
+/// Learning output budget. One call returns ONE document: fixed sections plus
+/// terms that scale with what the prompt echoes back — every user tag, and one
+/// entry per sampled file.
 const LEARNING_OUTPUT_BASE_TOKENS: usize = 600;
 const LEARNING_OUTPUT_TOKENS_PER_TAG: usize = 30;
 const LEARNING_OUTPUT_TOKENS_PER_SAMPLE: usize = 40;
 
 fn pricing(model: &str) -> Option<Pricing> {
     match model {
-        // Anthropic. Superseded models keep their entries: a user pinned to
-        // one still gets a real estimate instead of the "unknown model"
-        // degradation, and the settings dropdown now preserves whatever
-        // model is actually configured.
-        //
-        // The `max` in each vision rule is the per-image token ceiling, which
-        // tracks the model's maximum input resolution: 1568 for the older
-        // 1568px-long-edge tier, 4784 for the 2576px high-resolution tier.
+        // Anthropic. Superseded models keep their entries so a user pinned to one
+        // still gets a real estimate. The `max` in each vision rule is the
+        // per-image token ceiling, tracking the model's max input resolution.
         "claude-haiku-4-5" => Some(Pricing {
             input_per_m: 1_000_000,
             output_per_m: 5_000_000,
             vision: VisionRule::AnthropicWHOver750 { max: 1568 },
         }),
-        // Sonnet 5 also carries a lower introductory input/output price for a
-        // limited period. Listed at the standard rate deliberately: an
-        // estimate that expires silently would start *under*-charging the
-        // moment the promotion ends, and this estimator's stated policy is to
-        // err high rather than low.
+        // Listed at the standard rate although Sonnet 5 also carries a limited
+        // introductory price: an estimate that expires silently would start
+        // under-charging, and the policy here is to err high.
         "claude-sonnet-5" => Some(Pricing {
             input_per_m: 3_000_000,
             output_per_m: 15_000_000,
@@ -140,15 +104,9 @@ fn pricing(model: &str) -> Option<Pricing> {
             output_per_m: 4_500_000,
             vision: VisionRule::OpenAIPatchBased { multiplier: 1.62 },
         }),
-        // Patch-based like its mini/nano siblings (the 85-token low-detail
-        // flat rate belongs to the gpt-4o generation; OpenAI's vision guide
-        // moved the 5.4 family to 32-px patches — verified 2026-08-15). The
-        // guide publishes multipliers only for mini (1.62) and nano (2.46);
-        // the base model's is unpublished, so 1.33 is a deliberate ceiling:
-        // it prices our 256×256 thumbnail (64 patches) at the same 85 tokens
-        // the old flat rule charged, and stays an over- rather than under-
-        // estimate for any true multiplier ≤1.33 — this estimator's policy
-        // is to err high.
+        // Patch-based like its mini/nano siblings. The base model's multiplier is
+        // unpublished; 1.33 is a ceiling that prices a 256×256 thumbnail
+        // (64 patches) at 85 tokens.
         "gpt-5.4" => Some(Pricing {
             input_per_m: 2_500_000,
             output_per_m: 15_000_000,
@@ -204,21 +162,9 @@ pub fn estimate_image_tokens(width: u32, height: u32, model: &str) -> usize {
     }
 }
 
-/// Estimate the input/output tokens and USD cents for a request,
-/// without making any network call.
-///
-/// Assumes 256×256 thumbnails because that's what `thumbnail.rs`
-/// emits — actual image dimensions aren't part of `TagRequest`. If
-/// the frontend ever switches to per-asset thumbnail sizes, plumb
-/// the dimension through `AssetInput` and update this loop.
-///
-/// The real dispatch chunks a request into ≤[`MAX_ASSETS_PER_REQUEST`]
-/// asset batches and every batch re-sends the system prompt, the project
-/// framing and the full existing-tag context — so the shared part is
-/// billed once *per chunk*, not once per run. Modeling it once per run
-/// (the old shape) under-charged exactly the runs where the shared part
-/// matters: many tags × many chunks (2026-08 external review). This
-/// estimator's stated policy is to err high, never low.
+/// Estimate the input/output tokens and USD cents for a request, with no network
+/// call. Assumes 256×256 thumbnails, matching what `thumbnail.rs` emits. The
+/// shared prompt context is billed once per chunk, since every chunk re-sends it.
 pub fn estimate_cost(request: &TagRequest) -> CostEstimate {
     let p = match pricing(&request.model) {
         Some(p) => p,
@@ -282,15 +228,9 @@ fn finish_estimate(p: &Pricing, input_tokens: usize, output_tokens: usize) -> Co
     }
 }
 
-/// Estimate a LEARNING run. Deliberately NOT `estimate_cost` with a fake
-/// asset count: learning is one text-only call returning one document, so
-/// the tagging math (`150 output tokens × asset_count`) both overcharges
-/// the output side and invites callers to stuff "directory count" into
-/// `asset_count`, which explodes the estimate by orders of magnitude
-/// (~$18 shown for a run that really costs ~$0.32). Input is derived
-/// from the byte length of the ACTUAL prompt the run would send (the
-/// caller builds it with the same sampler + prompt builder as the real
-/// call); output is the bounded document described on the constants.
+/// Estimate a LEARNING run — not `estimate_cost` with a fake asset count, since
+/// learning is one text-only call returning one document. Input is derived from
+/// the byte length of the actual prompt the run would send.
 pub fn estimate_learning_cost(
     model: &str,
     prompt_chars: usize,
@@ -333,10 +273,8 @@ mod tests {
         }
     }
 
-    // ----- Anthropic vision formula -----
-    // Cross-checked against the docs' worked examples table:
-    // 200×200 → 54, 1000×1000 → 1334, 1092×1092 → 1568 (capped),
-    // Opus 4.7 1920×1080 → 2765.
+    // Cross-checked against the docs' worked examples: 200×200 → 54,
+    // 1000×1000 → 1334, 1092×1092 → 1568 (capped), Opus 4.7 1920×1080 → 2765.
 
     #[test]
     fn anthropic_vision_200x200() {
@@ -363,12 +301,9 @@ mod tests {
 
     // ----- OpenAI vision rules -----
 
-    /// Flat means size-independent, not model-independent. `gpt-4o-mini`
-    /// bills a low-detail image at 2833 tokens, not 85: OpenAI scales the
-    /// count by the same ~33× that separates the two models' per-token
-    /// prices, so an image costs about the same dollars on either. Charging
-    /// the estimate 85 made the preview 33× low — the direction this module's
-    /// own header says never to err.
+    /// Flat means size-independent, not model-independent. `gpt-4o-mini` bills a
+    /// low-detail image at 2833 tokens, not 85, scaled by the same ~33× that
+    /// separates the two models' per-token prices.
     #[test]
     fn openai_low_detail_is_flat_per_size_but_priced_per_model() {
         for (w, h) in [(256, 256), (2048, 2048), (50, 50)] {
@@ -376,11 +311,9 @@ mod tests {
         }
     }
 
-    /// gpt-5.4 is patch-based like its siblings (the flat 85 belongs to the
-    /// gpt-4o generation). Its multiplier is unpublished, so 1.33 is chosen
-    /// as a ceiling that prices the app's one real input — a 256×256
-    /// thumbnail, 64 patches — at the 85 tokens the old flat rule charged:
-    /// continuity for the shipped case, correct patch scaling for any other.
+    /// gpt-5.4 is patch-based like its siblings. Its multiplier is unpublished, so
+    /// 1.33 is a ceiling that prices the app's one real input — a 256×256
+    /// thumbnail, 64 patches — at 85 tokens.
     #[test]
     fn openai_patch_based_gpt54_256_matches_old_flat_rate() {
         assert_eq!(estimate_image_tokens(256, 256, "gpt-5.4"), 85);
@@ -408,15 +341,9 @@ mod tests {
         assert_eq!(tokens, (1536.0_f32 * 1.62).round() as usize);
     }
 
-    /// Every Claude model the settings dropdown offers must be priced here.
-    /// An unpriced model estimates as zero, which the UI reads as "unknown"
-    /// and silently drops the confirm modal's cost line — the user then
-    /// approves a paid call with no figure in front of them.
-    ///
-    /// Mirrors `MODEL_OPTIONS.claude` in `src/components/SettingsModal.tsx`
-    /// (first entry is also `DEFAULT_AI_PROVIDERS.claude` in
-    /// `src/stores/settingsStore.ts`). There is no codegen between the two,
-    /// so this list is the executable half of that contract.
+    /// Every Claude model the settings dropdown offers must be priced here: an
+    /// unpriced model estimates as zero, which the interface reads as "unknown" and
+    /// drops the cost line. Mirrors `MODEL_OPTIONS.claude` in SettingsModal.tsx.
     #[test]
     fn every_offered_claude_model_is_priced() {
         for model in ["claude-sonnet-5", "claude-haiku-4-5", "claude-opus-5"] {
@@ -476,10 +403,8 @@ mod tests {
     #[test]
     fn cost_50_assets_sonnet_matches_expected() {
         // Per-asset: 87 (image) + 100 (prompt) = 187 input + 150 output.
-        // 50 × (187 × 3 + 150 × 15) / 1_000_000 USD
-        //   = 50 × (561 + 2250) micros = 140_550 micros ≈ 14 cents,
-        // plus the (fixed) system-prompt input term — still 15 cents
-        // after ceiling.
+        // 50 × (187 × 3 + 150 × 15) micros = 140_550 ≈ 14 cents, plus the fixed
+        // system-prompt input term — still 15 cents after ceiling.
         let r = req("claude-sonnet-4-6", 50, true);
         let est = estimate_cost(&r);
         assert_eq!(est.usd_cents, 15);
@@ -487,8 +412,7 @@ mod tests {
 
     #[test]
     fn estimate_includes_the_system_prompt() {
-        // A text-only single-asset request is dominated by the system
-        // prompt; it used to be silently uncounted.
+        // A text-only single-asset request is dominated by the system prompt.
         let est = estimate_cost(&req("claude-sonnet-4-6", 1, false));
         let system_tokens = crate::llm::prompts::SYSTEM_PROMPT.len() / CHARS_PER_TOKEN;
         assert!(system_tokens > 300, "system prompt unexpectedly tiny");
@@ -510,11 +434,9 @@ mod tests {
         assert!(without.input_tokens < with.input_tokens);
     }
 
-    /// The dispatcher re-sends system prompt + project framing + tag context
-    /// with every ≤20-asset chunk, so the shared part must be billed per
-    /// chunk. Billing it once under-charged exactly the runs where it
-    /// matters (many tags × many chunks) — against this module's err-high
-    /// policy.
+    /// The dispatcher re-sends system prompt, project framing and tag context with
+    /// every ≤20-asset chunk, so the shared part must be billed per chunk. Billing
+    /// it once under-charged exactly the runs where it matters.
     #[test]
     fn estimate_bills_shared_context_once_per_chunk() {
         let mut tagged = req("claude-sonnet-4-6", 40, false); // 2 chunks of 20
@@ -547,10 +469,9 @@ mod tests {
 
     #[test]
     fn learning_output_scales_with_samples_and_tags_not_dirs_times_150() {
-        // 800 dirs × depth 10 = 8000 samples. The tagging estimator abused
-        // with that as "asset count" would budget 8000 × 150 = 1.2M output
-        // tokens (~$18 on Sonnet). The learning call returns ONE document;
-        // its output must stay orders of magnitude below that.
+        // 800 dirs × depth 10 = 8000 samples. The tagging estimator abused with that
+        // as "asset count" would budget 1.2M output tokens (~$18 on Sonnet); the
+        // learning call returns ONE document.
         let est = estimate_learning_cost("claude-sonnet-4-6", 400_000, 8000, 20);
         assert!(
             est.output_tokens_estimate < 8000 * OUTPUT_TOKENS_PER_ASSET / 3,
@@ -565,10 +486,9 @@ mod tests {
 
     #[test]
     fn learning_typical_project_is_cents_not_dollars() {
-        // ~120 dirs × depth 10 ≈ 1200 samples; the real prompt for that is
-        // roughly 60k chars (≈15k tokens). On Sonnet this must land in
-        // "cents" territory (the report's worked example: ~$0.32), far from
-        // the ~$18 the abused tagging estimator displayed.
+        // ~120 dirs × depth 10 ≈ 1200 samples, roughly 60k chars (≈15k tokens). On
+        // Sonnet this must land in cents territory, not the ~$18 the abused tagging
+        // estimator displayed.
         let est = estimate_learning_cost("claude-sonnet-4-6", 60_000, 1200, 10);
         assert!(est.usd_cents >= 1);
         assert!(

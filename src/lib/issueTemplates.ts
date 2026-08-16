@@ -1,11 +1,8 @@
 import i18n from "../i18n";
 
 /// The active locale's issue templates, flattened for the Rust side:
-/// `issues.rules.texture.max_size.message` → `"texture.max_size.message"`,
-/// `issues.duration.d` → `"duration.d"`.
-///
-/// Returns undefined for English, where the exported report uses the
-/// analyzer's own prose and stays byte-for-byte what it always was.
+/// `issues.rules.texture.max_size.message` → `"texture.max_size.message"`.
+/// Returns undefined for English, where the report uses the analyzer's prose.
 export function issueTemplatesForExport(): Record<string, string> | undefined {
   if (i18n.language === "en") return undefined;
   const bundle = i18n.getResourceBundle(i18n.language, "translation");

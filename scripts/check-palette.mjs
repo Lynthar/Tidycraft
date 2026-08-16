@@ -1,36 +1,7 @@
 #!/usr/bin/env node
-// Palette audit for the compiled stylesheet (dist/assets/*.css).
-//
-// Class renames on Tailwind token colours leave no trace when they go wrong —
-// not in the markup, not in `tsc`, not in the console; the element silently
-// falls back to an inherited colour. This script pins the compiled artifact
-// instead: it resolves every rule's var() chain to literal colours per theme,
-// so a rename can be verified as "same colours, new names".
-//
-//   node scripts/check-palette.mjs snapshot <out.json>
-//   node scripts/check-palette.mjs worklist <namemap.json> <classmap-out.json>
-//   node scripts/check-palette.mjs rename <classmap.json> <dir>
-//   node scripts/check-palette.mjs compare <base.json> <new.json> <classmap.json> [expected-gone.json]
-//   node scripts/check-palette.mjs dangling
-//
-// snapshot  — {theme: {selector: {prop: resolvedValue}}} plus two byproducts:
-//             per-theme-block token key sets (dark-only / light-only keys are
-//             suspects) and duplicate-value groups (renames that land on a
-//             same-valued token cannot be caught by compare — check by hand).
-// worklist  — derive the authoritative class-level rename map from the product:
-//             every class token in dist is decomposed as <utility>-<colourname>;
-//             names found in namemap with a changed target become map entries.
-//             Any class whose declarations reference var(--color-*) but which
-//             does not decompose is an unknown legacy vocab — hard error.
-// rename    — apply the class map to source files (.tsx/.ts/.css), longest key
-//             first, guarded so no match starts or ends inside a longer token.
-// compare   — every selector in the base snapshot, renamed through the map,
-//             must exist in the new snapshot with identical resolved values.
-//             expected-gone.json (a selector array) names rules whose deletion
-//             is the point of the change; those may go missing, nothing else.
-// dangling  — every var() in the product must resolve to a definition.
-//
-// Run `pnpm build` first; this reads the build output, not the sources.
+// Palette audit for the compiled stylesheet (dist/assets/*.css): resolves every
+// rule's var() chain to literal colours per theme, so a class rename can be
+// checked as "same colours, new names". Modes and usage: docs/design-notes.md.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -59,10 +30,9 @@ function fail(msg) {
 
 // --- theme var tables ------------------------------------------------------
 
-// Selectors here all have specificity 0-1-0, so the browser's tiebreak is
-// document order; walking in source order and letting later writes win
-// reproduces it. `*`-selector blocks are Tailwind's preflight defaults
-// (--tw-*) and apply everywhere.
+// Selectors here all have specificity 0-1-0, so the browser's tiebreak is document
+// order; walking in source order and letting later writes win reproduces it.
+// `*`-selector blocks are Tailwind's preflight defaults and apply everywhere.
 function scopesOf(selector) {
   const s = { base: false, dark: false, light: false };
   for (const sel of selector.split(",").map((x) => x.trim())) {

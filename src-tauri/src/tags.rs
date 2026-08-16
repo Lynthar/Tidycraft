@@ -3,21 +3,16 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-/// A tag that can be assigned to assets.
-///
-/// `description` is optional context the user can fill in via TagManager.
-/// AI Learning passes it to the LLM as part of the project context bundle
-/// so the model knows what each tag means in this user's vocabulary.
-/// Empty / None descriptions fall back to "show the model 5 sample paths
-/// where this tag is currently applied" — see `lib.rs::llm_suggest_tags`.
+/// A tag that can be assigned to assets. `description` is optional context the
+/// user fills in via TagManager; AI Learning passes it to the LLM, falling back
+/// to sample paths where the tag is applied when it is empty.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Tag {
     pub id: String,
     pub name: String,
     pub color: String,
-    /// Skipped on serialize when None so existing `.tidycraft-tags.json`
-    /// files stay byte-clean unless the user actually fills a description.
-    /// `default` lets us load older files without the field present.
+    /// Absent from the file unless the user fills it in; `default` loads older
+    /// files written before the field existed.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub description: Option<String>,
 }
@@ -25,7 +20,6 @@ pub struct Tag {
 /// Tags storage - persisted to a JSON file in the project root
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TagsData {
-    /// All defined tags
     pub tags: Vec<Tag>,
     /// Mapping from asset path to list of tag IDs
     pub asset_tags: HashMap<String, Vec<String>>,
@@ -34,14 +28,9 @@ pub struct TagsData {
 const TAGS_FILE: &str = ".tidycraft-tags.json";
 
 impl TagsData {
-    /// Load tags from the project directory.
-    ///
-    /// A missing file is the normal "no tags yet" state → empty data. But a
-    /// file that EXISTS yet fails to parse (a truncated write from before
-    /// atomic saves, or a bad hand-edit) must NOT silently degrade to empty:
-    /// the very next `save` would then overwrite the (possibly recoverable)
-    /// file with empty data and the user's tags would be gone for good. So we
-    /// back the corrupt file up first, then start fresh.
+    /// Load tags from the project directory. A missing file is the normal "no
+    /// tags yet" state; a file that exists but will not parse is backed up to
+    /// `.corrupt` first, so the next save cannot overwrite recoverable data.
     pub fn load(project_path: &Path) -> Self {
         let tags_file = project_path.join(TAGS_FILE);
         if tags_file.exists() {
@@ -49,9 +38,7 @@ impl TagsData {
                 Ok(content) => match serde_json::from_str(&content) {
                     Ok(data) => return data,
                     Err(e) => {
-                        // Preserve the corrupt file so the user can recover.
-                        // Keep the first backup (most likely the complete one)
-                        // if a `.corrupt` already exists from an earlier run.
+                        // Keep the first backup — the likeliest complete one.
                         let backup = project_path.join(format!("{}.corrupt", TAGS_FILE));
                         if !backup.exists() {
                             let _ = fs::rename(&tags_file, &backup);
@@ -69,14 +56,9 @@ impl TagsData {
         Self::default()
     }
 
-    /// Save tags to the project directory.
-    ///
-    /// Atomic write via [`crate::fs_atomic::write_atomic`] (temp + rename) so
-    /// a crash mid-write can never leave the tags file truncated — a reader
-    /// sees either the old complete file or the new one. (The previous direct
-    /// `fs::write` could truncate, and combined with `load`'s empty-fallback
-    /// that meant losing every tag.) The temp sibling keeps the dotfile
-    /// prefix, so the scanner and watcher both skip it.
+    /// Save tags to the project directory. Atomic (temp + rename), so a crash
+    /// mid-write can never truncate the file. The temp sibling keeps the dotfile
+    /// prefix, so the scanner and watcher skip it.
     pub fn save(&self, project_path: &Path) -> Result<(), String> {
         let tags_file = project_path.join(TAGS_FILE);
         let content = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
@@ -105,9 +87,7 @@ impl TagsData {
     }
 
     /// Update a tag. Each field is patched only when its argument is `Some`;
-    /// `None` means "leave unchanged". To explicitly clear a description,
-    /// callers pass `Some(Some(""))` and the empty-string normalization
-    /// happens here.
+    /// `Some(Some(""))` clears the description.
     pub fn update_tag(
         &mut self,
         tag_id: &str,
@@ -123,8 +103,7 @@ impl TagsData {
                 tag.color = c;
             }
             if let Some(d) = description {
-                // Treat empty/whitespace-only strings as "no description"
-                // so we don't ship blank values to the LLM context.
+                // Empty or whitespace-only means "no description".
                 tag.description = match d {
                     Some(s) if s.trim().is_empty() => None,
                     Some(s) => Some(s),
@@ -138,7 +117,6 @@ impl TagsData {
 
     /// Add a tag to an asset
     pub fn add_tag_to_asset(&mut self, asset_path: &str, tag_id: &str) {
-        // Verify tag exists
         if !self.tags.iter().any(|t| t.id == tag_id) {
             return;
         }
@@ -156,10 +134,8 @@ impl TagsData {
         }
     }
 
-    /// Move every tag binding from `old_path` to `new_path`. If `new_path`
-    /// already had bindings they're merged (union of tag IDs). No-op when
-    /// `old_path` had no bindings. Used when a file is renamed or moved
-    /// from inside Tidycraft so its tags follow it to the new location.
+    /// Move every tag binding from `old_path` to `new_path`, merging into any
+    /// bindings already there. No-op when `old_path` had none.
     pub fn rename_path(&mut self, old_path: &str, new_path: &str) {
         if old_path == new_path {
             return;
@@ -176,23 +152,15 @@ impl TagsData {
         }
     }
 
-    /// Drop every tag binding for `path`. Used when a file is deleted
-    /// (via trash or by the watcher noticing it vanished externally) so
-    /// the tags file doesn't accumulate orphan path entries.
+    /// Drop every tag binding for `path`, so the tags file does not accumulate
+    /// orphan entries.
     pub fn remove_path(&mut self, path: &str) {
         self.asset_tags.remove(path);
     }
 
-    /// Move every binding under directory `old_dir` to the same relative
-    /// position under `new_dir`. Used when the watcher sees a directory
-    /// renamed externally — the OS reports one event on the directory, never
-    /// per-child, so the children's bindings must be re-keyed wholesale.
-    ///
-    /// Matching is component-wise: only keys with `old_dir` + `/` as a strict
-    /// prefix move, so renaming `…/Tex` never captures `…/Textures/*`. Keys
-    /// are the scanner's normalized forward-slash paths on every platform.
-    /// Each key goes through [`Self::rename_path`], keeping its union-merge
-    /// semantics if the destination somehow already has bindings.
+    /// Move every binding under `old_dir` to the same relative position under
+    /// `new_dir`. Matching is component-wise, so renaming `…/Tex` never captures
+    /// `…/Textures/*`. Each key goes through [`Self::rename_path`].
     pub fn rename_dir(&mut self, old_dir: &str, new_dir: &str) {
         if old_dir == new_dir {
             return;
@@ -225,12 +193,9 @@ impl TagsData {
 
     /// Get all assets with a specific tag
     pub fn get_assets_with_tag(&self, tag_id: &str) -> Vec<String> {
-        // Sorted for determinism. `asset_tags` is a HashMap, so its iteration
-        // order is randomized per process; these paths feed the per-asset LLM
-        // cache key (via `llm::cache::hash_context`), so an unstable order
-        // would change the key on every app restart and silently invalidate
-        // the whole suggestion cache. Callers only use the result as prompt
-        // context behind a `truncate(5)`, so pinning the order is free.
+        // Sorted for determinism: `asset_tags` is a HashMap, and these paths feed
+        // the per-asset LLM cache key, which an unstable order would invalidate
+        // on every restart.
         let mut paths: Vec<String> = self
             .asset_tags
             .iter()
@@ -341,10 +306,8 @@ mod tests {
 
     #[test]
     fn get_assets_with_tag_is_sorted() {
-        // `asset_tags` is a HashMap (per-process randomized iteration order),
-        // but the result feeds the LLM cache context hash, so it must be
-        // deterministic. Insert in a deliberately non-sorted order and assert
-        // the output is sorted and excludes other tags' assets.
+        // The result feeds the LLM cache context hash, so it must be
+        // deterministic. Insertion order here is unsorted.
         let mut data = TagsData::default();
         let hero = data.create_tag("Hero".to_string(), "#ff0000".to_string());
         let other = data.create_tag("Other".to_string(), "#00ff00".to_string());

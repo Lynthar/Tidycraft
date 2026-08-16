@@ -3,10 +3,9 @@ import { useProjectStore, registerRecentsBridge } from "./projectStore";
 import { basename } from "../lib/pathUtils";
 import type { ProjectType, ProjectPathStatus, UnavailableStatus } from "../types/asset";
 
-/// Recently-opened projects, persisted per-machine so the ProjectSwitcher can
-/// offer them again after they're closed (and after an app restart). Distinct
-/// from `sessionStore`, which restores the projects that were *open* last
-/// session; a project can be "recent" long after it's been closed.
+/// Recently-opened projects, persisted per machine so the ProjectSwitcher can
+/// offer them again after they're closed. Distinct from `sessionStore`, which
+/// restores the projects that were *open* last session.
 
 const STORAGE_KEY = "tidycraft-recents";
 const MAX_RECENTS = 12;
@@ -16,8 +15,8 @@ export interface RecentProject {
   name: string;
   engine: ProjectType | null;
   lastOpenedAt: number;
-  /// Set by the startup pre-check; deliberately NOT persisted — a stale
-  /// verdict written to localStorage would outlive the condition it describes.
+  /// Set by the startup pre-check and NOT persisted — a stale verdict in
+  /// localStorage would outlive the condition it describes.
   unavailable?: UnavailableStatus | null;
 }
 
@@ -102,10 +101,9 @@ export const useRecentsStore = create<RecentsState>((set, get) => ({
   },
 }));
 
-// Record the active project once it has a scan result (so name + engine are
-// known). Guard on the path so we upsert once per activation, not on every
-// unrelated projectStore tick (watcher patches, git refreshes, …). Switching
-// away and back re-records, bumping it to the front.
+// Record the active project once it has a scan result, so name and engine are
+// known. Guarded on the path so it upserts once per activation rather than on
+// every unrelated projectStore tick.
 let lastRecordedPath: string | null = null;
 useProjectStore.subscribe((state) => {
   const path = state.projectPath;

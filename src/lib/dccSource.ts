@@ -1,7 +1,6 @@
-/** Display names for `AssetMetadata.dcc_source_kind` values. Must stay in
- *  sync with the canonical list in Rust `scanner::dcc_source_kind_for` (no
- *  codegen — same discipline as the DEFAULT_MODEL mirrors). Tool names are
- *  proper nouns and deliberately not localized. */
+/** Display names for `AssetMetadata.dcc_source_kind`. Must stay in sync with the
+ *  canonical list in Rust `scanner::dcc_source_kind_for` — there is no codegen.
+ *  Tool names are proper nouns and are not localized. */
 const DCC_LABELS: Record<string, string> = {
   blender: "Blender",
   maya_ascii: "Maya",

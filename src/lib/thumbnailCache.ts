@@ -1,19 +1,6 @@
-/// Shared LRU cache for gallery thumbnails (base64 PNG strings).
-///
-/// Lives in its own module — rather than inside AssetGalleryView — so two
-/// callers can reach it without a store→component dependency:
-///   - AssetGalleryView reads/writes it as cards mount.
-///   - projectStore.applyFsChange evicts entries when the watcher reports a
-///     file changed, so an external edit shows a fresh image instead of the
-///     stale cached one (the backend disk cache is mtime-keyed and already
-///     regenerates; this keeps the frontend in step).
-///
-/// Bounded to CAP entries by insertion-order eviction (oldest written entry
-/// drops first). A re-fetch after eviction is a cheap disk-cache read on the
-/// backend, not a re-decode, so capping costs almost nothing.
-///
-/// Value `null` = "tried, failed — don't retry". `peekThumb` returning
-/// `undefined` = "not cached yet".
+/// Shared LRU cache for gallery thumbnails (base64 PNG). Its own module so both
+/// AssetGalleryView and projectStore's watcher eviction can reach it. Value `null`
+/// = tried and failed; `peekThumb` returning `undefined` = not cached yet.
 
 const CAP = 600;
 const cache = new Map<string, string | null>();

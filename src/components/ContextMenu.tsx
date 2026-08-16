@@ -73,21 +73,17 @@ export function ContextMenu({
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Per-asset editor decision: if the user mapped this extension, prefer
-  // that editor; otherwise show the "Configure editor for .ext…" muted
-  // entry so the user knows where to set it up. Files without extensions
-  // (no dot in basename) get neither — the default-app row is enough.
+  // Per-asset editor: prefer a mapped editor for this extension, otherwise show
+  // the muted "Configure editor for .ext…" entry. Files without an extension get
+  // neither — the default-app row is enough.
   const ext = getExtension(assetPath);
   const editorPath = ext ? externalEditors[ext] : undefined;
   const editorName = editorPath ? getEditorDisplayName(editorPath) : undefined;
   const [showTagSubmenu, setShowTagSubmenu] = useState(false);
 
-  // The menu and its submenu are both placed from measured sizes. What the menu
-  // contains varies with context — an editor mapping for this extension, and
-  // whether duplicate / move / copy / delete / AI tagging are offered at all —
-  // so the hard-coded 200×300 estimate this replaces clipped the taller
-  // variants off the screen edge, and the submenu chose its side against a
-  // 200px width it never measured.
+  // The menu and its submenu are both placed from measured sizes, because what
+  // the menu contains varies with context — a fixed estimate would clip the taller
+  // variants off the screen edge.
   const submenuAnchorRef = useRef<HTMLDivElement>(null);
   const submenuRef = useRef<HTMLDivElement>(null);
   const [menuSize, setMenuSize] = useState<{ width: number; height: number } | null>(null);
@@ -147,10 +143,8 @@ export function ContextMenu({
   }, [isOpen, onClose]);
 
   // Layout effects, not effects: the measurement has to land before the first
-  // paint, or the menu visibly jumps from wherever it was first placed to where
-  // it belongs. Keyed on the asset, not the click position — the size follows
-  // which items are offered, and re-measuring on every reposition would only
-  // re-derive the same numbers.
+  // paint, or the menu visibly jumps. Keyed on the asset, not the click position —
+  // the size follows which items are offered.
   useLayoutEffect(() => {
     if (!isOpen || !menuRef.current) return;
     const { width, height } = menuRef.current.getBoundingClientRect();
@@ -165,10 +159,9 @@ export function ContextMenu({
     const { width, height } = panel.getBoundingClientRect();
     setSubmenu({
       side: anchor.right + width + VIEWPORT_MARGIN > window.innerWidth ? "left" : "right",
-      // The panel hangs down from the row's top edge; pull it up by however
-      // much of it would hang past the bottom of the window. Derived from the
-      // ROW's position, never the panel's own — reading the panel's top would
-      // feed the shift just applied back into the next measurement.
+      // The panel hangs down from the row's top edge; pull it up by however much
+      // would hang past the bottom of the window. Derived from the ROW's position,
+      // never the panel's own, which would feed the shift back into itself.
       shift: Math.min(0, window.innerHeight - VIEWPORT_MARGIN - (anchor.top + height)),
     });
   }, [showTagSubmenu, tags.length]);
@@ -317,10 +310,8 @@ export function ContextMenu({
       : []),
   ];
 
-  // Pin the far edge inside the window rather than the near one, so the whole
-  // menu stays visible instead of only its first items. A menu taller than the
-  // window lands at the top edge — its own top is where the items begin, so
-  // that is the least-bad way to run out of room. Until the first measurement
+  // Pin the far edge inside the window rather than the near one, so the whole menu
+  // stays visible instead of only its first items. Until the first measurement
   // lands, the click position is the best guess available.
   const clamp = (want: number, extent: number, viewport: number) =>
     Math.max(VIEWPORT_MARGIN, Math.min(want, viewport - extent - VIEWPORT_MARGIN));

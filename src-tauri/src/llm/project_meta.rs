@@ -1,23 +1,14 @@
-//! Project-level metadata read out of `tidycraft.toml`'s `[project]`
-//! table. Consumed by AI Learning + AI Tagging to give the LLM a sense
-//! of what kind of project this is.
-//!
-//! We deliberately do NOT extend `analyzer::rules::RuleConfig` with a
-//! project field — analyzer concerns and AI-context concerns are
-//! separate, and mixing them would force `RuleConfig::from_toml` to
-//! validate fields it doesn't care about. Instead we re-parse the TOML
-//! through `toml::Value` and pluck the `[project]` subtable.
+//! Project-level metadata from `tidycraft.toml`'s `[project]` table, consumed by
+//! AI Learning and AI Tagging. Kept out of `analyzer::rules::RuleConfig` so
+//! `from_toml` never has to validate fields it does not care about.
 
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-/// Free-form project context the user (optionally) writes into
-/// `tidycraft.toml`. All fields are `Option` because empty / missing
-/// is the common case — most projects start without any.
-///
-/// Empty-string fields are normalized to `None` at read time so the
-/// prompt builder doesn't emit `Theme: ""` placeholders.
+/// Free-form project context the user optionally writes into `tidycraft.toml`.
+/// All fields are `Option` because empty or missing is the common case, and
+/// empty strings normalize to `None` at read time.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct ProjectMeta {
     pub theme: Option<String>,
@@ -58,36 +49,15 @@ impl ProjectMeta {
     }
 }
 
-/// Persist `theme` + `goal` into `<root>/tidycraft.toml`'s `[project]`
-/// section. Uses `toml_edit` so every comment, blank line, and other
-/// section the user wrote is preserved on round-trip — the plain
-/// `toml` crate would lose them.
-///
-/// Behavior matrix:
-/// - File missing → creates it from `DEFAULT_CONFIG_TEMPLATE` (same
-///   path `ensure_project_config` takes), then patches `[project]`
-///   in place. Keeps the user's first-time experience consistent
-///   regardless of which UI surface triggered the create.
-/// - File present, no `[project]` table → appends a fresh `[project]`
-///   table at the end of the document. TOML semantics are independent
-///   of table order, so position doesn't matter.
-/// - File present with `[project]` table → patches `theme` and `goal`
-///   in place. Any extra keys the user added under `[project]` are
-///   left untouched.
-///
-/// Empty strings are written as `theme = ""` / `goal = ""` rather
-/// than dropping the keys, mirroring the template shape.
-/// `ProjectMeta::from_toml` normalizes them back to `None` on read,
-/// so the prompt builder still skips the project-context block when
-/// both fields are empty.
+/// Persist `theme` and `goal` into `<root>/tidycraft.toml`'s `[project]` section
+/// via `toml_edit`, preserving comments and other sections. Creates the file from
+/// `DEFAULT_CONFIG_TEMPLATE` when missing; appends `[project]` when absent.
 pub fn write_back(project_root: &Path, theme: &str, goal: &str) -> Result<(), String> {
     let toml_path = project_root.join("tidycraft.toml");
 
-    // Bootstrap from the analyzer-config template when the file is
-    // absent — same path `ensure_project_config` takes, so users
-    // creating their first tidycraft.toml via the LearnSetupModal
-    // get the full annotated rule scaffold rather than a bare
-    // [project] table.
+    // Bootstrap from the analyzer-config template when the file is absent — the
+    // same path `ensure_project_config` takes, so a first `tidycraft.toml` created
+    // here still gets the full annotated rule scaffold.
     if !toml_path.exists() {
         crate::fs_atomic::write_atomic(
             &toml_path,
@@ -117,10 +87,8 @@ pub fn write_back(project_root: &Path, theme: &str, goal: &str) -> Result<(), St
     project_table["theme"] = toml_edit::value(theme);
     project_table["goal"] = toml_edit::value(goal);
 
-    // Atomic (temp + rename): this is the user's hand-edited rule config, the
-    // highest-value file we ever overwrite. A torn write here loses their
-    // analyzer settings, not something we can regenerate. `tidycraft.ai.toml`
-    // has always been written this way; this one was the gap.
+    // Atomic (temp + rename): this is the user's hand-edited rule config, and a
+    // torn write loses analyzer settings that cannot be regenerated.
     crate::fs_atomic::write_atomic(&toml_path, doc.to_string().as_bytes())
         .map_err(|e| format!("Failed to write tidycraft.toml: {e}"))?;
     Ok(())
@@ -292,10 +260,9 @@ random_extra = "should-not-fail"
     #[test]
     fn write_back_empty_strings_normalize_to_none_on_read() {
         let dir = tempdir().unwrap();
-        // User cleared both fields — keys still get written
-        // (`theme = ""`) per template shape, but `from_toml`
-        // normalizes empty back to None so the prompt builder
-        // skips the project-context block.
+        // User cleared both fields — the keys are still written (`theme = ""`), and
+        // `from_toml` normalizes empty back to None so the prompt builder skips the
+        // project-context block.
         write_back(dir.path(), "", "").unwrap();
         let content = std::fs::read_to_string(dir.path().join("tidycraft.toml")).unwrap();
         let meta = ProjectMeta::from_toml(&content).unwrap();

@@ -34,20 +34,14 @@ import { ModelLightbox } from "./ModelLightbox";
 import type { AssetInfo, AssetType, UnityFileInfo } from "../types/asset";
 
 const VIDEO_EXTENSIONS = ["mp4", "webm", "mov", "avi", "mkv", "m4v"];
-// `.3ds` and `.blend` are routed into ModelViewer3D too: 3ds renders
-// fine via TDSLoader; blend can't render in the browser at all (Blender
-// private format) but the viewer surfaces a "please export to GLB"
-// message — better than the silent box-icon fallback the user got
-// before.
+// `.3ds` and `.blend` route into ModelViewer3D too: 3ds renders via TDSLoader,
+// and blend cannot render in the browser but the viewer surfaces a "please export
+// to GLB" message instead of the silent box-icon fallback.
 const MODEL_3D_EXTENSIONS = ["gltf", "glb", "fbx", "obj", "dae", "3ds", "blend", "vox"];
 
-// Holding an arrow key repeats the keystroke at the OS key-repeat rate —
-// well under 100ms per row once repeat kicks in — and every repeat swaps
-// `selectedAsset`. 150ms comfortably outlasts one repeat interval, so a
-// held key coalesces into a single settle instead of mounting a fresh
-// WebGL context, media element and thumbnail request per row it passes
-// over, while still being short enough that pausing on a row for a moment
-// reads as instant.
+// Holding an arrow key repeats well under 100ms per row, and every repeat swaps
+// `selectedAsset`. 150ms outlasts one repeat interval, so a held key coalesces
+// into a single settle while a brief pause still reads as instant.
 const SETTLED_ASSET_DEBOUNCE_MS = 150;
 
 function GlyphIcon({ type, size = 11 }: { type: AssetType; size?: number }) {
@@ -84,12 +78,9 @@ export function AssetPreview() {
     return () => clearTimeout(handle);
   }, [errorMsg]);
 
-  // Mirror the fullscreen lightboxes into uiStore so global shortcut
-  // handlers (Del, Ctrl+R, arrow navigation…) are gated by
-  // isBlockingOverlayOpen while one is up. Their open flags are local
-  // to this component; without the mirror, Del inside a lightbox used
-  // to open a delete-confirm dialog hidden BEHIND it with the confirm
-  // button focused — Enter then deleted files sight unseen.
+  // Mirror the fullscreen lightboxes into uiStore so global shortcut handlers are
+  // gated by `isBlockingOverlayOpen` while one is up. Without it, Del inside a
+  // lightbox opened a delete-confirm dialog hidden behind it.
   const setLightboxUiOpen = useUiStore((s) => s.setLightboxOpen);
   const anyLightboxOpen = lightboxOpen || modelLightboxOpen;
   useEffect(() => {
@@ -98,21 +89,13 @@ export function AssetPreview() {
     return () => setLightboxUiOpen(false);
   }, [anyLightboxOpen, setLightboxUiOpen]);
 
-  // Settled copy of `selectedAsset`, read only by the heavy media area
-  // further down (3D viewer, video/audio players, thumbnail fetch) and its
-  // fullscreen lightboxes. Every other section of this panel — name,
-  // metadata rows, path, tags, Unity/GUID info, the header buttons — reads
-  // `selectedAsset` directly, so the panel keeps responding instantly as
-  // the cursor moves row to row. While a run of changes is still landing,
-  // the heavy area keeps showing whichever asset it last settled on even
-  // though the metadata above it has already moved on to the new
-  // selection; that gap is the point of this debounce, not a bug to paper
-  // over with a spinner or a blanked-out panel.
+  // Settled copy of `selectedAsset`, read only by the heavy media area and its
+  // lightboxes; everything else reads `selectedAsset` directly. The heavy area
+  // lagging the metadata by one settle interval is the point, not a bug.
   const [settledAsset, setSettledAsset] = useState<AssetInfo | null>(null);
-  // Mirrors settledAsset so the effect below can tell "nothing has settled
-  // yet" from "something settled, another change is pending" without
-  // putting settledAsset itself in the dependency array — that would make
-  // the effect (and its cleanup) re-fire every time it updates the state.
+  // Mirrors settledAsset so the effect below can tell "nothing settled yet" from
+  // "something settled, another change pending" without putting settledAsset in
+  // the dependency array, which would re-fire the effect on every update.
   const settledAssetRef = useRef<AssetInfo | null>(null);
   useEffect(() => {
     if (!selectedAsset) {
@@ -163,10 +146,9 @@ export function AssetPreview() {
       return;
     }
 
-    // Stale-response guard (same pattern as the gallery's CardThumb): a
-    // slow thumbnail for the previously settled asset must not land on
-    // top of the current one's — the ImageLightbox fallback consumes this
-    // state too, so a stale write would survive into the lightbox.
+    // Stale-response guard: a slow thumbnail for the previously settled asset must
+    // not land on top of the current one's — the ImageLightbox fallback consumes
+    // this state too, so a stale write would survive into the lightbox.
     let cancelled = false;
     const loadThumbnail = async () => {
       setLoadingThumbnail(true);
@@ -177,10 +159,9 @@ export function AssetPreview() {
         });
         if (!cancelled) setThumbnail(base64);
       } catch (err) {
-        // Thumbnail failure always falls back to the type-icon placeholder,
-        // so we log at debug regardless of cause — extension-not-whitelisted,
-        // codec gaps (e.g. EXR DWAA / deep EXR), corrupted files, IO errors.
-        // None of these are actionable from a console.error.
+        // Thumbnail failure always falls back to the type-icon placeholder, so this
+        // logs at debug regardless of cause: unsupported extension, codec gap,
+        // corrupt file or IO error are none of them actionable from a console.
         console.debug("Thumbnail not available:", err);
         if (!cancelled) setThumbnail(null);
       } finally {
@@ -192,17 +173,14 @@ export function AssetPreview() {
     return () => {
       cancelled = true;
     };
-    // `modified` re-fetches when the watcher re-parses the selected file
-    // after an external edit (applyFsChange swaps selectedAsset, and
-    // settledAsset follows it once settled); the backend disk cache is
-    // mtime-keyed, so this returns the regenerated image rather than the
-    // stale one.
+    // `modified` re-fetches when the watcher re-parses the selected file after an
+    // external edit; the backend disk cache is mtime-keyed, so this returns the
+    // regenerated image rather than the stale one.
   }, [settledAsset?.path, settledAsset?.modified]);
 
-  // Unity structure (component list + GUID reference count) for prefab /
-  // scene files, parsed on demand by `get_unity_file_info`. Same stale-
-  // response guard as the thumbnail effect above; `modified` re-parses
-  // after external edits.
+  // Unity structure (component list + GUID reference count) for prefab and scene
+  // files, parsed on demand. Same stale-response guard as the thumbnail effect;
+  // `modified` re-parses after external edits.
   const [unityFileInfo, setUnityFileInfo] = useState<UnityFileInfo | null>(null);
   const isUnityStructureFile =
     scanResult?.project_type === "unity" &&
@@ -233,14 +211,9 @@ export function AssetPreview() {
     };
   }, [isUnityStructureFile, selectedAsset?.path, selectedAsset?.modified]);
 
-  // Goes through the clipboard plugin, the same way AssetList's context menu
-  // does. Not a portability nicety: WebKit gates `navigator.clipboard.writeText`
-  // on transient activation. Measured in the real bundle (`tauri://localhost`,
-  // CSP enforced): straight out of a click it resolves, but with no live
-  // gesture it rejects with `NotAllowedError` and the clipboard keeps its old
-  // contents — the plugin succeeds either way. So the old call worked only by
-  // accident of statement order; one `await` in front of it would have moved
-  // the write past the activation window, into a catch nobody could see.
+  // Goes through the clipboard plugin, like AssetList's context menu. Not a
+  // portability nicety: WebKit gates `navigator.clipboard.writeText` on transient
+  // activation, so one `await` in front of it moves the write past that window.
   const copyToClipboard = async (text: string, type: "path" | "guid") => {
     try {
       await writeText(text);
@@ -309,10 +282,9 @@ export function AssetPreview() {
 
   const renderPreview = () => {
     if (!settledAsset) {
-      // Only reachable for the single render between the very first-ever
-      // selection and the leading-edge effect above committing it — there
-      // is no previous asset to keep showing yet, so there is nothing to
-      // draw here for that one tick.
+      // Only reachable for the single render between the very first selection and
+      // the leading-edge effect committing it — there is no previous asset to keep
+      // showing yet.
       return null;
     }
 

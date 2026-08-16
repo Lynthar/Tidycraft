@@ -12,16 +12,9 @@ import {
 import { useTagsStore } from "../stores/tagsStore";
 import { useProjectStore } from "../stores/projectStore";
 
-/// Validate a regex pattern via JS `RegExp`. Pattern syntax is close
-/// enough between JS and Rust's `regex` crate for the simple anchors /
-/// char classes the LLM emits that this catches the vast majority of
-/// invalid patterns up-front. The dialects diverge both ways, though:
-/// JS-valid-but-Rust-invalid patterns (backreferences `\1`, look-around
-/// `(?=`) pass this check and silent-skip in the backend, while
-/// Rust-valid-but-JS-invalid ones (`(?P<name>...)` Python-style groups,
-/// which Rust's engine accepts) get a false warning here even though
-/// the backend compiles them fine. We'd surface true dead rules via a
-/// "0 matches" indicator in v2 if it becomes a problem.
+/// Validate a regex pattern via JS `RegExp`, which catches the vast majority of
+/// invalid patterns up front. The dialects diverge both ways, so some JS-valid
+/// patterns silent-skip in the backend and some Rust-valid ones warn here.
 const isValidRegex = (pattern: string): boolean => {
   try {
     new RegExp(pattern);
@@ -31,13 +24,9 @@ const isValidRegex = (pattern: string): boolean => {
   }
 };
 
-/// Reviews an LLM learning result.
-///
-/// Nothing is committed until Save: gap tags are created for the rows the
-/// user keeps checked, and the (possibly edited) rule list is persisted to
-/// `tidycraft.ai.toml` via `save_ai_rules` — which takes the pending doc the
-/// learn command staged in backend memory. Closing the panel without saving
-/// discards the run entirely; unreviewed rules never affect suggestions.
+/// Reviews an LLM learning result. Nothing is committed until Save: gap tags are
+/// created for the rows still checked, and the (possibly edited) rule list is
+/// persisted via `save_ai_rules`. Closing without saving discards the run.
 export function LearnReviewPanel() {
   const { t } = useTranslation();
   const open = useUiStore((s) => s.learnReviewOpen);
@@ -75,9 +64,8 @@ export function LearnReviewPanel() {
           .filter((label) => !lowerExisting.has(label.toLowerCase()))
       )
     );
-    // `userTags` is deliberately omitted: the pre-selection is snapshotted
-    // once per open, so toggling tags afterward doesn't reset the user's
-    // checkbox choices.
+    // `userTags` is omitted: the pre-selection is snapshotted once per open, so
+    // toggling tags afterwards does not reset the user's choices.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, data]);
 
@@ -127,12 +115,9 @@ export function LearnReviewPanel() {
     setSaving(true);
     setError(null);
     try {
-      // Explicit commit point: create the gap tags the user kept checked
-      // (skipping any that already exist), then persist the rules. Closing
-      // without Save writes nothing. Each write re-checks that the project
-      // this result belongs to is still active — the panel closes on a
-      // switch, but an in-flight save survives the unmount and would
-      // otherwise create the gap tags inside the newly active project.
+      // Explicit commit point: create the gap tags still checked, then persist the
+      // rules. Each write re-checks that the project this result belongs to is
+      // still active — an in-flight save survives the panel's unmount.
       let createdCount = 0;
       for (const gap of data.tag_gaps) {
         if (useProjectStore.getState().activeProjectId !== activeProjectId) {

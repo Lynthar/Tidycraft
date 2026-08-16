@@ -10,17 +10,9 @@ import { useProjectStore } from "../stores/projectStore";
 import { useToastStore } from "../stores/toastStore";
 import { formatFileSize } from "../lib/utils";
 
-// Curated model dropdown lists. Keep the first entry as the recommended
-// default, matching `DEFAULT_AI_PROVIDERS` in stores/settingsStore.ts;
-// entries beyond the first are alternatives offered to the user.
-//
-// Two places must move together whenever this list changes: that store
-// default, and the pricing table in src-tauri/src/llm/cost.rs — a model
-// offered here but absent there estimates as "unknown" and suppresses the
-// cost preview. (There is no backend `DEFAULT_MODEL` constant; earlier
-// comments here and in settingsStore.ts pointed at one that never existed.)
-// A configured model missing from this list is still shown — see
-// modelOptionsFor — so retiring an entry doesn't blank anyone's setting.
+// Curated model dropdown lists; the first entry is the recommended default and
+// must match `DEFAULT_AI_PROVIDERS` in stores/settingsStore.ts and the pricing
+// table in src-tauri/src/llm/cost.rs. A model missing here is still shown.
 const MODEL_OPTIONS: Record<AiProviderId, string[]> = {
   openai: ["gpt-5.4-mini", "gpt-4o-mini", "gpt-5.4", "gpt-5.4-nano"],
   claude: ["claude-sonnet-5", "claude-haiku-4-5", "claude-opus-5"],
@@ -125,12 +117,9 @@ function SegmentedControl<T extends string>({
   );
 }
 
-/// Editable list of (extension → editor path) mappings. Reads/writes
-/// `settingsStore.externalEditors`; persisting is immediate (each row
-/// edit calls `setExternalEditor` / `removeExternalEditor`). The "draft"
-/// row holds the in-progress new mapping so the user can pick path via
-/// `Browse…` before the mapping appears in the live list — keeps the
-/// store from churning on incomplete keystrokes.
+/// Editable list of (extension → editor path) mappings, persisting immediately per
+/// row edit. The "draft" row holds the in-progress mapping so the user can browse
+/// for a path before it reaches the live list.
 function ExternalEditorsSection() {
   const { t } = useTranslation();
   const externalEditors = useSettingsStore((s) => s.externalEditors);
@@ -285,17 +274,9 @@ function ExternalEditorsSection() {
   );
 }
 
-/// AI Tagging configuration. Provider is exposed as a "Disabled / OpenAI /
-/// Claude / Ollama" segmented control. When a provider is active, the
-/// per-provider config (model select, API key, endpoint, consent reset)
-/// renders below. The provider's settings persist even when switched
-/// inactive — so flipping back later doesn't ask the user to re-enter
-/// their API key.
-///
-/// First-save warning: if the active provider's API key was empty before
-/// this keystroke and is now non-empty, we flash an inline warning
-/// reminding the user that the value lives in plaintext localStorage.
-/// Auto-clears after 5s.
+/// AI Tagging configuration. Each provider's settings persist even while another
+/// is active. First-save warning: when the active provider's API key goes from
+/// empty to non-empty, an inline plaintext-storage reminder flashes for 5s.
 function AiTaggingSection() {
   const { t } = useTranslation();
   const aiActiveProvider = useSettingsStore((s) => s.aiActiveProvider);
@@ -343,10 +324,9 @@ function AiTaggingSection() {
   const config = activeId ? aiProviders[activeId] : null;
   const ollamaEndpoint = aiProviders.ollama.endpoint || "http://localhost:11434";
 
-  // Re-fetch installed Ollama models whenever the user activates Ollama
-  // or changes its endpoint. The /api/tags call is local, fast, and
-  // free; no need to debounce keystrokes — endpoint typing finishes
-  // quickly and a stale request just gets superseded.
+  // Re-fetch installed Ollama models whenever the user activates Ollama or changes
+  // its endpoint. The /api/tags call is local and fast, and a stale request just
+  // gets superseded, so keystrokes need no debounce.
   useEffect(() => {
     if (activeId !== "ollama") return;
     let cancelled = false;
@@ -370,13 +350,9 @@ function AiTaggingSection() {
     };
   }, [activeId, ollamaEndpoint]);
 
-  /** The candidate models for a provider, before the user's own choice is
-   *  taken into account.
-   *  - Cloud providers: static curated list.
-   *  - Ollama, daemon reachable: real `/api/tags` list.
-   *  - Ollama, daemon unreachable: fall back to MODEL_OPTIONS.ollama so
-   *    the user can still pick something — the call itself will fail
-   *    later with a clear error if the daemon is genuinely down. */
+  /** The candidate models for a provider, before the user's own choice is taken
+   *  into account: a static curated list for cloud providers, the real `/api/tags`
+   *  list for a reachable Ollama, and the curated fallback when it is not. */
   const candidateModelsFor = (id: AiProviderId): string[] => {
     if (id !== "ollama") return MODEL_OPTIONS[id];
     if (ollamaError || ollamaModels.length === 0) {
@@ -388,14 +364,9 @@ function AiTaggingSection() {
     return ollamaModels;
   };
 
-  /** Dropdown options for the model select: the candidates, plus the model
-   *  actually configured when the list doesn't contain it. Without that
-   *  append a `<select>` whose value matches no `<option>` renders BLANK —
-   *  the setting reads as unset while the configured model is still what
-   *  gets called. The Ollama branch has always done this; cloud providers
-   *  did not, so pinning an older or newer model than the curated list
-   *  carries (or opening a config written by a later release) showed an
-   *  empty box. The rule belongs to every provider, not one of them. */
+  /** Dropdown options for the model select: the candidates, plus the configured
+   *  model when the list lacks it. Without that append a `<select>` whose value
+   *  matches no `<option>` renders BLANK while that model is still what is called. */
   const modelOptionsFor = (id: AiProviderId, currentModel: string): string[] => {
     const candidates = candidateModelsFor(id);
     // An empty Ollama list is meaningful in itself (the hint UI explains
@@ -603,12 +574,9 @@ function AiTaggingSection() {
   );
 }
 
-/// Number field for the HTML report row caps. Edits commit live, but only
-/// when the field holds a real number: a cleared box reads as NaN (or ""),
-/// and committing that would persist 0 — which means UNLIMITED here, the
-/// most expensive possible misreading of "empty". The draft state lets the
-/// box actually go empty while typing; blur snaps it back to the committed
-/// value.
+/// Number field for the HTML report row caps. Edits commit live, but only when the
+/// field holds a real number: a cleared box would persist 0, which means UNLIMITED
+/// here. The draft state lets the box go empty while typing.
 function LimitInput({ value, onCommit }: { value: number; onCommit: (n: number) => void }) {
   const [draft, setDraft] = useState<string | null>(null);
   return (

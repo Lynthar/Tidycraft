@@ -32,13 +32,9 @@ async function stopFsWatch(projectId: string) {
   }
 }
 
-/// Ask the backend which of these paths are still usable. Returns a map keyed
-/// by path — the command answers one report per input in input order, but
-/// looking up by path is what keeps a duplicated or reordered input from
-/// silently pairing a verdict with the wrong project.
-///
-/// A failure here returns an EMPTY map on purpose: a health check that itself
-/// broke must not make the whole workspace look dead.
+/// Ask the backend which of these paths are still usable, keyed by path so a
+/// duplicated or reordered input cannot pair a verdict with the wrong project.
+/// A failure returns an EMPTY map: a broken health check must not look like death.
 export async function checkPaths(
   paths: string[]
 ): Promise<Map<string, ProjectPathStatus>> {
@@ -63,10 +59,8 @@ export function toUnavailable(
 }
 
 // Per-project debounced git-refresh timers. Each fs-change event resets the
-// timer for that project; on quiescence we re-fetch git info + statuses so
-// the branch chip and file badges don't drift from reality. The window sits
-// above the watcher's own 500ms coalescing in `watcher.rs` — together they
-// absorb bursts (batch rename, checkout, large copy) into a single refresh.
+// timer; on quiescence the branch chip and file badges re-fetch. The window sits
+// above the watcher's own 500ms coalescing in `watcher.rs`.
 const gitRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const GIT_REFRESH_DEBOUNCE_MS = 800;
 
@@ -90,11 +84,9 @@ function cancelGitRefresh(projectId: string) {
   }
 }
 
-// Store-level memoization cache for getFilteredAssets. Shared across all
-// components (AssetList, StatusBar, …) so they don't independently re-run
-// the filter+sort on 10k+ assets. Invalidated automatically on any input
-// identity change — scanResult, filters, and sort state are all replaced
-// (not mutated) by their setters, so reference equality is a correct check.
+// Store-level memoization for getFilteredAssets, shared across components so
+// they don't each re-run filter+sort on 10k+ assets. All inputs are replaced
+// rather than mutated by their setters, so reference equality is a correct check.
 let filterCacheInputs: readonly unknown[] | null = null;
 let filterCacheResult: AssetInfo[] = [];
 
@@ -124,11 +116,8 @@ export interface AdvancedFilters {
   gitStatusFilter: GitFileStatus[];
 }
 
-/// The "nothing filtered" state, built fresh each time. Four places need it —
-/// a new project's defaults, the cleared mirror when no project is active, the
-/// store's own initial state, and the reset action — and they had been four
-/// hand-copied literals of sixteen fields. A function rather than a shared
-/// const because two of those fields are arrays: one const would hand every
+/// The "nothing filtered" state, built fresh each call. A function rather than a
+/// shared const because two of its fields are arrays: one const would hand every
 /// project the same array to hold.
 export function createDefaultAdvancedFilters(): AdvancedFilters {
   return {
@@ -160,11 +149,9 @@ export interface ProjectData {
   error: string | null;
   scanProgress: ScanProgress | null;
   analysisResult: AnalysisResult | null;
-  /// True when files changed (watcher event or rescan) AFTER analysisResult
-  /// was computed — the analysis is a point-in-time snapshot and is now
-  /// showing pre-change data. IssueList surfaces this as a "re-run" banner,
-  /// and passCount math treats the issue set as potentially referencing
-  /// deleted files. Cleared by the next successful runAnalysis.
+  /// True when files changed after `analysisResult` was computed, so the analysis
+  /// is showing pre-change data. IssueList surfaces a "re-run" banner. Cleared by
+  /// the next successful runAnalysis.
   analysisStale: boolean;
   isAnalyzing: boolean;
   viewMode: ViewMode;
@@ -187,11 +174,9 @@ export interface ProjectData {
   /// Session-lifetime degradations (watcher trouble), deduped by kind —
   /// scan-time warnings live on scanResult.warnings and are NOT copied here.
   projectWarnings: ProjectWarning[];
-  /// Non-null when the project root is not usable — the folder was moved,
-  /// deleted, replaced by a file, or cannot be listed. Set by the startup
-  /// pre-check and by every openProject; `ok` is stored as null, so "the
-  /// path is fine" and "not checked yet" are one state (they render the
-  /// same). The branch predicate is `unavailable !== null`, never `kind`.
+  /// Non-null when the project root is not usable. `ok` is stored as null, so
+  /// "the path is fine" and "not checked yet" are one state. The branch predicate
+  /// is `unavailable !== null`, never `kind`.
   unavailable: UnavailableStatus | null;
 }
 
@@ -220,14 +205,9 @@ const createDefaultProjectData = (id: string, path: string): ProjectData => ({
   unavailable: null,
 });
 
-/// Reset a project entry down to "just learned something about this folder" —
-/// same bones as createDefaultProjectData, but preserving the six observation
-/// preferences (view mode, search, type filter, sort, advanced filters) that
-/// describe how the user was looking at the project rather than what was in
-/// it. Shared by relocateProject and both of openProject's unavailable
-/// branches: every one of them was resetting this by hand, and the drift
-/// between the copies is exactly what let stale analysisResult / selectedAsset
-/// / gitInfo / etc. survive a folder going away in two of the three places.
+/// Reset a project entry to "just learned something about this folder": the same
+/// bones as createDefaultProjectData, but preserving the six observation
+/// preferences that describe how the user was looking at the project.
 function resetProjectData(
   project: ProjectData,
   path: string,
@@ -249,11 +229,9 @@ const generateProjectId = (): string => {
   return `project_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 };
 
-// Bridge registered by tagsStore at its module init. locateAsset needs to
-// clear tag filters that would hide the located asset, but tag state lives
-// in tagsStore — and tagsStore already imports this store (its top-level
-// `useProjectStore.subscribe(...)` runs at module evaluation), so a static
-// import from here would close an ESM cycle and TDZ-crash at startup.
+// Bridge registered by tagsStore at its module init. tagsStore already imports
+// this store, so a static import back would close an ESM cycle and TDZ-crash at
+// startup.
 interface TagFilterBridge {
   /// Clear the active tag filters if (and only if) they would exclude
   /// `path` from the asset list.
@@ -276,11 +254,9 @@ export const registerRecentsBridge = (bridge: RecentsBridge) => {
 
 // Same cycle constraint, two more hooks — both fired from applyFsChange.
 interface SelectionSyncBridge {
-  /// Re-point batch-selected paths across recognized renames. Called BEFORE
-  /// the scanResult swap: selectionStore's prune subscription fires on that
-  /// swap and must see the selection already carrying the new paths, or it
-  /// prunes the old ones as stale and the selection is lost instead of
-  /// following the rename.
+  /// Re-point batch-selected paths across recognized renames. Called BEFORE the
+  /// scanResult swap: selectionStore's prune subscription fires on that swap and
+  /// must already see the new paths, or it prunes them as stale.
   applyRenames: (renamed: RenamedPair[]) => void;
 }
 let selectionSyncBridge: SelectionSyncBridge | null = null;
@@ -314,28 +290,18 @@ export function renamedTargetFor(
   return null;
 }
 
-// True when a project entry is an unhydrated stub — registered (usually by
-// session restore) but never scanned — that should be lazily hydrated the
-// moment it becomes the active project. Deliberately false when `error` is
-// set: auto-retrying a permanent failure (path gone, permission denied)
-// would loop the user through "switch → error → switch back → error"
-// forever; the Header rescan button remains the manual retry path.
-// Shared by setActiveProject and closeProject so every code path that can
-// promote a project to active applies the same hydration rule.
-// `unavailable` joins the same guard: a project whose folder is gone would
-// otherwise re-scan (and re-fail) on every switch into it.
+// True when a project entry is an unhydrated stub — registered but never scanned
+// — that should be hydrated the moment it becomes active. False when `error` or
+// `unavailable` is set, so a permanent failure does not re-scan on every switch.
 const needsHydration = (project: ProjectData): boolean =>
   project.scanResult === null &&
   !project.isScanning &&
   !project.error &&
   !project.unavailable;
 
-// Filtering by the project root is identical to no filter at all, so the root
-// is stored as `null`. Letting both representations exist is what desynced the
-// tree highlight from the real scope in the first place — every path that
-// assigns `selectedDirectory` goes through here, not just the setter, or the
-// second one reintroduces the bug on its own (`locateAsset` did exactly that:
-// locating a root-level asset left a redundant scope bar behind).
+// Filtering by the project root is identical to no filter, so the root is stored
+// as `null`. Every path that assigns `selectedDirectory` goes through here, not
+// just the setter.
 const normalizeDirectory = (path: string | null, projectPath: string | null): string | null =>
   path && path === projectPath ? null : path;
 
@@ -353,18 +319,14 @@ interface ProjectState {
   /// "syncing" indicator. 0 = no events seen yet this session.
   watcherPulse: number;
 
-  /// Monotonic counter bumped by every locateAsset call. The asset views
-  /// scroll the selected row into view on [selectedAsset.path, locatePulse]
-  /// — the pulse makes a repeat locate of the already-selected asset still
-  /// scroll, without making every ordinary filter change fight the user's
-  /// scroll position.
+  /// Monotonic counter bumped by every locateAsset call. The asset views scroll
+  /// on [selectedAsset.path, locatePulse], so a repeat locate still scrolls
+  /// without every filter change fighting the user's scroll position.
   locatePulse: number;
 
-  /// Monotonic counter bumped only when the active project's previewed asset
-  /// was dropped because its file was removed (applyFsChange's `removed`
-  /// branch) — never for any other reason a selection can go away. Exists so
-  /// the asset list can restore a keyboard cursor after an external delete
-  /// without having to guess, after the fact, why the selection is gone.
+  /// Monotonic counter bumped only when the active project's previewed asset was
+  /// dropped because its file was removed — never for any other reason a
+  /// selection can go away.
   selectionRemovedPulse: number;
 
   // Convenience getters for active project
@@ -395,15 +357,13 @@ interface ProjectState {
 
   // Multi-project actions
   openProject: (path: string, options?: { force?: boolean }) => Promise<void>;
-  /// Register a project with the backend and add a stub `ProjectData` to
-  /// the projects Map without triggering a scan. Used by session restore
-  /// so non-active projects appear in the sidebar instantly; their full
-  /// hydration runs lazily when the user switches to them. Idempotent —
-  /// calling this for a path that's already in the Map is a no-op.
+  /// Register a project with the backend and add a stub `ProjectData` without
+  /// scanning, so session-restored projects appear in the sidebar instantly and
+  /// hydrate lazily. Idempotent for a path already in the Map.
   registerProjectStub: (rawPath: string, unavailable?: UnavailableStatus | null) => Promise<void>;
-  /// Point an existing project at a different folder. The projectId is kept,
-  /// so this is "this project moved", not "close one and open another" —
-  /// deleting the project is a separate action the user takes deliberately.
+  /// Point an existing project at a different folder. The projectId is kept, so
+  /// this is "this project moved", not "close one and open another" — deleting a
+  /// project is a separate action.
   relocateProject: (projectId: string, newPath: string) => Promise<void>;
   /// Close a project AND drop it from recents, so an unusable path stops
   /// coming back as a suggestion in the same menu.
@@ -429,13 +389,9 @@ interface ProjectState {
   rescan: () => Promise<void>;
   clearError: () => void;
   runAnalysis: () => Promise<void>;
-  /// Optimistic prune after the duplicate-group cleanup trashed all but one
-  /// copy: drop that group's issue from `projectId`'s analysisResult so the
-  /// card disappears immediately (counts recomputed wholesale). `groupKey`
-  /// is the group's first `related_paths` member (root-relative), the same
-  /// identity the issue list collapses on. Deliberately does NOT touch
-  /// `analysisStale` — the deletions make OTHER issues stale too, and the
-  /// watcher-driven banner is the source of truth for that.
+  /// Optimistic prune after the duplicate-group cleanup: drop that group's issue
+  /// so the card disappears immediately, counts recomputed wholesale. `groupKey`
+  /// is the group's first `related_paths` member. Does not touch `analysisStale`.
   pruneDuplicateGroup: (projectId: string, groupKey: string) => void;
   setViewMode: (mode: ViewMode) => void;
   setHasCustomConfig: (value: boolean) => void;
@@ -561,21 +517,17 @@ const syncFromActiveProject = (project: ProjectData | undefined): Partial<Projec
   };
 };
 
-// True when `path` names a directory node anywhere in `tree`. Used to keep
-// `selectedDirectory` honest against a fresh directory tree — filtering the
-// asset list by a directory that no longer exists yields a blank view with
-// no explanation.
+// True when `path` names a directory node anywhere in `tree`. Keeps
+// `selectedDirectory` honest against a fresh tree: filtering by a directory that
+// no longer exists yields a blank view with no explanation.
 function directoryExistsInTree(tree: DirectoryNode, path: string): boolean {
   if (tree.path === path) return true;
   return tree.children.some((child) => directoryExistsInTree(child, path));
 }
 
-/// Record a session-lifetime warning against a (possibly non-active)
-/// project. Deduped by kind, latest payload wins — the backend's
-/// watcher_events_dropped carries a cumulative count, so replacing is
-/// correct and appending would double-count. tags_not_saved becomes a toast
-/// instead of a list entry: it belongs to the one operation the user just
-/// performed, not to the project's standing state.
+/// Record a session-lifetime warning against a (possibly non-active) project.
+/// Deduped by kind, latest payload wins. `tags_not_saved` becomes a toast rather
+/// than a list entry — it belongs to the operation the user just performed.
 function recordProjectWarning(projectId: string, w: ProjectWarning) {
   if (w.kind === "tags_not_saved") {
     useToastStore.getState().push({
@@ -617,10 +569,8 @@ function clearProjectWarning(projectId: string, kind: ProjectWarning["kind"]) {
   useProjectStore.setState(patch);
 }
 
-// Apply a filesystem-change event from the backend watcher into the store.
-// Runs outside any specific store action — targets the project the event was
-// emitted for, even if the user has switched away. See openProject's scan
-// handler for the same pattern.
+// Apply a filesystem-change event into the store. Targets the project the event
+// was emitted for, even if the user has switched away.
 function applyFsChange(projectId: string, event: FsChangeEvent) {
   const state = useProjectStore.getState();
   const target = state.projects.get(projectId);
@@ -662,14 +612,9 @@ function applyFsChange(projectId: string, event: FsChangeEvent) {
     }
   }
 
-  // Reconcile selectedDirectory: follow a renamed folder to its new path
-  // (instead of the reset-to-whole-project below), then drop the scope when
-  // the selected folder is genuinely gone — an external delete used to leave
-  // the list filtering against a ghost path: blank view, no explanation, and
-  // clicking the (gone) tree node couldn't fix it. The fallback is `null`,
-  // not `root_path`: "entire project" is spelled `null` everywhere else
-  // (DirectoryTree stores null for the root row), and the root-path spelling
-  // kept a pointless scope bar up over the full asset list.
+  // Reconcile selectedDirectory: follow a renamed folder, then drop the scope
+  // when the selected folder is genuinely gone. The fallback is `null`, not
+  // `root_path` — "entire project" is spelled `null` everywhere else.
   let newSelectedDirectory = target.selectedDirectory;
   if (newSelectedDirectory) {
     const renamedTo = renamedTargetFor(newSelectedDirectory, event.renamed);
@@ -767,10 +712,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   openProject: async (rawPath: string, options?: { force?: boolean }) => {
     const { projects } = get();
 
-    // Normalize path separators. The Tauri dialog returns OS-native paths
-    // (backslashes on Windows) but everything downstream — the scanner,
-    // `selectedDirectory` filtering, `convertFileSrc`, tree navigation —
-    // expects forward slashes. Backend does the same for scan result paths.
+    // Normalize path separators: the Tauri dialog returns OS-native paths, but
+    // the scanner, `selectedDirectory` filtering, `convertFileSrc` and tree
+    // navigation all expect forward slashes.
     const path = rawPath.replace(/\\/g, "/");
 
     const existingProject = Array.from(projects.values()).find(p => p.projectPath === path);
@@ -794,12 +738,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // gone produces an error the user can only "Retry" into the same wall.
     const health = toUnavailable((await checkPaths([path])).get(path));
     if (health) {
-      // Same concurrent double-open hazard as the guard below register_project:
-      // this branch also crosses an await (the health check) before writing a
-      // Map entry for a path that may not have had one yet. A second
-      // openProject call for the same path that raced ahead during that await
-      // would already have inserted its own entry — adopt it instead of
-      // inserting a duplicate switcher row for one dead folder.
+      // This branch crosses an await (the health check) before writing a Map
+      // entry. A second openProject for the same path that raced ahead during
+      // that await already inserted one — adopt it rather than duplicate.
       if (!existingProject) {
         const winner = Array.from(get().projects.values()).find(
           (p) => p.projectPath === path
@@ -810,10 +751,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         }
       } else if (!get().projects.has(existingProject.id)) {
         // The mirror image: the entry was CLOSED while the health check ran.
-        // The panel now offers "check again" and "remove from workspace" side
-        // by side, and a hung mount makes that check take seconds — writing
-        // our pre-await snapshot back would resurrect a project the user just
-        // removed, with its backend registration already gone.
+        // Writing the pre-await snapshot back would resurrect a project the user
+        // just removed, with its backend registration already gone.
         return;
       }
       const id = existingProject?.id ?? generateProjectId();
@@ -831,12 +770,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // ProjectState (undo history, watcher, tags, git manager) survives.
     const projectId = existingProject?.id ?? generateProjectId();
 
-    // Register with the backend BEFORE flipping activeProjectId, so that
-    // subscribers like tagsStore (which re-load on activeProjectId change)
-    // don't race an unregistered project into their invoke calls. The backend
-    // registry is idempotent for the same path; registering an existing id
-    // with a DIFFERENT path rebuilds that project's backend state (that is
-    // what relocation uses).
+    // Register with the backend BEFORE flipping activeProjectId, so subscribers
+    // that re-load on that change don't race an unregistered project into their
+    // invoke calls. Registering an existing id with a different path rebuilds it.
     try {
       await invoke("register_project", { projectId, path });
     } catch (err) {
@@ -850,11 +786,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       return;
     }
 
-    // Concurrent double-open guard: a second openProject for the same path
-    // that started while our register_project was in flight may have written
-    // its Map entry already (both calls snapshot `projects` BEFORE any
-    // await). Adopt the winner instead of inserting a duplicate row; our
-    // freshly generated backend registration is dropped best-effort.
+    // Concurrent double-open guard: a second openProject for the same path may
+    // have written its Map entry while register_project was in flight. Adopt the
+    // winner; this call's backend registration is dropped best-effort.
     if (!existingProject) {
       const winner = Array.from(get().projects.values()).find(
         (p) => p.projectPath === path
@@ -939,13 +873,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const state = get();
       const target = state.projects.get(projectId);
       if (target) {
-        // Force-rescan promises to keep UI state; honor it for the directory
-        // selection too — the old unconditional reset to root kicked the user
-        // out of the folder they were working in on every Ctrl+R. Falls back
-        // to `null` (= whole project) when the directory vanished between
-        // scans — NOT the root path: "scoped to root" and "no scope" must be
-        // one state, or the tree highlight, the scope bar, and the type-pill
-        // counts all disagree about whether a scope is active.
+        // Force-rescan keeps UI state, including the directory selection. Falls
+        // back to `null` (= whole project) when the directory vanished between
+        // scans — never the root path, which must not be a second spelling.
         const keptDirectory =
           target.selectedDirectory &&
           target.selectedDirectory !== path &&
@@ -978,17 +908,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         set(patch);
       }
 
-      // Refresh git info for this project specifically — refreshGitInfo
-      // patches the right entry in the projects Map regardless of which
-      // project is currently active, so we don't need an "is still active"
-      // guard here.
+      // refreshGitInfo patches the right entry in the Map regardless of which
+      // project is active, so no "is still active" guard is needed here.
       get().refreshGitInfo(projectId);
 
-      // Start the filesystem watcher now that the cache is populated.
-      // Events that arrive before the scan completes would be no-ops on the
-      // backend (no cached_scan to patch), so ordering matters.
-      // On force-rescan, the watcher is already running from the original
-      // open — skip to avoid stacking duplicate listeners / watch handles.
+      // Start the watcher now that the cache is populated: earlier events would
+      // be no-ops backend-side. On force-rescan the watcher is already running,
+      // so skip it to avoid stacking duplicate listeners.
       if (!fsWatchers.has(projectId)) {
         try {
           const fsUnlisten = await listen<FsChangeEvent>(
@@ -1022,25 +948,20 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       if (!get().projects.get(projectId)) return;
       const isCancelled = errorMessage.includes("cancelled");
       // The folder can go away between the pre-check and the scan. Ask again
-      // instead of pattern-matching the error prose — this store already
-      // carries two `String(err).includes(...)` branches and they are exactly
-      // the thing that breaks silently when a message is reworded.
+      // rather than pattern-matching the error prose, which breaks silently the
+      // moment a message is reworded.
       const recheck = isCancelled
         ? null
         : toUnavailable((await checkPaths([path])).get(path));
-      // Re-read everything after the await — the Map, this project's own
-      // entry, and the active id. A watcher batch that patched a DIFFERENT
-      // project during the re-check would be dropped by writing a stale Map
-      // back, and the project itself may have been closed in the meantime.
+      // Re-read everything after the await — the Map, this entry, and the active
+      // id. Writing a stale Map back would drop a watcher batch that patched a
+      // different project, and this project may have been closed meanwhile.
       const latest = get();
       const target = latest.projects.get(projectId);
       if (!target) return;
-      // The folder disappearing invalidates everything derived from it, not
-      // just scanResult — leaving analysisResult/selectedAsset/gitInfo/etc.
-      // in place would let the switcher and (if this project is active) the
-      // preview panel keep showing data for a project the main area is about
-      // to say is gone. resetProjectData is the same reset relocateProject
-      // and the pre-check branch above use.
+      // The folder disappearing invalidates everything derived from it, not just
+      // scanResult, so the whole entry resets through the same `resetProjectData`
+      // relocateProject and the pre-check branch use.
       const updated: ProjectData = recheck
         ? resetProjectData(target, path, recheck)
         : {
@@ -1105,11 +1026,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       ...syncFromActiveProject(activeProject),
     });
 
-    // Closing the active project promotes the next one directly (bypassing
-    // setActiveProject), so apply the same lazy-hydration rule here: a
-    // promoted session-restored stub would otherwise render a permanently
-    // blank asset view — clicking its row hits setActiveProject's same-id
-    // early return, leaving a force rescan as the only way out.
+    // Closing the active project promotes the next one directly, bypassing
+    // setActiveProject, so the same lazy-hydration rule applies here — a promoted
+    // stub would otherwise render a permanently blank asset view.
     if (idToClose === activeProjectId && activeProject && needsHydration(activeProject)) {
       void get().openProject(activeProject.projectPath, { force: true });
     }
@@ -1121,11 +1040,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const project = projects.get(projectId);
     if (!project) return;
 
-    // Lazy hydration: if this is a stub (see needsHydration), kick off a
-    // full openProject. openProject's force=true path will replace the
-    // stub's ProjectData with isScanning=true, set activeProjectId,
-    // wire scan-progress and fs-change listeners, run the scan, and
-    // start the watcher + refresh git on completion.
+    // Lazy hydration: a stub gets a full openProject, whose force path replaces
+    // the stub's ProjectData, wires the scan-progress and fs-change listeners,
+    // runs the scan, and starts the watcher on completion.
     if (needsHydration(project)) {
       void get().openProject(project.projectPath, { force: true });
       return;
@@ -1197,10 +1114,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       return;
     }
 
-    // The watcher map is keyed by projectId, and the id does not change here.
-    // openProject only installs a watcher when the map has no entry for the
-    // id — without this teardown the relocated project would run with no
-    // watcher at all, and nothing about the UI would say so.
+    // The watcher map is keyed by projectId and the id does not change here.
+    // openProject only installs a watcher when the map has no entry, so without
+    // this teardown the relocated project would run with none.
     await stopFsWatch(projectId);
 
     // Everything derived from the old root goes; the six observation
@@ -1219,13 +1135,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // register_project call rebuilds the backend state on the new root.
     await get().openProject(newPath, { force: true });
 
-    // Relocation preserves activeProjectId, so tagsStore's "reload on
-    // activeProjectId change" subscription never fires for it — the tag
-    // mirror would otherwise keep pointing at the old folder until the user
-    // happens to revisit the assets view (AssetList's own scanResult-keyed
-    // reload). Same bridge fs-change renames/removals already use. Guarded
-    // like every other background write here: only act if this project is
-    // still the one on screen when the scan finishes.
+    // Relocation preserves activeProjectId, so tagsStore's reload-on-change
+    // subscription never fires — the tag mirror is pushed through the bridge
+    // instead. Guarded on this project still being active at write time.
     if (get().activeProjectId === projectId) {
       tagsSyncBridge?.reloadTags();
     }
@@ -1267,10 +1179,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   rescan: async () => {
     const { projectPath, isScanning } = get();
     if (!projectPath || isScanning) return;
-    // Drop the on-disk scan cache so even files whose mtime didn't change get
-    // reclassified (e.g. after a format gained a new AssetType), then re-open
-    // with force. Best-effort cache clear — a failure still proceeds to the
-    // force rescan so the button / shortcut is never a dead end.
+    // Drop the on-disk scan cache so even unchanged-mtime files get reclassified,
+    // then re-open with force. A failed cache clear still proceeds, so the button
+    // is never a dead end.
     try {
       await invoke("clear_scan_cache", { path: projectPath });
     } catch (err) {
@@ -1288,24 +1199,18 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const startedProjectId = startState.activeProjectId;
     if (!startedProjectId) return;
 
-    /// Snapshot the project that owns this analysis. All subsequent
-    /// state writes target THIS project's entry in the Map even if the
-    /// user switches active project mid-flight — same pattern as
-    /// openProject's scan handler. Mirror fields only sync when the
-    /// started project is still active at write time.
+    /// Snapshot the project that owns this analysis. Every subsequent write
+    /// targets THIS project's entry even if the user switches mid-flight; mirror
+    /// fields only sync when it is still active at write time.
     const startedProject = startState.projects.get(startedProjectId);
     if (!startedProject) return;
-    /// Re-entry guard. UI surfaces this via `disabled={isAnalyzing}` on
-    /// the Sidebar button, but the CommandPalette entry and the menu item
-    /// don't gate on it — collapse the check here so every entry path
-    /// is safe.
+    /// Re-entry guard. The Sidebar button disables on `isAnalyzing`, but the
+    /// command palette and menu entries do not, so the check is collapsed here.
     if (startedProject.isAnalyzing) return;
 
-    /// Snapshot the view the user was on when they kicked off analysis.
-    /// If they navigate elsewhere mid-flight, leave them where they went —
-    /// silently yanking them back to "issues" feels intrusive. We auto-
-    /// switch only when the started project is still active AND the
-    /// active view is unchanged at completion.
+    /// Snapshot the view the user was on at kickoff. Auto-switching to "issues"
+    /// on completion happens only when the started project is still active and
+    /// the view is unchanged.
     const viewModeAtStart = startState.viewMode;
 
     /// Patch helper: writes to the started project's entry directly,
@@ -1326,14 +1231,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     patchProject({ isAnalyzing: true });
 
-    // Re-read config at click time (not just at scan-complete) so users
-    // can edit `tidycraft.toml` and re-run without rescanning. A missing
-    // file is the normal case (arrives as `null` → defaults); a file that
-    // EXISTS but can't be read is the only thing that rejects here, and it
-    // must fail the run — the exporters error on the same condition
-    // (`load_rule_config`, whose contract says the Issues view fails the
-    // same way), and silently analyzing with default thresholds instead of
-    // the user's reads as a clean bill their config never issued.
+    // Re-read config at click time so users can edit `tidycraft.toml` and re-run
+    // without rescanning. A missing file is normal (`null` → defaults); a file
+    // that exists but cannot be read must fail the run, as the exporters do.
     let configToml: string | null = null;
     let hasCustomConfig = false;
     try {
@@ -1353,8 +1253,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       });
       const updates: Partial<ProjectData> = {
         analysisResult: result,
-        // Fresh snapshot: whatever staleness the previous one accumulated
-        // is history now.
+        // Fresh snapshot: the new scan result carries no accumulated staleness.
         analysisStale: false,
         isAnalyzing: false,
         hasCustomConfig,
@@ -1486,12 +1385,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       selectedAsset: asset,
     }));
 
-    // "Locate" must actually land on a visible row. If the current filters
-    // exclude the target (checked through the real pipeline, not a
-    // re-implementation of it), reset them; when they don't, leave the
-    // user's filter context alone. Tag filters live in tagsStore and are
-    // handled through the registered bridge (import-cycle constraint, see
-    // registerTagFilterBridge).
+    // "Locate" must land on a visible row: if the current filters exclude the
+    // target — checked through the real pipeline — reset them. Tag filters live
+    // in tagsStore and go through the registered bridge.
     if (!get().getFilteredAssets().some((a) => a.path === path)) {
       set(updateActiveProject(get(), { searchQuery: "", typeFilter: null }));
       get().resetAdvancedFilters();
@@ -1513,16 +1409,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }));
   },
 
-  // Undo actions (scoped to active project).
-  //
-  // `canUndo` / `undoHistory` are GLOBAL mirror fields with no per-project
-  // copy in the Map, so every write below re-checks that the project the
-  // IPC round-trip started for is still the active one — the same
-  // stale-response rule refreshGitInfo documents. Without the check,
-  // switching projects mid-flight painted project A's undo button state
-  // and history list onto project B (clicking undo then acts on B while
-  // showing A's entries). A skipped write self-heals: Header re-runs
-  // refreshUndoState whenever projectPath changes.
+  // Undo actions (scoped to the active project). `canUndo` / `undoHistory` are
+  // GLOBAL mirror fields, so every write re-checks that the project the IPC round
+  // trip started for is still active. A skipped write self-heals in the Header.
   undoLastOperation: async () => {
     const { activeProjectId } = get();
     if (!activeProjectId) return null;
@@ -1570,19 +1459,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
   },
 
-  // Git actions
-  //
-  // Refreshes the gitInfo + gitStatuses for a specific project. If
-  // `targetProjectId` is omitted, uses the currently active project.
-  //
-  // Race-safe: the target project id is captured once at entry and used for
-  // every backend call and every store write. Without this, async awaits
-  // between getting state and setting it could let the user switch projects
-  // mid-flight, causing project A's git data to be written to project B.
-  //
-  // The patch goes directly into the projects Map for the target id;
-  // convenience mirror fields are only updated if the target is still the
-  // active project at write time. Same pattern as `applyFsChange`.
+  // Refresh gitInfo + gitStatuses for a specific project, defaulting to the
+  // active one. The target id is captured once at entry and used for every call
+  // and write; mirror fields update only if it is still active, as applyFsChange.
   refreshGitInfo: async (targetProjectId?: string) => {
     const initialState = get();
     const projectId = targetProjectId ?? initialState.activeProjectId;
@@ -1637,13 +1516,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const { scanResult, selectedDirectory, searchQuery, typeFilter, sortField, sortDirection, advancedFilters, gitStatuses } = get();
     if (!scanResult) return [];
 
-    // Cheap identity check: if every input is the same reference as the
-    // previous call, return the cached result. Because setters replace
-    // values (new scanResult objects on fs-change, new advancedFilters
-    // objects on setAdvancedFilters, etc.) this catches every real change
-    // without needing deep equality. `gitStatuses` is in here because the
-    // gitStatusFilter branch below reads from it; refreshGitInfo replaces
-    // the whole map by reference, so identity tracks freshness correctly.
+    // Cheap identity check: if every input is the same reference as last call,
+    // return the cached result. Setters replace values rather than mutate, so
+    // this catches every real change without deep equality.
     const inputs = [
       scanResult,
       selectedDirectory,
@@ -1672,10 +1547,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       });
     }
 
-    // Filter by search query. Trim before matching, not just in the
-    // emptiness gate: an accidental leading/trailing space (IME commit,
-    // paste) otherwise becomes part of the needle and "icon " silently
-    // matches nothing. Interior spaces still match paths literally.
+    // Filter by search query. Trim before matching, not just in the emptiness
+    // gate: a leading or trailing space from an IME commit or paste would
+    // otherwise join the needle. Interior spaces still match paths literally.
     if (searchQuery.trim()) {
       const query = searchQuery.trim().toLowerCase();
       assets = assets.filter(
@@ -1698,10 +1572,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     if (advancedFilters.maxSize !== null) {
       assets = assets.filter((asset) => asset.size <= advancedFilters.maxSize!);
     }
-    // Metadata range filters: an asset is kept only when the field is actually
-    // present. The old `(value || 0)` coalesced a missing field to 0, so e.g.
-    // "max duration 10s" matched every texture/script/model (0 <= 10) — assets
-    // that have no duration at all. Gate on presence first, then compare.
+    // Metadata range filters keep an asset only when the field is present. A
+    // `(value || 0)` coalesce made "max duration 10s" match every texture, script
+    // and model (0 <= 10). Gate on presence first, then compare.
     if (advancedFilters.minWidth !== null) {
       assets = assets.filter((asset) => { const v = asset.metadata?.width; return v != null && v >= advancedFilters.minWidth!; });
     }
@@ -1747,10 +1620,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const wanted = new Set(advancedFilters.gitStatusFilter);
       assets = assets.filter((asset) => {
         const status = gitStatuses[asset.path];
-        // Files not in gitStatuses are unchanged (the backend only emits
-        // entries for changed files), so they only match if "unchanged" is
-        // explicitly wanted — which the UI doesn't expose, so effectively
-        // never. Treat undefined as a no-match.
+        // Files absent from gitStatuses are unchanged — the backend only emits
+        // entries for changed files — so undefined is a no-match.
         return status !== undefined && wanted.has(status);
       });
     }

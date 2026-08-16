@@ -2,19 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { basename, dirname } from "./pathUtils";
 
-/**
- * A synchronous URL modifier for Three.js LoadingManager, built asynchronously
- * from a pre-scanned sibling-texture map so that FBX/OBJ/DAE files referencing
- * textures by bare filename (or with a stale absolute path) can still find them.
- *
- * Strategy:
- * 1. Ask the backend to walk the model's dir + common texture subdirs
- *    (`Textures/`, `Materials/`, …) and build a filename → absolute-path map.
- * 2. In the returned modifier, extract the basename of whatever URL Three.js
- *    hands us (works for both bare filenames and already-encoded asset URLs)
- *    and look it up in the map.
- * 3. On miss, fall back to the old behavior (resolve relative to `modelDir`).
- */
+/** A synchronous URL modifier for three.js's LoadingManager, built from a
+ *  pre-scanned sibling-texture map so FBX/OBJ/DAE files referencing textures by
+ *  bare filename can find them. On a miss it resolves relative to `modelDir`. */
 export async function buildTextureUrlResolver(
   modelPath: string
 ): Promise<(url: string) => string> {

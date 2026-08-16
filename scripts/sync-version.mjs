@@ -1,24 +1,6 @@
-// Single-source the app version. `package.json > version` is the source of
-// truth (the titlebar imports it directly, and `pnpm version` edits it); this
-// script propagates that value into the two files Tauri reads at build time:
-//   - src-tauri/Cargo.toml  ([package] version)
-//   - src-tauri/tauri.conf.json  (top-level version)
-//
-// Wired into `package.json`'s "build" script, so `pnpm build` and
-// `pnpm tauri build` (whose beforeBuildCommand is `pnpm build`) keep all three
-// in lockstep automatically — no manual three-file edit per release.
-//
-// Usage:
-//   node scripts/sync-version.mjs           # rewrite the two derived files
-//   node scripts/sync-version.mjs --check    # verify only; exit 1 on drift (CI)
-//
-// Why regex instead of a TOML/JSON round-trip:
-//   - Cargo.toml carries hand-written comments a parse+reserialize would drop.
-//     We anchor on the [package] table's own `version = "..."` line (matched
-//     via a preceding newline, so the `rust-version` key and every dependency
-//     `version` are left untouched), leaving all other bytes identical.
-//   - We only write when the value actually changes, so an up-to-date Cargo.toml
-//     keeps its mtime and doesn't trigger a needless Rust rebuild.
+// Single-source the app version: `package.json > version` is the source of truth,
+// propagated into src-tauri/Cargo.toml and tauri.conf.json. `--check` verifies
+// only and exits 1 on drift. Rationale and usage: docs/design-notes.md.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -32,10 +14,9 @@ const cargoPath = join(root, "src-tauri", "Cargo.toml");
 const confPath = join(root, "src-tauri", "tauri.conf.json");
 
 const version = JSON.parse(readFileSync(pkgPath, "utf8")).version;
-// Fully anchored on purpose: a prerelease/build suffix (`0.7.0-beta.1`)
-// would propagate into tauri.conf.json and only explode much later, deep
-// inside the tagged release build — the Windows MSI bundler cannot encode
-// non-numeric versions. Fail here, at the first step, with the reason.
+// Fully anchored: a prerelease or build suffix (`0.7.0-beta.1`) would propagate
+// into tauri.conf.json and only explode much later, inside the tagged release
+// build — the Windows MSI bundler cannot encode non-numeric versions.
 if (typeof version !== "string" || !/^\d+\.\d+\.\d+$/.test(version)) {
   console.error(`[sync-version] package.json version must be plain MAJOR.MINOR.PATCH, got: ${JSON.stringify(version)}`);
   console.error("[sync-version] prerelease/build suffixes are rejected because the Windows MSI bundler cannot encode them (a v-tag release would fail at the bundling step).");

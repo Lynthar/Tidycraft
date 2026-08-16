@@ -34,10 +34,9 @@ import { formatShortcut, SHORTCUTS } from "../hooks/useKeyboardShortcuts";
 import { basename } from "../lib/pathUtils";
 import { ASSET_TYPES } from "../types/asset";
 
-/// Maximum number of asset quick-jump matches surfaced in one query.
-/// Cap is intentional — typical projects have 1k–50k assets and rendering
-/// thousands of <button>s would tank input responsiveness. Future expansion
-/// (fuzzy ranking, Web Worker, virtualization) can replace `.slice` here.
+/// Maximum number of asset quick-jump matches surfaced in one query. Typical
+/// projects hold 1k–50k assets, and rendering thousands of buttons would tank
+/// input responsiveness.
 const ASSET_RESULT_CAP = 50;
 
 interface CmdItem {
@@ -90,13 +89,8 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
   const listRef = useRef<HTMLDivElement>(null);
 
   /// True only when the pointer's coordinates differ from the last ones seen.
-  /// Keyboard use scrolls and re-filters the list under a stationary pointer,
-  /// and WebKit answers that by re-running its hit test and synthesizing mouse
-  /// events on whichever row slid beneath it — which dragged the cursor back to
-  /// the pointer mid-navigation. Those synthetic events carry the pointer's
-  /// last known coordinates, which is what separates a real movement from the
-  /// shadow of a scroll. A ref, not state: nothing renders differently, so
-  /// re-rendering the list on every pointer movement would be pure waste.
+  /// WebKit synthesizes mouse events on whichever row slides under a stationary
+  /// pointer during keyboard navigation; those carry its last known coordinates.
   const lastPointer = useRef({ x: -1, y: -1 });
 
   const pointerMoved = (e: React.MouseEvent) => {
@@ -106,19 +100,16 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
     return moved;
   };
 
-  /// Hover and the keyboard cursor paint the same highlight, so only one of
-  /// them may be lit at a time — two identical highlights say nothing about
-  /// which one Enter will run. This is the paint half, written straight to the
-  /// node for the stylesheet to read; which row the cursor occupies is decided
-  /// by `pointerMoved` and the key handler.
+  /// Hover and the keyboard cursor paint the same highlight, so only one may be
+  /// lit at a time. This is the paint half, written straight to the node; which
+  /// row the cursor occupies is decided by `pointerMoved` and the key handler.
   const setHoverHighlight = (on: boolean) => {
     listRef.current?.toggleAttribute("data-hover-off", !on);
   };
 
-  // Reset query + cursor each time the palette opens. Hover starts suspended:
-  // the list materializes under wherever the pointer already happens to sit,
-  // and letting that count as hovering would light a second row the instant the
-  // palette appeared. The pointer has to move to claim the cursor.
+  // Reset query and cursor each time the palette opens. Hover starts suspended:
+  // the list materializes under wherever the pointer already sits, and letting
+  // that count as hovering would light a second row instantly.
   useEffect(() => {
     if (cmdkOpen) {
       setQuery("");
@@ -176,10 +167,9 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
         shortcut: formatShortcut(SHORTCUTS.rescan),
         icon: <RefreshCw size={13} />,
         onSelect: () => {
-          // Same contract as the ⌘R it advertises: rescan() clears the
-          // disk scan cache first. The bare force-open this used to call
-          // kept serving cached entries — a different, weaker operation
-          // under the same label.
+          // Same contract as the ⌘R it advertises: `rescan()` clears the disk scan
+          // cache first. A bare force-open keeps serving cached entries — a
+          // weaker operation under the same label.
           void rescan();
           close();
         },
@@ -519,10 +509,9 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cmdkOpen, filteredItems, activeIndex]);
 
-  // Keep the cursor visible as it moves. We query by index against the live
-  // DOM rather than tracking refs per item — DOM order matches filteredItems
-  // order, and this avoids the stale-callback-ref problem when keys are
-  // stable across renders.
+  // Keep the cursor visible as it moves. Queried by index against the live DOM
+  // rather than per-item refs: DOM order matches `filteredItems` order, and this
+  // avoids the stale-callback-ref problem when keys are stable across renders.
   useEffect(() => {
     if (!cmdkOpen) return;
     const items = listRef.current?.querySelectorAll<HTMLButtonElement>(
@@ -571,9 +560,7 @@ export function CommandPalette({ onExport }: CommandPaletteProps) {
                     onClick={() => it.onSelect()}
                     // `mousemove`, not `mouseenter`: the pointer regains the
                     // cursor the moment it moves, even without crossing into
-                    // another row — otherwise a nudge that stays inside one row
-                    // restored the hover highlight while the keyboard's cursor
-                    // sat elsewhere, which is the two-highlights state again.
+                    // another row — otherwise a nudge inside one row lights two.
                     onMouseMove={(e) => {
                       if (!pointerMoved(e)) return;
                       setHoverHighlight(true);

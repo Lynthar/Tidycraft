@@ -3,17 +3,9 @@ import { useProjectStore } from "../stores/projectStore";
 import { useUiStore, isBlockingOverlayOpen } from "../stores/uiStore";
 import i18n from "../i18n";
 
-/// App-level actions reachable from more than one surface — the keyboard
-/// handler (`useKeyboardShortcuts`) and the macOS menu bar (`appMenu.ts`)
-/// both route through here, guards included, so the two can never drift.
-///
-/// The guards are NOT redundant with the keyboard hook's own checks: on
-/// macOS, an accelerator declared on a menu item is consumed by the menu
-/// system before the webview ever sees the keydown, so the menu action is
-/// the ONLY code that runs for those combos there. If the blocking-overlay
-/// guard lived solely in the keydown handler, ⌘K from the menu would open
-/// the palette over a modal and its project-switching commands would write
-/// to the wrong project — a bug this codebase has already fixed once.
+/// App-level actions reachable from more than one surface — the keyboard handler
+/// and the macOS menu bar both route through here, guards included. On macOS a
+/// menu accelerator is consumed before the webview ever sees the keydown.
 
 /// Global actions are frozen while the command palette owns the keyboard or
 /// a blocking modal is up — same rule the keydown handler applies.
@@ -28,10 +20,9 @@ export function registerSearchFocus(fn: (() => void) | null) {
   searchFocuser = fn;
 }
 
-// Same arrangement for the asset list, which the search box hands focus to on
-// a down arrow. The list registers itself rather than App registering it: the
-// slot is then empty exactly when there is no list to focus — the grid view,
-// no project open, a scan still running — and the caller can tell.
+// Same arrangement for the asset list, which the search box hands focus to on a
+// down arrow. The list registers itself, so the slot is empty exactly when there
+// is no list to focus and the caller can tell.
 let assetListFocuser: (() => void) | null = null;
 export function registerAssetListFocus(fn: (() => void) | null) {
   assetListFocuser = fn;
@@ -110,10 +101,8 @@ export const menuActions = {
     useProjectStore.getState().setViewMode(mode);
   },
 
-  /// ⌘K keeps its own asymmetric guard: opening is blocked under a modal
-  /// (the palette would stack above it and its commands would run against
-  /// the wrong project), but CLOSING an already-open palette must always
-  /// work — including via the same shortcut that opened it.
+  /// ⌘K keeps an asymmetric guard: opening is blocked under a modal, but closing
+  /// an already-open palette must always work, including via the same shortcut.
   toggleCommandPalette: () => {
     const ui = useUiStore.getState();
     if (ui.cmdkOpen || !isBlockingOverlayOpen()) {

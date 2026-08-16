@@ -24,29 +24,21 @@ pub struct Issue {
     pub asset_path: String,
     pub suggestion: Option<String>,
     pub auto_fixable: bool,
-    /// Every member of the same finding, root-relative and sorted, with the
-    /// kept "original" first. Currently only the `duplicate` rule fills this
-    /// (all files sharing one content hash); the frontend uses it to collapse
-    /// per-file duplicate issues into a single group card. `None` for rules
-    /// without grouped findings — omitted from serialized output so exports
-    /// stay byte-identical for those.
+    /// Every member of the same finding, root-relative and sorted, with the kept
+    /// "original" first. Only the `duplicate` rule fills this; the frontend uses
+    /// it to collapse per-file duplicate issues into a single group card.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub related_paths: Option<Vec<String>>,
-    /// Placeholder values for the localized rendering of this issue's message
-    /// and suggestion, keyed by the placeholder name used in the locale
-    /// templates (`{{width}}` → `"width"`). The English prose in `message` /
-    /// `suggestion` stays authoritative: it is what the JSON export and the
-    /// logs carry, and what the UI falls back to when a locale has no entry
-    /// for this rule yet. Empty for rules that interpolate nothing — omitted
-    /// from serialized output so their exports stay byte-identical.
+    /// Placeholder values for the localized rendering of this issue's message and
+    /// suggestion, keyed by the placeholder name used in the locale templates.
+    /// The English prose in `message` / `suggestion` stays authoritative.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub args: HashMap<String, String>,
 }
 
-/// Build an `Issue.args` map from literal pairs. Exists because the 23
-/// construction sites would otherwise each carry a `HashMap::from([...])`
-/// literal with `.to_string()` on both halves of every pair, which buries the
-/// one interesting part — which placeholders the rule promises to fill.
+/// Build an `Issue.args` map from literal pairs, so each construction site shows
+/// which placeholders the rule promises to fill rather than a `HashMap` literal
+/// with `.to_string()` on both halves of every pair.
 pub fn issue_args<const N: usize>(pairs: [(&str, String); N]) -> HashMap<String, String> {
     pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
 }
@@ -119,10 +111,7 @@ impl Analyzer {
             )));
         }
 
-        // Add texture rules. Note: `texture.color_space` is now gated
-        // independently — enabling stricter size/PoT checks via
-        // `[texture]` shouldn't be the only way to keep the
-        // color-space safety net.
+        // `texture.color_space` is gated independently of this section's flag.
         if config.texture.enabled {
             analyzer.add_rule(Box::new(rules::texture::TextureRule::new(
                 config.texture.clone(),
@@ -182,15 +171,9 @@ impl Analyzer {
         rules::duplicate::find_duplicates(&scan_result.assets, &scan_result.root_path)
     }
 
-    /// Check for Unity GUID references that don't resolve to any asset in
-    /// the project. No-op for non-Unity projects. `package_index` clears
-    /// references the local `Library/PackageCache` accounts for (empty
-    /// index = resolve nothing).
-    ///
-    /// `scan_result` is the analysis scope (post-`[ignore]`); `full_scan` is the
-    /// unfiltered scan that decides which GUIDs exist. They are the same value
-    /// when no ignore patterns are configured — see the rule's own doc comment
-    /// for why they must be allowed to differ.
+    /// Check for Unity GUID references that resolve to no asset in the project.
+    /// No-op for non-Unity projects. `scan_result` is the analysis scope
+    /// (post-`[ignore]`); `full_scan` is what decides which GUIDs exist.
     pub fn find_missing_references(
         &self,
         scan_result: &ScanResult,
@@ -205,10 +188,8 @@ impl Analyzer {
         )
     }
 
-    /// Check for incomplete PBR material sets — directories where a
-    /// BaseColor texture exists but its expected siblings (Normal,
-    /// Roughness, …) are missing. Cross-asset; takes the live config so
-    /// users can tune channel suffixes without rebuilding the analyzer.
+    /// Check for incomplete PBR material sets — a directory with a BaseColor
+    /// texture but missing expected siblings. Cross-asset; takes the live config.
     pub fn find_pbr_set_issues(
         &self,
         scan_result: &ScanResult,
@@ -217,11 +198,8 @@ impl Analyzer {
         rules::pbr_set::find_pbr_set_issues(&scan_result.assets, config)
     }
 
-    /// Check for DCC source files (`.blend` / `.ma` / `.psd` / etc.)
-    /// whose runtime exports (`.fbx` / `.png` / etc.) are older than
-    /// the source — likely indicating a forgotten re-export. Cross-
-    /// asset; takes the live config so users can tune mappings and
-    /// the lookup directory list without rebuilding the analyzer.
+    /// Check for DCC source files whose runtime exports are older than the source.
+    /// Cross-asset; takes the live config.
     pub fn find_dcc_source_issues(
         &self,
         scan_result: &ScanResult,
@@ -243,20 +221,9 @@ mod tests {
     use crate::scanner::{AssetMetadata, AssetType};
     use std::collections::{BTreeMap, BTreeSet};
 
-    /// Which placeholders each rule promises to fill. Read by the locale
-    /// template gates (`zh_templates_only_use_placeholders_the_rules_emit`
-    /// and `zh_template_keys_all_name_a_declared_rule`), which cannot look at
-    /// the rules themselves. Kept honest by
-    /// `declared_rule_args_match_what_the_rules_actually_emit` below — this
-    /// table is pinned to observed behavior, not a free-floating declaration.
-    ///
-    /// Those gates read `zh.json` and nothing else, and that is correct:
-    /// `issues.rules.*` and `issues.duration.*` exist ONLY in the non-English
-    /// locales. English is the analyzer's own `format!` output, carried on the
-    /// issue itself and used as the fallback at both ends, so no string lives
-    /// in two places. A third locale writes its own section rather than
-    /// copying en.json's key set, which does not have one, and both gates name
-    /// `zh.json` literally — they have to be pointed at the new file too.
+    /// Which placeholders each rule promises to fill. Read by the locale template
+    /// gates, which cannot look at the rules themselves, and pinned to observed
+    /// behavior by `declared_rule_args_match_what_the_rules_actually_emit`.
     const RULE_ARGS: &[(&str, &[&str])] = &[
         ("texture.file_size", &["size", "max"]),
         (
@@ -387,10 +354,9 @@ mod tests {
 
     fn harvest_naming() -> Vec<Issue> {
         use rules::naming::{NamingConfig, NamingRule};
-        // Each fixture isolates one branch: the rule returns at the first
-        // violation it finds (length → forbidden → chinese → prefix → case),
-        // so a name meant for a later check must be clean for every earlier
-        // one. `case_style` is a plain String on the config, not an enum.
+        // Each fixture isolates one branch: the rule returns at the first violation
+        // it finds (length → forbidden → chinese → prefix → case), so a name meant
+        // for a later check must be clean for every earlier one.
         let long_name = format!("{}.png", "a".repeat(80));
         let cases: Vec<(NamingConfig, String)> = vec![
             (
@@ -448,13 +414,9 @@ mod tests {
 
     fn harvest_model() -> Vec<Issue> {
         use rules::model::{ModelConfig, ModelRule};
-        // `enabled` is inert here: no `Rule::check` impl reads it. It only
-        // decides whether `Analyzer::with_config` registers the rule at all,
-        // and this harvest calls `check()` directly. Set true anyway so the
-        // fixture reads as a config a user could actually have written.
-        // (The free-function rules below are the opposite case —
-        // `find_pbr_set_issues` / `find_dcc_source_issues` test the flag in
-        // their own body, so their fixtures genuinely need it on.)
+        // `enabled` is inert here: no `Rule::check` impl reads it, and this harvest
+        // calls `check()` directly. Set true anyway so the fixture reads as a config
+        // a user could actually have written.
         let cfg = ModelConfig {
             enabled: true,
             max_vertices: 10_000,
@@ -513,11 +475,9 @@ mod tests {
             channels: Some(channels),
             ..Default::default()
         };
-        // Branch order is sample_rate → sfx_duration → stereo_sfx →
-        // file_size, and the two SFX branches additionally require an SFX
-        // token in the file name (`hit` / `click` / `sfx` / …, matched as a
-        // whole token). So the later fixtures carry an allowed rate, and the
-        // file-size one avoids an SFX name entirely.
+        // Branch order is sample_rate → sfx_duration → stereo_sfx → file_size, and
+        // the two SFX branches additionally require an SFX token in the file name,
+        // so later fixtures carry an allowed rate and avoid SFX names.
         [
             mk("ambience.wav", 1024, meta(22050, None, 1)),
             mk("sword_hit.wav", 1024, meta(44100, Some(12.0), 1)),
@@ -550,10 +510,8 @@ mod tests {
     fn harvest_duplicate() -> Vec<Issue> {
         use rules::dcc_source::tests::make_asset;
         let dir = tempfile::tempdir().expect("tempdir");
-        // The rule buckets by the declared `size` (both files get
-        // `make_asset`'s 1) and only then hashes, so the two have to be
-        // byte-identical on disk. Writing exactly one byte each also keeps
-        // the declared size honest.
+        // The rule buckets by the declared `size` and only then hashes, so the two
+        // files have to be byte-identical on disk.
         let paths: Vec<_> = ["a.png", "b.png"]
             .iter()
             .map(|name| {
@@ -594,10 +552,9 @@ mod tests {
 
     fn harvest_pbr_set() -> Vec<Issue> {
         use rules::pbr_set::PbrSetConfig;
-        // `find_pbr_set_issues` reads `config.enabled` in its own body and
-        // returns an empty result when it is false — and false is the
-        // default. Unlike the trait rules above, this one really does need
-        // the override, or the harvest sees nothing to record.
+        // `find_pbr_set_issues` reads `config.enabled` in its own body and returns
+        // an empty result when it is false, which is the default — unlike the trait
+        // rules above, this fixture genuinely needs the override.
         let cfg = PbrSetConfig {
             enabled: true,
             ..PbrSetConfig::default()
@@ -611,10 +568,9 @@ mod tests {
     fn harvest_dcc_source() -> Vec<Issue> {
         use rules::dcc_source::tests::{make_asset, write_with_mtime};
         use rules::dcc_source::DccSourceConfig;
-        // Same `config.enabled` caveat as pbr_set above. The export is
-        // stamped first and the source second, so the gap is at least the
-        // 3 days asked for and never less — it lands in `humanize_seconds`'s
-        // last bucket, and the message reads "3d" as that function documents.
+        // Same `config.enabled` caveat as pbr_set. The export is stamped first and
+        // the source second, so the gap is at least the 3 days asked for and lands
+        // in `humanize_seconds`'s last bucket.
         let cfg = DccSourceConfig {
             enabled: true,
             ..DccSourceConfig::default()
@@ -658,10 +614,8 @@ mod tests {
             undeclared.is_empty(),
             "rules emitted but not declared: {undeclared:?}"
         );
-        // Guards the harvest, not the analyzer: nothing here counts rule_id
-        // construction sites, so a 24th rule with no fixture in `harvest()`
-        // reaches neither of the checks above. Bump this by hand when adding a
-        // rule, and add the fixture that makes the bump legitimate.
+        // Guards the harvest, not the analyzer: a 24th rule with no fixture in
+        // `harvest()` reaches neither check above. Bump by hand when adding a rule.
         assert_eq!(
             RULE_ARGS.len(),
             23,
@@ -859,11 +813,9 @@ mod tests {
 
     #[test]
     fn zh_templates_only_use_placeholders_the_rules_emit() {
-        // The only place that can see both halves: which placeholders a rule
-        // fills (RULE_ARGS, itself pinned by the harvest) and which ones the
-        // translations reference. A typo here renders as a literal `{{witdh}}`
-        // on screen and in the exported report, since neither end substitutes
-        // unknown names.
+        // The only place that can see both halves: which placeholders a rule fills
+        // and which ones the translations reference. A typo renders as a literal
+        // `{{witdh}}`, since neither end substitutes unknown names.
         let path =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/i18n/locales/zh.json");
         let raw = std::fs::read_to_string(&path)
@@ -903,17 +855,9 @@ mod tests {
 
     #[test]
     fn zh_template_keys_all_name_a_declared_rule() {
-        // The other direction of `zh_templates_only_use_placeholders_…`: that
-        // test walks declared rule id → JSON and skips what is missing, so a
-        // key the JSON has and no rule claims is invisible to it.
-        //
-        // It is not a harmless typo. `issueTemplates.ts` flattens with `.`
-        // regardless of nesting depth, so a flat `"texture.max_size": {...}`
-        // under `rules` — the shape a translator writes who does not know
-        // i18next reads `.` as nesting — produces exactly the key the report
-        // looks up. The panel then renders English (i18next misses) while the
-        // exported report renders Chinese, with every other gate green.
-        // A misspelled or undeclared id sits inert the same way.
+        // The other direction of `zh_templates_only_use_placeholders_…`, which walks
+        // declared rule id → JSON and skips what is missing, so a key the JSON has
+        // and no rule claims is invisible to it.
         let path =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/i18n/locales/zh.json");
         let raw = std::fs::read_to_string(&path)
@@ -923,9 +867,8 @@ mod tests {
 
         for segments in leaf_paths(&doc["issues"]["rules"]) {
             // Checked on the segments, not on the joined key: a flat
-            // `"texture.max_size"` joins to the same string a properly nested
-            // one does, which is exactly why the split is invisible in the
-            // rendered output and visible only here.
+            // `"texture.max_size"` joins to the same string a properly nested one
+            // does, which is why the split is visible only here.
             for segment in &segments {
                 assert!(
                     !segment.contains('.'),

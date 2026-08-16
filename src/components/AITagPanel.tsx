@@ -17,11 +17,9 @@ interface TagGroup {
   samples: string[];
 }
 
-/// Mirrors `analyzer::rule_suggest::RuleWarning` — AI rules that exist but
-/// didn't run. Worth rendering because nothing else in this panel would show
-/// it: rule groups and heuristic groups look identical, so a fallback reads
-/// as a working rule set. `kind` is the serde tag; keep both arms in step
-/// with the Rust enum.
+/// Mirrors `analyzer::rule_suggest::RuleWarning` — AI rules that exist but did
+/// not run. Rule groups and heuristic groups look identical, so a silent fallback
+/// reads as a working rule set. `kind` is the serde tag; keep both arms in step.
 type RuleWarning =
   | { kind: "rules_unreadable"; detail: string }
   | { kind: "invalid_pattern"; pattern: string; detail: string };
@@ -92,9 +90,8 @@ export function AITagPanel() {
   const handleReview = async () => {
     if (!activeProjectId || !rulesDoc) return;
     // Synthesize a minimal LearningResult from the saved rules so
-    // LearnReviewPanel can render. We don't have the original
-    // conventions / sample_tags / tag_gaps after persistence — only
-    // rules survived the round-trip — so those sections render empty.
+    // LearnReviewPanel can render. Only rules survive persistence, so the
+    // conventions / sample_tags / tag_gaps sections render empty.
     const synthesized: AiLearningResult = {
       inferred_conventions: {
         naming: "",
@@ -208,11 +205,9 @@ export function AITagPanel() {
 
   const handleApplyAll = async () => {
     if (!groups || groups.length === 0) return;
-    // Snapshot the project this apply-all targets. If the user switches projects
-    // mid-loop (Sidebar / Switcher), abort the remaining groups — the tags-store
-    // actions resolve the active project id LIVE, so they'd otherwise create the
-    // rest of the tags in the newly-active project. (The panel itself also closes
-    // on switch via uiStore's subscription; this stops the loop already running.)
+    // Snapshot the project this apply-all targets. The tags-store actions resolve
+    // the active project id LIVE, so a mid-loop switch would otherwise create the
+    // remaining tags in the newly-active project.
     const targetProjectId = useProjectStore.getState().activeProjectId;
     if (!targetProjectId) return;
     setApplyingAll(true);

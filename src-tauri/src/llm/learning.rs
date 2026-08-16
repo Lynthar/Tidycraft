@@ -1,16 +1,6 @@
-//! Learning-mode schemas (sampling + rule generation).
-//!
-//! Distinct from per-asset tagging (`TagRequest` / `TagResponse`) because:
-//!   - Input is whole-project metadata (samples + tag system + project
-//!     framing), not a list of specific assets.
-//!   - Output includes inferred conventions, tag-gap suggestions, and
-//!     LEARNED RULES (filename pattern → tags) that drive a local
-//!     RuleSuggester — the LLM is teacher, not labeler.
-//!   - Lives in its own file so the per-asset path stays readable.
-//!
-//! Persistence: serialized into `<project>/tidycraft.ai.toml` after the
-//! user reviews and accepts in LearnReviewPanel (Day 7+). Re-running
-//! learning overwrites this file; the toml comment header warns users.
+//! Learning-mode schemas. Input is whole-project metadata rather than a list of
+//! assets, and output includes inferred conventions, tag gaps and learned rules
+//! that drive a local RuleSuggester — the model is teacher, not labeler.
 
 use std::collections::HashMap;
 
@@ -18,10 +8,9 @@ use serde::{Deserialize, Serialize};
 
 use super::{project_meta::ProjectMeta, ExistingTagContext, TagCategory, Usage};
 
-/// Cache-busting version for the learning prompt + output schema.
-/// Bump on any change to `SYSTEM_PROMPT_LEARNING` semantics or
-/// `LearningResult` shape so older `tidycraft.ai.toml` files can be
-/// detected as stale (frontend nudges user to re-learn).
+/// Cache-busting version for the learning prompt and output schema. Bump on any
+/// change to `SYSTEM_PROMPT_LEARNING`'s semantics or `LearningResult`'s shape, so
+/// older `tidycraft.ai.toml` files can be detected as stale.
 pub const LEARNING_PROMPT_VERSION: u32 = 1;
 
 // ============ Inputs ============
@@ -81,11 +70,9 @@ pub struct InferredConventions {
     pub naming: String,
     /// Free-form: e.g. "Organized by faction; Characters/{name}/...".
     pub directories: String,
-    /// Per-existing-tag explanation of how the model interprets it.
-    /// Keys are tag names (matching `ExistingTagContext.name` in the
-    /// request). Values are the model's understanding sentence-level.
-    /// Useful for surfacing "the AI thinks `hero` means X" so the user
-    /// can correct misunderstandings via tag descriptions.
+    /// Per-existing-tag explanation of how the model interprets it, keyed by tag
+    /// name. Surfacing "the AI thinks `hero` means X" lets the user correct the
+    /// misunderstanding via a tag description.
     #[serde(default)]
     pub existing_tag_meanings: HashMap<String, String>,
 }
@@ -115,10 +102,8 @@ pub struct NewTagHint {
     pub confidence: f32,
 }
 
-/// A tag the model thinks the user's vocabulary is missing. Promoted
-/// to actual tag creation in LearnReviewPanel (Day 7+) — by default
-/// auto-created (per #6 decision), with the panel showing "AI added
-/// N new tags" so the user can revoke.
+/// A tag the model thinks the user's vocabulary is missing. Auto-created by the
+/// review panel, which shows "AI added N new tags" so the user can revoke.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TagGap {
     pub label: String,
@@ -128,14 +113,9 @@ pub struct TagGap {
     pub reason: String,
 }
 
-/// One heuristic rule the model derived. Fed into `RuleSuggester`
-/// (Day 7) which runs them across the full project to produce
-/// `TagGroup[]` for the existing AITagPanel UI.
-///
-/// The four `kind`s cover the patterns that came up across the design
-/// discussion. Free-form regex is included for power-user escape
-/// hatches, but the model is asked to prefer the simpler kinds when
-/// possible (regex is harder to edit and review).
+/// One heuristic rule the model derived, fed into `RuleSuggester`. Free-form
+/// regex is a power-user escape hatch; the model is asked to prefer the simpler
+/// kinds, which are easier to edit and review.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum LearnedRule {
@@ -169,11 +149,9 @@ pub enum LearnedRule {
         tags: Vec<String>,
         confidence: f32,
     },
-    /// Catch-all for `kind` values the model invents outside the schema
-    /// (e.g. "path_regex"). One hallucinated kind used to fail
-    /// deserialization of the ENTIRE already-paid learning response.
-    /// Never surfaces: [`LearningResult::drop_unknown_rules`] strips these
-    /// right after parse, and rule loading skips them defensively.
+    /// Catch-all for `kind` values the model invents outside the schema, so one
+    /// hallucinated kind cannot fail the whole already-paid response.
+    /// `drop_unknown_rules` strips these right after parse.
     #[serde(other)]
     Unknown,
 }
@@ -192,10 +170,8 @@ pub struct LearningResult {
 }
 
 impl LearningResult {
-    /// Strip rules whose `kind` fell into the [`LearnedRule::Unknown`]
-    /// catch-all. Called by every provider right after parsing, so
-    /// downstream consumers (review panel, rule store, suggester) never
-    /// see them.
+    /// Strip rules whose `kind` fell into [`LearnedRule::Unknown`]. Called by every
+    /// provider right after parsing, so downstream consumers never see them.
     pub fn drop_unknown_rules(&mut self) {
         let before = self.rules.len();
         self.rules.retain(|r| !matches!(r, LearnedRule::Unknown));
@@ -256,10 +232,9 @@ mod tests {
 
     #[test]
     fn missing_optional_fields_default_cleanly() {
-        // LLM output is instructed NOT to emit `usage` (it's API
-        // metadata, filled in by the provider after parse), and older
-        // tidycraft.ai.toml files may lack sample_tags / tag_gaps /
-        // rules. All four must default rather than fail the load.
+        // The model is instructed NOT to emit `usage`, and older tidycraft.ai.toml
+        // files may lack sample_tags / tag_gaps / rules. All four must default
+        // rather than fail the load.
         let json = r#"{
             "inferred_conventions": {
                 "naming": "",
@@ -278,11 +253,9 @@ mod tests {
 
     #[test]
     fn parses_llm_response_shape_without_usage_field() {
-        // Regression for the learn_project parse path:
         // SYSTEM_PROMPT_LEARNING tells the model to emit exactly
-        // {inferred_conventions, sample_tags, tag_gaps, rules} with no
-        // `usage`. Deserialization must accept that shape across every
-        // LearnedRule kind.
+        // {inferred_conventions, sample_tags, tag_gaps, rules} with no `usage`.
+        // Deserialization must accept that across every LearnedRule kind.
         let json = r#"{
             "inferred_conventions": {
                 "naming": "PascalCase with type prefix",

@@ -1,13 +1,6 @@
-//! Per-project filesystem watcher.
-//!
-//! Uses `notify-debouncer-full` to coalesce OS filesystem events (editors often
-//! write-and-rename in bursts), then re-parses affected files and emits a
-//! single `fs-change-{project_id}` Tauri event per debounce window.
-//!
-//! The watcher holds its `Debouncer` handle inside `ProjectState.watcher` — when
-//! the project is unregistered, the state (and thus the debouncer) drops, which
-//! tears down the OS watch and closes the event channel; the processing thread
-//! exits naturally on channel close.
+//! Per-project filesystem watcher. `notify-debouncer-full` coalesces OS events,
+//! affected files are re-parsed, and one `fs-change-{project_id}` Tauri event is
+//! emitted per debounce window. Dropping `ProjectState.watcher` tears it down.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -28,12 +21,9 @@ use crate::scanner::{self, AssetInfo, AssetType, DirectoryNode, ProjectType};
 
 const DEBOUNCE_WINDOW: Duration = Duration::from_millis(500);
 
-/// One external rename the watcher recognized — either a stitched pair from
-/// the debouncer (`RenameMode::Both`) or a remove+create joined by identity
-/// (`match_orphans`). The frontend uses these to re-point selection and to
-/// know the backend migrated tag bindings; the scan delta itself still
-/// travels as `removed` (old path) + `updated` (new entry), so the merge
-/// contract is unchanged.
+/// One external rename the watcher recognized: a stitched pair from the
+/// debouncer or a remove+create joined by identity. The scan delta still travels
+/// as `removed` (old path) + `updated` (new entry); `renamed` is additive.
 #[derive(Debug, Clone, Serialize)]
 pub struct RenamedPair {
     pub from: String,
@@ -76,10 +66,8 @@ pub fn start(
     }
 
     // Built once at watcher start so FS events apply the same `.gitignore`
-    // exclusions the scan used — otherwise a scan-excluded file (e.g. inside
-    // Unity's gitignored `Library/`, which Unity rewrites constantly) would
-    // get re-added to the cached scan on every modification. `None` when the
-    // project scanned with gitignore off.
+    // exclusions the scan used. `None` when the project scanned with gitignore
+    // off.
     let ignore_matcher = scanner::build_gitignore_matcher(&root_buf, respect_gitignore);
 
     let (tx, rx) = mpsc::channel::<DebounceEventResult>();
@@ -95,15 +83,8 @@ pub fn start(
         .map_err(|e| format!("Failed to watch path: {}", e))?;
 
     // Populate the debouncer's file-id cache for everything already under the
-    // root. Without this, rename stitching is dead on Windows and macOS: those
-    // backends attach no tracker (Windows emits bare From/To, FSEvents bare
-    // `Any`), so the debouncer can only match a rename's two halves by
-    // comparing file ids — and 0.3.x fills its cache exclusively through this
-    // call plus later events. `add_root` walks the tree once (one metadata
-    // handle per file; the scan that just finished leaves the OS metadata
-    // cache warm), after which the debouncer maintains it on every
-    // create/remove/rename itself. Linux pairs by inotify cookie and would
-    // work without this, but the cache keeps behavior uniform.
+    // root: on Windows and macOS the backends attach no tracker, so rename
+    // stitching can only match halves by file id, and 0.3.x fills it here.
     debouncer
         .cache()
         .add_root(root_buf.clone(), RecursiveMode::Recursive);
@@ -139,10 +120,9 @@ pub fn start(
                 }
             };
 
-            // Stitched rename pairs are handled as renames (tags follow, scan
-            // re-keys); every other event contributes bare paths to the
-            // existence-driven pipeline below, exactly as before renames were
-            // understood at all.
+            // Stitched rename pairs are handled as renames (tags follow, the
+            // scan re-keys); every other event contributes bare paths to the
+            // existence-driven pipeline below.
             let (raw_pairs, mut single_paths) = split_batch(&events);
 
             let mut pairs: Vec<(PathBuf, PathBuf)> = Vec::new();
@@ -155,16 +135,9 @@ pub fn start(
 
             let mut candidates: HashSet<PathBuf> = HashSet::new();
             for path in single_paths {
-                // A `.meta` change is really a change to its host asset's
-                // Unity metadata (the GUID) — remap to the host so it gets
-                // re-parsed. `is_trackable_path` below drops sidecars, so
-                // without this the cached `unity_guid` goes stale until
-                // the next full rescan whenever Unity (re)generates one.
-                //
-                // Godot's `.import` / `.uid` get no such remap on purpose:
-                // `AssetInfo` has no field derived from them, so a change
-                // to one leaves every value we hold correct. They are
-                // simply dropped by the filter below.
+                // A `.meta` change is a change to its host asset's Unity GUID —
+                // remap to the host so it gets re-parsed. Godot's `.import` and
+                // `.uid` get no remap: no `AssetInfo` field derives from them.
                 if let Some(host) = meta_host_path(&path) {
                     candidates.insert(host);
                 } else {
@@ -180,23 +153,16 @@ pub fn start(
                     }
                     if p.is_dir() {
                         // An existing directory event. A directory that appears
-                        // wholesale — moved or copied into the project — is
-                        // reported as ONE event on the directory path with none
-                        // for its children, so it must survive filtering for
-                        // apply_changes to list what's inside. (Windows reports
-                        // a cross-directory folder move as plain REMOVED+ADDED,
-                        // never a rename pair, so this is also half of how a
-                        // moved folder's tags survive — see `match_orphans`.)
+                        // wholesale is reported as ONE event on the directory
+                        // path, with none for its children.
                         path_shape_trackable(p, &thread_root)
                     } else if p.exists() {
                         // Existing file: track only real asset files (extensioned).
                         is_trackable_path(p, &thread_root)
                     } else {
-                        // Deletion: the path is gone. It may be a tracked file, or a
-                        // directory whose removal macOS coalesces into one event on
-                        // the extensionless directory path. Let it through (dropping
-                        // the extension requirement) so apply_changes can remove the
-                        // tracked files at or under it; keep the hidden/.meta guards.
+                        // Deletion: the path is gone. macOS coalesces a directory
+                        // removal into one event on the extensionless directory
+                        // path, so the extension requirement is dropped here.
                         path_shape_trackable(p, &thread_root)
                     }
                 })
@@ -231,11 +197,8 @@ pub fn start(
 }
 
 /// Split a debounced batch into stitched rename pairs and plain single-path
-/// candidates. Only `Modify(Name(RenameMode::Both))` with exactly two paths
-/// is a pair — the debouncer's stitched shape, `paths = [from, to]`.
-/// Everything else (unmatched From/To/Any halves, Create/Remove/Modify)
-/// contributes bare paths to the existence-driven pipeline, which is exactly
-/// how every event behaved before renames were understood at all.
+/// candidates. Only `Modify(Name(RenameMode::Both))` with exactly two paths is a
+/// pair; everything else feeds the existence-driven pipeline.
 fn split_batch(events: &[DebouncedEvent]) -> (Vec<(PathBuf, PathBuf)>, Vec<PathBuf>) {
     let mut pairs = Vec::new();
     let mut singles = Vec::new();
@@ -260,12 +223,11 @@ enum PairRoute {
     Fallback(Vec<PathBuf>),
 }
 
-/// Route a stitched pair. Pure decision (no syscalls) so it's testable; the
-/// filesystem probing happens later in `apply_changes`.
+/// Route a stitched pair. Pure computation, no syscalls; the filesystem probing
+/// happens later in `apply_changes`.
 fn route_pair(from: &Path, to: &Path, root: &Path) -> PairRoute {
     if from == to {
-        // Same-string pair (a file moved out of the tree and back within one
-        // window can stitch into this) — nothing changed that we can express.
+        // Same-string pair — nothing changed that can be expressed.
         return PairRoute::Fallback(Vec::new());
     }
     let is_sidecar = |p: &Path| {
@@ -274,10 +236,9 @@ fn route_pair(from: &Path, to: &Path, root: &Path) -> PairRoute {
             .is_some_and(crate::sidecar::is_sidecar_name)
     };
     if is_sidecar(from) || is_sidecar(to) {
-        // An engine renamed a sidecar (usually alongside its host asset's own
-        // pair). Sidecars are not assets, but a `.meta` To-side must still
-        // refresh its host's guid — the single-path pipeline's remap already
-        // does that. Route both halves there.
+        // An engine renamed a sidecar. Sidecars are not assets, but a `.meta`
+        // To-side must still refresh its host's guid, which the single-path
+        // remap does — route both halves there.
         return PairRoute::Fallback(vec![from.to_path_buf(), to.to_path_buf()]);
     }
     if !path_shape_trackable(from, root) && !path_shape_trackable(to, root) {
@@ -298,11 +259,9 @@ struct ProbedPair {
     to_is_dir: bool,
     /// New path passes shape + gitignore — it belongs in the scan.
     to_visible: bool,
-    /// The old path is occupied again by flush time — the safe-save pattern
-    /// (an editor renames `a.png` → `a.png.bak` and writes a fresh `a.png` in
-    /// the same burst). The rename is physically real, but the user's tag
-    /// belongs to the ROLE at the old path, which is alive again — migrating
-    /// would walk it off to the backup file.
+    /// The old path is occupied again by flush time — the safe-save pattern. The
+    /// rename is physically real, but the tag belongs to the role at the old
+    /// path, which is alive again.
     from_reoccupied: bool,
     /// Scan-side payload for a visible file target: re-keyed from the cached
     /// entry when the extension is unchanged, else freshly parsed.
@@ -314,10 +273,9 @@ enum Probe {
     /// Existing file that parsed. Boxed: `AssetInfo` dwarfs the other
     /// variants and probes travel in a per-batch `Vec`.
     Parsed(Box<AssetInfo>),
-    /// Existing directory — its trackable descendants, parsed. A directory
-    /// that appears wholesale (moved or copied into the project) delivers ONE
-    /// event on the directory path and none for its children, so they must be
-    /// listed here or the subtree stays invisible until a full rescan.
+    /// Existing directory — its trackable descendants, parsed. A directory that
+    /// appears wholesale delivers ONE event on the directory path and none for
+    /// its children, so they must be listed here.
     DirListing(Vec<AssetInfo>),
     /// Path is gone — remove every tracked asset at or under it.
     Vanished(PathBuf),
@@ -325,12 +283,9 @@ enum Probe {
     Nothing,
 }
 
-/// Recursively parse the trackable assets under `dir`, applying the same
-/// filters the watcher applies to individual events (gitignore, hidden
-/// components, sidecars, extension required). Depth-bounded because this is a
-/// hand-rolled walk (`read_dir` + `is_dir` follow symlinks, and a link loop
-/// would otherwise recurse forever — the scanner's `WalkBuilder` handles that
-/// internally, but pulling it in here for a per-event subtree is overkill).
+/// Recursively parse the trackable assets under `dir`, applying the same filters
+/// the watcher applies to individual events. Depth-bounded: `read_dir` +
+/// `is_dir` follow symlinks, so a link loop would otherwise recurse forever.
 fn collect_dir_assets(
     dir: &Path,
     root: &Path,
@@ -379,14 +334,9 @@ struct OrphanMatch {
     preserved: HashSet<String>,
 }
 
-/// Pair vanished assets with appeared ones by identity triple `(file name,
-/// size, mtime)` — the shape a cross-directory move leaves on Windows, where
-/// ReadDirectoryChangesW reports plain REMOVED + ADDED and the debouncer has
-/// no rename halves to stitch. A move preserves all three fields; genuinely
-/// new content matches none (a `git checkout` rewrite arrives with a fresh
-/// mtime). Only bijective (1 vanished ↔ 1 appeared) triples pair up: with
-/// several identical candidates there is no telling which file went where,
-/// and guessing would hand one file's tags to another.
+/// Pair vanished assets with appeared ones by identity triple `(file name, size,
+/// mtime)` — the shape a cross-directory move leaves on Windows. Only bijective
+/// (1 vanished ↔ 1 appeared) triples pair up; ambiguity would misassign tags.
 fn match_orphans(removed: &[OrphanInfo], added: &[OrphanInfo]) -> OrphanMatch {
     type Triple = (String, u64, u64);
     let mut by_triple: HashMap<Triple, (Vec<usize>, Vec<usize>)> = HashMap::new();
@@ -473,28 +423,8 @@ fn upsert_asset(
 }
 
 /// Apply a batch of stitched rename pairs plus single-path candidates to the
-/// project's cached scan result.
-///
-/// Pairs: tags migrate (`from → to`), the scan re-keys (directory pairs
-/// re-key their whole subtree — the OS reports one event on the directory and
-/// none for children). Candidates keep the existence-driven semantics: parse
-/// what exists, sweep what vanished. Vanished-and-appeared candidates that
-/// share an identity triple are joined into renames too (`match_orphans` —
-/// Windows reports cross-directory moves as plain REMOVED+ADDED). Only what
-/// remains genuinely vanished gets its tag bindings reaped, and ambiguous
-/// matches are preserved unreaped: since this is the app's one data-loss
-/// surface, the bias is "when unsure, keep".
-///
-/// Returns an `FsChangeEvent` describing the net change (`removed` carries
-/// old paths, `updated` new entries, so the frontend merge contract is
-/// unchanged; `renamed` is additive), or `Err` if nothing ended up changing
-/// or the project had no cached scan yet.
-///
-/// Tag bookkeeping runs as a second `with_mut` pass (same two-pass shape as
-/// before: a sibling `&mut state.tags_data` inside the scan pass would need a
-/// destructure). The gap between the passes is safe: the only thing that
-/// reaps bindings is this function itself, and it migrates before it reaps
-/// within that single second pass.
+/// project's cached scan result. Returns an `FsChangeEvent` describing the net
+/// change, or `Err` when nothing changed or the project has no cached scan.
 fn apply_changes(
     project_id: &str,
     pairs: &[(PathBuf, PathBuf)],
@@ -528,10 +458,8 @@ fn apply_changes(
     })?;
 
     // ---- Phase 1: probe + parse, outside the lock ------------------------
-    // Parsing decodes image headers, model geometry and audio streams; under
-    // a `git checkout` or a bulk export a 500ms batch can carry hundreds.
-    // Doing that inside `with_mut` meant the watcher owned the project lock
-    // for the whole burst, blocking every command for that project.
+    // Parsing decodes image headers, model geometry and audio streams, and one
+    // 500ms batch can carry hundreds — the project lock is not held for it.
     let probed_pairs: Vec<ProbedPair> = pairs
         .iter()
         .map(|(from, to)| {
@@ -551,11 +479,9 @@ fn apply_changes(
                     .map(|e| e.to_string_lossy().to_string())
                     .unwrap_or_default();
                 match old_infos.get(&from_str) {
-                    // Renames don't change bytes: re-key the cached entry
-                    // instead of re-reading the file (a large mesh would
-                    // otherwise fully re-parse for a name change). Only while
-                    // the extension is unchanged — `metadata`'s shape belongs
-                    // to the asset type.
+                    // Renames don't change bytes: re-key the cached entry rather
+                    // than re-read the file, but only while the extension is
+                    // unchanged — `metadata`'s shape belongs to the asset type.
                     Some(old) if old.extension.eq_ignore_ascii_case(&new_ext) => {
                         Some(scanner::rekey_asset_info(old, to, &project_type))
                     }
@@ -600,17 +526,14 @@ fn apply_changes(
         })
         .collect();
 
-    // Tag moves owed by the stitched pairs — decided before the scan pass so
-    // they happen even when the scan itself has nothing visible to change
-    // (e.g. a rename between untracked locations whose binding is parked from
-    // an earlier rename-out).
+    // Tag moves owed by the stitched pairs, decided before the scan pass so they
+    // happen even when the scan itself has nothing visible to change.
     let mut tag_migrations: Vec<TagMigration> = Vec::new();
     for p in &probed_pairs {
         if p.to_is_dir {
-            // Tags always follow a renamed directory: the files under it
-            // physically moved, so a binding left at the old prefix is
-            // guaranteed dead. (The file-level safe-save guard doesn't apply
-            // — no editor does directory-level backup renames.)
+            // Tags always follow a renamed directory: the files under it moved,
+            // so a binding left at the old prefix is dead. No editor does
+            // directory-level backup renames, so the safe-save guard is moot.
             tag_migrations.push(TagMigration::DirPrefix {
                 from: p.from.clone(),
                 to: p.to.clone(),
@@ -654,10 +577,9 @@ fn apply_changes(
         // never the other way around.
         for pair in &probed_pairs {
             if pair.to_is_dir && pair.to_visible {
-                // Directory rename: one OS event, zero child events. Re-key
-                // every tracked descendant or the subtree falls out of the
-                // scan until the next full rescan (and, before this existed,
-                // its tags were reaped as orphans).
+                // Directory rename: one OS event, zero child events. Re-key every
+                // tracked descendant or the subtree falls out of the scan until
+                // the next full rescan.
                 for idx in 0..scan_result.assets.len() {
                     if path_within(&scan_result.assets[idx].path, &pair.from_path) {
                         let old_path = scan_result.assets[idx].path.clone();
@@ -678,10 +600,9 @@ fn apply_changes(
                     is_dir: true,
                 });
             } else if let Some(new_info) = pair.parsed_to.as_ref() {
-                // File rename with a visible, parseable target. Drop the old
-                // entry first (also the clobbered target entry on a
-                // rename-over), then land the new one — strictly sequenced so
-                // the index map never aliases.
+                // File rename with a visible, parseable target. Drop the old entry
+                // first (and the clobbered target on a rename-over), then land the
+                // new one, so the index map never aliases.
                 if let Some(&idx) = path_to_idx.get(&pair.from) {
                     // Drops the map entry for `from` and re-points whatever
                     // swap_remove relocated into the hole.
@@ -703,10 +624,9 @@ fn apply_changes(
                     });
                 }
             } else {
-                // Target invisible (renamed into an ignored/hidden path) or
-                // already gone again — the asset left the visible set. Its
-                // binding still migrates (recorded above): it sits out the
-                // exile on the invisible path and comes back if the file does.
+                // Target invisible (renamed into an ignored or hidden path) or
+                // gone again — the asset left the visible set. Its binding still
+                // migrates and comes back if the file does.
                 pair_vanish.push(&pair.from_path);
             }
         }
@@ -737,11 +657,9 @@ fn apply_changes(
             }
         }
 
-        // -- Sweep vanished subtrees. An exact-match file, or — when macOS
-        // coalesces a directory removal into one event on the (extensionless)
-        // directory path — all of that directory's tracked descendants.
-        // Without this, deleting a folder from outside the app leaves phantom
-        // assets in the scan and the directory tree.
+        // -- Sweep vanished subtrees: an exact-match file, or every tracked
+        // descendant when macOS coalesces a directory removal into one event on
+        // the extensionless directory path.
         for (gone, is_orphan) in pair_vanish
             .iter()
             .map(|p| (*p, false))
@@ -794,10 +712,9 @@ fn apply_changes(
             return Ok((None, reap, matches.pairs));
         }
 
-        // Frontend merge applies `removed` before `updated`, so a path in
-        // both (safe-save: old entry dropped by the pair, fresh parse
-        // re-added it) nets out correctly. Deduplicate `updated` by path,
-        // last write wins, and drop claims about paths no longer tracked.
+        // The frontend merge applies `removed` before `updated`, so a path in
+        // both nets out correctly. Deduplicate `updated` by path, last write
+        // wins, and drop claims about paths no longer tracked.
         let mut dedup_idx: HashMap<String, usize> = HashMap::new();
         let mut deduped: Vec<AssetInfo> = Vec::new();
         for info in updated {
@@ -852,11 +769,9 @@ fn apply_changes(
     if !tag_migrations.is_empty() || !reap.is_empty() {
         let _ = project::with_mut(project_id, |state| {
             if !tag_migrations.is_empty() {
-                // Migrations are data preservation — load the tags file if it
-                // wasn't touched this session rather than silently dropping
-                // the move. (The reap-only branch keeps the lazy gate:
-                // loading from disk just to delete orphans is churn, and an
-                // unloaded orphan stays harmlessly on disk.)
+                // Migrations are data preservation — load the tags file even if it
+                // was untouched this session. The reap-only branch stays lazy: an
+                // unloaded orphan sits harmlessly on disk.
                 let tags = state.ensure_tags();
                 for m in &tag_migrations {
                     match m {
@@ -908,13 +823,9 @@ fn meta_host_path(path: &Path) -> Option<PathBuf> {
     Some(path.with_file_name(host))
 }
 
-/// Path-shape checks shared by tracked asset files and tracked-path
-/// *deletions*: the path is inside `root`, has no hidden path components, and
-/// its file name is neither a dotfile nor an engine sidecar. Unlike
-/// `is_trackable_path` this does NOT require an extension — a deleted directory
-/// (which macOS surfaces as a single event on the extensionless directory
-/// path, never per-child removals) must still be processed so its tracked
-/// children can be removed.
+/// Path-shape checks shared by tracked asset files and tracked-path deletions:
+/// inside `root`, no hidden path components, and a file name that is neither a
+/// dotfile nor an engine sidecar. Unlike `is_trackable_path`, no extension needed.
 fn path_shape_trackable(path: &Path, root: &Path) -> bool {
     let rel = match path.strip_prefix(root) {
         Ok(r) => r,
@@ -948,9 +859,8 @@ fn path_within(asset_path: &str, deleted: &Path) -> bool {
 }
 
 /// Whether `path` is excluded by the project's `.gitignore` rules, using the
-/// matcher built at watcher start. A `None` matcher (gitignore disabled for
-/// this project) is never ignored. Matching is lexical, so it also correctly
-/// rejects deletions of paths that were never tracked.
+/// matcher built at watcher start. A `None` matcher never ignores. Matching is
+/// lexical, so deletions of never-tracked paths are rejected correctly too.
 fn is_gitignored(path: &Path, root: &Path, matcher: Option<&scanner::IgnoreMatcher>) -> bool {
     let Some(matcher) = matcher else {
         return false;
@@ -988,11 +898,9 @@ mod tests {
     use std::time::Instant;
     use tempfile::tempdir;
 
-    /// Create `files` under `dir`, parse them into a cached scan, register
-    /// the project, and return the normalized asset paths. Content is the
-    /// file's own relative name so same-named files in different directories
-    /// get equal sizes (what a real copy/move produces) while different names
-    /// differ.
+    /// Create `files` under `dir`, parse them into a cached scan, register the
+    /// project, and return the normalized asset paths. Content is the file's own
+    /// relative name, so same-named files get equal sizes and others differ.
     fn setup_project(id: &str, dir: &Path, files: &[&str]) -> Vec<String> {
         let mut assets = Vec::new();
         let mut paths = Vec::new();
@@ -1303,10 +1211,8 @@ mod tests {
         assert_eq!(tags_at(id, &paths[0]), 0);
     }
 
-    /// Two identical files (same name, size, mtime) moved in one batch: there
-    /// is no telling which went where, and guessing would hand one file's
-    /// tags to the other. Bindings stay at the old paths, unreaped — rename
-    /// back and they are still there.
+    /// Two identical files (same name, size, mtime) moved in one batch: there is
+    /// no telling which went where, so bindings stay at the old paths, unreaped.
     #[test]
     fn ambiguous_identity_preserves_bindings_unreaped() {
         let dir = tempdir().unwrap();
@@ -1495,10 +1401,8 @@ mod tests {
     }
 
     // macOS coalesces `rm -rf <dir>` into a single event on the extensionless
-    // *directory* path (never per-child Remove events). That path must survive
-    // filtering so `apply_changes` can drop the tracked files beneath it —
-    // otherwise deleting the selected folder leaves the scan (and the
-    // selected-directory reconcile) filtering against a ghost path.
+    // directory path. That path must survive filtering so `apply_changes` can
+    // drop the tracked files beneath it.
     #[test]
     fn deleted_directory_path_is_shape_trackable_despite_no_extension() {
         let root = Path::new("/proj");

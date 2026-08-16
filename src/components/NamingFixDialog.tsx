@@ -18,10 +18,9 @@ interface NamingFixDialogProps {
   onComplete: (fullySucceeded: boolean, renamedCount: number) => void;
 }
 
-/// Cap on rendered rows. A strict project (Kenney with a `T_` prefix rule) can
-/// have tens of thousands of auto-fixable issues; rendering them all as
-/// non-virtualized table rows stalls the webview (the duplicate-group lesson).
-/// Apply still operates on the full included set — only the display is capped.
+/// Cap on rendered rows. A strict project can have tens of thousands of
+/// auto-fixable issues, and rendering them all as non-virtualized table rows
+/// stalls the webview. Apply still operates on the full included set.
 const RENDER_CAP = 200;
 
 /// Parent directory + case-folded name — the key on which two proposed renames
@@ -33,11 +32,9 @@ function targetKey(path: string, name: string): string {
   return JSON.stringify([parent.toLowerCase(), name.toLowerCase()]);
 }
 
-/// Review + apply auto-fixable naming renames. Fetches proposals from
-/// `preview_naming_fixes` (same config the analysis used), lets the user
-/// exclude or hand-edit any target, warns about Godot `res://` references, and
-/// applies through `apply_naming_fixes` — one undo batch, tags carried, .meta
-/// sidecars carried. Mounted inline by IssueList (like DeleteConfirmDialog).
+/// Review and apply auto-fixable naming renames: proposals from
+/// `preview_naming_fixes` (same config the analysis used), hand-editable, with
+/// Godot `res://` warnings, applied through `apply_naming_fixes` as one batch.
 export function NamingFixDialog({ isOpen, onClose, scopePaths, onComplete }: NamingFixDialogProps) {
   const { t } = useTranslation();
   const activeProjectId = useProjectStore((s) => s.activeProjectId);

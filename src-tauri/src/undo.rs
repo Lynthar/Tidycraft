@@ -1,9 +1,6 @@
-//! 撤销管理模块
-//!
-//! 批量文件操作的撤销栈。v2 (Phase 3.1): 历史持久化到
-//! `{data_dir}/tidycraft/undo/{sha256(root)[..16]}.json`,每次
-//! record_batch / undo / clear 后落盘,register_project 时回读。
-//! 文件在用户/磁盘操作失败时只记录不崩,保证撤销功能本身不阻塞主流程。
+//! Undo stack for batch file operations. History is persisted to
+//! `{data_dir}/tidycraft/undo/{sha256(root)[..16]}.json` after every record,
+//! undo and clear, and read back when the project is registered.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -11,95 +8,71 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// 单个文件操作记录
+/// One recorded file operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileOperation {
-    /// 操作类型
     pub operation_type: OperationType,
-    /// 原始路径
     pub original_path: String,
-    /// 新路径（重命名/移动后）
+    /// Destination after a rename or move.
     pub new_path: Option<String>,
-    /// 操作时间戳
     pub timestamp: u64,
 }
 
-/// 操作类型枚举
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum OperationType {
-    /// 重命名操作
     Rename,
-    /// 移动操作（预留）
     Move,
-    /// 删除操作（预留，需要备份机制）
+    /// Not undoable — there is no backup mechanism.
     Delete,
 }
 
-/// 批量操作记录
+/// One recorded batch of file operations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatchOperation {
-    /// 唯一标识符
     pub id: String,
-    /// 操作描述
     pub description: String,
-    /// 包含的文件操作列表
     pub operations: Vec<FileOperation>,
-    /// 操作时间戳
     pub timestamp: u64,
-    /// 是否已撤销
     pub undone: bool,
 }
 
-/// 撤销操作结果
+/// Outcome of one undo.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UndoResult {
-    /// 是否成功
     pub success: bool,
-    /// 成功撤销的文件数
     pub reverted_count: usize,
-    /// 失败的文件数
     pub failed_count: usize,
-    /// 错误信息列表
     pub errors: Vec<String>,
-    /// 被撤销的操作描述
     pub operation_description: String,
-    /// 本次**实际还原成功**的 `(原路径, 新路径)` 对。命令层用它把标签绑定迁回
-    /// (new_path → original)——只迁移真正搬回去了的文件,所以部分失败的撤销不会把
-    /// 仍停在 new_path 的文件的标签剥走(旧实现用 `original.exists()` 猜测,在
-    /// 「original 被无关占位文件顶替」时会误判)。不序列化给前端。
+    /// The `(original, new)` pairs that were actually restored. The command
+    /// layer migrates tag bindings back along these, so a partially failed undo
+    /// leaves the still-moved files' tags where they are. Not sent to the frontend.
     #[serde(skip)]
     pub reverted_pairs: Vec<(String, String)>,
 }
 
-/// 历史记录摘要（用于 UI 显示）
+/// History summary for the interface.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistoryEntry {
-    /// 操作 ID
     pub id: String,
-    /// 操作描述
     pub description: String,
-    /// 文件数量
     pub file_count: usize,
-    /// 时间戳
     pub timestamp: u64,
-    /// 是否可撤销（未被撤销且是最近的操作）
+    /// True only for the most recent batch that has not been undone.
     pub can_undo: bool,
 }
 
-/// 撤销历史管理器
+/// Bounded, disk-persisted undo history for one project.
 pub struct UndoManager {
-    /// 操作历史栈
     history: Vec<BatchOperation>,
-    /// 最大历史记录数
     max_history: usize,
-    /// 磁盘持久化路径。`None` 表示纯内存(测试 / fallback)。
+    /// Disk persistence target. `None` means in-memory only.
     persist_path: Option<PathBuf>,
 }
 
 impl UndoManager {
-    /// 创建纯内存的撤销管理器(无持久化)。主要给测试用;生产代码走
-    /// `load_for_project`。
+    /// In-memory only, for tests; production goes through `load_for_project`.
     pub const fn new(max_history: usize) -> Self {
         Self {
             history: Vec::new(),
@@ -108,8 +81,8 @@ impl UndoManager {
         }
     }
 
-    /// 为某个项目构造 UndoManager,并从磁盘读回历史(如果存在)。
-    /// 回读后会按 `max_history` trim 掉过旧的批次。
+    /// Build a manager for a project, reading its history back from disk and
+    /// trimming to `max_history`.
     pub fn load_for_project(project_root: &Path, max_history: usize) -> Self {
         let persist_path = Self::persist_path_for(project_root);
         let history = persist_path
@@ -124,12 +97,9 @@ impl UndoManager {
         }
     }
 
-    /// 从 `path` 读回历史并按 `max_history` 保留最新的若干条。
-    ///
-    /// 文件缺失是正常的「还没有历史」→ 空。但**存在却解析不了**的文件不能
-    /// 静默退化为空:下一次 `record_batch` 的 `save_to_disk` 会盖掉它,用户
-    /// 那份(很可能还能救的)历史就永久没了,且全程无任何痕迹。所以先把损坏
-    /// 文件挪到 `.corrupt` 备份再从空开始——与 `tags.rs::load` 同一套纪律。
+    /// Read history from `path`, keeping the newest `max_history` entries. A
+    /// file that exists but will not parse is moved aside to `.corrupt` rather
+    /// than silently treated as empty.
     fn read_history_from(path: &Path, max_history: usize) -> Vec<BatchOperation> {
         if !path.exists() {
             return Vec::new();
@@ -141,7 +111,7 @@ impl UndoManager {
                     return loaded[start..].to_vec();
                 }
                 Err(e) => {
-                    // 保留最早那份备份(最可能是完整的),别让后一次损坏覆盖它。
+                    // Keep the earliest backup; a later corruption must not replace it.
                     let backup = path.with_extension("json.corrupt");
                     if !backup.exists() {
                         let _ = fs::rename(path, &backup);
@@ -158,22 +128,20 @@ impl UndoManager {
         Vec::new()
     }
 
-    /// 把历史原子写入 `path`(建父目录)。错误**向上传播**,由 `save_to_disk`
-    /// 负责记日志——写盘持续失败意味着每次重启都丢光撤销历史,静默吞掉它
-    /// 等于让这种故障永远查不出来。
+    /// Write the history to `path` atomically, creating the parent directory.
+    /// Errors propagate; `save_to_disk` logs them.
     fn write_history_to(path: &Path, history: &[BatchOperation]) -> std::io::Result<()> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
         let json = serde_json::to_string_pretty(history)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        // Atomic (temp + rename): a crash mid-write must not tear the
-        // persisted undo history — same discipline as tags.rs.
+        // Atomic (temp + rename): a crash mid-write must not tear the history.
         crate::fs_atomic::write_atomic(path, json.as_bytes())
     }
 
-    /// 以项目根路径的 SHA256(前 16 hex) 做文件名,避免路径特殊字符 /
-    /// 冲突问题,也能跨 app 会话稳定命中同一文件。
+    /// File name is the SHA256 (first 16 hex) of the project root: stable across
+    /// sessions and free of path characters.
     fn persist_path_for(project_root: &Path) -> Option<PathBuf> {
         let mut hasher = Sha256::new();
         hasher.update(project_root.to_string_lossy().as_bytes());
@@ -185,9 +153,8 @@ impl UndoManager {
         })
     }
 
-    /// 写盘 best-effort:失败不阻塞撤销操作(内存里的历史照常可用),但**必须
-    /// 留下日志**——否则一个持续写不进去的数据目录表现为「每次重启撤销历史
-    /// 都空了」,没有任何线索可查。
+    /// Best-effort: a failed write never blocks the undo itself, but it must be
+    /// logged — silence looks like "the history is empty again after restart".
     fn save_to_disk(&self) {
         let Some(path) = &self.persist_path else {
             return;
@@ -200,7 +167,7 @@ impl UndoManager {
         }
     }
 
-    /// 记录一次批量操作
+    /// Record one batch of operations.
     pub fn record_batch(&mut self, description: String, operations: Vec<FileOperation>) -> String {
         let id = generate_operation_id();
         let timestamp = current_timestamp();
@@ -215,7 +182,7 @@ impl UndoManager {
 
         self.history.push(batch);
 
-        // 超过最大历史记录数时移除最旧的
+        // Drop the oldest beyond the limit.
         while self.history.len() > self.max_history {
             self.history.remove(0);
         }
@@ -224,23 +191,19 @@ impl UndoManager {
         id
     }
 
-    /// 撤销最近一次未撤销的操作
+    /// Undo the most recent batch that has not been undone.
     pub fn undo_last(&mut self) -> Option<UndoResult> {
-        // 查找最近一个未撤销的操作
         let index = self.history.iter().rposition(|op| !op.undone)?;
 
         let batch = &self.history[index];
         let description = batch.description.clone();
 
-        // 执行撤销
         let had_operations = !batch.operations.is_empty();
         let result = execute_batch_undo(&batch.operations);
 
-        // 标记为已撤销。全败(一个都没回滚)时**不**标记:失败几乎总是暂时且
-        // 可修复的——文件被 Photoshop/Unity 占用、盘符临时不可用——烧掉条目
-        // 就等于在用户关掉那个程序之后再也回不去了。部分成功仍然标记:重跑
-        // 会对已经回滚过的文件再次尝试并报错,不是可用的重试语义。
-        // `had_operations` 守住空批次,否则它会永远卡在栈顶。
+        // A batch where nothing reverted stays retryable: the cause is usually
+        // transient. Partial success still consumes it — a re-run would
+        // re-attempt files that already moved back. Empty batches are consumed.
         if result.reverted_count > 0 || !had_operations {
             self.history[index].undone = true;
             self.save_to_disk();
@@ -256,9 +219,8 @@ impl UndoManager {
         })
     }
 
-    /// 获取撤销历史列表
+    /// History, newest first.
     pub fn get_history(&self) -> Vec<HistoryEntry> {
-        // 找到最近一个未撤销的操作的索引
         let last_undoable_index = self.history.iter().rposition(|op| !op.undone);
 
         self.history
@@ -269,25 +231,24 @@ impl UndoManager {
                 description: op.description.clone(),
                 file_count: op.operations.len(),
                 timestamp: op.timestamp,
-                // 只有最近一个未撤销的操作可以撤销
                 can_undo: last_undoable_index == Some(i) && !op.undone,
             })
-            .rev() // 最新的在前面
+            .rev()
             .collect()
     }
 
-    /// 检查是否有可撤销的操作
+    /// Whether any batch can still be undone.
     pub fn can_undo(&self) -> bool {
         self.history.iter().any(|op| !op.undone)
     }
 
-    /// 清空历史记录
+    /// Drop the whole history.
     pub fn clear_history(&mut self) {
         self.history.clear();
         self.save_to_disk();
     }
 
-    /// 获取最近一次操作的描述
+    /// Description of the most recent batch that has not been undone.
     #[allow(dead_code)]
     pub fn get_last_operation_description(&self) -> Option<String> {
         self.history
@@ -296,7 +257,6 @@ impl UndoManager {
             .map(|op| op.description.clone())
     }
 
-    /// 获取历史记录数量
     #[allow(dead_code)]
     pub fn history_count(&self) -> usize {
         self.history.len()
@@ -309,29 +269,22 @@ impl Default for UndoManager {
     }
 }
 
-/// 判断两个路径是否指向**同一个文件**——按文件系统身份(Unix: dev+inode,
-/// Windows: 卷序列号+文件索引,经 `same-file` crate),而不是按文件名猜测。
-/// 任一路径不存在或元数据不可读时返回 false,调用方随即按「目标已存在」保守拒绝。
-///
-/// 用于改名/撤销的「目标已存在」守卫:目标 `exists()` 可能命中源文件自身
-/// (大小写不敏感文件系统上的纯大小写改名、macOS 的 NFC/NFD Unicode 变体),
-/// 这种改名必须放行;而大小写**敏感**文件系统(Linux)上 `foo.png` 与 `FOO.PNG`
-/// 可共存,旧的「文件名仅大小写不同即放行」在那里会让 `fs::rename` 静默覆盖
-/// 目标文件。按身份判断在两类文件系统上都正确。
+/// Whether two paths name the **same file** by filesystem identity (Unix
+/// dev+inode, Windows volume serial + file index). False when either path is
+/// missing or unreadable, so callers reject conservatively.
 pub(crate) fn paths_are_same_file(a: &Path, b: &Path) -> bool {
     same_file::is_same_file(a, b).unwrap_or(false)
 }
 
-/// 执行批量撤销
+/// Revert a batch, most recent operation first.
 fn execute_batch_undo(operations: &[FileOperation]) -> UndoResult {
     let mut reverted_count = 0;
     let mut failed_count = 0;
     let mut errors = Vec::new();
-    // 只收集真正还原成功的 (原路径, 新路径) 对,供命令层把标签迁回。失败的操作
-    // (源丢失 / 目标被占用)不进此列表,其标签因此留在 new_path 不被误迁。
+    // Only genuinely restored pairs, so the command layer never migrates tags
+    // off a file that stayed put.
     let mut reverted_pairs: Vec<(String, String)> = Vec::new();
 
-    // 反向遍历操作列表，按相反顺序撤销
     for op in operations.iter().rev() {
         match execute_single_undo(op) {
             Ok(()) => {
@@ -357,7 +310,7 @@ fn execute_batch_undo(operations: &[FileOperation]) -> UndoResult {
     }
 }
 
-/// 执行单个文件撤销操作
+/// Revert one file operation.
 fn execute_single_undo(operation: &FileOperation) -> Result<(), String> {
     match operation.operation_type {
         OperationType::Rename => {
@@ -369,7 +322,6 @@ fn execute_single_undo(operation: &FileOperation) -> Result<(), String> {
             let src = Path::new(new_path);
             let dst = Path::new(&operation.original_path);
 
-            // 检查源文件是否存在
             if !src.exists() {
                 return Err(format!(
                     "Source file not found: {} (file may have been modified)",
@@ -377,10 +329,8 @@ fn execute_single_undo(operation: &FileOperation) -> Result<(), String> {
                 ));
             }
 
-            // 检查目标路径是否已存在。dst.exists() 可能命中 src 自身(大小写不敏感
-            // 文件系统上撤销纯大小写改名、NFC/NFD 变体),这种情况放行——fs::rename
-            // 能正确改名;只有 dst 确实是**另一个文件**时才拒绝(大小写敏感文件系统
-            // 上同名异例可共存,按文件名猜测会静默覆盖它,按身份判断不会)。
+            // `dst.exists()` may resolve to `src` itself (case-only undo, NFC/NFD
+            // variant); only a genuinely different file blocks the undo.
             if dst.exists() && !paths_are_same_file(src, dst) {
                 return Err(format!(
                     "Target path already exists: {}",
@@ -388,25 +338,20 @@ fn execute_single_undo(operation: &FileOperation) -> Result<(), String> {
                 ));
             }
 
-            // Sidecar 与主文件同规,且在动主文件**之前**查:回迁目的地被另一个
-            // 文件占住时整项拒绝,免得主文件回去了、sidecar 回不去(资产与身份
-            // 分家)。大小写-only 场景由 rename_conflicts 的同文件判据放行。
+            // Sidecars are pre-flighted before the primary file moves, so a blocked
+            // destination refuses the whole item instead of splitting asset from identity.
             let sidecar_conflicts = crate::sidecar::rename_conflicts(src, dst);
             if !sidecar_conflicts.is_empty() {
                 return Err(sidecar_conflicts.join("; "));
             }
 
-            // 执行重命名
             fs::rename(src, dst).map_err(|e| {
                 format!(
                     "Failed to rename '{}' back to '{}': {}",
                     new_path, operation.original_path, e
                 )
             })?;
-            // 撤销也要对称连带引擎 sidecar(Unity .meta / Godot .import
-            // .uid)—— 否则把主文件名改回去却把 sidecar 留在新名上,反而
-            // 制造孤儿 + 断引用。Best-effort: 连带失败只记录,不回滚已成功
-            // 的主文件还原。
+            // Carry the engine sidecars back too; best-effort, logged on failure.
             if let Err(e) = crate::sidecar::carry_on_rename(src, dst) {
                 eprintln!(
                     "[undo] engine sidecar not carried back for {}: {}",
@@ -416,7 +361,6 @@ fn execute_single_undo(operation: &FileOperation) -> Result<(), String> {
             Ok(())
         }
         OperationType::Move => {
-            // 移动操作的撤销与重命名类似
             let new_path = operation
                 .new_path
                 .as_ref()
@@ -429,9 +373,7 @@ fn execute_single_undo(operation: &FileOperation) -> Result<(), String> {
                 return Err(format!("Source file not found: {}", new_path));
             }
 
-            // 与上面 Rename 分支同一判据(理由见那里的注释):`dst.exists()` 命中
-            // 源文件自身时必须放行,否则撤销永远失败——全败的批次不会被消费,
-            // 同一个错误每次重试都再来一遍。
+            // Same identity check as the Rename branch above.
             if dst.exists() && !paths_are_same_file(src, dst) {
                 return Err(format!(
                     "Target path already exists: {}",
@@ -439,13 +381,12 @@ fn execute_single_undo(operation: &FileOperation) -> Result<(), String> {
                 ));
             }
 
-            // Sidecar 预检,理由见 Rename 分支。
+            // Sidecar pre-flight, as in the Rename branch.
             let sidecar_conflicts = crate::sidecar::rename_conflicts(src, dst);
             if !sidecar_conflicts.is_empty() {
                 return Err(sidecar_conflicts.join("; "));
             }
 
-            // 确保目标目录存在
             if let Some(parent) = dst.parent() {
                 if !parent.exists() {
                     fs::create_dir_all(parent).map_err(|e| {
@@ -460,7 +401,7 @@ fn execute_single_undo(operation: &FileOperation) -> Result<(), String> {
                     new_path, operation.original_path, e
                 )
             })?;
-            // 移动撤销同样对称连带引擎 sidecar(见 Rename 分支说明)。
+            // Carry the engine sidecars back, as in the Rename branch.
             if let Err(e) = crate::sidecar::carry_on_rename(src, dst) {
                 eprintln!(
                     "[undo] engine sidecar not carried back for {}: {}",
@@ -469,21 +410,15 @@ fn execute_single_undo(operation: &FileOperation) -> Result<(), String> {
             }
             Ok(())
         }
-        OperationType::Delete => {
-            // 删除操作的撤销需要备份机制，目前不支持
-            Err("Undo for delete operations is not yet supported".to_string())
-        }
+        OperationType::Delete => Err("Undo for delete operations is not yet supported".to_string()),
     }
 }
 
-/// 生成唯一的操作 ID。用 uuid v4 —— 旧实现是 `秒级时间戳 ^ 栈地址`,而同一
-/// 调用点的栈地址通常不变,于是同一秒内记录的两批操作会生成相同 id,
-/// 按 id 查找的路径(如 undo 历史列表)命中第一个 → 关联到错误的批次。
+/// Unique operation id (uuid v4).
 fn generate_operation_id() -> String {
     format!("op_{}", uuid::Uuid::new_v4().simple())
 }
 
-/// 获取当前时间戳
 fn current_timestamp() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -496,7 +431,7 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
-    // ---- History persistence (the same discipline tags.rs already keeps) ----
+    // ---- History persistence ----
 
     fn a_batch(description: &str) -> BatchOperation {
         BatchOperation {
@@ -513,10 +448,8 @@ mod tests {
         }
     }
 
-    /// A history file that exists but won't parse must not degrade to "no
-    /// history": the next `record_batch` saves over it, and the user's route
-    /// back is gone with no way to tell it ever existed. `tags.rs` already
-    /// backs its file up for exactly this reason; this path did not.
+    /// A history file that exists but will not parse must not degrade to "no
+    /// history": the next `record_batch` would save over it.
     #[test]
     fn a_corrupt_history_file_is_preserved_rather_than_silently_dropped() {
         let dir = tempdir().unwrap();
@@ -535,9 +468,8 @@ mod tests {
         assert!(!path.exists(), "it is moved aside, not copied");
     }
 
-    /// Second corruption keeps the FIRST backup — that one is the likeliest
-    /// to be complete, and a fresh empty file overwriting it would finish the
-    /// job the corruption started.
+    /// The first backup is the likeliest to be complete, so a later corruption
+    /// must not overwrite it.
     #[test]
     fn an_existing_corrupt_backup_is_not_overwritten() {
         let dir = tempdir().unwrap();
@@ -568,9 +500,8 @@ mod tests {
         assert_eq!(descriptions, ["middle", "newest"]);
     }
 
-    /// A write that fails must reach a log, not `let _ =`. The manager keeps
-    /// working in memory either way, but a persistently unwritable history is
-    /// a silent loss of every undo across restarts.
+    /// A failed write must reach a log. The manager keeps working in memory,
+    /// but a persistently unwritable history loses every undo across restarts.
     #[test]
     fn a_failed_history_write_is_reported_rather_than_swallowed() {
         let dir = tempdir().unwrap();
@@ -588,10 +519,8 @@ mod tests {
         path.to_string_lossy().to_string()
     }
 
-    /// A batch where nothing could be reverted must stay retryable. The usual
-    /// cause is transient and fixable — the files are open in Photoshop/Unity,
-    /// or a drive is momentarily unavailable — so burning the entry destroys
-    /// the user's only route back once they close the other app.
+    /// A batch where nothing could be reverted must stay retryable — the usual
+    /// causes are transient (files open in another app, drive unavailable).
     #[test]
     fn a_totally_failed_undo_leaves_the_batch_retryable() {
         let mut manager = UndoManager::new(10);
@@ -626,9 +555,8 @@ mod tests {
         assert!(manager.undo_last().is_some(), "retry must find it again");
     }
 
-    /// Partial success still consumes the entry: re-running would re-attempt
-    /// the files that already moved back and error on them. Only a *total*
-    /// failure is retryable.
+    /// Partial success still consumes the entry: a re-run would re-attempt the
+    /// files that already moved back. Only a total failure is retryable.
     #[test]
     fn a_partial_undo_still_consumes_the_batch() {
         let dir = tempfile::tempdir().unwrap();
@@ -707,7 +635,7 @@ mod tests {
 
         assert_eq!(manager.history_count(), 3);
 
-        // 确保保留的是最新的 3 个操作
+        // The newest three survive.
         let history = manager.get_history();
         assert_eq!(history.len(), 3);
         assert!(history[0].description.contains('4'));
@@ -747,11 +675,10 @@ mod tests {
     fn test_undo_rename() {
         let dir = tempdir().unwrap();
 
-        // 创建原始文件
         let original_path = create_test_file(dir.path(), "original.txt");
         let new_path = dir.path().join("renamed.txt");
 
-        // 模拟重命名操作
+        // Simulate the forward rename.
         fs::rename(&original_path, &new_path).unwrap();
 
         let mut manager = UndoManager::new(10);
@@ -765,7 +692,6 @@ mod tests {
 
         manager.record_batch("Rename file".to_string(), ops);
 
-        // 执行撤销
         let result = manager.undo_last().unwrap();
 
         assert!(result.success);
@@ -773,18 +699,14 @@ mod tests {
         assert_eq!(result.failed_count, 0);
         assert!(result.errors.is_empty());
 
-        // 验证文件已恢复原名
         assert!(Path::new(&original_path).exists());
         assert!(!new_path.exists());
     }
 
     #[test]
     fn test_undo_rename_carries_engine_sidecars() {
-        // Undoing a rename must move the engine sidecar back too — otherwise
-        // the revert strands it on the new name and breaks the GUID / UID
-        // references the forward op was careful to preserve. Run per suffix so
-        // Godot's two are covered by the same guarantee as Unity's `.meta`,
-        // rather than by a test that only ever saw `.meta`.
+        // Undoing a rename must move the engine sidecar back too, or the revert
+        // strands it on the new name. Run per suffix so Godot's two are covered.
         for suffix in [".meta", ".import", ".uid"] {
             let dir = tempdir().unwrap();
             let original = dir.path().join("a.txt");
@@ -831,10 +753,8 @@ mod tests {
 
         manager.record_batch("Test".to_string(), ops);
 
-        // 标记为已撤销
         manager.history[0].undone = true;
 
-        // 尝试撤销应该返回 None
         assert!(manager.undo_last().is_none());
         assert!(!manager.can_undo());
     }
@@ -895,9 +815,6 @@ mod tests {
 
     #[test]
     fn generated_ids_do_not_collide_within_the_same_second() {
-        // The old id was `timestamp_secs ^ stack_addr`, so two batches recorded
-        // in the same second produced the same id and undo_by_id targeted the
-        // wrong one. uuid v4 ids must differ even back-to-back.
         let a = generate_operation_id();
         let b = generate_operation_id();
         assert_ne!(a, b);
@@ -919,25 +836,20 @@ mod tests {
         let link = dir.path().join("a_link.txt");
         std::fs::hard_link(&a, &link).unwrap();
         assert!(paths_are_same_file(Path::new(&a), &link));
-        // Nonexistent path → conservatively "not the same file" (the guard
-        // then rejects, never silently proceeds).
+        // Nonexistent path → conservatively "not the same file".
         assert!(!paths_are_same_file(
             Path::new(&a),
             &dir.path().join("missing.txt")
         ));
     }
 
-    // POSIX rename() over an existing directory entry of the *same* file is a
-    // documented no-op success; on Windows MoveFileEx errors instead, so this
-    // behavioral check is Unix-only (the helper itself is tested above on all
-    // platforms).
+    // POSIX rename() over an existing entry of the *same* file is a documented
+    // no-op success; Windows MoveFileEx errors instead, so this check is Unix-only.
     #[cfg(unix)]
     #[test]
     fn undo_allows_target_occupied_by_the_same_file() {
-        // If the occupant of the original path is the renamed file ITSELF
-        // (here via a hard link; on case-insensitive filesystems via a case
-        // variant), the undo must proceed rather than report "target already
-        // exists" — that guard exists to protect a *different* file's data.
+        // The occupant of the original path is the renamed file itself (a hard
+        // link here), so the undo must proceed rather than report a conflict.
         let dir = tempdir().unwrap();
         let renamed = create_test_file(dir.path(), "renamed.txt");
         let original = dir.path().join("orig.txt");
@@ -966,11 +878,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn undo_move_allows_target_occupied_by_the_same_file() {
-        // The Move branch kept the bare `dst.exists()` the Rename branch had
-        // already outgrown, so undoing a move whose original path resolves to
-        // the moved file itself failed with "Target path already exists" —
-        // and permanently: a batch in which every operation fails is not
-        // consumed, so the same error came back on every retry.
+        // Undoing a move whose original path resolves to the moved file itself
+        // must succeed; same identity check as the Rename branch.
         let dir = tempdir().unwrap();
         let moved = create_test_file(dir.path(), "moved.txt");
         let original = dir.path().join("orig.txt");
@@ -1022,9 +931,9 @@ mod tests {
         // carry its tags back to the restored path.
         assert_eq!(result.reverted_pairs, vec![(ok_original, ok_new_str)]);
 
-        // A rename whose source (new_path) no longer exists fails to undo and
-        // must NOT appear in reverted_pairs — otherwise the command layer would
-        // migrate tags off a file that never moved (the #7 bug).
+        // A rename whose source no longer exists fails to undo and must not
+        // appear in reverted_pairs, or the command layer would migrate tags off
+        // a file that never moved.
         let mut manager2 = UndoManager::new(10);
         manager2.record_batch(
             "Rename".to_string(),

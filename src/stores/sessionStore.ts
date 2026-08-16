@@ -47,11 +47,9 @@ const useSessionStore = create<SessionState>()(
   )
 );
 
-/// Keep the session store in lockstep with the projectStore's open-project
-/// set. Any open / close / active-project change eventually reaches here.
-/// The quick-check below skips the zustand `set` when nothing meaningful
-/// has changed (e.g. during scan progress updates that rewrite `projects`
-/// Map but don't add or remove entries).
+/// Keep the session store in lockstep with projectStore's open-project set. The
+/// quick check skips the zustand `set` when nothing meaningful changed, e.g.
+/// scan-progress updates that rewrite the `projects` Map without adding entries.
 useProjectStore.subscribe((state) => {
   const session = useSessionStore.getState();
   const paths = Array.from(state.projects.values()).map((p) => p.projectPath);
@@ -70,24 +68,9 @@ useProjectStore.subscribe((state) => {
   session.setSession(paths, active);
 });
 
-/// Replay the persisted session on app launch. Call once from App.tsx.
-///
-/// Two-phase restore:
-///   1. Register every persisted path as a stub (parallel, O(1) each):
-///      backend gets the project entry, sidebar shows the row, but no
-///      scan runs. This used to be a serial `await openProject` loop
-///      that triggered N full scans on boot — slow with many projects
-///      and wasteful since non-active scans are immediately discarded
-///      by the active-switch step at the end.
-///   2. Fully open the active project (or fall back to the first one
-///      if the previously-active path is gone). `openProject` here will
-///      see the stub in the projects Map (path matches), hit the dedupe
-///      branch, and route through `setActiveProject`, which detects the
-///      stub state and triggers full hydration.
-///
-/// When the user later switches to a different stub, the same
-/// `setActiveProject` lazy-hydration kicks in — they pay the scan cost
-/// once, when they actually need that project.
+/// Replay the persisted session on app launch. Call once from App.tsx. Two
+/// phases: register every persisted path as a stub in parallel, then fully open
+/// the active project (or the first remaining one), which hydrates it lazily.
 export async function restoreSession(): Promise<void> {
   const session = useSessionStore.getState();
   if (session.restored) return;
@@ -95,13 +78,9 @@ export async function restoreSession(): Promise<void> {
 
   const { openProjectPaths, activeProjectPath } = session;
 
-  // One batch for everything the switcher can show: the projects that were
-  // open last session and the recents list. Stub projects are never scanned,
-  // so without this a project whose folder is gone looks identical to a
-  // healthy one until the user clicks it. Runs ahead of the early return
-  // below so the recents list still gets marked when no projects were open
-  // last session — the common case that lands on EmptyState and invites
-  // picking from recents.
+  // One batch for everything the switcher can show: last session's projects plus
+  // the recents list. Stubs are never scanned, so without this a project whose
+  // folder is gone looks healthy. Runs ahead of the early return below.
   const recentPaths = useRecentsStore.getState().recents.map((r) => r.path);
   const health = await checkPaths([
     ...new Set([...openProjectPaths, ...recentPaths]),
@@ -112,10 +91,8 @@ export async function restoreSession(): Promise<void> {
 
   const store = useProjectStore.getState();
 
-  // Phase 1: stubs for every project except the one we're about to
-  // open fully. Parallel because each call is just a backend HashMap
-  // insert + zustand Map insert; no IO that would benefit from
-  // sequencing.
+  // Phase 1: stubs for every project except the one about to open fully.
+  // Parallel, since each call is just two Map inserts with no IO.
   const stubPaths = openProjectPaths.filter((p) => p !== activeProjectPath);
   await Promise.all(
     stubPaths.map((path) =>

@@ -11,11 +11,9 @@ interface DeleteConfirmDialogProps {
   isOpen: boolean;
   paths: string[];
   onClose: () => void;
-  /**
-   * Called after the delete finishes, whether fully successful or with per-path errors.
-   * Gives caller a chance to clear selection / display toast / etc. The filesystem
-   * watcher will update the asset list on its own — no rescan needed.
-   */
+  /** Called after the delete finishes, fully successful or with per-path errors,
+   *  so the caller can clear the selection or show a toast. The filesystem watcher
+   *  updates the asset list on its own — no rescan needed. */
   onDone: (result: DeleteResult) => void;
 }
 
@@ -30,18 +28,16 @@ export function DeleteConfirmDialog({
   const { t } = useTranslation();
   const [isDeleting, setIsDeleting] = useState(false);
   const [errors, setErrors] = useState<DeleteResult["errors"]>([]);
-  // Initial focus lands on Cancel (via ModalShell), NOT the destructive
-  // confirm button: this dialog can open from a bare Delete keypress, and
-  // confirm-focused meant a blind Enter deleted files. Esc + focus trap +
-  // focus restore also come from ModalShell.
+  // Initial focus lands on Cancel (via ModalShell), NOT the destructive confirm
+  // button: this dialog can open from a bare Delete keypress, and confirm-focused
+  // meant a blind Enter deleted files.
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (isOpen) {
       // Reset transient state on every open: the component persists across
-      // openings (parent only toggles `isOpen`), so leaving `isDeleting` true
-      // from a previous successful delete would make the confirm button render
-      // as a disabled "Deleting..." the next time around.
+      // openings, so leaving `isDeleting` true from a previous delete would render
+      // the confirm button as a disabled "Deleting…" the next time around.
       setIsDeleting(false);
       setErrors([]);
     }

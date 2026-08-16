@@ -1,23 +1,6 @@
-//! PBR material set completeness check.
-//!
-//! Detects when a directory contains a partial PBR texture set — e.g., a
-//! BaseColor exists but the Normal sibling is missing. This is a cross-
-//! asset check (it operates on groups of textures sharing the same base
-//! name in the same directory), so it lives outside the per-asset Rule
-//! trait and is invoked separately from `analyze_assets` like the
-//! duplicate / missing-reference passes.
-//!
-//! Design highlights
-//! - Strict `_<suffix>` parsing (the underscore must be present) so
-//!   `T_brand_new.png` is not misread as a normal map (the suffix `new`
-//!   doesn't match any configured channel).
-//! - A set forms only when the trigger channel (default: `basecolor`) is
-//!   present, so directories of UI / non-PBR textures don't form spurious
-//!   sets and produce no issues — this also makes the rule safe to leave
-//!   on by default for projects that don't follow PBR naming.
-//! - Packed channels (ORM, MRA, RMA) satisfy multiple roles at once when
-//!   listed in `packed`, so Substance Painter's bundled output doesn't
-//!   trip false missing-channel warnings.
+//! PBR material set completeness: detects a directory holding a partial PBR
+//! texture set. Cross-asset, so it lives outside the per-asset `Rule` trait and
+//! is invoked separately, like the duplicate and missing-reference passes.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -116,14 +99,9 @@ enum RoleKind {
     Packed(String),
 }
 
-/// Parse a stem like `T_RustyMetal_BaseColor` into
-/// `(base_stem, RoleKind)`. Returns `None` if no `_<suffix>` matches the
-/// configured channel or packed lists.
-///
-/// Strict semantics: the suffix is the substring after the LAST `_`.
-/// `T_brand_new` finds suffix `new` — which won't match anything by
-/// default, so the file is silently skipped (it just won't form part of
-/// any PBR set).
+/// Parse a stem like `T_RustyMetal_BaseColor` into `(base_stem, RoleKind)`. The
+/// suffix is the substring after the LAST `_`; `None` when it matches no
+/// configured channel or packed entry, and the file is then skipped.
 fn parse_stem(
     stem: &str,
     channels: &HashMap<String, Vec<String>>,
@@ -150,10 +128,8 @@ fn parse_stem(
     None
 }
 
-/// Run the cross-asset PBR set completeness check.
-///
-/// Returns issues for every set that contains the trigger channel but
-/// lacks one or more of `config.required`.
+/// Run the cross-asset PBR set completeness check. Returns issues for every set
+/// that contains the trigger channel but lacks one or more of `config.required`.
 pub fn find_pbr_set_issues(assets: &[AssetInfo], config: &PbrSetConfig) -> AnalysisResult {
     let mut result = AnalysisResult::new();
     if !config.enabled {
@@ -167,11 +143,9 @@ pub fn find_pbr_set_issues(assets: &[AssetInfo], config: &PbrSetConfig) -> Analy
     // file so clicking the issue takes the user to the most relevant
     // texture in the group.
     let mut trigger_path_per_set: HashMap<SetKey, String> = HashMap::new();
-    // Fallback anchor: the first file seen in the set, whatever its role. A
-    // packed suffix can carry the trigger role on its own (e.g. a packed key
-    // listing `basecolor`), and then no trigger-channel file exists — the
-    // issue used to ship an empty `asset_path`, which made the frontend's
-    // Locate a silent no-op.
+    // Fallback anchor: the first file seen in the set, whatever its role. A packed
+    // suffix can carry the trigger role alone, leaving no trigger-channel file, and
+    // an empty `asset_path` makes the frontend's Locate a silent no-op.
     let mut any_path_per_set: HashMap<SetKey, String> = HashMap::new();
     // First-seen original casing per set, for the issue message (the key
     // itself is lowercased for grouping).
@@ -197,10 +171,9 @@ pub fn find_pbr_set_issues(assets: &[AssetInfo], config: &PbrSetConfig) -> Analy
             None => continue,
         };
         let (base_stem, role) = parsed;
-        // Case-insensitive set grouping: the SUFFIX match is already
-        // case-insensitive, but a case-sensitive stem key split
-        // `T_Wood_BaseColor` + `t_wood_Normal` into two phantom sets —
-        // each then reported as incomplete.
+        // Case-insensitive set grouping: the suffix match already is, but a
+        // case-sensitive stem key split `T_Wood_BaseColor` + `t_wood_Normal` into
+        // two phantom sets, each then reported as incomplete.
         let key = (dir, base_stem.to_lowercase());
         display_stem.entry(key.clone()).or_insert(base_stem);
         any_path_per_set
@@ -270,10 +243,9 @@ pub fn find_pbr_set_issues(assets: &[AssetInfo], config: &PbrSetConfig) -> Analy
             ),
             auto_fixable: false,
             related_paths: None,
-            // `channels` ships pre-joined rather than as a list: the only
-            // consumer that would benefit from the structure is a locale that
-            // wants a different separator, which is not worth widening `args`
-            // from HashMap<String, String> to serde_json::Value for one rule.
+            // `channels` ships pre-joined rather than as a list: only a locale
+            // wanting a different separator would benefit from the structure, which
+            // is not worth widening `args` beyond HashMap<String, String>.
             args: issue_args([
                 ("set", base_stem.clone()),
                 ("channels", missing.join(", ")),
@@ -322,10 +294,9 @@ mod tests {
         }
     }
 
-    /// The issue's `asset_path` is what the frontend's Locate jumps to. When
-    /// the trigger role is satisfied only by a packed texture there is no
-    /// trigger-channel file to anchor on, and the path came out empty — Locate
-    /// then did nothing at all, with no error to explain why.
+    /// The issue's `asset_path` is what the frontend's Locate jumps to. When the
+    /// trigger role is satisfied only by a packed texture there is no trigger
+    /// file to anchor on, and an empty path made Locate do nothing at all.
     #[test]
     fn packed_only_trigger_still_anchors_the_issue_on_a_real_file() {
         let mut cfg = enabled_cfg();

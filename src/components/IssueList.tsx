@@ -55,9 +55,8 @@ function IssueRow({ issue, t, displayPath, expanded, onToggle, onLocate, onFix, 
   const fileName = basename(issue.asset_path);
   const tone = SEV_TO_TONE[issue.severity];
   // Localized here rather than in the `rows` memo: that memo rebuilds on every
-  // filter change and walks ALL issues, while virtualization only ever mounts
-  // about thirty rows. On a project reporting thousands of issues that is the
-  // difference between three `t()` calls per keystroke and thousands.
+  // filter change and walks ALL issues, while virtualization mounts about thirty
+  // rows. On a project with thousands of issues that is the whole difference.
   const text = localizeIssue(issue, t);
 
   return (
@@ -145,10 +144,8 @@ type VirtualRow =
   | { kind: "dup-group"; key: string; ruleId: string; ruleName: string; paths: string[] };
 
 /// Collapse per-file duplicate issues into one row per content group.
-/// `related_paths` (root-relative, original first) is the group identity;
-/// every member issue carries the same list, so the first occurrence emits
-/// the group row and the rest are dropped. Issues without the field (other
-/// rules, or results from an older backend) pass through untouched.
+/// `related_paths` is the group identity and every member carries the same list,
+/// so the first occurrence emits the row. Issues without the field pass through.
 function collapseDuplicates(issues: Issue[]): VirtualRow[] {
   const emitted = new Set<string>();
   const rows: VirtualRow[] = [];
@@ -190,11 +187,9 @@ interface DupGroupRowProps {
   onConfirmCleanup: () => void;
 }
 
-/// One card per duplicate-content group: every member listed (original
-/// tagged), each with its own locate action. Replaces N-1 identical
-/// stacked cards per group. "Clean up" mode turns the member list into a
-/// keep-one picker; the rest go to the recycle bin via the shared
-/// DeleteConfirmDialog (mounted by IssueList).
+/// One card per duplicate-content group: every member listed with the original
+/// tagged, each with its own locate action. "Clean up" mode turns the member list
+/// into a keep-one picker; the rest go to the recycle bin.
 function DupGroupRow({
   row,
   expanded,
@@ -377,11 +372,9 @@ export function IssueList({ result, stale, isAnalyzing, onAnalyze, onLocate }: I
     return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0]));
   }, [groupByRule, filteredIssues]);
 
-  /// Issue keys carry rule_id + asset_path + group-local index. The trailing
-  /// index disambiguates the rare case where the same rule fires twice on
-  /// one asset; without it both rows would share an expanded slot.
-  /// Duplicate-content issues collapse into one dup-group row per content
-  /// group in both modes (see collapseDuplicates).
+  /// Issue keys carry rule_id + asset_path + a group-local index, which
+  /// disambiguates the rare case of one rule firing twice on one asset.
+  /// Duplicate-content issues collapse into one dup-group row in both modes.
   const rows = useMemo<VirtualRow[]>(() => {
     if (groupByRule && groups) {
       const list: VirtualRow[] = [];
@@ -403,13 +396,9 @@ export function IssueList({ result, stale, isAnalyzing, onAnalyze, onLocate }: I
 
   const parentRef = useRef<HTMLDivElement>(null);
 
-  /// Stable callback identities — react-virtual's `useVirtualizer` re-runs
-  /// internal effects when these references change, and inline arrow
-  /// functions per render were producing a re-render storm under certain
-  /// transitions (run-analysis-while-changing-views). estimateSize is a
-  /// rough constant by row kind only; measureElement feeds the true height
-  /// (including expanded-row growth) back to the virtualizer via
-  /// ResizeObserver — no need to closure over expandedIds here.
+  /// Stable callback identities: `useVirtualizer` re-runs internal effects when
+  /// these references change, and inline arrows per render produced a re-render
+  /// storm. `measureElement` feeds true heights back via ResizeObserver.
   const getScrollElement = useCallback(() => parentRef.current, []);
   const estimateSize = useCallback(
     (index: number) => {
@@ -432,10 +421,8 @@ export function IssueList({ result, stale, isAnalyzing, onAnalyze, onLocate }: I
   });
 
   /// Reset expanded state and scroll position when the underlying issue set
-  /// changes (filter / group toggle / re-analyze). The functional setter
-  /// returns `prev` when already empty so we don't churn a fresh Set
-  /// reference each time and force a no-op re-render. Cleanup mode resets
-  /// too — its keep-selection refers to a member list that may be gone.
+  /// changes. The functional setter returns `prev` when already empty so no fresh
+  /// Set reference churns. Cleanup mode resets too — its selection may be gone.
   useEffect(() => {
     setExpandedIds((prev) => (prev.size === 0 ? prev : new Set()));
     setCleanup((prev) => (prev === null ? prev : null));
@@ -494,16 +481,13 @@ export function IssueList({ result, stale, isAnalyzing, onAnalyze, onLocate }: I
   // their count drives the "Fix all naming" toolbar action.
   const fixableCount = result.issues.filter((i) => i.auto_fixable).length;
 
-  /// After Fix-it renames land, the watcher flags the analysis stale and
-  /// refreshes the asset list on its own. Confirm with a toast that offers a
-  /// one-tap undo of the whole batch (only on full success — a partial failure
-  /// keeps the dialog open with its per-file errors).
+  /// After Fix-it renames land, the watcher flags the analysis stale and refreshes
+  /// the asset list. Confirm with a toast offering a one-tap undo of the batch, on
+  /// full success only — a partial failure keeps the dialog open with its errors.
   const handleFixComplete = (fullySucceeded: boolean, count: number) => {
-    // Refresh BEFORE the full-success gate: commit_renames records an undo
-    // batch whenever *anything* renamed (`if !done.is_empty()`), so a partial
-    // failure — which shows no toast at all — leaves the Header button as the
-    // only route back to the files that did move. Same pairing the AssetList
-    // rename handlers use, and they don't gate on success either.
+    // Refresh BEFORE the full-success gate: commit_renames records an undo batch
+    // whenever anything renamed, so a partial failure — which shows no toast —
+    // would otherwise leave the Header button as the only route back.
     void refreshUndoState();
     if (!fullySucceeded) return;
     pushToast({

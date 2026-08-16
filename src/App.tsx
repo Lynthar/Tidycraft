@@ -49,19 +49,15 @@ function App() {
     activeProjectId,
     unavailable,
   } = useProjectStore(
-    // `isEmpty` is derived in the selector rather than from `getProjectList()`
-    // in the body: subscribing to the getter subscribed to a function whose
-    // identity never changes, so opening or closing a project moved nothing
-    // here — it re-rendered only because some neighbouring field in this same
-    // selector usually changed at the same time.
+    // `isEmpty` is derived in the selector rather than from `getProjectList()`:
+    // subscribing to the getter subscribed to a function whose identity never
+    // changes, so opening or closing a project moved nothing here.
     useShallow((s) => ({ scanResult: s.scanResult, viewMode: s.viewMode, analysisResult: s.analysisResult, analysisStale: s.analysisStale, isAnalyzing: s.isAnalyzing, runAnalysis: s.runAnalysis, locateAsset: s.locateAsset, isEmpty: s.projects.size === 0, activeProjectId: s.activeProjectId, unavailable: s.unavailable, }))
   );
 
-  // Live-vs-snapshot arithmetic: scanResult.total_count is watcher-patched
-  // while analysisResult.issues is a frozen snapshot, so a naive subtraction
-  // could count flagged files that no longer exist and even go negative
-  // (delete enough analyzed files and total < flagged). Intersect the flagged
-  // set with the live asset paths, and clamp as a belt-and-braces.
+  // `scanResult.total_count` is watcher-patched while `analysisResult.issues` is a
+  // frozen snapshot, so a naive subtraction can count files that no longer exist
+  // and even go negative. Intersect with the live paths, then clamp.
   const passCount = useMemo(() => {
     if (!scanResult) return 0;
     if (!analysisResult) return scanResult.total_count;
@@ -101,26 +97,18 @@ function App() {
   useKeyboardShortcuts();
 
   // The preview panel is expanded on the assets view of any scanned project
-  // (AssetPreview renders its own "select an asset" empty state when nothing
-  // is selected) and collapsed to zero width on issues/stats and when no
-  // project is open.
+  // (AssetPreview renders its own empty state) and collapsed to zero width on
+  // issues/stats and when no project is open.
   const showPreview = !!(scanResult && viewMode === "assets" && !isEmpty);
 
-  // All three Panels stay PERMANENTLY mounted; visibility is driven through
-  // the collapse/expand imperative API below. react-resizable-panels 4.2
-  // does not re-consult defaultLayout / defaultSize when a Panel mounts into
-  // an existing Group — a conditionally-rendered preview panel came up at
-  // near-zero width (even below its minSize) and every mount/unmount cycle
-  // shifted the other panels. A fixed panel set sidesteps that entire
-  // behavior class and keeps the persisted layout key stable.
-  // Plain useRef instead of the library's usePanelRef: its return type is
-  // RefObject<Handle | null>, which React 18's Ref<Handle> prop type rejects.
+  // All three Panels stay PERMANENTLY mounted; visibility runs through the
+  // collapse/expand imperative API below. react-resizable-panels 4.2 does not
+  // re-consult defaultSize when a Panel mounts into an existing Group.
   const previewPanelRef = useRef<PanelImperativeHandle>(null);
   useEffect(() => {
-    // Deferred a frame: on first mount this effect fires before the Group
-    // has registered the panel's constraints, and collapse()/expand() then
-    // throw "Panel constraints not found". The catch covers HMR/unmount
-    // races; the next run settles the state either way.
+    // Deferred a frame: on first mount this effect fires before the Group has
+    // registered the panel's constraints, and collapse()/expand() then throw.
+    // The catch covers HMR and unmount races; the next run settles it either way.
     const raf = requestAnimationFrame(() => {
       const handle = previewPanelRef.current;
       if (!handle) return;

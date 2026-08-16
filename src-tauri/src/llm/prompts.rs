@@ -1,28 +1,18 @@
-//! System prompt + user-prompt builder.
-//!
-//! Version-bump policy: increment `PROMPT_VERSION` whenever the SYSTEM_PROMPT
-//! changes meaning (new categories, different output schema, stricter
-//! confidence cutoff, etc.). The version is part of the cache key, so a
-//! bump invalidates every previously cached suggestion. Cosmetic edits
-//! (typo fixes, whitespace, reordering equivalent phrases) do NOT
-//! warrant a bump.
+//! System prompt and user-prompt builder. Increment `PROMPT_VERSION` whenever
+//! `SYSTEM_PROMPT` changes meaning: the version is part of the cache key, so a
+//! bump invalidates every cached suggestion. Cosmetic edits do not warrant one.
 
 use std::fmt::Write;
 
 use super::{learning::DirectorySample, project_meta::ProjectMeta, AssetInput, ExistingTagContext};
 
-/// Cache-busting prompt version — see module-level doc.
-///
-/// History:
-/// - v1: initial prompt; per-asset analysis only.
-/// - v2 (2026-05-09): adds project-context + existing-tag blocks and
-///   instructs the LLM to mark suggestions as `existing` vs `new`.
+/// Cache-busting prompt version — see the module doc. v2 added the
+/// project-context and existing-tag blocks and the `existing` vs `new` marking.
 pub const PROMPT_VERSION: u32 = 2;
 
-/// Instructs the model on output schema, allowed categories, and rules.
-/// Kept in English: the LLM ecosystem is overwhelmingly English-native
-/// and switching to Chinese here measurably degrades response quality
-/// even when the user's UI is zh.
+/// Instructs the model on output schema, allowed categories and rules. Kept in
+/// English: the LLM ecosystem is overwhelmingly English-native, and switching to
+/// Chinese measurably degrades response quality even for a zh interface.
 pub const SYSTEM_PROMPT: &str = r#"You are an art-asset taxonomist for game development. Look at each provided asset (thumbnail + filename + path) and suggest tags that capture content and style — NOT format or technical metadata (the user already sees that).
 
 You MAY be given two extra context blocks before the asset list:
@@ -60,12 +50,9 @@ Rules:
 - Don't repeat extension/dimension info ("png", "1024px") — user has those.
 - Output JSON only. No commentary."#;
 
-/// Learning-mode system prompt. Asks the model to study the user's
-/// project (samples + tags + theme/goal) and produce four artifacts:
-/// inferred conventions, per-sample tagging, tag gaps, and local
-/// heuristic rules. The local rules are the actual product — they
-/// drive a deterministic RuleSuggester at runtime so the user doesn't
-/// pay per-asset LLM cost forever.
+/// Learning-mode system prompt. Asks the model to study the project and produce
+/// inferred conventions, per-sample tagging, tag gaps and local heuristic rules.
+/// The local rules are the product — they drive a deterministic RuleSuggester.
 pub const SYSTEM_PROMPT_LEARNING: &str = r#"You are an art-asset taxonomy consultant for game development. The user gives you:
 1. Their project's theme and goal (sometimes).
 2. Their existing tag system (names, optional descriptions, sample paths each tag is applied to).
@@ -128,34 +115,9 @@ Hard rules:
 - Don't invent project context the user didn't supply.
 - Output JSON only. No commentary, no markdown fences."#;
 
-/// Build the user-message body. Layout:
-///
-/// ```text
-/// Project context:
-/// - Theme: ...
-/// - Goal: ...
-///
-/// Existing project tags (prefer these — match by name when applicable):
-/// - "hero" — Player-controlled characters
-///   used on: a/b.png, c/d.png, ...
-/// - "weapon"
-///   used on: ...
-///
-/// Analyze N asset(s):
-///
-/// Asset 1:
-/// - path: ...
-/// - filename: ...
-/// - [thumbnail attached]
-/// ```
-///
-/// Each context block is omitted entirely when its source is empty
-/// (no project meta / no existing tags) so simple use-cases don't pay
-/// for the framing overhead.
-///
-/// The thumbnail bytes themselves are attached via per-provider content-
-/// block APIs (image blocks for Claude, image_url for OpenAI, images
-/// array for Ollama); here we only emit the textual scaffold.
+/// Build the user-message body: project context, existing tags with sample paths,
+/// then one block per asset. Each context block is omitted when its source is
+/// empty. Thumbnail bytes are attached by the provider, not here.
 pub fn build_user_prompt(
     assets: &[AssetInput],
     project_ctx: Option<&ProjectMeta>,
@@ -218,34 +180,9 @@ pub fn build_user_prompt(
     out
 }
 
-/// Build the user-message body for a learning request. Layout:
-///
-/// ```text
-/// Project context:
-/// - Theme: ...
-/// - Goal: ...
-///
-/// Existing project tags (prefer these — match by name in your output):
-/// - "hero" — Player chars
-///   used on: a/b.png, c/d.png, ...
-/// ...
-///
-/// Directory samples:
-/// - Characters/Hero (15 files; 5 sampled):
-///   - T_Hero_BaseColor.png [texture]
-///   - SM_Hero_Body.fbx [model]
-///   ...
-/// - Weapons/Sword (4 files; 4 sampled):
-///   ...
-///
-/// Analyze this project per the schema in the system prompt.
-/// ```
-///
-/// Each context block is omitted when its source is empty so simple
-/// projects don't pay for the framing overhead. The "Directory samples"
-/// header is always emitted even with zero samples (prints "No directory
-/// samples — nothing to analyze") so the LLM gets clear guidance instead
-/// of a bare prompt.
+/// Build the user-message body for a learning request: project context, existing
+/// tags, then per-directory samples. Empty context blocks are omitted, but the
+/// samples header is always emitted so the model gets clear guidance.
 pub fn build_learning_prompt(
     samples: &[DirectorySample],
     project_ctx: Option<&ProjectMeta>,

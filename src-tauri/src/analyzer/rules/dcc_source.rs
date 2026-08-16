@@ -1,39 +1,6 @@
-//! DCC source-file linking.
-//!
-//! Cross-asset analyzer: pairs authoring/source files (`.blend`, `.ma`,
-//! `.psd`, `.spp`, ...) with their runtime exports (`.fbx`, `.png`, ...)
-//! by stem matching, then warns when the source's mtime is newer than
-//! the export's — signalling a likely missing re-export.
-//!
-//! ## Pairing strategy
-//!
-//! For each source asset:
-//! 1. Find the [`DccMapping`] whose `sources` list owns this extension.
-//! 2. Build a candidate-export-directories set:
-//!    - The source's own directory (when `lookup.same_dir`).
-//!    - Sibling directories named in `lookup.sibling_dirs`, located by
-//!      walking up from the source's parent and joining each sibling
-//!      name at every ancestor level.
-//! 3. In each candidate directory, look for files with the source's
-//!    stem and an extension in `mapping.exports`.
-//! 4. Pick the **newest** export across all candidates.
-//! 5. If `source.mtime > export.mtime + tolerance_secs`, emit an issue.
-//!
-//! ## Why mtime, not content
-//!
-//! `git checkout` synchronizes mtimes, so cross-commit "stale" pairs
-//! escape detection. This is a documented limitation; the signal we
-//! DO catch reliably is the common "edited locally, forgot to
-//! re-export" loop. A future iteration could read git status to
-//! upgrade severity when the source file is dirty in the working tree.
-//!
-//! ## Phase 1 vs Phase 2
-//!
-//! Phase 1 (this file) does 1→1 stem matching only. Substance Painter
-//! `.spp` → multi-channel PNG output is treated as 1→newest-PNG, which
-//! is a useful approximation but not exhaustive. Phase 2 will add true
-//! 1→N pairing using PBR channel suffixes (probably reusing the
-//! `[pbr_set.channels]` config to identify expected outputs).
+//! DCC source-file linking. Pairs authoring/source files (`.blend`, `.ma`,
+//! `.psd`, `.spp`, …) with their runtime exports by stem matching, then warns
+//! when a source's mtime is newer than its export's.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -47,25 +14,18 @@ use crate::scanner::AssetInfo;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DccSourceConfig {
-    /// Out-of-box OFF: pairing rules are opinionated (which sources go
-    /// with which exports), and a fresh project rarely matches a
-    /// default set without a quick look at the mappings. Opt in via
-    /// `tidycraft.toml`.
+    /// Out-of-box OFF: pairing rules are opinionated, and a fresh project rarely
+    /// matches a default set. Opt in via `tidycraft.toml`.
     #[serde(default = "default_enabled")]
     pub enabled: bool,
-    /// Tolerance in seconds for the "source newer than export"
-    /// comparison. `git checkout` synchronizes file mtimes to current
-    /// time, so a freshly cloned/pulled repo has every file's mtime
-    /// within milliseconds of every other; this tolerance keeps us
-    /// from bursting issues immediately after a pull. 60s also covers
-    /// slow disks / VM filesystems with > 1s mtime granularity.
+    /// Tolerance in seconds for the "source newer than export" comparison.
+    /// `git checkout` synchronizes mtimes, so a fresh clone would otherwise burst
+    /// issues; 60s also covers filesystems with coarse mtime granularity.
     #[serde(default = "default_mtime_tolerance")]
     pub mtime_tolerance_secs: u64,
-    /// One mapping per DCC tool family. The default list covers the
-    /// common stack (Blender / Maya / Max / ZBrush / Modo / Houdini /
-    /// Cinema 4D / Marvelous / Substance Painter+Designer / Photoshop).
-    /// Users can override the whole list to add in-house source
-    /// formats or trim down to just the tools their pipeline uses.
+    /// One mapping per DCC tool family. The default list covers the common stack;
+    /// users can override it wholesale to add in-house source formats or trim it
+    /// to the tools their pipeline uses.
     #[serde(default = "default_mappings")]
     pub mappings: Vec<DccMapping>,
     /// Where to look for export candidates relative to the source.
@@ -96,10 +56,8 @@ pub struct DccLookup {
     /// `models/character.fbx`).
     #[serde(default = "default_true")]
     pub same_dir: bool,
-    /// Sibling directory names to also check. The walker rebuilds
-    /// candidate paths by joining each sibling name under every
-    /// ancestor of the source's parent. Defaults to common
-    /// authoring/runtime split conventions.
+    /// Sibling directory names to also check. The walker rebuilds candidate paths
+    /// by joining each sibling name under every ancestor of the source's parent.
     #[serde(default = "default_sibling_dirs")]
     pub sibling_dirs: Vec<String>,
 }
@@ -150,8 +108,7 @@ fn default_mappings() -> Vec<DccMapping> {
         ),
         m("cinema4d", &["c4d"], &["fbx", "obj"]),
         m("marvelous", &["zprj"], &["obj", "fbx"]),
-        // Phase 1: 1→1 stem match. .spp pairs with the newest same-stem
-        // texture; Phase 2 adds true 1→N for SP's per-channel output.
+        // 1→1 stem match: .spp pairs with the newest same-stem texture.
         m(
             "substance_painter",
             &["spp"],
@@ -173,44 +130,18 @@ impl Default for DccSourceConfig {
     }
 }
 
-/// Read the file's last-modified time as Unix epoch seconds. Returns
-/// `None` for any IO / clock error. We deliberately don't propagate
-/// the error — a single unreadable file just means that pair gets
-/// silently skipped instead of poisoning the analyze run.
+/// The file's last-modified time as Unix epoch seconds, `None` on any IO or clock
+/// error. A single unreadable file skips its pair rather than poisoning the
+/// analyze run.
 fn read_mtime_secs(path: &str) -> Option<u64> {
     let m = std::fs::metadata(path).ok()?;
     let t = m.modified().ok()?;
     t.duration_since(UNIX_EPOCH).ok().map(|d| d.as_secs())
 }
 
-/// Build the list of candidate parent directories an export might
-/// live in for a given source. Always includes the source's own
-/// directory when `lookup.same_dir`.
-///
-/// Sibling-dirs semantics: when an ancestor's name matches one of
-/// `sibling_dirs`, that ancestor is treated as a "source home" and
-/// the export is expected one level up (grandparent). If the user
-/// configures multiple sibling names (e.g. `["sources", "exports"]`),
-/// the OTHER names are also treated as candidate export sites under
-/// the same grandparent — handles the `art/sources/x.blend` ↔
-/// `art/exports/x.fbx` layout when both names are listed.
-///
-/// The walk only ever goes UP. No subdirectory of the source's own
-/// directory is a candidate, so `models/hero.blend` never pairs with
-/// `models/exported/hero.fbx` whatever `sibling_dirs` holds — `exported/`
-/// sits below `models/`, not beside it, and `models` isn't sibling-named so
-/// nothing expands. Documented as a limitation in `docs/analyzer-rules.md`;
-/// the layout that does work is to put the source in a sibling-named dir
-/// (`models/sources/hero.blend`) and list `exported` in `sibling_dirs`.
-///
-/// Examples (with default `sibling_dirs = ["sources", "_source", "src"]`):
-/// - `source_parent="/proj/models"` (no match in ancestors) →
-///   `["/proj/models"]` (just same_dir, no sibling expansion)
-/// - `source_parent="/proj/sources"` (matches "sources") →
-///   `["/proj/sources", "/proj", "/proj/_source", "/proj/src"]`
-/// - `source_parent="/Characters/Hero/sources"` (matches at depth 1) →
-///   `["/Characters/Hero/sources", "/Characters/Hero",
-///     "/Characters/Hero/_source", "/Characters/Hero/src"]`
+/// Candidate parent directories an export might live in. Includes the source's
+/// own directory when `lookup.same_dir`, and expands a sibling-named ancestor to
+/// its grandparent. The walk only ever goes UP.
 fn candidate_dirs(source_parent: &str, lookup: &DccLookup) -> Vec<String> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut out: Vec<String> = Vec::new();
@@ -227,11 +158,9 @@ fn candidate_dirs(source_parent: &str, lookup: &DccLookup) -> Vec<String> {
     }
 
     if !lookup.sibling_dirs.is_empty() {
-        // Walk up from source's parent. At every ancestor whose leaf
-        // name matches a configured sibling-dir, treat the GRANDPARENT
-        // as a candidate export site, plus the grandparent's other
-        // sibling-named subdirs (covers art/sources ↔ art/exports
-        // bidirectional layouts).
+        // Walk up from the source's parent. At every ancestor whose leaf name
+        // matches a configured sibling-dir, the grandparent becomes a candidate
+        // export site, plus that grandparent's other sibling-named subdirs.
         let parent_path = Path::new(parent_norm);
         let mut walker: Option<&Path> = Some(parent_path);
         while let Some(p) = walker {
@@ -278,10 +207,9 @@ fn mapping_for_source<'a>(mappings: &'a [DccMapping], ext: &str) -> Option<&'a D
         .find(|m| m.sources.iter().any(|s| s.eq_ignore_ascii_case(&ext_lower)))
 }
 
-/// Split a duration into a magnitude and a unit tag. The English prose below
-/// renders it as "3d"; locales render the tag through `issues.duration.*`.
-/// Keeping the bucket choice here means there is exactly one implementation
-/// of it — the frontend only looks the tag up.
+/// Split a duration into a magnitude and a unit tag. The English prose renders it
+/// as "3d"; locales render the tag through `issues.duration.*`. The bucket choice
+/// lives only here — the frontend just looks the tag up.
 fn humanize_seconds(secs: u64) -> (u64, &'static str) {
     if secs < 60 {
         (secs, "s")
@@ -300,10 +228,8 @@ pub fn find_dcc_source_issues(assets: &[AssetInfo], config: &DccSourceConfig) ->
         return result;
     }
 
-    // Index assets by (parent_dir, stem) for O(1) export lookup.
-    // Both keys are lowercased so case-insensitive filesystems and
-    // mixed-case stems still match. parent_dir is normalized to use
-    // forward slashes (scanner already emits these).
+    // Index assets by (parent_dir, stem) for O(1) export lookup. Both keys are
+    // lowercased so case-insensitive filesystems and mixed-case stems still match.
     type Key = (String, String);
     let mut by_key: HashMap<Key, Vec<&AssetInfo>> = HashMap::new();
     for a in assets {
@@ -381,10 +307,8 @@ pub fn find_dcc_source_issues(assets: &[AssetInfo], config: &DccSourceConfig) ->
 
         let (export, export_mtime) = match best {
             Some(p) => p,
-            // No matching export found. Phase 1 stays silent here —
-            // it could legitimately be a source the user hasn't
-            // exported yet. Phase 2 may add an info-level "no export"
-            // signal once we have UI to suppress it cleanly.
+            // No matching export found — silent, since it could legitimately be a
+            // source the user has not exported yet.
             None => continue,
         };
         let source_mtime = match read_mtime_secs(&source.path) {
@@ -580,7 +504,7 @@ pub(crate) mod tests {
 
     #[test]
     fn no_export_candidate_no_issue() {
-        // Phase 1 stays silent on orphan sources.
+        // Orphan sources are silent.
         let dir = tempdir().unwrap();
         let blend = dir.path().join("orphan.blend");
         write_with_mtime(&blend, 60);
@@ -640,11 +564,9 @@ pub(crate) mod tests {
 
     #[test]
     fn sibling_dir_lookup_finds_export() {
-        // Layout:
-        //   <root>/sources/Hero.blend   (modified 30s ago)
-        //   <root>/Hero.fbx             (modified 7200s ago)
-        // sibling_dirs contains "sources" by default, so walking up
-        // from <root>/sources hits <root> → finds Hero.fbx.
+        // Layout: <root>/sources/Hero.blend (30s ago) and <root>/Hero.fbx (7200s
+        // ago). `sources` is a default sibling_dir, so walking up from
+        // <root>/sources reaches <root> and finds Hero.fbx.
         let dir = tempdir().unwrap();
         let blend = dir.path().join("sources").join("Hero.blend");
         let fbx = dir.path().join("Hero.fbx");
@@ -716,10 +638,8 @@ pub(crate) mod tests {
 
     #[test]
     fn same_stem_different_mapping_does_not_pair() {
-        // .blend (Blender) should NOT pair with a same-stem .png — png
-        // is not in Blender's exports list. Exercises the per-mapping
-        // export filter so a Painter .spp doesn't accidentally claim
-        // a Blender export's siblings, etc.
+        // `.blend` must NOT pair with a same-stem `.png` — png is not in Blender's
+        // exports list. Exercises the per-mapping export filter.
         let dir = tempdir().unwrap();
         let blend = dir.path().join("ambiguous.blend");
         let png = dir.path().join("ambiguous.png");

@@ -3,19 +3,15 @@ import { initReactI18next } from "react-i18next";
 import en from "./locales/en.json";
 import zh from "./locales/zh.json";
 
-/// Resolve the startup language: an explicit user choice (persisted on the
-/// language toggle) always wins; otherwise sniff the OS/browser locale so a
-/// zh-* system boots into Chinese instead of always defaulting to English.
-/// Only en/zh ship, so every other locale falls back to en.
+/// Resolve the startup language: an explicit user choice always wins, otherwise
+/// the OS or browser locale decides. Only en and zh ship, so every other locale
+/// falls back to en.
 function detectLanguage(): "en" | "zh" {
   const saved = localStorage.getItem("language");
   if (saved === "en" || saved === "zh") return saved;
-  // `navigator.languages` is ordered by preference, so the FIRST supported
-  // entry wins — testing "is zh anywhere in the list" let a lower-priority
-  // Chinese locale outrank the user's actual first choice, booting someone
-  // whose settings read ["en-US", "zh-CN"] into Chinese. Unsupported locales
-  // are skipped rather than ending the search, so ["fr", "zh-CN"] still
-  // reaches Chinese.
+  // `navigator.languages` is ordered by preference, so the FIRST supported entry
+  // wins. Unsupported locales are skipped rather than ending the search, so
+  // ["fr", "zh-CN"] still reaches Chinese.
   const candidates = [navigator.language, ...(navigator.languages ?? [])];
   for (const candidate of candidates) {
     const tag = candidate?.toLowerCase();

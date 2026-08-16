@@ -1,8 +1,6 @@
-//! 一个项目根现在还能不能用,作为前端可以直接分支的值。
-//!
-//! 与扫描的错误路径分开:stub 项目从不扫描,所以「文件夹还在不在」必须能在
-//! 不跑扫描的前提下回答。形状照 `warning::ScanWarning`——serde-tagged、
-//! `kind` 串由测试钉住、`asset.ts` 手抄镜像。
+//! Whether a project root is currently usable, as a value the frontend can
+//! branch on. Answerable without running a scan. serde-tagged; the `kind`
+//! strings are pinned by a test and mirrored by hand in `asset.ts`.
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -23,9 +21,8 @@ pub struct ProjectPathReport {
     pub status: ProjectPathStatus,
 }
 
-/// 两次系统调用是有意的:`metadata` 分开「没了」与「不是目录」,而只有
-/// `read_dir` 能发现目录存在却列不动(mode 000)。这样的根扫描必然失败,
-/// stat 却成功——只 stat 会把它报成健康。
+/// Two syscalls: `metadata` separates missing from not-a-directory, and only
+/// `read_dir` catches a directory that exists but cannot be listed (mode 000).
 pub fn check(path: &str) -> ProjectPathStatus {
     let p = Path::new(path);
     match fs::metadata(p) {
@@ -43,9 +40,8 @@ pub fn check(path: &str) -> ProjectPathStatus {
     }
 }
 
-/// 每个入参产出一条报告,重复入参就产出重复报告——命令不去重,前端建 Map
-/// 时后写覆盖先写(同路径必然同结论)。**按 path 配对而不是按序号对应**:
-/// 同型教训见 LLM 缓存(写回按 `asset_path` 配对,从不按响应顺序)。
+/// One report per input, duplicates included, paired by `path` rather than by
+/// index. Callers building a Map get last-write-wins on repeated paths.
 pub fn check_all(paths: &[String]) -> Vec<ProjectPathReport> {
     paths
         .iter()
@@ -87,8 +83,8 @@ mod tests {
         assert_eq!(check(&s(&file)), ProjectPathStatus::NotADirectory);
     }
 
-    /// mode 000 是「存在但列不动」唯一便携的造法，而 chmod 在 Windows 上
-    /// 无效——不门住就是主力开发机上一条永远绿的测试。
+    /// Unix-only: mode 000 is the portable way to make a directory unlistable,
+    /// and `chmod` is a no-op on Windows.
     #[cfg(unix)]
     #[test]
     fn a_directory_that_cannot_be_listed_is_unreadable() {
@@ -99,7 +95,7 @@ mod tests {
         fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
 
         let status = check(&s(&locked));
-        // 先恢复权限，断言失败时 tempdir 仍能清理。
+        // Restore permissions first so tempdir can clean up even on failure.
         fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
 
         match status {
@@ -115,7 +111,7 @@ mod tests {
         fs::write(&file, b"x").unwrap();
         let gone = dir.path().join("nope");
 
-        // 乱序 + 重复：报告按入参逐条产出，不去重。
+        // Shuffled and duplicated: one report per input, in order, no dedup.
         let inputs = vec![s(&gone), s(dir.path()), s(&file), s(&gone)];
         let reports = check_all(&inputs);
 

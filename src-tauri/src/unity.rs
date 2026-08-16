@@ -44,24 +44,8 @@ impl UnityFileType {
             // Sprite-animation .anim files reference sprites/clips via PPtr guids.
             "anim" => UnityFileType::Anim,
             // The remaining native Unity YAML assets whose job is to point at
-            // other assets. Filed under `Asset` deliberately: the variant only
-            // decides whether component extraction runs (prefab / scene), so a
-            // variant per type would buy nothing and would have to be mirrored
-            // in `UnityFileInfo`'s TypeScript union.
-            //
-            //   spriteatlas / spriteatlasv2 — the sprites and textures packed
-            //   terrainlayer                — diffuse / normal / mask textures
-            //   playable                    — Timeline clips, prefabs, bindings
-            //   shadervariants              — the shaders in the collection
-            //   guiskin                     — font + per-style background textures
-            //   fontsettings                — a custom font's texture + material
-            //   flare                       — the lens flare's texture
-            //   preset                      — serialized values, object refs included
-            //
-            // The cost of this list is deliberately lopsided: a type left out
-            // makes every asset only it references show up as unused, and the
-            // unused list is what people delete from. A type wrongly included
-            // costs one file read that turns up no guids.
+            // other assets. Filed under `Asset` because the variant only decides
+            // whether component extraction runs (prefab / scene).
             "spriteatlas" | "spriteatlasv2" | "terrainlayer" | "playable" | "shadervariants"
             | "guiskin" | "fontsettings" | "flare" | "preset" => UnityFileType::Asset,
             _ => UnityFileType::Unknown,
@@ -70,15 +54,8 @@ impl UnityFileType {
 }
 
 /// Does `ext` name a Unity text asset `parse_unity_file` can pull GUID
-/// references out of?
-///
-/// Callers that pre-filter before calling it must ask here rather than keep
-/// their own extension list. Two lists drifted before — the dependency graph
-/// walked prefab/unity/mat while the unused-asset scan also walked controller,
-/// so the two disagreed about what referenced what — and a caller's list being
-/// *wider* than the parser's is worse still: it hands over files the parser
-/// refuses, which the unused-asset scan counts as unreadable sources and
-/// reports as a reason to distrust its own output.
+/// references out of? Callers that pre-filter must ask here rather than keep
+/// their own extension list.
 pub fn is_reference_source(ext: &str) -> bool {
     !matches!(UnityFileType::from_extension(ext), UnityFileType::Unknown)
 }
@@ -114,10 +91,9 @@ pub fn parse_unity_file(path: &Path) -> Option<UnityFileInfo> {
     })
 }
 
-/// Unity project info surfaced on the Stats dashboard's engine card. Parsed
-/// from `ProjectSettings/ProjectVersion.txt` — plain `key: value` YAML the
-/// editor rewrites on every version switch and that is committed to VCS by
-/// convention (standard Unity .gitignore templates keep ProjectSettings/).
+/// Unity project info for the Stats dashboard's engine card, parsed from
+/// `ProjectSettings/ProjectVersion.txt` — plain `key: value` YAML, committed to
+/// VCS by convention.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnityProjectInfo {
     /// e.g. "2022.3.10f1"
@@ -128,18 +104,9 @@ pub struct UnityProjectInfo {
     pub editor_version_with_revision: Option<String>,
 }
 
-/// The Unity project root for a scanned directory: the nearest directory at
-/// or above `scan_root` that holds `ProjectSettings/`.
-///
-/// Usually that is `scan_root` itself, but opening `Assets/` — or a folder
-/// inside it — instead of the project root is a routine user action, and
-/// every marker of Unity-ness (`ProjectSettings/`, `Library/PackageCache`)
-/// lives *above* such a root. Reading them relative to the scan root alone
-/// turns the entire engine integration off without a word.
-///
-/// Only the `Assets/` subtree qualifies, so a sibling like `Docs/` doesn't
-/// inherit the project. `starts_with` compares whole path components, so
-/// `AssetsBackup/` is not inside `Assets/`.
+/// The Unity project root for a scanned directory: the nearest directory at or
+/// above `scan_root` that holds `ProjectSettings/`. Only the `Assets/` subtree
+/// qualifies, and `starts_with` compares whole path components.
 pub fn unity_project_root(scan_root: &Path) -> Option<PathBuf> {
     if scan_root.join("ProjectSettings").is_dir() {
         return Some(scan_root.to_path_buf());
@@ -195,17 +162,9 @@ pub struct PackageAssetRef {
     pub file_name: String,
 }
 
-/// GUID → package-asset map harvested from `Library/PackageCache`. UPM
-/// extracts every non-embedded package there as an immutable
-/// `<name>@<suffix>` directory (suffix is a version or, in newer editors, a
-/// content hash — opaque either way), shipping the same `.meta` sidecars a
-/// project asset would have. Scenes / materials reference package shaders,
-/// scripts and sprites by those GUIDs, but `Library/` is gitignored by
-/// convention so the scan never resolves them — this index is what lets the
-/// dependency graph and the missing-reference rule tell "package asset"
-/// apart from "genuinely dangling". Absent `Library/` (fresh clone, CI)
-/// yields an empty index and everything degrades to the unresolved
-/// treatment.
+/// GUID → package-asset map harvested from `Library/PackageCache`, where UPM
+/// extracts every non-embedded package with the same `.meta` sidecars a project
+/// asset has. An absent `Library/` yields an empty index.
 #[derive(Debug, Default)]
 pub struct PackageGuidIndex {
     map: HashMap<String, PackageAssetRef>,
@@ -217,11 +176,9 @@ impl PackageGuidIndex {
     }
 }
 
-/// The package directories currently extracted into `Library/PackageCache`,
-/// as a sorted list of dir names. Package dirs are immutable (editing one
-/// requires embedding it under `Packages/`), so this listing changing is the
-/// only way the index goes stale — it serves as the cache key in
-/// `ProjectState`. Missing cache dir → empty list.
+/// The package directories currently extracted into `Library/PackageCache`, as
+/// a sorted list of dir names. Package dirs are immutable, so this listing is
+/// the cache key in `ProjectState`. Missing cache dir → empty list.
 pub fn package_cache_key(root: &Path) -> Vec<String> {
     let cache = project_root_or_self(root)
         .join("Library")
@@ -238,11 +195,9 @@ pub fn package_cache_key(root: &Path) -> Vec<String> {
     names
 }
 
-/// Build the index by walking every package dir's `.meta` files. A .meta
-/// carries its guid in the first lines, so only each file's head is read —
-/// cost stays proportional to the package-asset count (tens of thousands of
-/// small reads on a render-pipeline-scale cache; around a second cold, and
-/// the `ProjectState` cache makes it once per session).
+/// Build the index by walking every package dir's `.meta` files, reading only
+/// each file's head. Cost is proportional to the package-asset count; the
+/// `ProjectState` cache makes it once per session.
 pub fn build_package_guid_index(root: &Path) -> PackageGuidIndex {
     let mut map = HashMap::new();
     let cache = project_root_or_self(root)
@@ -326,14 +281,7 @@ pub fn is_null_guid(guid: &str) -> bool {
 
 /// The two GUIDs Unity reserves for editor-shipped asset bundles:
 /// `0000000000000000e000000000000000` ("unity default resources") and
-/// `0000000000000000f000000000000000` ("unity_builtin_extra"). Any project
-/// that touches a built-in shader, material, or UI sprite references them,
-/// and they never correspond to a scanned .meta — so neither the
-/// missing-reference rule nor the dependency graph may treat them as
-/// dangling. NOTE: do not try to detect built-ins via the reference's
-/// `type:` field instead — real project asset references (e.g. a .mat's
-/// texture) are `type: 3` while built-ins are `type: 0`; filtering on type
-/// would suppress true positives.
+/// `0000000000000000f000000000000000` ("unity_builtin_extra").
 pub fn is_builtin_guid(guid: &str) -> bool {
     let bytes = guid.as_bytes();
     bytes.len() == 32
@@ -790,10 +738,9 @@ mod tests {
         assert!(unity_project_root(&root.join("Docs")).is_none());
     }
 
-    /// The regression that makes the `Assets/`-as-root fix safe rather than
-    /// harmful: turning the Unity rules on for that root while
-    /// `Library/PackageCache` — which lives ABOVE it — stayed unresolved
-    /// would report every package reference as a dangling GUID.
+    /// Turning the Unity rules on for an `Assets/` root while
+    /// `Library/PackageCache` — which lives above it — stayed unresolved would
+    /// report every package reference as a dangling GUID.
     #[test]
     fn package_cache_resolves_when_the_scan_root_is_the_assets_folder() {
         let dir = tempfile::tempdir().unwrap();

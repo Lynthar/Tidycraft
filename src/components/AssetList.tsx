@@ -25,10 +25,9 @@ import { AssetGalleryView } from "./AssetGalleryView";
 import { ASSET_TYPES, type AssetInfo, type AssetType } from "../types/asset";
 import type { SelectIntent } from "../lib/selectIntent";
 
-/// The "Art assets" quick-group pill: everything an artist owns, minus the
-/// code / data / misc files real engine projects interleave with them. One
-/// click gets "all art, no clutter" — the multi-select union that motivated
-/// multi-select in the first place.
+/// The "Art assets" quick-group pill: everything an artist owns, minus the code,
+/// data and misc files real engine projects interleave with them. One click gets
+/// "all art, no clutter".
 const ART_TYPE_GROUP: AssetType[] = ASSET_TYPES.filter(
   (t) => t !== "script" && t !== "data" && t !== "other"
 );
@@ -97,15 +96,9 @@ export function AssetList() {
   const addPaths = useSelectionStore((s) => s.addPaths);
   const removePaths = useSelectionStore((s) => s.removePaths);
   const clearSelection = useSelectionStore((s) => s.clearSelection);
-  // The two children that want an array rather than the Set share one
-  // snapshot, rebuilt only when the selection itself changes: selectionStore
-  // replaces the Set exactly then and leaves it alone otherwise (its prune
-  // subscription only writes when something is genuinely stale). Building it
-  // inline in the JSX instead handed them a new array on every re-render of
-  // this component — a watcher batch swapping `scanResult` is the everyday
-  // one — and BatchRenameDialog keys its preview effect on the prop, so each
-  // of those re-sent the same preview request and pushed the preview itself
-  // another debounce interval into the future.
+  // The two children that want an array rather than the Set share one snapshot,
+  // rebuilt only when the selection itself changes. Building it inline handed them
+  // a new array per render, and BatchRenameDialog keys its preview effect on it.
   const selectedPathList = useMemo(() => Array.from(selectedPaths), [selectedPaths]);
 
   const [showBatchRename, setShowBatchRename] = useState(false);
@@ -179,9 +172,8 @@ export function AssetList() {
     (asset: AssetInfo, index: number, intent: SelectIntent) => {
       if (intent.extend) {
         // Re-resolve the anchor against the CURRENT view every time; if it was
-        // filtered or sorted out of view, fall back to a plain selection
-        // instead of selecting an unrelated range (or crashing on a stale
-        // out-of-range index, as the old index-based anchor did).
+        // filtered or sorted out of view, fall back to a plain selection rather
+        // than selecting an unrelated range.
         const anchorIndex =
           lastClickedPath !== null
             ? assets.findIndex((a) => a.path === lastClickedPath)
@@ -227,22 +219,16 @@ export function AssetList() {
     }
   }, [assets, selectedPaths.size, clearSelection, setSelectedPaths]);
 
-  // Refresh after a batch rename. Deliberately does NOT close the dialog —
-  // the dialog owns its own lifecycle so a partial failure can stay open and
-  // show its error list (closing is its `onClose`). On partial failure we
-  // also keep the selection: the renamed-away paths get pruned by the
-  // selectionStore subscription when the fresh scanResult lands, leaving
-  // exactly the failed files selected for a retry.
+  // Refresh after a batch rename. Does NOT close the dialog — it owns its own
+  // lifecycle so a partial failure stays open with its error list, and the
+  // selection is kept, leaving the failed files ready for a retry.
   const handleRenameComplete = useCallback(
     async (fullySucceeded: boolean) => {
       if (fullySucceeded) clearSelection();
       await refreshUndoState();
       // Tags followed the renamed files on the backend; re-sync the store so the
-      // moved bindings show immediately rather than after the watcher's ~500ms
-      // scanResult refresh re-triggers loadTags. The scan list itself is
-      // refreshed by that watcher pass — the bare openProject(path) that
-      // used to sit here was a guaranteed no-op (already-open + not-force
-      // short-circuits into setActiveProject's same-id early return).
+      // moved bindings show immediately rather than after the watcher's next
+      // scanResult refresh re-triggers loadTags.
       await loadTags();
     },
     [refreshUndoState, clearSelection, loadTags]
@@ -386,10 +372,9 @@ export function AssetList() {
     }
   }, [targetPathsFromContext, pushToast, t]);
 
-  // The delete chord (see below for which key that is on each platform)
-  // triggers delete for the current multi-selection when nothing interactive
-  // has focus. It deliberately does not act on the single previewed
-  // `selectedAsset` — that is ambiguous with simply navigating.
+  // The delete chord triggers delete for the current multi-selection when nothing
+  // interactive has focus. It does not act on the single previewed asset — that
+  // is ambiguous with simply navigating.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -408,12 +393,9 @@ export function AssetList() {
       )
         return;
 
-      // macOS reports the key labelled delete on the main keyboard as
-      // `Backspace`; the one that reports `Delete` is Fn+Delete, so listening
-      // for that alone made this shortcut unreachable there. ⌘⌫ is the
-      // system's own move-to-trash chord, and requiring the modifier is what
-      // keeps a bare backspace — a key people hit to erase, and one with no
-      // undo here beyond the trash — from deleting files.
+      // macOS reports the main-keyboard delete key as `Backspace`; the one that
+      // reports `Delete` is Fn+Delete. ⌘⌫ is the system's own move-to-trash chord,
+      // and requiring the modifier keeps a bare backspace from deleting files.
       const deletePressed = isMacOS()
         ? e.key === "Backspace" && e.metaKey
         : e.key === "Delete";
@@ -460,10 +442,9 @@ export function AssetList() {
   }
 
   if (assets.length === 0) {
-    // Say WHY the list is empty — an active search, other filters, or a
-    // genuinely empty directory read very differently to the user — and
-    // offer a one-click way out of a directory scope they may not even
-    // know is active (it can be set implicitly by issue-list "Locate").
+    // Say WHY the list is empty — an active search, other filters, or a genuinely
+    // empty directory read very differently — and offer a one-click way out of a
+    // directory scope the user may not know is active.
     const hasQuery = searchQuery.trim().length > 0;
     const advancedActive = Object.values(advancedFilters).some((v) =>
       Array.isArray(v) ? v.length > 0 : v !== null
@@ -606,10 +587,9 @@ export function AssetList() {
                 data-active={typeFilter?.includes(type) ? "true" : undefined}
                 title={typePillHint}
                 onClick={(e) => {
-                  // Plain click keeps the familiar single-select (and
-                  // re-clicking the sole active type clears back to All);
-                  // Ctrl/Cmd+click accumulates — the same modifier grammar
-                  // as batch selection.
+                  // Plain click keeps the familiar single-select, and re-clicking
+                  // the sole active type clears back to All; Ctrl/Cmd+click
+                  // accumulates, the same grammar as batch selection.
                   if (e.ctrlKey || e.metaKey) {
                     toggleTypeFilter(type);
                   } else if (typeFilter?.length === 1 && typeFilter[0] === type) {
@@ -756,10 +736,9 @@ export function AssetList() {
           // takes care of removing / inserting them in scanResult.assets.
           if (result.successes.length === 0) return;
           removePaths(result.successes.map((s) => s.original_path));
-          // A move records an undo batch on the backend (copy doesn't), and the
-          // Header button is the only way to reach it — this dialog shows no
-          // toast. Refresh unconditionally: the copy case is a cheap no-change
-          // refetch, same as loadTags below.
+          // A move records an undo batch on the backend (copy does not), and the
+          // Header button is the only way to reach it. Refreshed unconditionally:
+          // the copy case is a cheap no-change refetch.
           refreshUndoState();
           // Moved files carried their tag bindings on the backend — re-sync.
           // (Copy doesn't carry tags; loadTags is a harmless no-change refetch.)

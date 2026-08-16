@@ -1,9 +1,8 @@
 import { create } from "zustand";
 
-/// Transient bottom-right notifications. Deliberately tiny: silent operations
-/// (export, later copy/duplicate feedback) share this one channel instead of
-/// each inventing an inline banner. Toasts auto-dismiss; `actionLabel` +
-/// `onAction` render a single optional button (e.g. "Show in folder").
+/// Transient bottom-right notifications, kept tiny: silent operations share this
+/// one channel instead of each inventing an inline banner. Toasts auto-dismiss;
+/// `actionLabel` + `onAction` render a single optional button.
 
 export interface Toast {
   id: number;

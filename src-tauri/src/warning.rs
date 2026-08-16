@@ -1,22 +1,16 @@
-//! Warnings that make "could not read it" distinct from "nothing wrong".
-//!
-//! Same shape as `analyzer::rule_suggest::RuleWarning`, for the same reason:
-//! these failures used to reach `eprintln!` and nowhere else, and a
-//! Finder-launched .app has no stderr attached to anything. They ride to the
-//! frontend as serde-tagged values whose `kind` strings a test pins, because
-//! `asset.ts` mirrors them by hand.
+//! Warnings that make "could not read it" distinct from "nothing wrong". They
+//! ride to the frontend as serde-tagged values whose `kind` strings a test
+//! pins, because `asset.ts` mirrors them by hand.
 
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
-/// Cap on example paths carried per warning: enough to recognize the pattern
-/// ("it's all under Vendor/"), few enough that a project with a whole
-/// unreadable subtree ships a count, not fifty thousand strings.
+/// Cap on example paths carried per warning: enough to recognize a pattern,
+/// few enough that an unreadable subtree ships a count rather than the paths.
 pub const SAMPLE_CAP: usize = 5;
 
 /// A non-fatal problem in ONE scan. Rides on `ScanResult.warnings`, so the
-/// command return, the cached scan and the JSON export carry the admission
-/// automatically.
+/// command return, the cached scan and the JSON export all carry it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ScanWarning {
@@ -27,10 +21,8 @@ pub enum ScanWarning {
         sample: Vec<String>,
         detail: String,
     },
-    /// Files that were discovered but whose metadata could not be read. The
-    /// incremental scan drops them; the full scan keeps them with zeroed
-    /// size/mtime. `affected`, not `skipped`: the records may still be
-    /// present — they are just not to be trusted.
+    /// Files discovered but whose metadata could not be read. The incremental
+    /// scan drops them; the full scan keeps them with zeroed size/mtime.
     AssetUnreadable {
         affected: usize,
         sample: Vec<String>,
@@ -43,22 +35,17 @@ pub enum ScanWarning {
     CacheNotSaved { detail: String },
 }
 
-/// A non-fatal problem of the RUNNING SESSION, pushed over
-/// `project-warning-{project_id}`. Kept out of `ScanWarning` on purpose:
-/// these belong to no scan, so they must not ride into a cached scan or an
-/// exported report. The frontend adds a third member to its mirror of this
-/// enum (`watcher_start_failed`) that is born on its side of the IPC — the
-/// failed invoke itself is the signal, so the backend never sends it.
+/// A non-fatal problem of the running session, pushed over
+/// `project-warning-{project_id}`. Never rides into a cached scan or an
+/// exported report. The frontend's mirror adds a `watcher_start_failed` member.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ProjectWarning {
-    /// notify handed the watcher an error batch; those events are gone and
-    /// the cached scan may no longer match the disk. `batches` is cumulative
-    /// since the watcher started — the frontend replaces, never adds.
+    /// notify handed the watcher an error batch; those events are gone and the
+    /// cached scan may no longer match the disk. `batches` is cumulative.
     WatcherEventsDropped { batches: usize, detail: String },
-    /// Tag bindings were migrated in memory but could not be written to
-    /// disk. Surfaced as a toast, not in the warning list — it is tied to
-    /// the one operation the user just performed.
+    /// Tag bindings were migrated in memory but could not be written to disk.
+    /// Surfaced as a toast rather than in the warning list.
     TagsNotSaved { detail: String },
 }
 
@@ -69,9 +56,7 @@ pub fn emit_project_warning(app: &tauri::AppHandle, project_id: &str, w: &Projec
 }
 
 /// Accumulates one class of failure during a scan: full count, first
-/// [`SAMPLE_CAP`] paths, first error text. The parallel parse stage wraps one
-/// in a `Mutex` — it locks only when something fails, so the happy path pays
-/// nothing.
+/// [`SAMPLE_CAP`] paths, first error text.
 #[derive(Debug, Default)]
 pub struct SampledFailures {
     pub count: usize,
@@ -102,9 +87,7 @@ mod tests {
     use super::*;
 
     /// `asset.ts` mirrors both enums by hand and branches on the exact `kind`
-    /// strings — no codegen between the two sides. Same discipline (and same
-    /// test shape) as
-    /// `rule_suggest::warning_wire_shape_matches_the_frontends_mirror`.
+    /// strings — there is no codegen between the two sides.
     #[test]
     fn warning_wire_shape_matches_the_frontends_mirror() {
         let walk = serde_json::to_value(ScanWarning::TreeWalkFailed {

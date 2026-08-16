@@ -48,11 +48,9 @@ interface ChartColors {
   fallback: string;
 }
 
-/// Resolve the design tokens the charts need into concrete color strings.
+/// Resolve the design tokens the charts need into concrete colour strings.
 /// recharts writes `fill` as an SVG presentation attribute, which — unlike an
-/// inline `style` — does NOT resolve CSS `var()`, so we hand it the computed
-/// `oklch(...)` literals instead. data-theme lives on <html> and custom
-/// properties inherit, so reading documentElement is correct in both themes.
+/// inline `style` — does NOT resolve CSS `var()`.
 function resolveChartColors(): ChartColors {
   const cs = getComputedStyle(document.documentElement);
   const read = (name: string) => cs.getPropertyValue(name).trim();
@@ -82,12 +80,9 @@ const TOOLTIP_ITEM_STYLE = { color: "var(--text-2)" };
 
 const SIZE_ORDER = ["< 1 KB", "1-10 KB", "10-100 KB", "100 KB - 1 MB", "1-10 MB", "> 10 MB"];
 
-/// Cap on unused-asset rows rendered at once, matching `IssueList`'s
-/// duplicate-group cap. A project that has never been pruned can report tens
-/// of thousands of unused files, and this list mounts a row plus a button for
-/// each — the same unbounded render that turned a large duplicate group into
-/// a frozen black screen. The count of what isn't shown is printed below, and
-/// the report export carries the complete list.
+/// Cap on unused-asset rows rendered at once, matching `IssueList`'s duplicate
+/// cap. A never-pruned project can report tens of thousands. The hidden count is
+/// printed below, and the report export carries the complete list.
 const UNUSED_MAX_RENDERED = 200;
 
 /// Which engine card the project gets, tagged so render can switch on it.
@@ -133,24 +128,21 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Unused-assets panel: lazy, button-triggered. `find_unused_assets` parses
-  // every prefab/scene/material for GUID refs, so it's too heavy to run on
-  // every Stats open — the user scans on demand. Unity-only for now (the
-  // backend rejects non-Unity projects); Godot support is a later step.
+  // Unused-assets panel: lazy, button-triggered. `find_unused_assets` parses every
+  // prefab, scene and material for GUID refs, so it is too heavy to run on every
+  // Stats open. Unity-only for now — the backend rejects other project types.
   const projectType = scanResult?.project_type;
   const [unused, setUnused] = useState<string[] | null>(null);
   const [unusedLoading, setUnusedLoading] = useState(false);
   const [unusedError, setUnusedError] = useState<string | null>(null);
-  /// Referenceable Unity files whose text couldn't be read — a Force Binary
-  /// serialization project. Their outgoing references are invisible, so the
-  /// list below under-counts what's actually in use. Non-zero means "do not
-  /// act on this list" (see `UnusedAssetsResult` in lib.rs).
+  /// Referenceable Unity files whose text could not be read — a Force Binary
+  /// serialization project. Their outgoing references are invisible, so the list
+  /// under-counts what is in use. Non-zero means "do not act on this list".
   const [unusedUnreadable, setUnusedUnreadable] = useState(0);
 
-  // Chart palette resolved from the design tokens, recomputed on theme flip
-  // so the charts share the app's colors (recharts SVG fills can't consume
-  // var(); see resolveChartColors). applyTheme sets data-theme before the
-  // store updates, so this reads the new theme's values on re-render.
+  // Chart palette resolved from the design tokens, recomputed on theme flip.
+  // `applyTheme` sets data-theme before the store updates, so this reads the new
+  // theme's values on re-render.
   const theme = useThemeStore((s) => s.theme);
   const chartColors = useMemo(() => resolveChartColors(), [theme]);
 
@@ -220,10 +212,9 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
   };
 
   useEffect(() => {
-    // Reset the on-demand unused-assets panel when the project changes so we
-    // never show a previous project's result. Keyed on the project only —
-    // watcher-driven scanResult refreshes must NOT wipe a user-requested
-    // unused scan (it goes stale, but stale beats vanishing mid-read).
+    // Reset the on-demand unused-assets panel when the project changes. Keyed on
+    // the project only — watcher-driven scanResult refreshes must NOT wipe a
+    // user-requested scan; stale beats vanishing mid-read.
     setUnused(null);
     setUnusedError(null);
     setUnusedUnreadable(0);
@@ -259,11 +250,9 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
     return () => {
       cancelled = true;
     };
-    // `scanResult` is a dependency so watcher file changes and Ctrl+R rescans
-    // (same project id, new result object) refetch — totals/charts/largest
-    // files used to freeze at first render while the sibling passCount card
-    // kept updating. During a forced rescan the mirror briefly goes null; the
-    // extra fetch is harmless (the backend serves its last cached scan).
+    // `scanResult` is a dependency so watcher changes and Ctrl+R rescans refetch
+    // the totals and charts. During a forced rescan the mirror briefly goes null,
+    // and the extra fetch is harmless.
   }, [activeProjectId, scanResult]);
 
   if (loading) {

@@ -97,10 +97,9 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
                 )}
               >
                 {editingId === tag.id ? (
-                  // Editing: name+color row on top, description input below.
-                  // Keeps the compact visual rhythm for non-editing rows
-                  // (which stay one line tall) while giving description
-                  // its own full-width input only when actively editing.
+                  // Editing: name+colour row on top, description input below, so
+                  // non-editing rows stay one line tall while the description gets
+                  // a full-width input only while actively editing.
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center gap-2">
                       <div className="flex gap-1">

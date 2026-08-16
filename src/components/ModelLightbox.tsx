@@ -41,10 +41,8 @@ export function ModelLightbox({ isOpen, filePath, extension, vertexCount, modelN
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const animationIdRef = useRef<number>(0);
-  // Monotonic token identifying the current setup-effect run — see
-  // ModelViewer3D for the full rationale (a shared "mounted" boolean lets
-  // a previous model's slow onLoad/onError through once the next run
-  // resets it). cleanup() bumps it; callbacks compare their captured
+  // Monotonic token identifying the current setup-effect run — see ModelViewer3D
+  // for the rationale. `cleanup()` bumps it; callbacks compare their captured
   // value against it before touching any state.
   const runIdRef = useRef(0);
   const mixerRef = useRef<THREE.AnimationMixer | null>(null);
@@ -56,10 +54,9 @@ export function ModelLightbox({ isOpen, filePath, extension, vertexCount, modelN
   const [error, setError] = useState<ModelError | null>(null);
   const [stats, setStats] = useState<LoadingStats | null>(null);
   const [showGrid, setShowGrid] = useState(true);
-  // The 3D backdrop is the user's to choose here (the Sun/Moon button below),
-  // but it starts where the app already is: a light-theme user opening the
-  // lightbox used to get an unconditionally black viewport under a button
-  // offering to turn the lights ON.
+  // The 3D backdrop is the user's to choose here, but it starts where the app
+  // already is, so a light-theme user does not open onto a black viewport under a
+  // button offering to turn the lights ON.
   const appTheme = useThemeStore((s) => s.theme);
   const [darkMode, setDarkMode] = useState(appTheme === "dark");
 
@@ -296,13 +293,9 @@ export function ModelLightbox({ isOpen, filePath, extension, vertexCount, modelN
       window.removeEventListener("resize", handleResize);
       cleanup();
     };
-    // darkMode / showGrid are deliberately NOT dependencies: they're
-    // patched in place by the two small effects above, and re-running
-    // this effect would tear down the scene and reload the model (a
-    // 50MB FBX takes seconds) just to change the background or grid.
-    // The effect body still reads their current values whenever it does
-    // re-run (open / model switch). `t` isn't one either — errors are
-    // stored as i18n keys and translated at render time.
+    // darkMode / showGrid are NOT dependencies: they are patched in place by the
+    // two small effects above, and re-running this would reload the model. `t` is
+    // not one either — errors are i18n keys, translated at render.
   }, [isOpen, filePath, extension, cleanup]);
 
   const resetCamera = () => {

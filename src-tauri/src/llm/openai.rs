@@ -1,16 +1,6 @@
 //! OpenAI Chat Completions provider with vision content.
-//!
-//! API reference (verified 2026-05-08):
-//!   POST https://api.openai.com/v1/chat/completions
-//!   Auth: Authorization: Bearer <key>
-//!   Body: { model, messages: [...], response_format: {type:"json_object"} }
-//!   Image content block: { type: "image_url", image_url: { url: "data:image/png;base64,...", detail: "low" } }
-//!   Response: choices[0].message.content + usage.{prompt_tokens,completion_tokens}
-//!
-//! `response_format: json_object` instructs the model to emit valid JSON
-//! at the top level — saves the tier-2 markdown-fence parser most of
-//! the time. Tier-2 still exists as defense in depth (some snapshots
-//! still wrap output despite the directive).
+//! `response_format: json_object` makes the model emit valid top-level JSON; the
+//! markdown-fence parser stays as defense in depth.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -76,10 +66,9 @@ enum ContentBlock {
 #[derive(Serialize)]
 struct ImageUrl {
     url: String,
-    /// "low" / "high" / "auto". We use "low" because thumbnails are
-    /// 256×256 and the high-detail tile budget would just inflate
-    /// cost without quality gains at that resolution. Matches the
-    /// 85-token rule baked into `cost.rs`.
+    /// "low" / "high" / "auto". "low" because thumbnails are 256×256 and the
+    /// high-detail tile budget would inflate cost without quality gains at that
+    /// resolution. Matches the baseline in `cost.rs`.
     detail: &'static str,
 }
 
@@ -103,11 +92,9 @@ struct OpenAIChoice {
 
 #[derive(Deserialize)]
 struct OpenAIChoiceMessage {
-    /// `null` when the model declines — the reason moves to `refusal`. Held as
-    /// an Option so the body still deserializes: a required String failed the
-    /// whole response, which surfaced as "failed to parse provider response"
-    /// about a reply that was perfectly well-formed, and threw away the one
-    /// sentence explaining what happened.
+    /// `null` when the model declines — the reason moves to `refusal`. Held as an
+    /// Option so the body still deserializes: a required String failed the whole
+    /// response and threw away the sentence explaining what happened.
     #[serde(default)]
     content: Option<String>,
     #[serde(default)]
@@ -151,11 +138,9 @@ fn build_user_content_blocks(
 
 // ---- Response → TagResponse ----
 
-/// Pull the text reply + usage out of a parsed response. A
-/// `finish_reason: "length"` reply was cut at the output cap, so it's
-/// reported as `Truncated` before any JSON parsing (which would fail by
-/// construction) — mirrors claude.rs's `stop_reason` handling. Shared by
-/// the tagging path and learning's `send_text_chat`.
+/// Pull the text reply and usage out of a parsed response. A
+/// `finish_reason: "length"` reply was cut at the output cap and is reported as
+/// `Truncated` before any JSON parsing, mirroring claude.rs.
 fn extract_text_response(parsed: OpenAIResponse) -> Result<(String, Usage), LLMError> {
     let usage = Usage {
         input_tokens: parsed.usage.prompt_tokens,
@@ -402,10 +387,8 @@ mod tests {
     }
 
     /// A refusal comes back as HTTP 200 with `content: null` and the reason in
-    /// `refusal`. Modelling `content` as a required String made serde fail on
-    /// the whole body, so the call surfaced as "failed to parse provider
-    /// response" — reporting a malformed reply for a reply that was perfectly
-    /// well-formed, and discarding the one sentence that said what happened.
+    /// `refusal`. Modelling `content` as a required String made serde fail on the
+    /// whole body and discard the one sentence that said what happened.
     #[test]
     fn a_refusal_surfaces_its_reason_instead_of_a_parse_error() {
         let json = r#"{

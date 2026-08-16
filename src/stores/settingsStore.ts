@@ -2,45 +2,24 @@ import { create } from "zustand";
 
 // ============ AI Tagging types ============
 
-/**
- * Stable provider id strings — must match the strings the Rust backend
- * routes through `make_provider`. Adding a new provider here requires
- * adding the Rust counterpart in `src-tauri/src/llm/`.
- */
+/** Stable provider id strings — must match what the Rust backend routes through
+ *  `make_provider`. A new provider needs its counterpart in `src-tauri/src/llm/`. */
 export type AiProviderId = "claude" | "openai" | "ollama";
 
-/**
- * Per-provider configuration. `apiKey` lives in plaintext localStorage —
- * a deliberate trade-off for a local single-user tool, disclosed in
- * README → "Privacy & Data"; the first save flashes a toast to remind
- * the user. Empty `apiKey` for cloud providers means "configured but
- * not credentialed" — `llm_suggest_tags` returns NoApiKey when called
- * against such a state.
- */
+/** Per-provider configuration. `apiKey` lives in plaintext localStorage, as the
+ *  README's "Privacy & Data" section states. An empty `apiKey` for a cloud
+ *  provider means "configured but not credentialed". */
 export interface AiProviderConfig {
   apiKey?: string;
-  /**
-   * Override URL. Always used for Ollama (default `http://localhost:11434`).
-   * Optional for OpenAI (Azure / OpenRouter / corporate proxies). Unused
-   * for Claude.
-   */
+  /** Override URL. Always used for Ollama (default `http://localhost:11434`),
+   *  optional for OpenAI (Azure / OpenRouter / proxies), unused for Claude. */
   endpoint?: string;
   model: string;
 }
 
-/**
- * The model each provider starts on. This is the authoritative default —
- * the backend picks no model of its own, it uses whatever the request
- * carries. (Earlier comments here named backend `DEFAULT_MODEL` constants
- * and an `llm_default_models` command; neither exists.)
- *
- * Changing an entry only affects new configurations: a stored provider
- * config keeps its model through the settings merge.
- *
- * Keep in step with `MODEL_OPTIONS` in components/SettingsModal.tsx (this
- * model should be its first entry) and with the pricing table in
- * `src-tauri/src/llm/cost.rs`.
- */
+/** The model each provider starts on — the authoritative default, since the
+ *  backend uses whatever the request carries. Keep in step with `MODEL_OPTIONS`
+ *  in SettingsModal.tsx and the pricing table in `src-tauri/src/llm/cost.rs`. */
 const DEFAULT_AI_PROVIDERS: Record<AiProviderId, AiProviderConfig> = {
   claude: { model: "claude-sonnet-5" },
   openai: { model: "gpt-5.4-mini" },
@@ -67,48 +46,27 @@ interface SettingsState {
   externalEditors: Record<string, string>;
 
   // ----- AI tagging -----
-  /**
-   * Which provider's `suggest_tags` is invoked when the user clicks
-   * "AI Tag". `null` means AI tagging is disabled entirely (the
-   * "Disabled" radio in the Settings panel).
-   */
+  /** Which provider's `suggest_tags` runs on "AI Tag". `null` disables AI tagging
+   *  entirely (the "Disabled" radio in the Settings panel). */
   aiActiveProvider: AiProviderId | null;
-  /**
-   * All providers' configs are kept side-by-side, so switching the
-   * active provider doesn't lose the credentials of the previous one.
-   */
+  /** All providers' configs are kept side by side, so switching the active
+   *  provider does not lose the previous one's credentials. */
   aiProviders: Record<AiProviderId, AiProviderConfig>;
-  /**
-   * Per-provider thumbnail-upload consent. The cost confirm modal
-   * gates the first call until the corresponding flag flips to `true`.
-   * Settings → "Reset consent" lets the user revoke per provider.
-   */
+  /** Per-provider thumbnail-upload consent. The cost confirm modal gates the
+   *  first call until the flag flips; Settings → "Reset consent" revokes it. */
   aiPrivacyConsented: Record<AiProviderId, boolean>;
-  /**
-   * Toggles the "AI Tag (directly)" entry points on AssetList multi-
-   * select bar and right-click menu. Off by default — Learning mode
-   * (sampling + rule generation) is recommended; per-asset vision
-   * calls are ~50× more expensive and should be opt-in.
-   */
+  /** Toggles the "AI Tag (directly)" entry points. Off by default — Learning mode
+   *  is recommended, and per-asset vision calls are ~50× more expensive. */
   aiPerAssetModeEnabled: boolean;
 
-  /**
-   * When true (default), the scanner honors `.gitignore` / `.ignore`
-   * files and skips hidden directories like `.git/` / `.vscode/`. Set
-   * false to scan everything — useful for projects whose actual
-   * assets live under gitignored paths (e.g. a vendored `Library/`).
-   * Toggling this on a project triggers a full rescan on the next
-   * `openProject` so the cache prunes the now-out-of-scope files.
-   */
+  /** When true (default), the scanner honors `.gitignore` / `.ignore` and skips
+   *  hidden directories. Toggling it triggers a full rescan on the next
+   *  `openProject` so the cache prunes now-out-of-scope files. */
   respectGitignore: boolean;
 
-  /**
-   * Row caps for the HTML report's issue / asset tables. The report is a
-   * single self-contained file, so unlimited rows on a 100k-file project
-   * produce a very large document — hence caps, but configurable ones
-   * (the old hardcoded 100/500 buried real findings on big projects).
-   * `0` means unlimited.
-   */
+  /** Row caps for the HTML report's issue and asset tables; `0` is unlimited. The
+   *  report is one self-contained file, so unbounded rows on a 100k-file project
+   *  produce a very large document. */
   htmlReportIssueLimit: number;
   htmlReportAssetLimit: number;
 
@@ -140,19 +98,12 @@ interface StoredSettings {
   aiActiveProvider: AiProviderId | null;
   aiProviders: Record<AiProviderId, AiProviderConfig>;
   aiPrivacyConsented: Record<AiProviderId, boolean>;
-  /**
-   * Toggles the "AI Tag (directly)" entry points on AssetList multi-select
-   * and the right-click menu. Off by default — Learning mode (sampling +
-   * rule generation) is the recommended path; per-asset vision calls are
-   * 50× more expensive and should be opt-in for users who actually need
-   * thumbnail-level analysis.
-   */
+  /** Toggles the "AI Tag (directly)" entry points on the multi-select bar and the
+   *  right-click menu. Off by default — Learning mode is the recommended path,
+   *  and per-asset vision calls cost about 50× more. */
   aiPerAssetModeEnabled: boolean;
-  /**
-   * Per-machine setting. See `SettingsState.respectGitignore` for
-   * full docs. Defaults to `true` for new installs; older shapes
-   * (pre-feature) merge to the default cleanly.
-   */
+  /** Per-machine setting; see `SettingsState.respectGitignore`. Defaults to
+   *  `true`, and older stored shapes merge to that default cleanly. */
   respectGitignore: boolean;
   /** See `SettingsState` — HTML report row caps, 0 = unlimited. */
   htmlReportIssueLimit: number;
@@ -174,13 +125,9 @@ const DEFAULT_SETTINGS: StoredSettings = {
   htmlReportAssetLimit: 500,
 };
 
-/**
- * Deep-merge stored settings with current defaults. Older shapes
- * (pre-AI-tagging) lack `aiProviders` entirely; partial shapes (a user
- * who has used Claude but never configured OpenAI/Ollama) need each
- * missing provider filled from defaults so the UI never sees an
- * undefined config.
- */
+/** Deep-merge stored settings with current defaults. Older shapes lack
+ *  `aiProviders` entirely, and partial ones need each missing provider filled
+ *  from defaults so the interface never sees an undefined config. */
 function mergeStored(parsed: Partial<StoredSettings>): StoredSettings {
   return {
     ...DEFAULT_SETTINGS,
@@ -338,10 +285,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
     },
 
     setHtmlReportIssueLimit: (limit: number) => {
-      // Non-finite input (NaN from a cleared/garbled field) is "no edit",
-      // NOT zero — 0 means unlimited by contract with export_to_html, and
-      // silently persisting it would arm an unbounded report. Negatives
-      // clamp to 0.
+      // Non-finite input (NaN from a cleared or garbled field) means "no edit",
+      // NOT zero: 0 means unlimited by contract with export_to_html, so
+      // persisting it would arm an unbounded report. Negatives clamp to 0.
       if (!Number.isFinite(limit)) return;
       set({ htmlReportIssueLimit: Math.max(0, Math.floor(limit)) });
       saveSettings(snapshot());

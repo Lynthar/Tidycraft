@@ -31,17 +31,13 @@ interface BatchRenameResult {
 interface BatchRenameDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  /// Must keep its identity while the selection is unchanged — both effects
-  /// below are keyed on it, one of them fetching every reference in the
-  /// project. A fresh array per render turns each of them into work repeated
-  /// for nothing.
+  /// Must keep its identity while the selection is unchanged — both effects below
+  /// are keyed on it, one of them fetching every reference in the project. A fresh
+  /// array per render turns each of them into work repeated for nothing.
   selectedPaths: string[];
-  /// Called when at least one file was renamed, so the parent refreshes
-  /// the asset list / tags / undo state. `fullySucceeded` tells it whether
-  /// to also clear the selection — on a partial failure the parent keeps
-  /// it, so the failed files stay selected for a retry. Refresh and close
-  /// are deliberately decoupled: the dialog stays open on partial failure
-  /// to show the per-file errors.
+  /// Called when at least one file was renamed. `fullySucceeded` tells the parent
+  /// whether to clear the selection; on a partial failure it keeps it, and the
+  /// dialog stays open to show the per-file errors.
   onComplete: (fullySucceeded: boolean) => void;
 }
 
@@ -63,10 +59,9 @@ export function BatchRenameDialog({
   const [result, setResult] = useState<BatchRenameResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Godot rename guardrail (see RenameDialog for the rationale). References
-  // depend only on the files' CURRENT paths, so one fetch per open covers
-  // every find/replace variation the user types; the aggregate below is
-  // recomputed against the live preview's will_change set.
+  // Godot rename guardrail (see RenameDialog). References depend only on the files'
+  // CURRENT paths, so one fetch per open covers every find/replace variation the
+  // user types; the aggregate is recomputed against the live preview.
   const [godotRefs, setGodotRefs] = useState<Record<string, string[]> | null>(null);
   useEffect(() => {
     if (!isOpen || projectType !== "godot" || !activeProjectId || selectedPaths.length === 0) {
@@ -154,9 +149,8 @@ export function BatchRenameDialog({
       if (result.success_count > 0) {
         onComplete(result.error_count === 0);
       }
-      // Full success: nothing to review, close as before. Any failure keeps
-      // the dialog open so the result banner and error list actually render
-      // (they used to be unmounted before the first paint).
+      // Full success: nothing to review, so close. Any failure keeps the dialog
+      // open so the result banner and error list render.
       if (result.error_count === 0) {
         onClose();
       }
@@ -167,10 +161,9 @@ export function BatchRenameDialog({
     }
   };
 
-  // Reset on close — whatever path closed us (Cancel, X, backdrop-less
-  // auto-close after success). Without this, a close that skips the Cancel
-  // button leaks the previous run's find/replace/preview/result into the
-  // next open.
+  // Reset on close, whatever path closed the dialog. Without this a close that
+  // skips the Cancel button leaks the previous run's find/replace, preview and
+  // result into the next open.
   useEffect(() => {
     if (!isOpen) {
       setResult(null);

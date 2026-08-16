@@ -69,21 +69,17 @@ impl AudioRule {
     }
 
     fn is_likely_sfx(&self, asset: &AssetInfo) -> bool {
-        // Heuristic: the filename carries a common SFX indicator as a whole
-        // token. Token equality, NOT substring — `guitar.wav` contains "ui"
-        // and `white_noise.wav` contains "hit", and both used to be judged
-        // SFX (then warned for exceeding max_sfx_duration). Tokens split on
-        // non-alphanumeric boundaries and lower/upper camelCase seams, so
-        // `sword_hit_01`, `UIClick`, and `Sfx-Explosion` all still match.
+        // Token equality, NOT substring: `guitar.wav` contains "ui" and
+        // `white_noise.wav` contains "hit". Tokens split on non-alphanumeric
+        // boundaries and camelCase seams.
         const SFX_TOKENS: [&str; 6] = ["sfx", "sound", "effect", "hit", "click", "ui"];
         sfx_name_tokens(&asset.name).any(|tok| SFX_TOKENS.contains(&tok.as_str()))
     }
 }
 
 /// Split a filename into lowercase word tokens: separators are any
-/// non-alphanumeric run, plus lower→upper camelCase seams ("UIClick" →
-/// ["ui", "click"] — an uppercase run followed by a lowercase letter
-/// starts a new word at its last capital).
+/// non-alphanumeric run, plus lower→upper camelCase seams ("UIClick" → ["ui",
+/// "click"]).
 fn sfx_name_tokens(name: &str) -> impl Iterator<Item = String> + '_ {
     let mut tokens: Vec<String> = Vec::new();
     let mut current = String::new();
@@ -128,9 +124,8 @@ impl Rule for AudioRule {
     fn check(&self, asset: &AssetInfo) -> Option<Issue> {
         let metadata = asset.metadata.as_ref()?;
 
-        // Check sample rate. An empty allow-list means "no constraint" —
-        // skip entirely rather than flag every rate (indexing [0] below
-        // used to panic on `allowed_sample_rates = []` in tidycraft.toml).
+        // Check sample rate. An empty allow-list means "no constraint" — skip
+        // entirely rather than flag every rate.
         if let (Some(sample_rate), Some(&preferred)) = (
             metadata.sample_rate,
             self.config.allowed_sample_rates.first(),
@@ -272,9 +267,7 @@ mod tests {
             allowed_sample_rates: vec![],
             ..Default::default()
         });
-        // `allowed_sample_rates = []` in tidycraft.toml used to flag every
-        // rate as non-standard and then panic building the suggestion
-        // (indexed [0] into the empty list). Empty list = check off.
+        // An empty `allowed_sample_rates` turns the check off entirely.
         assert!(rule.check(&audio_asset(22050)).is_none());
     }
 
@@ -286,9 +279,8 @@ mod tests {
             .expect("22.05 kHz is non-standard");
         assert_eq!(issue.rule_id, "audio.sample_rate");
         assert!(issue.suggestion.expect("has suggestion").contains("44100"));
-        // The allowed rates must be joined ("44100, 48000"), not Rust's
-        // debug form of the Vec ("[44100, 48000]"). The `[` check is what
-        // actually catches a regression back to `{:?}`.
+        // The allowed rates must be joined ("44100, 48000"), not Rust's debug form
+        // of the Vec — the `[` check is what catches `{:?}`.
         assert!(issue.message.contains("44100, 48000"));
         assert!(!issue.message.contains('['));
     }

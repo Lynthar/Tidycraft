@@ -62,11 +62,9 @@ export function Header({ searchInputRef }: HeaderProps) {
   const [refreshingGit, setRefreshingGit] = useState(false);
   const langDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Manual git-status refresh. The spinner stays up until the git IO actually
-  // settles, but for at least 600ms so tiny repos (near-instant refresh) still
-  // show clear feedback instead of a flicker — the old fixed 600ms timeout
-  // could stop the spinner while a slower refresh was still running. Errors
-  // are swallowed by refreshGitInfo's own try/catch.
+  // Manual git-status refresh. The spinner stays up until the git IO settles, but
+  // for at least 600ms so tiny repos still show clear feedback instead of a
+  // flicker. Errors are swallowed by refreshGitInfo's own try/catch.
   const handleGitRefresh = async () => {
     if (refreshingGit) return;
     setRefreshingGit(true);
@@ -113,10 +111,8 @@ export function Header({ searchInputRef }: HeaderProps) {
     const result = await undoLastOperation();
     if (result && result.success) {
       // Undo carried tag bindings back to the original paths on the backend;
-      // re-sync the tags store so they reappear without waiting for the
-      // watcher's scanResult refresh. The scan list itself is refreshed by
-      // the watcher — the bare openProject(path) that used to sit here was
-      // a guaranteed no-op (already-open + not-force short-circuits).
+      // re-sync the tags store so they reappear without waiting for the watcher's
+      // scanResult refresh, which refreshes the scan list on its own.
       await useTagsStore.getState().loadTags();
     }
   };
@@ -234,13 +230,9 @@ export function Header({ searchInputRef }: HeaderProps) {
                   setSearchQuery("");
                   setShowSearchHistory(false);
                 } else if (e.key === "ArrowDown") {
-                  // Down out of the search box walks into the results. On a
-                  // stock Mac this is the only way in: the system's Keyboard
-                  // Navigation setting is off by default and WebKit honours
-                  // it, so Tab reaches text fields and nothing else. The
-                  // keystroke is claimed only when there was a list to enter,
-                  // and the history dropdown is dismissed by hand — it closes
-                  // on Enter, Escape and a pick, not on losing focus.
+                  // Down out of the search box walks into the results. On a stock
+                  // Mac this is the only way in: Keyboard Navigation is off by
+                  // default, so Tab reaches text fields and nothing else.
                   if (focusAssetList()) {
                     e.preventDefault();
                     setShowSearchHistory(false);

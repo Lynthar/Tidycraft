@@ -1,20 +1,6 @@
-//! Per-directory by-type-ratio sampler for AI Learning.
-//!
-//! Goal: feed the LLM a representative slice of the project's filenames
-//! without uploading the full asset list. Two pressures:
-//!
-//! 1. **Per-directory quota** — naming/taxonomy conventions are usually
-//!    directory-local (`Characters/Hero/T_Hero_*` vs `Weapons/Sword/SM_*`),
-//!    so we sample independently in each dir rather than globally.
-//! 2. **By-type ratio** — a directory with 100 PNGs and 1 FBX must
-//!    surface the FBX, otherwise the model can't learn the FBX naming
-//!    convention. We use round-robin allocation: every type with files
-//!    in the dir gets at least one slot before any type gets seconds.
-//!
-//! Determinism: file selection within a (dir, type) bucket is hash-
-//! ranked by `(seed, path)` and sorted, so the same scan + same seed
-//! produces the same samples — useful for "re-learn" UX where the user
-//! expects stable output unless the project actually changed.
+//! Per-directory by-type-ratio sampler for AI Learning: feeds the model a
+//! representative slice of filenames without uploading the whole asset list.
+//! Selection is deterministic for a given scan and seed.
 
 use std::collections::{hash_map::DefaultHasher, HashMap};
 use std::hash::{Hash, Hasher};
@@ -23,14 +9,9 @@ use crate::scanner::{AssetInfo, AssetType, ScanResult};
 
 use super::learning::{DirectorySample, SampleFile};
 
-/// Sample up to `depth` files per directory, biased so every present
-/// asset type gets at least one slot before any type doubles up.
-///
-/// `seed` controls deterministic file selection within each
-/// (dir, type) bucket — same scan + same seed = same samples.
-///
-/// Returns directories sorted by `rel_path` for stable diff-friendly
-/// output.
+/// Sample up to `depth` files per directory, biased so every present asset type
+/// gets a slot before any type doubles up. `seed` makes selection deterministic.
+/// Returns directories sorted by `rel_path`.
 pub fn sample_directories(scan: &ScanResult, depth: usize, seed: u64) -> Vec<DirectorySample> {
     if depth == 0 || scan.assets.is_empty() {
         return Vec::new();
@@ -69,12 +50,9 @@ pub fn sample_directories(scan: &ScanResult, depth: usize, seed: u64) -> Vec<Dir
     samples
 }
 
-/// Allocate `depth` slots across a directory's assets, then deterministically
-/// pick which file fills each slot.
-///
-/// Allocation: round-robin by type so a dir with 100 PNGs + 1 FBX
-/// surfaces the FBX. Within a type, files are sorted by hash rank
-/// so selection is stable across runs with the same seed.
+/// Allocate `depth` slots across a directory's assets, then deterministically pick
+/// which file fills each. Allocation is round-robin by type; within a type, files
+/// are ranked by a seeded hash.
 fn pick_per_type<'a>(files: &[&'a AssetInfo], depth: usize, seed: u64) -> Vec<&'a AssetInfo> {
     if files.len() <= depth {
         // Take everything — sort by rank for output stability.

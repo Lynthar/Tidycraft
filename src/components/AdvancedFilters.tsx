@@ -11,10 +11,9 @@ const GIT_STATUS_FILTER_OPTIONS: GitFileStatus[] = [
 
 export function AdvancedFiltersPanel() {
   const { t } = useTranslation();
-  // Selector + shallow compare: this panel lives in the Header, so an
-  // unselected `useProjectStore()` re-rendered it on every store change —
-  // not just the search box it sits next to, but each scan-progress tick as
-  // well, and each of those re-runs the two full-asset scans below.
+  // Selector + shallow compare: this panel lives in the Header, so an unselected
+  // `useProjectStore()` re-rendered it on every store change, including each
+  // scan-progress tick, and each of those re-runs the two full-asset scans below.
   const {
     advancedFilters,
     setAdvancedFilters,

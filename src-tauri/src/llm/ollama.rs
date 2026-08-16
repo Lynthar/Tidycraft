@@ -1,18 +1,6 @@
-//! Ollama provider — local HTTP, no auth.
-//!
-//! API reference (verified 2026-05-08):
-//!   POST {endpoint}/api/chat   (default endpoint: http://localhost:11434)
-//!   Body: { model, messages: [{role, content, images?: [b64]}], stream:false, format:"json" }
-//!   Response: { message: {role,content}, prompt_eval_count, eval_count, done, ... }
-//!
-//! Differences vs Anthropic / OpenAI:
-//!   - `images` lives on the message, NOT inside the `content` array
-//!     (Ollama's content is a plain string).
-//!   - `format: "json"` instructs Ollama to emit valid JSON.
-//!   - No 401 / 429 — local server. Connection failures surface as
-//!     `Network` errors with a hint pointing at the endpoint.
-//!   - Ollama has no $ cost; cost.rs already short-circuits to zero
-//!     for Ollama-family model ids.
+//! Ollama provider — local HTTP, no auth. `images` lives on the message rather
+//! than inside `content`, `format: "json"` forces valid JSON, there is no 401 or
+//! 429, and cost.rs short-circuits Ollama-family model ids to zero.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -54,29 +42,18 @@ struct OllamaRequest<'a> {
 
 #[derive(Serialize)]
 struct OllamaOptions {
-    /// Context window. Without it Ollama uses the model default (often
-    /// 4096), and a prompt longer than that is SILENTLY truncated from
-    /// the front — dropping the system prompt first, which turns the
-    /// response into free-form prose that fails schema parsing. Sized
-    /// from the actual request (chars/4 + response headroom), clamped so
-    /// small requests don't over-allocate KV-cache memory and huge ones
-    /// don't ask for more than typical local models support.
+    /// Context window. Without it Ollama uses the model default (often 4096) and
+    /// silently truncates a longer prompt from the front, dropping the system
+    /// prompt first. Sized from the request and clamped at both ends.
     num_ctx: usize,
 }
 
 const NUM_CTX_MIN: usize = 8_192;
 const NUM_CTX_MAX: usize = 32_768;
 
-/// Context tokens to budget per attached image.
-///
-/// Images ride at message level, outside `content`, so they cost nothing to
-/// measure by string length and a great deal to actually process: a vision
-/// model expands each into a block of tokens — about 1610 for
-/// llama3.2-vision at 512×512, 576 for llava's fixed 336px projection. This
-/// takes the high end of that range on purpose. Over-budgeting costs
-/// KV-cache memory that the `NUM_CTX_MAX` clamp bounds anyway;
-/// under-budgeting costs the silent front-truncation that `num_ctx` exists
-/// to prevent.
+/// Context tokens budgeted per attached image. Images ride at message level, so
+/// they cost nothing to measure by string length but expand into a token block
+/// (~1610 for llama3.2-vision at 512×512, 576 for llava). This is the high end.
 const IMAGE_TOKENS_EST: usize = 1_610;
 
 /// Context window for a request whose text totals `prompt_chars` and which
@@ -85,9 +62,9 @@ fn num_ctx_for(prompt_chars: usize, image_count: usize) -> usize {
     let est_prompt_tokens = prompt_chars / 4 + image_count.saturating_mul(IMAGE_TOKENS_EST);
     let with_headroom = est_prompt_tokens.saturating_add(2_048); // response + slack
     if with_headroom > NUM_CTX_MAX {
-        // Still truncated, but no longer silently: the ceiling is a guess at
-        // what local models support, and a request that needs more than it
-        // now leaves a line to find when the reply comes back malformed.
+        // Still truncated, but logged: the ceiling is a guess at what local models
+        // support, so a request that needs more leaves a line to find when the
+        // reply comes back malformed.
         eprintln!(
             "[ollama] request needs ~{with_headroom} context tokens ({image_count} images), \
              capped at {NUM_CTX_MAX} — the model may drop the front of the prompt"
@@ -111,10 +88,9 @@ struct OllamaMessage {
 #[derive(Deserialize)]
 struct OllamaResponse {
     message: OllamaResponseMessage,
-    /// `"stop"` normally; `"length"` when generation stopped at the context
-    /// or output limit — the same event Anthropic reports as
-    /// `stop_reason: "max_tokens"` and OpenAI as `finish_reason: "length"`,
-    /// and surfaced the same way here. Optional: older Ollama builds omit it.
+    /// `"stop"` normally; `"length"` when generation stopped at the context or
+    /// output limit — the same event Anthropic reports as `max_tokens` and OpenAI
+    /// as `length`. Optional: older Ollama builds omit it.
     #[serde(default)]
     done_reason: Option<String>,
     /// Tokens spent reading the prompt (system + user). May be absent
@@ -169,10 +145,9 @@ fn build_messages(
 // ---- Response → TagResponse ----
 
 fn extract_response(parsed: OllamaResponse) -> Result<TagResponse, LLMError> {
-    // Checked before parsing, like claude.rs does with `stop_reason`: a
-    // cut-off reply is invalid JSON, so parsing first reports a malformed
-    // response and sends the user looking at the model instead of at the
-    // request size, which is the part they can change.
+    // Checked before parsing, like claude.rs does with `stop_reason`: a cut-off
+    // reply is invalid JSON, and parsing first would send the user looking at the
+    // model instead of at the request size.
     if parsed.done_reason.as_deref() == Some("length") {
         return Err(LLMError::Truncated);
     }
@@ -189,12 +164,9 @@ fn extract_response(parsed: OllamaResponse) -> Result<TagResponse, LLMError> {
 
 // ---- HTTP call ----
 
-/// Map a non-2xx Ollama response to an error family. Local server: no
-/// auth (401) or metering (429) to speak of — but 404 is the classic
-/// "model not installed" and must NOT surface as a network problem: the
-/// frontend routes any message mentioning Network / timed out to a
-/// "check your connection" hint, which points the user in exactly the
-/// wrong direction. 5xx stays Network (server-side breakage).
+/// Map a non-2xx Ollama response to an error family. A local server has no auth
+/// or metering, but 404 means "model not installed" and must NOT surface as a
+/// network problem. 5xx stays Network.
 fn map_http_status(status: u16, url: &str, model: &str, body_preview: &str) -> LLMError {
     match status {
         404 => LLMError::Other(format!(
@@ -422,13 +394,9 @@ mod tests {
         assert!(!r.usage.cached);
     }
 
-    /// Ollama reports a cut-off reply as `done_reason: "length"`, the same
-    /// event Anthropic calls `stop_reason: "max_tokens"` and OpenAI calls
-    /// `finish_reason: "length"`. Both cloud providers turn it into
-    /// `Truncated`; Ollama ignored the field, so the cut-off JSON reached the
-    /// parser and came back as a `ParseError` about malformed JSON — pointing
-    /// the user at the model's output instead of at the request size, which is
-    /// the thing they can actually change.
+    /// Ollama reports a cut-off reply as `done_reason: "length"`. Ignoring the
+    /// field lets the cut-off JSON reach the parser, which then reports malformed
+    /// JSON instead of a request-size problem.
     #[test]
     fn a_length_cutoff_is_truncated_not_a_parse_error() {
         let json = r#"{
@@ -461,11 +429,8 @@ mod tests {
     }
 
     /// Ollama attaches images at message level, so they add nothing to
-    /// `content.len()` while a vision model expands each into a block of
-    /// tokens. Sizing the window from text alone left a vision request short
-    /// by thousands of them, and Ollama answers a too-small window by
-    /// truncating from the front — dropping the system prompt first, which is
-    /// the exact failure `num_ctx` was added to prevent.
+    /// `content.len()` while a vision model expands each into a token block.
+    /// Sizing the window from text alone left a vision request thousands short.
     #[test]
     fn num_ctx_counts_images_not_only_text() {
         // Text large enough that neither call lands on the MIN clamp.

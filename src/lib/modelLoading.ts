@@ -1,20 +1,6 @@
-/// Everything ModelViewer3D and ModelLightbox do identically to get a
-/// three.js `Object3D` on screen: format dispatch, material normalization,
-/// framing, error classification, and teardown.
-///
-/// The two components diverge in what they ARE — an inline square panel
-/// versus a fullscreen lightbox with grid/lighting toggles and keyboard
-/// shortcuts — but not in how a model gets loaded. Before this module they
-/// carried 467 byte-identical lines between them and stayed in step by hand,
-/// via four "See ModelViewer3D…" comments. The interest that was accruing on
-/// that is visible in the footer both files render: the vertex/mesh line was
-/// written twice, and both copies are equally untranslated.
-///
-/// What deliberately did NOT move here: scene, camera, renderer, lights and
-/// grid construction. Those look similar but differ in every constant that
-/// matters (fit distance, light count and intensity, shadow maps, grid size,
-/// zoom clamps), and folding them behind an options bag would produce exactly
-/// the boolean-riddled shared function that is worse than the duplication.
+/// Everything ModelViewer3D and ModelLightbox do identically to get a three.js
+/// `Object3D` on screen: format dispatch, material normalization, framing, error
+/// classification and teardown. Scene, camera, lights and grid stay in the components.
 
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
@@ -26,11 +12,9 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { buildTextureUrlResolver } from "./modelUrlResolver";
 import { dirname } from "./pathUtils";
 
-/// Formats routed into the 3D viewers. `.blend` is in the list so
-/// AssetPreview sends the file here rather than to the box-icon fallback —
-/// `loadModel` then short-circuits to an actionable "export to GLB" message.
-/// Real loading is impossible: .blend is Blender's private binary format
-/// with no web loader.
+/// Formats routed into the 3D viewers. `.blend` is listed so AssetPreview sends
+/// the file here rather than to the box-icon fallback; `loadModel` then
+/// short-circuits to an actionable "export to GLB" message.
 export const SUPPORTED_MODEL_FORMATS = [
   "gltf",
   "glb",
@@ -42,15 +26,9 @@ export const SUPPORTED_MODEL_FORMATS = [
   "vox",
 ];
 
-/// The 3D scene's backdrop — one pair of values for both viewers, as a CSS hex
-/// string because `THREE.Color` takes one. The inline viewer picks by app theme;
-/// the lightbox keeps its own light/dark toggle over the same pair.
-///
-/// Deliberately NOT design tokens, and deliberately not used by the loading /
-/// error overlays either: this is the inside of a render target. The overlays
-/// are app chrome and use theme tokens, which also keeps their text paired with
-/// their own background — the lightbox's backdrop toggle is independent of the
-/// theme, and no single red satisfies 4.5:1 against both backdrops at once.
+/// The 3D scene's backdrop, as a CSS hex string because `THREE.Color` takes one.
+/// The inline viewer picks by app theme; the lightbox has its own toggle over the
+/// same pair. Not design tokens: this is the inside of a render target.
 export const VIEWER_BACKDROP = {
   dark: "#1a1a1a",
   light: "#f0f0f0",
@@ -61,23 +39,17 @@ export interface ModelStats {
   vertexCount: number;
 }
 
-/// An error held as an i18n key (+ optional fallback) rather than a
+/// An error held as an i18n key (plus optional fallback) rather than a
 /// pre-translated string, so it re-translates on a language switch without
-/// re-running the WebGL setup effect — which would otherwise tear down and
-/// rebuild the whole scene just to relabel one message. Render with
-/// `t(error.key, error.fallback)`.
+/// re-running the WebGL setup effect. Render with `t(error.key, error.fallback)`.
 export interface ModelError {
   key: string;
   fallback?: string;
 }
 
-/// Give every mesh a material that will actually be visible under the
-/// viewers' lighting, and count meshes and vertices while walking the tree.
-///
-/// `vertexColors` is carried across every conversion: OBJLoader sets it true
-/// for OBJs with inline `v x y z r g b` lines, and unlit GLTFs
-/// (KHR_materials_unlit) arrive as MeshBasicMaterial. Dropping it renders
-/// those flat gray.
+/// Give every mesh a material that is visible under the viewers' lighting, and
+/// count meshes and vertices while walking the tree. `vertexColors` is carried
+/// across every conversion, or vertex-coloured OBJs and unlit GLTFs render gray.
 export function fixMaterials(object: THREE.Object3D): ModelStats {
   let meshCount = 0;
   let vertexCount = 0;
@@ -188,15 +160,9 @@ export function setupAnimations(
   return mixer;
 }
 
-/// Center `object` on the origin and scale its largest dimension to
-/// `targetSize`.
-///
-/// Order matters: scale BEFORE the position offset, because the resulting
-/// world transform is T·S, so a mesh ends up at `position + scale *
-/// localCenter`. Translating first only happens to look right when
-/// localCenter is already near the hierarchy root (typical of GLTF/GLB/OBJ);
-/// FBX and DAE often place the mesh node far from its root, and the wrong
-/// order then drifts the model off the grid by `(scale - 1) * center`.
+/// Center `object` on the origin and scale its largest dimension to `targetSize`.
+/// Scale BEFORE the position offset: the world transform is T·S, so translating
+/// first drifts the model off the grid by `(scale - 1) * center`.
 export function fitObjectToView(
   object: THREE.Object3D,
   targetSize: number
@@ -211,12 +177,9 @@ export function fitObjectToView(
   object.position.sub(center.multiplyScalar(scale));
 }
 
-/// Dispose every geometry and material under `root`. The caller still detaches
-/// the object — this only releases GPU memory.
-///
-/// Separate from `disposeSceneContents` because a viewer that keeps its scene
-/// across files has to drop the model without touching the lights and grid
-/// standing beside it.
+/// Dispose every geometry and material under `root`; the caller still detaches
+/// the object. Separate from `disposeSceneContents` so a viewer that keeps its
+/// scene across files can drop the model without taking the lights and grid.
 export function disposeObjectTree(root: THREE.Object3D): void {
   root.traverse((object) => {
     if (object instanceof THREE.Mesh) {
@@ -238,12 +201,8 @@ export function disposeSceneContents(scene: THREE.Scene): void {
 }
 
 /// Dispose a renderer, release its WebGL context, and detach its canvas.
-///
-/// `dispose()` frees GPU buffers but does NOT release the context; browsers
-/// cap active contexts (~16/page), so without `forceContextLoss` swapping
-/// between many model previews — or reopening the lightbox repeatedly —
-/// exhausts them and the browser force-loses the oldest ("Too many active
-/// WebGL contexts"), leaving a black preview.
+/// `dispose()` frees GPU buffers but does NOT release the context, and browsers
+/// cap active contexts at around 16 per page.
 export function releaseRenderer(renderer: THREE.WebGLRenderer): void {
   renderer.dispose();
   renderer.forceContextLoss();
@@ -260,11 +219,9 @@ function classifyModelError(err: unknown, ext: string): ModelError {
   if (message.includes("404") || message.includes("not found")) {
     return { key: "modelViewer.fileNotFound", fallback: "File not found" };
   }
-  // three.js's FBXLoader is a reverse-engineered parser that doesn't cover
-  // every UV/MappingInformationType combination Autodesk DCC tools emit. The
-  // failure mode is a cryptic `Cannot read properties of undefined (reading
-  // 'a')` from GeometryParser.parseUVs. We can't fix the parser, but we can
-  // tell the user a path forward (re-export as GLB).
+  // three.js's FBXLoader is a reverse-engineered parser that does not cover every
+  // UV/MappingInformationType Autodesk tools emit; the failure surfaces as a
+  // cryptic error from GeometryParser.parseUVs. Point the user at GLB instead.
   if (
     ext === "fbx" &&
     (message.includes("Cannot read properties of undefined") ||
@@ -284,13 +241,9 @@ function classifyModelError(err: unknown, ext: string): ModelError {
 export interface LoadModelOptions {
   filePath: string;
   extension: string;
-  /// True once this load has been superseded — the component unmounted, or a
-  /// newer model started. Checked after every await and inside every loader
-  /// callback: a plain "mounted" boolean cannot do this job, because the next
-  /// run resets it to alive and a still-in-flight callback from the previous
-  /// model then passes the guard, hijacking the mixer or painting "Failed to
-  /// load" over a model that rendered fine. Callers pass a monotonic-token
-  /// comparison.
+  /// True once this load has been superseded. Checked after every await and in
+  /// every loader callback: a plain "mounted" boolean cannot do this, because the
+  /// next run resets it and a stale in-flight callback then passes.
   isStale: () => boolean;
   onLoad: (object: THREE.Object3D) => void;
   onFailure: (error: ModelError) => void;
@@ -298,14 +251,9 @@ export interface LoadModelOptions {
   label: string;
 }
 
-/// Load `filePath` with the right three.js loader for its extension and hand
-/// the resulting object to `onLoad`. Every failure — unsupported format,
-/// missing file, unparseable geometry — arrives at `onFailure` already
-/// classified into an i18n key.
-///
-/// The unsupported-format rejection happens before the first `await`, so it
-/// still lands synchronously within the caller's effect, as it did when this
-/// lived inline.
+/// Load `filePath` with the right three.js loader for its extension and hand the
+/// result to `onLoad`. Every failure arrives at `onFailure` already classified
+/// into an i18n key. The unsupported-format rejection happens before any await.
 export async function loadModel({
   filePath,
   extension,
@@ -356,14 +304,9 @@ export async function loadModel({
       loader.setResourcePath(resourcePath);
       loader.load(modelUrl, (gltf) => onLoad(gltf.scene), undefined, fail);
     } else if (ext === "obj") {
-      // Pre-fetch the OBJ text so we can (a) honor the actual `mtllib`
-      // filename instead of guessing `<basename>.mtl` — OBJ allows arbitrary
-      // names like `mtllib materials.mtl` — and (b) skip the MTL request
-      // entirely when no `mtllib` line is present. The previous blind attempt
-      // at `.mtl` produced a console-polluting 500 from the asset protocol
-      // (the silent fallback rendered the OBJ correctly, but the log noise
-      // was confusing). Using `parse(text)` avoids a second fetch by
-      // OBJLoader.
+      // Pre-fetch the OBJ text to honor the actual `mtllib` filename instead of
+      // guessing `<basename>.mtl`, and to skip the MTL request entirely when no
+      // `mtllib` line is present. `parse(text)` avoids a second fetch.
       let objText: string;
       try {
         const resp = await fetch(modelUrl);
@@ -427,15 +370,9 @@ export async function loadModel({
       loader.setResourcePath(resourcePath);
       loader.load(modelUrl, onLoad, undefined, fail);
     } else if (ext === "vox") {
-      // VOXLoader (r182) returns `{ chunks, scene }`. Modern files with
-      // nTRN/nGRP/nSHP nodes populate `scene` directly; older v150
-      // single-model exports (e.g. plain MagicaVoxel saves) only carry
-      // SIZE/XYZI/RGBA chunks → `scene` is null at runtime even though
-      // @types/three claims Object3D. Fall back to manual `buildMesh` per
-      // chunk so both shapes load. VOX is self-contained (palette + voxel
-      // data, no external textures), so no setResourcePath is needed;
-      // buildMesh already centers the geometry and emits a vertex-color
-      // MeshStandardMaterial that survives fixMaterials intact.
+      // VOXLoader (r182) returns `{ chunks, scene }`. Older v150 single-model
+      // exports leave `scene` null at runtime despite the types, so fall back to
+      // `buildMesh` per chunk. VOX is self-contained — no setResourcePath needed.
       const { VOXLoader, buildMesh } = await import(
         "three/addons/loaders/VOXLoader.js"
       );

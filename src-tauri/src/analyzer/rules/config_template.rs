@@ -1,15 +1,6 @@
-/// Default `tidycraft.toml` written into a project root the first time the
-/// user opens the rules editor and no config exists yet. Every field is
-/// listed with its default value so users can see the full surface; comments
-/// flag the toggles most likely to need adjustment.
-///
-/// Keep this in sync with the field defaults declared in each rule's
-/// `default_*` function — there's no compile-time check, so reviewers must
-/// eyeball both. Drift here only affects the welcome template; runtime
-/// defaults still come from `RuleConfig::default()` regardless.
-// `r##"..."##` (two hashes) is needed because the template body contains
-// the literal sequence `"#"` (e.g. inside the forbidden_chars example),
-// which would otherwise close a single-hash raw string early.
+/// Default `tidycraft.toml` written into a project root the first time the user
+/// opens the rules editor. Keep in sync with each rule's `default_*` function.
+/// `r##` is required: the body contains the literal sequence `"#`.
 pub const DEFAULT_CONFIG_TEMPLATE: &str = r##"# Tidycraft analysis rules.
 # Edit and save — Run Analysis re-reads this file on each click; no rescan needed.
 # Delete this file to fall back to built-in defaults.

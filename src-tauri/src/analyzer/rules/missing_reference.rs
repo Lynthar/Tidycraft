@@ -1,10 +1,6 @@
-//! Unity missing-reference detection.
-//!
-//! The inverse of `find_unused_assets`: walk every referenceable Unity file
-//! (prefab / scene / material / controller / asset) and flag any GUID it
-//! references that doesn't resolve to an asset we scanned. This catches the
-//! classic "I deleted `foo.png` but still have a prefab pointing at its GUID"
-//! breakage that Unity's own editor only surfaces once you open the asset.
+//! Unity missing-reference detection: the inverse of `find_unused_assets`. Walks
+//! every referenceable Unity file and flags any GUID it references that resolves
+//! to no scanned asset.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -17,16 +13,8 @@ use crate::unity;
 const REFERENCEABLE_EXTS: &[&str] = &["prefab", "unity", "mat", "controller", "asset"];
 
 /// `sources` are the files walked for references — the analysis scope, i.e.
-/// post-`[ignore]`. `known` is what establishes which GUIDs exist and must be
-/// the FULL scan, ignore patterns included.
-///
-/// The two differ on purpose. `[ignore]` means "don't report problems in these
-/// files", not "pretend these files were deleted" — and the sample config's own
-/// example (`"Plugins/**"`, `"ThirdParty/**"`) is exactly the case where the
-/// difference bites: dropping vendored assets from the existence universe made
-/// every prefab/scene/material that references them report a dangling GUID, in
-/// bulk. Ignoring a *referencing* file still suppresses its findings, because
-/// it never appears in `sources` — the suppression path the docs describe.
+/// post-`[ignore]`. `known` is what establishes which GUIDs exist and must be the
+/// FULL scan, ignore patterns included.
 pub fn find_missing_references(
     sources: &[AssetInfo],
     known: &[AssetInfo],
@@ -64,10 +52,9 @@ pub fn find_missing_references(
         // five places is still one broken link.
         let mut reported: HashSet<String> = HashSet::new();
         for r in &info.references {
-            // Unity uses all-zero GUID as "no reference"; skip these. The
-            // editor-shipped built-in bundles are never in the scan set by
-            // design. Both classifiers live in `unity.rs` (shared with the
-            // dependency graph, which applies the same exemptions).
+            // The all-zero "no reference" GUID and the editor-shipped built-in
+            // bundles are never in the scan set. Both classifiers live in
+            // `unity.rs`, shared with the dependency graph.
             if unity::is_null_guid(&r.guid) || unity::is_builtin_guid(&r.guid) {
                 continue;
             }
@@ -83,10 +70,9 @@ pub fn find_missing_references(
             if !reported.insert(r.guid.clone()) {
                 continue;
             }
-            // Warning, not Error: known_guids only covers what the scan saw
-            // and the package index only what a local Library/ cache
-            // resolves (a fresh clone has neither) — a miss is strong
-            // signal, not proof of breakage.
+            // Warning, not Error: `known_guids` only covers what the scan saw and
+            // the package index only what a local Library/ resolves, so a miss is
+            // strong signal rather than proof.
             result.add_issue(Issue {
                 rule_id: "missing_reference".to_string(),
                 rule_name: "Missing Reference".to_string(),
@@ -161,10 +147,9 @@ pub(crate) mod tests {
         }
     }
 
-    /// `[ignore]` narrows what we report on, not what exists. Ignoring the
-    /// sample config's own `"Plugins/**"` used to make every prefab that
-    /// referenced a plugin asset report a dangling GUID — in bulk, on a
-    /// perfectly healthy project.
+    /// `[ignore]` narrows what is reported, not what exists. Ignoring the sample
+    /// config's own `"Plugins/**"` made every prefab that referenced a plugin
+    /// asset report a dangling GUID, in bulk, on a healthy project.
     #[test]
     fn ignored_assets_still_count_as_existing() {
         let dir = tempdir().unwrap();
@@ -350,9 +335,8 @@ pub(crate) mod tests {
     #[test]
     fn skips_unity_builtin_guids() {
         // `...e...` = "unity default resources", `...f...` = "unity_builtin_extra".
-        // Both ship inside the editor, are referenced by any project touching a
-        // built-in shader/material/sprite, and never have a scanned .meta —
-        // flagging them buries real breakage in noise on ordinary projects.
+        // Both ship inside the editor and never have a scanned .meta, so flagging
+        // them buries real breakage in noise.
         let dir = tempdir().unwrap();
         let assets = vec![
             texture_with_guid(dir.path(), "t.png", "11111111111111111111111111111111"),

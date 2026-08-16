@@ -36,10 +36,9 @@ export function VideoPlayer({ filePath }: VideoPlayerProps) {
         videoRef.current.pause();
         setIsPlaying(false);
       } else {
-        // play() returns a promise that REJECTS for unsupported codecs /
-        // decode failures / autoplay policy. Only flip the state on
-        // success — the old unconditional flip left a "playing" UI over a
-        // frozen frame, plus an unhandled-rejection console error.
+        // play() returns a promise that REJECTS for unsupported codecs, decode
+        // failures and autoplay policy. Only flip the state on success — an
+        // unconditional flip left a "playing" UI over a frozen frame.
         videoRef.current
           .play()
           .then(() => setIsPlaying(true))

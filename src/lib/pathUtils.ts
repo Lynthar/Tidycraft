@@ -1,11 +1,6 @@
-/// Path utilities for the renderer.
-///
-/// All paths emitted by the backend are normalized to forward slashes by
-/// `scanner::path_to_string`, so a `lastIndexOf("/")` would suffice for
-/// well-behaved input. We accept both separators here defensively because:
-///   - File dialogs occasionally surface raw OS paths.
-///   - FBX/OBJ/DAE loaders emit embedded texture URLs with mixed separators.
-///   - User-supplied editor paths in Settings come straight from the OS picker.
+/// Path utilities for the renderer. Backend paths are always forward-slashed, but
+/// both separators are accepted defensively: file dialogs, embedded texture URLs
+/// from model loaders, and OS-picker editor paths can all carry either.
 
 /// Last index of either `/` or `\` in `path`, or -1 if neither appears.
 function lastSeparatorIndex(path: string): number {
@@ -36,12 +31,9 @@ export function getExtension(path: string): string {
   return path.slice(lastDot).toLowerCase();
 }
 
-/// Project-relative form of `path` when it lives under `root`; otherwise the
-/// input unchanged. Accepts either separator on both sides and compares the
-/// prefix case-insensitively (Windows drive-letter / user-folder casing can
-/// differ between the dialog, the backend, and persisted state). Used for
-/// user-facing path display — issue rows, the directory-scope bar — where the
-/// absolute prefix is pure noise.
+/// Project-relative form of `path` when it lives under `root`, else the input
+/// unchanged. Accepts either separator and compares the prefix case-insensitively.
+/// Used for user-facing path display, where the absolute prefix is noise.
 export function relativeToRoot(path: string, root: string | null | undefined): string {
   if (!root) return path;
   const p = path.replace(/\\/g, "/");
@@ -51,10 +43,8 @@ export function relativeToRoot(path: string, root: string | null | undefined): s
   return path;
 }
 
-/// Pretty display name for an editor binary path: strips directory and
-/// the `.exe` / `.app` suffix common on Windows / macOS. Used in
-/// ContextMenu and AssetPreview to render "Open in Photoshop" rather
-/// than "Open in Photoshop.exe".
+/// Pretty display name for an editor binary path: strips the directory and the
+/// `.exe` / `.app` suffix, so the menu reads "Open in Photoshop".
 export function getEditorDisplayName(editorPath: string): string {
   const name = basename(editorPath);
   const lower = name.toLowerCase();

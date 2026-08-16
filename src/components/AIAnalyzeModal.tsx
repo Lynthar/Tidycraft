@@ -20,19 +20,9 @@ const PROVIDER_LABEL_KEYS: Record<AiProviderId, string> = {
   ollama: "settings.aiProviderOllama",
 };
 
-/// Cost-preview + consent modal that gates `llm_suggest_tags`. Triggered
-/// from AssetList multi-select bar and ContextMenu via the global
-/// `uiStore.aiAnalyzeOpen` flag (paths come along on the open call).
-///
-/// Flow:
-///   1. Open with paths → call `llm_estimate_cost` to populate the
-///      preview (pure function, no network).
-///   2. User confirms (and ticks the consent box for cloud providers
-///      on first call) → call `llm_suggest_tags`. Backend handles per-
-///      asset cache lookup so a partial-cache run only bills the misses.
-///   3. On success, swap to `AIResultPanel` via `setAiResultOpen`.
-///   4. Errors are mapped to friendly i18n messages by string-matching
-///      the LLMError variants the backend serializes.
+/// Cost-preview and consent modal gating `llm_suggest_tags`. Opens with paths,
+/// estimates locally, then dispatches on confirm and swaps to `AIResultPanel`.
+/// Errors are mapped to i18n messages by matching the serialized LLMError text.
 export function AIAnalyzeModal() {
   const { t } = useTranslation();
   const aiAnalyzeOpen = useUiStore((s) => s.aiAnalyzeOpen);
@@ -56,24 +46,17 @@ export function AIAnalyzeModal() {
   // we promote it to persisted `aiPrivacyConsented[provider]` so future
   // calls skip the checkbox altogether.
   const [consentLocal, setConsentLocal] = useState(false);
-  // Whether to upload thumbnails as part of the prompt. Default OFF
-  // because for game assets, filenames + paths usually carry the
-  // semantic signal — normal/roughness/AO maps and 3D models don't
-  // gain anything from a thumbnail (and 3D models have no thumbnail
-  // anyway). Only flip on for diffuse/albedo textures or icon-style
-  // flat assets where the visual matters. Vision tokens are 60-80%
-  // of the total prompt cost, so OFF is also the cheap default.
+  // Whether to upload thumbnails as part of the prompt. Default OFF: for game
+  // assets filenames and paths usually carry the semantic signal, and vision
+  // tokens are 60–80% of the total prompt cost.
   const [uploadThumbnails, setUploadThumbnails] = useState(false);
 
   const provider = aiActiveProvider;
   const config = provider ? aiProviders[provider] : null;
   const consented = provider ? aiPrivacyConsented[provider] : false;
-  // Cloud providers (claude/openai) need explicit consent before
-  // thumbnails leave the machine. Ollama is local — skip the gate.
-  // Also skip when uploadThumbnails is off: text-only filenames don't
-  // raise the same privacy concern (filenames + paths are still sent,
-  // but the user agreed to that by configuring a cloud provider at all;
-  // thumbnails are the meaningful "leaves the machine" delta).
+  // Cloud providers need explicit consent before thumbnails leave the machine.
+  // Ollama is local, and with `uploadThumbnails` off there is no image delta —
+  // filenames and paths were agreed to by configuring a cloud provider at all.
   const needsConsentGate =
     provider !== null && provider !== "ollama" && uploadThumbnails;
   const canContinue =
@@ -83,11 +66,9 @@ export function AIAnalyzeModal() {
     !loadingCost &&
     (!needsConsentGate || consented || consentLocal);
 
-  // Reset transient state when modal closes/reopens. Without this,
-  // a previous error / cost number would briefly flash on the next open —
-  // and the thumbnail-upload consent stuck across opens, so a second run
-  // in the same session silently defaulted to uploading images the user
-  // only agreed to for the FIRST batch.
+  // Reset transient state when the modal closes or reopens. Without it a previous
+  // error or cost briefly flashes on the next open, and the thumbnail-upload
+  // consent stuck across opens into batches the user never agreed to.
   useEffect(() => {
     if (!aiAnalyzeOpen) {
       setCost(null);
@@ -98,12 +79,9 @@ export function AIAnalyzeModal() {
     }
   }, [aiAnalyzeOpen]);
 
-  // Cost estimate fetch. Depends on provider + model + asset count +
-  // thumbnail toggle (cost.rs prices asset entries by count, not path) —
-  // plus the project, whose tag context the real request re-sends with
-  // every chunk and the estimate therefore prices too. Using
-  // `paths.length` instead of `paths` itself keeps re-renders cheap when
-  // a different selection of the same size opens the modal.
+  // Cost estimate fetch, depending on provider, model, asset count, the thumbnail
+  // toggle and the project — whose tag context the real request re-sends with
+  // every chunk. `paths.length` keeps re-renders cheap for a same-size selection.
   useEffect(() => {
     if (!aiAnalyzeOpen || !provider || !config || paths.length === 0) return;
     let cancelled = false;
@@ -145,10 +123,9 @@ export function AIAnalyzeModal() {
     setError(null);
     try {
       const response = await invoke<AiTagResponse>("llm_suggest_tags", {
-        // Pass the active project's id so the backend can load this
-        // project's tag system + tidycraft.toml [project] theme/goal as
-        // prompt context (existing-tag reuse + project-aware suggestions).
-        // Empty string makes the backend silently fall back to no context.
+        // Pass the active project's id so the backend can load this project's tag
+        // system and `[project]` theme/goal as prompt context. An empty string
+        // makes the backend fall back to no context.
         projectId: activeProjectId ?? "",
         assetPaths: paths,
         provider,
@@ -157,11 +134,9 @@ export function AIAnalyzeModal() {
         endpoint: config.endpoint ?? null,
         uploadThumbnails,
       });
-      // Project switched while the request was in flight? The switch
-      // subscription already dismissed the AI modals; re-opening the result
-      // panel here would float project A's suggestions over project B, and
-      // AIResultPanel's Apply writes to whichever project is active — the
-      // cross-project-write bug. Discard the response instead.
+      // Project switched while the request was in flight: re-opening the result
+      // panel would float project A's suggestions over project B, and Apply writes
+      // to whichever project is active. Discard the response instead.
       if (useProjectStore.getState().activeProjectId !== activeProjectId) return;
       setAiResultOpen(true, response, paths);
       setAiAnalyzeOpen(false);

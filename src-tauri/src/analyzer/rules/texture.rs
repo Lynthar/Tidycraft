@@ -31,19 +31,15 @@ pub struct TextureConfig {
     #[serde(default = "default_max_file_size")]
     pub max_file_size: u64,
 
-    /// Color-space mismatch detection. Lives under `[texture.color_space]`
-    /// in the TOML; gated independently from this section's `enabled`
-    /// flag so users can turn off PoT / size / file-size checks without
-    /// also losing the sRGB-data-texture safety net.
+    /// Colour-space mismatch detection, `[texture.color_space]` in the TOML.
+    /// Gated independently of this section's `enabled` flag.
     #[serde(default)]
     pub color_space: TextureColorSpaceConfig,
 }
 
 fn default_enabled() -> bool {
-    // Out-of-box OFF: texture standards are stylistic conventions
-    // (PoT, max-size, file-size). Users opt in via tidycraft.toml.
-    // The independent `[texture.color_space]` rule stays on because
-    // it's a real bug check, not a convention.
+    // Out-of-box OFF: texture standards (PoT, max size, file size) are stylistic
+    // conventions. `[texture.color_space]` stays on — it is a real bug check.
     false
 }
 
@@ -105,11 +101,9 @@ impl Rule for TextureRule {
     }
 
     fn check(&self, asset: &AssetInfo) -> Option<Issue> {
-        // Dimensions are optional: PSD/PSB and other exotic formats often
-        // parse without them. The old `metadata.width?` early-return exempted
-        // exactly those (typically the LARGEST files) from every check — the
-        // file-size check below must run regardless; only the dimension-
-        // dependent checks are gated.
+        // Dimensions are optional: PSD/PSB and other exotic formats often parse
+        // without them, and those are typically the largest files. Only the
+        // dimension-dependent checks are gated on them.
         let dims = asset
             .metadata
             .as_ref()
@@ -257,10 +251,9 @@ impl TextureRule {
         None
     }
 
-    /// DDS-only: warn when a large texture ships without a mipmap chain.
-    /// Only DDS stores mipmap_count; for other formats the engine generates
-    /// them on import so the file alone doesn't tell us. 512px threshold
-    /// skirts UI textures that legitimately ship base-only.
+    /// DDS-only: warn when a large texture ships without a mipmap chain. Only DDS
+    /// stores mipmap_count. The 512px threshold skirts UI textures that
+    /// legitimately ship base-only.
     fn check_mipmaps(&self, asset: &AssetInfo, width: u32, height: u32) -> Option<Issue> {
         if let Some(mips) = asset.metadata.as_ref().and_then(|m| m.mipmap_count) {
             if mips <= 1 && (width >= 512 || height >= 512) {
@@ -295,11 +288,9 @@ fn next_power_of_two(n: u32) -> u32 {
     if n == 0 {
         return 1;
     }
-    // Above 2^31 there is no next power of two representable in u32; the
-    // bit-fill + 1 below would overflow (panic in debug, wrap to 0 in release).
-    // Cap at 2^31 — a dimension this large only comes from a corrupt texture
-    // header, and this value only feeds a human-readable "Resize to NxN"
-    // suggestion, not any real computation.
+    // Above 2^31 there is no next power of two representable in u32 and the
+    // bit-fill below would overflow. The value only feeds a human-readable
+    // "Resize to NxN" suggestion.
     if n > (1 << 31) {
         return 1 << 31;
     }
@@ -334,8 +325,8 @@ mod tests {
     #[test]
     fn file_size_check_covers_textures_without_dimensions() {
         let rule = TextureRule::new(TextureConfig::default());
-        // Over the default 10 MB cap: must fire even though the old
-        // `width?` early-return used to exempt exactly these files.
+        // Over the default 10 MB cap: fires even though the file carries no parsed
+        // dimensions.
         let issue = rule.check(&psd_without_dims(11 * 1024 * 1024));
         assert_eq!(
             issue.expect("expected an issue").rule_id,

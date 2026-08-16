@@ -6,28 +6,9 @@ import { menuActions } from "./menuActions";
 import { useRecentsStore } from "../stores/recentsStore";
 import { version as appVersion } from "../../package.json";
 
-/// The macOS menu bar, built frontend-side. JS ownership is deliberate:
-/// labels come straight from i18next (a Rust-built menu would need a second
-/// copy of every translation shipped over IPC), the Open Recent submenu
-/// reads `recentsStore` directly, and actions are plain closures into the
-/// shared `menuActions` layer — the same guards the keyboard handler uses.
-///
-/// macOS-only by design (`installAppMenu` no-ops elsewhere): on Windows and
-/// Linux a Tauri menu renders as an in-window menu strip, which would fight
-/// the custom Header. On macOS the bar is app-global and free.
-///
-/// Two platform rules shape the structure (verified against tauri 2.11.1):
-/// - The FIRST submenu automatically becomes the application menu; its label
-///   is ignored in favor of the app name.
-/// - Replacing the default menu replaces the Edit roles that make ⌘C/⌘V/⌘Z
-///   work inside text fields — so this menu must re-include every one of
-///   them (the predefined Undo…SelectAll block below is load-bearing, not
-///   decoration).
-///
-/// Accelerators declared here are consumed by the menu system before the
-/// webview sees the keydown, so each item's `action` is the only handler
-/// that runs for its combo on macOS — hence everything routes through
-/// `menuActions`, never through bespoke logic.
+/// The macOS menu bar, built frontend-side: labels come from i18next, Open Recent
+/// reads `recentsStore`, and actions route through `menuActions`. Not installed
+/// on other platforms, where a Tauri menu would render as an in-window strip.
 
 const GITHUB_URL = "https://github.com/Lynthar/Tidycraft";
 const ISSUES_URL = "https://github.com/Lynthar/Tidycraft/issues";
@@ -240,9 +221,8 @@ export function installAppMenu(): void {
   });
 }
 
-/// Test-only view of the installed-menu reference (no test runner exists in
-/// this repo today; kept for the CDP smoke probe, which asserts the non-mac
-/// no-op by checking this stays null).
+/// Test-only view of the installed-menu reference, used by the smoke probe to
+/// assert the non-macOS no-op.
 export function installedMenuForProbe(): Menu | null {
   return installed;
 }

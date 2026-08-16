@@ -1,11 +1,6 @@
-/// Platform detection for renderer-side code.
-///
-/// Tauri 2 has an async `os` plugin that requires importing and awaiting,
-/// which is awkward for synchronous render-time checks (CSS class toggles,
-/// shortcut display). Sniffing `navigator.userAgent` once and caching the
-/// result is reliable enough — Tauri webviews keep the host platform's UA.
-/// Server-side rendering / unit tests fall back to "linux" so callers
-/// don't crash on `navigator` being undefined.
+/// Platform detection for renderer-side code. Tauri 2's `os` plugin is async,
+/// which is awkward for synchronous render-time checks, and Tauri webviews keep
+/// the host platform's UA. Falls back to "linux" when `navigator` is undefined.
 
 export type Platform = "macos" | "windows" | "linux";
 

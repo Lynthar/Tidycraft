@@ -1,21 +1,6 @@
-/// Bounded request queue for gallery thumbnails.
-///
-/// `get_thumbnail` decodes the image in full on the backend before resizing
-/// it (a 4096² texture is 67 MB of pixels), and tokio's blocking pool grows a
-/// thread per queued task up to 512 — so scrolling quickly through a texture
-/// library used to put hundreds of full decodes in flight at once.
-///
-/// A concurrency cap alone would not fix what the user actually sees, though.
-/// Stopping after a long scroll left the twenty visible cards queued behind
-/// hundreds of requests for cards that had already gone past. So a request
-/// still waiting when its card unmounts is dropped: scrolled-past work
-/// evaporates, and what is left is what is on screen. FIFO plus dropping is
-/// enough — no priority queue needed.
-///
-/// A request that has already been sent cannot be recalled: Tauri's `invoke`
-/// has no cancellation and the backend will finish it either way. Cancelling
-/// one is therefore a no-op, and the caller is expected to keep the result
-/// (see `THUMB_CANCELLED`).
+/// Bounded request queue for gallery thumbnails: `get_thumbnail` decodes the image
+/// in full before resizing, so a fast scroll would otherwise put hundreds of
+/// decodes in flight. A request still queued when its card unmounts is dropped.
 
 import { invoke } from "@tauri-apps/api/core";
 
@@ -23,12 +8,9 @@ import { invoke } from "@tauri-apps/api/core";
 /// leaving cores free for a scan or an analysis running alongside.
 const MAX_IN_FLIGHT = 6;
 
-/// Rejection value for a request dropped before it was ever sent.
-///
-/// It has to be distinguishable from a real failure: the thumbnail cache
-/// records failures as tombstones ("tried, don't retry"), so storing a
-/// cancellation that way would leave whole swathes of a fast-scrolled gallery
-/// showing the placeholder glyph permanently.
+/// Rejection value for a request dropped before it was ever sent. It must be
+/// distinguishable from a real failure: the thumbnail cache records failures as
+/// tombstones, which would leave fast-scrolled cards permanently blank.
 export const THUMB_CANCELLED = Symbol("thumbnail-request-cancelled");
 
 interface PendingRequest {
@@ -63,12 +45,9 @@ function pump(): void {
   }
 }
 
-/// Queue a thumbnail request.
-///
-/// Call `cancel` when the requester goes away. It drops the request if it is
-/// still queued; if it has already been sent, it does nothing and the promise
-/// settles normally — the caller should still cache that result, since the
-/// backend has already paid for it.
+/// Queue a thumbnail request. Call `cancel` when the requester goes away: it drops
+/// a still-queued request, and does nothing for one already sent — the caller
+/// should still cache that result, since the backend has already paid for it.
 export function requestThumbnail(
   path: string,
   size: number

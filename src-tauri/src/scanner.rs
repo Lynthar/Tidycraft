@@ -32,10 +32,9 @@ pub struct AssetInfo {
     pub extension: String,
     pub asset_type: AssetType,
     pub size: u64,
-    /// File mtime as unix seconds (0 when unreadable). Besides display,
-    /// this is the frontend's change signal for mounted components:
-    /// CardThumb / AssetPreview key their thumbnail effects on it so an
-    /// external edit refreshes a card that never left the viewport.
+    /// File mtime as unix seconds (0 when unreadable). Also the frontend's
+    /// change signal: thumbnail effects key on it, so an external edit refreshes
+    /// a card that never left the viewport.
     pub modified: u64,
     pub metadata: Option<AssetMetadata>,
     pub unity_guid: Option<String>,
@@ -97,15 +96,9 @@ pub struct AssetMetadata {
     // Mipmap level count (DDS). 1 = base only, no mipmaps.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mipmap_count: Option<u32>,
-    // DCC tool identifier when the file is an authoring/source format
-    // (`.blend` / `.ma` / `.psd` / `.spp` / etc). Values are the stable
-    // strings returned by `dcc_source_kind_for` — see that function for
-    // the canonical list. None for runtime exports (`.fbx` / `.png` / ...)
-    // and non-asset files. Consumers: the naming rule exempts sources from
-    // type-prefix checks, and the frontend renders a source badge
-    // (list/grid/preview — `dccSourceLabel` in src/lib/dccSource.ts maps
-    // kind → display name). The dcc_source analyzer still matches on file
-    // extensions from its own config, NOT on this field.
+    // DCC tool identifier for authoring/source formats (`.blend` / `.ma` /
+    // `.psd` / ...), from `dcc_source_kind_for`. None for runtime exports and
+    // non-asset files.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dcc_source_kind: Option<String>,
 }
@@ -205,12 +198,9 @@ impl Default for ScanState {
     }
 }
 
-/// Convert a `Path` to a string using forward slashes as the separator.
-///
-/// All paths we send to the frontend go through this — the frontend expects
-/// a single separator so its path filtering, `convertFileSrc`, and all the
-/// `lastIndexOf("/")` call sites work the same on Windows as on macOS/Linux.
-/// Windows filenames cannot contain `\`, so the replace is lossless there.
+/// Convert a `Path` to a string using forward slashes. Every path sent to the
+/// frontend goes through this, so path filtering and `convertFileSrc` behave the
+/// same on Windows as elsewhere. Windows filenames cannot contain `\`.
 pub(crate) fn path_to_string(path: &Path) -> String {
     let s = path.to_string_lossy().to_string();
     if cfg!(windows) {
@@ -223,17 +213,13 @@ pub(crate) fn path_to_string(path: &Path) -> String {
 /// Get asset type from file extension
 fn get_asset_type(extension: &str) -> AssetType {
     match extension.to_lowercase().as_str() {
-        // Textures + texture-source DCC formats. .psb is Photoshop's
-        // big-document variant; .spp is Substance Painter's project
-        // file (1→N, paired against generated PBR textures); .sbs is
-        // Substance Designer's source graph (typically produces .sbsar
-        // or PNG output).
+        // Textures and texture-source DCC formats: `.psb` is Photoshop's
+        // big-document variant, `.spp` a Substance Painter project, `.sbs` a
+        // Substance Designer source graph.
         "png" | "jpg" | "jpeg" | "tga" | "psd" | "psb" | "tiff" | "tif" | "exr" | "hdr"
         | "webp" | "dds" | "bmp" | "gif" | "svg" | "spp" | "sbs" => AssetType::Texture,
-        // Models + 3D-source DCC formats. ZBrush (ztl/zpr), Maya
-        // (ma/mb), 3ds Max (max), Modo (lxo), Houdini (hip/hipnc/hiplc),
-        // Cinema 4D (c4d), Marvelous Designer (zprj — garment, exports
-        // to obj/fbx). Blender (blend) was already in this list.
+        // Models and 3D-source DCC formats: ZBrush (ztl/zpr), Maya (ma/mb),
+        // 3ds Max, Modo, Houdini, Cinema 4D, Marvelous Designer (zprj).
         "fbx" | "obj" | "gltf" | "glb" | "blend" | "dae" | "3ds" | "max" | "vox" | "ma" | "mb"
         | "ztl" | "zpr" | "lxo" | "hip" | "hipnc" | "hiplc" | "c4d" | "zprj" => AssetType::Model,
         // Audio
@@ -247,10 +233,8 @@ fn get_asset_type(extension: &str) -> AssetType {
         "controller" | "anim" => AssetType::Animation,
         "cs" | "js" => AssetType::Script,
         "asset" | "json" | "xml" | "yaml" | "csv" => AssetType::Data,
-        // Godot specific. `.tscn` is a scene (like Unity's `.unity`); `.gd` is
-        // a script; `.tres` is a serialized resource (material / curve / …) —
-        // there's no dedicated Resource type, so it joins the other serialized
-        // formats under Data.
+        // Godot: `.tscn` is a scene, `.gd` a script, `.tres` a serialized
+        // resource, which joins the other serialized formats under Data.
         "tscn" => AssetType::Scene,
         "gd" => AssetType::Script,
         "tres" => AssetType::Data,
@@ -259,23 +243,9 @@ fn get_asset_type(extension: &str) -> AssetType {
     }
 }
 
-/// Map an extension to a DCC tool identifier when the file is an
-/// authoring/source format. Returns `None` for runtime exports
-/// (`.fbx` / `.png` / ...) and non-asset files. The string returned is
-/// the wire-format value persisted into `AssetMetadata.dcc_source_kind`,
-/// consumed by the naming rule's prefix exemption and the frontend's
-/// source badge (the dcc_source analyzer still matches extensions from
-/// its own config). Keep values stable: they're serialized into scan
-/// caches AND mapped to display names in src/lib/dccSource.ts, so a
-/// rename would break both until cache bump + frontend sync.
-///
-/// Why a separate function (not just `get_asset_type` returning a
-/// richer enum): asset_type is the user-visible category (Texture /
-/// Model / etc.); dcc_source_kind is an orthogonal "source vs
-/// runtime" axis. A `.blend` is both a Model AND a Blender source —
-/// folding the two into one enum would force `.blend` to pick one
-/// and break the AssetList type filter for users who expect to see
-/// `.blend` under "Models".
+/// Map an extension to a DCC tool identifier for authoring/source formats;
+/// `None` for runtime exports. Values are persisted into scan caches and mapped
+/// to display names in `src/lib/dccSource.ts`, so keep them stable.
 pub fn dcc_source_kind_for(extension: &str) -> Option<&'static str> {
     match extension.to_lowercase().as_str() {
         "blend" => Some("blender"),
@@ -294,37 +264,17 @@ pub fn dcc_source_kind_for(extension: &str) -> Option<&'static str> {
     }
 }
 
-/// Size at which a mesh takes the heavy-parse gate, and how many may be
-/// parsed at once once they do.
-///
-/// Three of our geometry parsers hold the whole mesh in memory just to count
-/// it: `tobj` expands OBJ faces into a de-duplicated vertex buffer (positions,
-/// normals and texcoords, plus the `(v, vt, vn)` hash map that de-duplicates
-/// them), `fbxcel-dom` builds the entire FBX document tree, and
-/// `gltf::Gltf::open` keeps a GLB's binary chunk as a blob. Any one of those is
-/// bounded by the file — the problem is that the scan calls
-/// `parse_metadata_for` under `rayon`, so the peak is that cost times the core
-/// count, and a library with a handful of large meshes can have all of them
-/// expanded simultaneously.
-///
-/// Only files at or above the threshold take the gate. Meshes below it parse
-/// in milliseconds and keep the full width of the thread pool, so the common
-/// case is unaffected.
+/// Size at which a mesh takes the heavy-parse gate, and how many may parse at
+/// once once they do. The OBJ, FBX and GLB parsers each hold a whole mesh in
+/// memory, and the scan runs them under `rayon`.
 const HEAVY_PARSE_THRESHOLD: u64 = 32 * 1024 * 1024;
 const HEAVY_PARSE_CONCURRENCY: usize = 2;
 
 static HEAVY_PARSE_GATE: Semaphore = Semaphore::new(HEAVY_PARSE_CONCURRENCY);
 
-/// A counting semaphore over `std::sync`.
-///
-/// `parking_lot` (used elsewhere in this file) ships no semaphore, and
-/// `tokio`'s requires an async context — the scan body runs inside
-/// `spawn_blocking`. The permit count must live in a `Mutex` rather than an
-/// atomic because `Condvar` needs one to wait on.
-///
-/// Poisoning is recovered from rather than propagated: a panic in one parser
-/// must not wedge every later scan behind a poisoned mutex, and the guarded
-/// value is a plain count that a panic cannot leave inconsistent.
+/// A counting semaphore over `std::sync`: `parking_lot` ships none and
+/// `tokio`'s needs an async context. Poisoning is recovered from rather than
+/// propagated — the guarded value is a plain count.
 struct Semaphore {
     permits: std::sync::Mutex<usize>,
     released: std::sync::Condvar,
@@ -368,11 +318,8 @@ impl Drop for SemaphorePermit<'_> {
     }
 }
 
-/// Whether parsing `path` should take the gate.
-///
-/// A file we can't stat counts as small: the gate exists to bound a cost we
-/// can see, and guessing pessimistically would serialise meshes on any
-/// transient stat failure.
+/// Whether parsing `path` should take the gate. A file that cannot be stat'd
+/// counts as small, so a transient stat failure never serialises meshes.
 fn takes_heavy_parse_gate(path: &Path) -> bool {
     path.metadata()
         .map(|m| m.len() >= HEAVY_PARSE_THRESHOLD)
@@ -385,24 +332,14 @@ fn parse_large_mesh<T>(path: &Path, parse: impl FnOnce() -> Option<T>) -> Option
     if !takes_heavy_parse_gate(path) {
         return parse();
     }
-    // Named binding, not `_`: `let _ = guard` drops on the spot and the gate
-    // would hold nothing.
+    // Named binding, not `_`: `let _ = guard` would drop it on the spot.
     let _permit = HEAVY_PARSE_GATE.acquire();
     parse()
 }
 
-/// Dispatch metadata parsing for a single asset based on its type + extension.
-/// Used by both the full scan and the incremental per-file reparse so the set
-/// of supported formats lives in one place.
-///
-/// After per-format parsing, files identified as a DCC source by
-/// `dcc_source_kind_for` get their `dcc_source_kind` field tagged —
-/// this happens even when format-specific parsing returned None (e.g.
-/// `.blend` has no metadata extractor, but we still want the kind
-/// label so the dcc_source analyzer can find it). For files that are
-/// both DCC sources AND parseable (`.psd` parsed via `image` would
-/// be such a case if we enabled the feature), the parsed metadata is
-/// preserved and the kind field is overlaid.
+/// Dispatch metadata parsing for one asset by type + extension, shared by the
+/// full scan and the incremental re-parse. DCC sources are tagged with their
+/// kind afterwards, even when format-specific parsing returned nothing.
 fn parse_metadata_for(
     path: &Path,
     extension: &str,
@@ -449,10 +386,8 @@ fn parse_metadata_for(
         _ => None,
     };
 
-    // Tag DCC source kind. Even when format-specific parsing failed
-    // (most authoring formats — .blend, .ma, .psd — have no Rust
-    // parser), we still produce a metadata entry carrying the kind
-    // so the dcc_source analyzer can reason about source/export pairs.
+    // Tag the DCC source kind even when format parsing failed — most authoring
+    // formats have no Rust parser, and the analyzer still needs the kind.
     if let Some(kind) = dcc_source_kind_for(&ext) {
         let mut m = parsed.unwrap_or_default();
         m.dcc_source_kind = Some(kind.to_string());
@@ -461,14 +396,9 @@ fn parse_metadata_for(
     parsed
 }
 
-/// Parse image metadata (dimensions, alpha).
-///
-/// Reads only the header (dimensions + color type) via the decoder instead of
-/// decoding every pixel — a 4K texture is hundreds of ms to fully decode and we
-/// only need w/h/alpha. The incremental scan cache means this runs at most once
-/// per file version, but the first scan of a texture-heavy project is far
-/// cheaper this way. On any header/format error we return None, exactly as the
-/// old full-decode path did on `Err`.
+/// Parse image metadata (dimensions, alpha). Reads only the header via the
+/// decoder rather than decoding every pixel. Any header or format error yields
+/// `None`.
 fn parse_image_metadata(path: &Path) -> Option<AssetMetadata> {
     let reader = image::ImageReader::open(path)
         .ok()?
@@ -583,28 +513,9 @@ fn parse_svg_metadata(path: &Path) -> Option<AssetMetadata> {
     None
 }
 
-/// Parse DDS (DirectDraw Surface) header for width/height/alpha/mipmap count.
-///
-/// DDS files are very common for game textures (BC1/BC3/BC7 compressed) but
-/// the `image` crate's DDS support doesn't cover most of the compressed
-/// variants. We only need the header, so a minimal 128-byte reader does the
-/// job regardless of the inner format.
-///
-/// Layout (all little-endian):
-///   0..4   : magic "DDS "
-///   4..8   : dwSize (must be 124)
-///   8..12  : dwFlags
-///   12..16 : dwHeight
-///   16..20 : dwWidth
-///   20..24 : dwPitchOrLinearSize
-///   24..28 : dwDepth
-///   28..32 : dwMipMapCount
-///   ...
-///   76..108: DDS_PIXELFORMAT (32-byte struct)
-///       80..84: ddspf.dwFlags (DDPF_ALPHAPIXELS = 0x1, DDPF_FOURCC = 0x4)
-///       84..88: ddspf.dwFourCC (compressed format tag, e.g. "DXT5"/"DX10")
-///   128..148: DDS_HEADER_DXT10 extension, only when FourCC == "DX10"
-///       128..132: dxgiFormat
+/// Parse a DDS header for width/height/alpha/mipmap count. The `image` crate
+/// does not cover most compressed DDS variants and only the 128-byte header is
+/// needed; field offsets are documented in `docs/design-notes.md`.
 fn parse_dds_metadata(path: &Path) -> Option<AssetMetadata> {
     const DDPF_ALPHAPIXELS: u32 = 0x1;
     const DDPF_FOURCC: u32 = 0x4;
@@ -672,16 +583,9 @@ fn parse_dds_metadata(path: &Path) -> Option<AssetMetadata> {
     })
 }
 
-/// Walk PNG chunks looking for color-space signals. An explicit `sRGB` chunk
-/// wins; an `iCCP` chunk has its embedded ICC profile parsed and classified
-/// ("sRGB" for gamma-encoded transfer curves, "Linear" for identity ones —
-/// see `classify_icc_profile`); an unreadable profile yields None (unknown)
-/// rather than a guess. None also means "no color-profile info at all" — the
-/// colorspace rule only fires on *known* encodings to avoid false positives.
-///
-/// PNG chunk layout (after 8-byte magic): repeated [4-byte big-endian length]
-/// [4-byte type] [length bytes of data] [4-byte CRC]. Chunks before IDAT
-/// carry the color metadata we care about.
+/// Walk PNG chunks for color-space signals: an explicit `sRGB` chunk wins, an
+/// `iCCP` chunk is classified via `classify_icc_profile`, and anything
+/// unreadable yields `None` (unknown) rather than a guess.
 fn parse_png_color_space(path: &Path) -> Option<String> {
     use std::io::{Read, Seek, SeekFrom};
 
@@ -743,10 +647,8 @@ fn parse_png_color_space(path: &Path) -> Option<String> {
 }
 
 /// Decode a PNG `iCCP` chunk payload — `[profile name][NUL][compression
-/// method byte][zlib stream]` — and classify the embedded ICC profile.
-/// `None` = unreadable/unknown, so the colorspace rule stays silent rather
-/// than guessing (the old behavior treated ANY profile as sRGB and mis-warned
-/// on deliberately linear profiles).
+/// method byte][zlib stream]` — and classify the embedded ICC profile. `None`
+/// means unreadable or unknown.
 fn classify_iccp_chunk(data: &[u8]) -> Option<String> {
     // Layout: 1-79 byte profile name, NUL, compression method (0 = zlib),
     // compressed profile bytes.
@@ -763,10 +665,8 @@ fn classify_iccp_chunk(data: &[u8]) -> Option<String> {
 }
 
 /// Classify a raw ICC profile: `Some("Linear")` when its tone-response curves
-/// are (approximately) identity, `Some("sRGB")` when they're gamma-encoded —
-/// which is the question the texture colorspace rule actually asks: "will the
-/// engine de-gamma this data?". Falls back to the profile description text
-/// when no TRC is readable; `None` when the profile tells us nothing.
+/// are approximately identity, `Some("sRGB")` when they are gamma-encoded. Falls
+/// back to the description text; `None` when the profile says nothing.
 fn classify_icc_profile(profile: &[u8]) -> Option<String> {
     // 128-byte header ('acsp' signature at 36) + u32 tag count at 128.
     if profile.len() < 132 || &profile[36..40] != b"acsp" {
@@ -806,8 +706,7 @@ fn classify_icc_profile(profile: &[u8]) -> Option<String> {
         }
     }
 
-    // Transfer curves are the ground truth: the colorspace rule's question is
-    // literally "will the engine de-gamma these pixels?".
+    // Transfer curves are the ground truth for "will the engine de-gamma this".
     if !trc_verdicts.is_empty() {
         let all_linear = trc_verdicts.iter().all(|&l| l);
         return Some(if all_linear { "Linear" } else { "sRGB" }.to_string());
@@ -907,10 +806,8 @@ fn parse_gltf_metadata(path: &Path) -> Option<AssetMetadata> {
                         .unwrap_or(0);
                     vertex_count += position_count as u32;
 
-                    // Non-indexed primitives draw straight from the vertex
-                    // stream, so the element count falls back to it. How many
-                    // triangles those elements make depends on the topology —
-                    // strips/fans share edges, points/lines have no faces.
+                    // Non-indexed primitives draw from the vertex stream, so the
+                    // element count falls back to it; topology decides faces.
                     let element_count = primitive
                         .indices()
                         .map(|a| a.count())
@@ -935,15 +832,9 @@ fn parse_gltf_metadata(path: &Path) -> Option<AssetMetadata> {
     }
 }
 
-/// Parse FBX model metadata (vertex/face/material count).
-///
-/// FBX is Autodesk's proprietary interchange format — both binary (most common
-/// today) and ASCII variants exist. `fbxcel-dom` handles both and gives us a
-/// typed DOM; we iterate the object list, match on `Geometry::Mesh` + `Material`,
-/// and pull raw node children for the cheap counts we need. For polygon count
-/// we exploit FBX's convention that `PolygonVertexIndex` uses a negative
-/// sentinel (bit-inverted last index) to mark each polygon's end — so the
-/// number of negatives equals the face/polygon count regardless of tri/quad/n-gon.
+/// Parse FBX metadata (vertex/face/material counts) via `fbxcel-dom`, which
+/// handles both the binary and ASCII variants. Face count comes from the
+/// negative sentinels that end each polygon in `PolygonVertexIndex`.
 fn parse_fbx_metadata(path: &Path) -> Option<AssetMetadata> {
     use fbxcel_dom::any::AnyDocument;
     use fbxcel_dom::v7400::object::{geometry::TypedGeometryHandle, TypedObjectHandle};
@@ -1019,11 +910,9 @@ fn parse_obj_metadata(path: &Path) -> Option<AssetMetadata> {
             Some(AssetMetadata {
                 vertex_count: Some(vertex_count),
                 face_count: Some(face_count),
-                // `models` are sub-meshes/groups, not materials — a 30-group
-                // export with one shared material must report 1, or the
-                // max_materials rule fires on every multi-object OBJ. The
-                // side-loaded MTL is authoritative; if it can't be read the
-                // count is unknown, not zero.
+                // `models` are sub-meshes, not materials: a 30-group export
+                // sharing one material must report 1. The side-loaded MTL is
+                // authoritative; unreadable means unknown, not zero.
                 material_count: materials.ok().map(|m| m.len() as u32),
                 ..Default::default()
             })
@@ -1156,10 +1045,8 @@ fn parse_audio_metadata(path: &Path) -> Option<AssetMetadata> {
     })
 }
 
-/// Mtime of the Unity sidecar `<file>.meta` in nanoseconds, if present.
-/// Unity's convention is the full filename plus ".meta" (`foo.png` →
-/// `foo.png.meta`). Used by the incremental scan to fold the sidecar
-/// into the cache-invalidation key — see [`crate::cache::CacheEntry`].
+/// Mtime of the Unity sidecar `<file>.meta` in nanoseconds, if present. Folded
+/// into the incremental scan's cache-invalidation key.
 fn meta_mtime_nanos(path: &Path) -> Option<u64> {
     let mut p = path.as_os_str().to_owned();
     p.push(".meta");
@@ -1262,23 +1149,9 @@ fn precompute_dir_stats(assets: &[AssetInfo]) -> HashMap<String, DirStats> {
     map
 }
 
-/// Build the directory tree for the project.
-///
-/// Historically this was O(D × N) — each of the D directory nodes filtered
-/// the full assets slice looking for its direct children. On a 10k-file /
-/// 200-dir project that's 2M comparisons per rebuild, and watcher events
-/// trigger a full rebuild on every fs-change batch.
-///
-/// New implementation: one O(N) preprocessing pass groups assets by their
-/// parent directory path into a HashMap, then the recursive tree build only
-/// does an O(1) hashmap lookup per node for its direct counts.
-///
-/// `ignore` prunes gitignored directories from the `fs::read_dir` recursion
-/// (pass the same matcher the scan/watcher uses; `None` = gitignore off).
-/// Without it, a Unity project's `Library/` — 50k+ entries the scan never
-/// looks at — got fully re-walked on every scan AND every watcher batch,
-/// and showed up in the sidebar tree even though none of its files exist
-/// in the scan result.
+/// Build the directory tree for the project. One O(N) pass groups assets by
+/// parent directory so the recursive build costs O(1) per node. `ignore` prunes
+/// gitignored directories from the `fs::read_dir` recursion (`None` = off).
 pub(crate) fn build_directory_tree(
     root: &Path,
     assets: &[AssetInfo],
@@ -1307,17 +1180,9 @@ fn build_dir_node(
     if let Ok(entries) = fs::read_dir(path) {
         for entry in entries.flatten() {
             let entry_path = entry.path();
-            // `entry.file_type()` does NOT traverse the link, unlike
-            // `Path::is_dir()` — so a symlinked / junctioned directory reports
-            // `is_dir() == false` here and is skipped. That matters twice:
-            //
-            // 1. `ln -s .. loop` (or `mklink /J`, which needs no admin rights)
-            //    made this recursion unbounded. A stack overflow aborts the
-            //    process under every panic strategy, so it wasn't catchable.
-            // 2. The asset walker runs with `follow_links(false)`, so files
-            //    under a linked directory are never scanned. Recursing here
-            //    put directories in the tree that could never hold a listed
-            //    file — the tree and the list disagreed.
+            // `entry.file_type()` does not traverse the link, unlike
+            // `Path::is_dir()`, so symlinked directories are skipped: they can
+            // loop forever, and the asset walk never enters them either.
             let Ok(file_type) = entry.file_type() else {
                 continue;
             };
@@ -1354,14 +1219,9 @@ fn build_dir_node(
     }
 }
 
-/// Build the directory walker. When `respect_gitignore` is true the
-/// walker honors `.gitignore` (incl. parent dirs and `.git/info/exclude`)
-/// and `.ignore` files; `require_git(false)` makes the gitignore rules
-/// apply even outside a git repo. Hidden files and directories
-/// (`.git/`, `.vscode/`, `.idea/`, etc.) are always skipped — matches
-/// the user-visible behavior of the previous walkdir filter (which
-/// only checked `starts_with('.')` at the file-name level after
-/// recursing wastefully into dot dirs).
+/// Build the directory walker. With `respect_gitignore` it honors `.gitignore`
+/// (including parent directories and `.git/info/exclude`) and `.ignore`, even
+/// outside a git repo. Hidden files and directories are always skipped.
 fn build_walker(root: &Path, respect_gitignore: bool) -> ignore::Walk {
     let mut builder = WalkBuilder::new(root);
     builder.follow_links(false).hidden(true);
@@ -1385,25 +1245,17 @@ fn build_walker(root: &Path, respect_gitignore: bool) -> ignore::Walk {
 }
 
 /// A single-path `.gitignore` matcher mirroring `build_walker`'s root-level
-/// exclusion sources, for callers that test individual paths instead of
-/// walking the tree (the filesystem watcher). Checks both the project-local
-/// ignore files and the user's global gitignore.
-///
-/// NOTE: this loads only the project-root `.gitignore` / `.ignore` /
-/// `.git/info/exclude` (+ global) — it does NOT descend into per-directory
-/// nested `.gitignore` files the way `WalkBuilder` does. That covers the
-/// common case (root-level rules like `Library/`, `Temp/`, `*.tmp`); nested
-/// ignore files are a documented gap.
+/// sources, for callers that test individual paths (the watcher). Nested
+/// per-directory ignore files are not loaded — a documented gap.
 pub struct IgnoreMatcher {
     local: ignore::gitignore::Gitignore,
     global: ignore::gitignore::Gitignore,
 }
 
 impl IgnoreMatcher {
-    /// True if `rel_path` (relative to the project root) is excluded by either
-    /// the local or global ignore rules. `is_dir` lets directory-only patterns
-    /// (`Library/`) match correctly, and matching is purely lexical so it
-    /// works for paths that no longer exist (deletions).
+    /// True if `rel_path` (relative to the project root) is excluded. `is_dir`
+    /// lets directory-only patterns match; matching is purely lexical, so it
+    /// works for paths that no longer exist.
     pub fn is_ignored(&self, rel_path: &Path, is_dir: bool) -> bool {
         self.local
             .matched_path_or_any_parents(rel_path, is_dir)
@@ -1415,12 +1267,9 @@ impl IgnoreMatcher {
     }
 }
 
-/// Build an [`IgnoreMatcher`] for `root`, or `None` when `respect_gitignore`
-/// is false (the watcher then tracks everything `is_trackable_path` allows).
-/// Build the tree's ignore matcher. `Ok(None)` = gitignore disabled by the
-/// caller; `Err` = the rules exist but cannot be compiled, so the directory
-/// tree will stop filtering ignored entries — the scan turns that into a
-/// warning.
+/// Build an [`IgnoreMatcher`] for `root`. `Ok(None)` = gitignore disabled by
+/// the caller; `Err` = the rules exist but will not compile, so the directory
+/// tree stops filtering ignored entries and the scan raises a warning.
 pub fn build_gitignore_matcher_reported(
     root: &Path,
     respect_gitignore: bool,
@@ -1430,9 +1279,8 @@ pub fn build_gitignore_matcher_reported(
     }
     let mut builder = ignore::gitignore::GitignoreBuilder::new(root);
     // Mirror build_walker's root-level sources. `add` returns Some(err) for a
-    // missing/unreadable file; a missing `.ignore` or git exclude is the common
-    // case, so we ignore those and let only genuine pattern errors surface in
-    // `build()` below.
+    // missing file, which is the common case; only genuine pattern errors
+    // surface in `build()`.
     let _ = builder.add(root.join(".gitignore"));
     let _ = builder.add(root.join(".ignore"));
     let _ = builder.add(root.join(".git").join("info").join("exclude"));
@@ -1470,14 +1318,9 @@ fn walk_error_path(err: &ignore::Error) -> Option<String> {
     }
 }
 
-/// Scan a directory with optional state for progress tracking and
-/// cancellation. `respect_gitignore=true` honors the user's
-/// `.gitignore` / `.ignore` files; `false` re-enables "scan everything".
-///
-/// The shipped scan path is `scan_directory_incremental`; since the legacy
-/// non-incremental commands were removed this full-scan variant survives as
-/// the test suite's harness for the discovery/parse/tree pipeline (it skips
-/// the disk cache, which tests must not touch).
+/// Scan a directory with optional state for progress and cancellation.
+/// `respect_gitignore=true` honors the user's ignore files. The shipped path is
+/// `scan_directory_incremental`; this variant is the tests' harness (no cache).
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn scan_directory_with_state(
     path: &str,
@@ -1512,10 +1355,8 @@ pub fn scan_directory_with_state(
     for result in build_walker(root_path, respect_gitignore) {
         let entry = match result {
             Ok(e) => e,
-            // Walk errors (permission denied on a sibling, transient IO
-            // hiccup) shouldn't poison the whole scan — skip, but COUNT:
-            // whatever lives there is absent from the results, and "didn't
-            // read it" must stay distinguishable from "nothing there".
+            // Walk errors must not poison the scan — skip, but count: "did not
+            // read it" has to stay distinguishable from "nothing there".
             Err(e) => {
                 walk_failures.record(walk_error_path(&e).as_deref(), &e.to_string());
                 continue;
@@ -1529,9 +1370,7 @@ pub fn scan_directory_with_state(
             }
         }
 
-        // Hidden files and dot-directories are filtered upstream by
-        // `build_walker(hidden=true)`, so no `starts_with('.')` check
-        // is needed here.
+        // Hidden files and dot-directories are filtered by build_walker.
         if entry.file_type().is_some_and(|ft| ft.is_dir()) {
             continue;
         }
@@ -1543,10 +1382,7 @@ pub fn scan_directory_with_state(
             .unwrap_or_default();
 
         // Engine sidecars (Unity `.meta`, Godot `.import` / `.uid`) are
-        // per-asset metadata, not assets. Godot writes one `.import` per
-        // imported file and one `.uid` per script, so listing them roughly
-        // doubles the asset count with files the user can't act on. Same
-        // list the file ops carry — see `crate::sidecar`.
+        // per-asset metadata, not assets — same list the file ops carry.
         if crate::sidecar::is_sidecar_name(&file_name) {
             continue;
         }
@@ -1613,9 +1449,8 @@ pub fn scan_directory_with_state(
             let metadata = match entry_path.metadata() {
                 Ok(m) => Some(m),
                 Err(e) => {
-                    // The file stays in the results with zeroed size/mtime
-                    // (pre-existing behavior); the warning is what marks the
-                    // record as untrustworthy.
+                    // The file stays in the results with zeroed size/mtime; the
+                    // warning is what marks the record as untrustworthy.
                     parse_failures
                         .lock()
                         .record(Some(&path_to_string(entry_path)), &e.to_string());
@@ -1802,16 +1637,8 @@ pub fn parse_asset_file(path: &Path, project_type: &Option<ProjectType>) -> Opti
 }
 
 /// Re-key a cached [`AssetInfo`] onto a renamed path without re-reading the
-/// file. A rename doesn't change bytes, so `size`, `modified` and the parsed
-/// `metadata` carry over; everything derived from the path itself (`path`,
-/// `name`, `extension`, `asset_type`) is recomputed. `unity_guid` is
-/// re-derived from whatever `.meta` sits beside the NEW path: an engine-driven
-/// rename moves the sidecar too (guid survives), an Explorer rename leaves it
-/// behind (guid correctly becomes `None` — the association is adjacency).
-///
-/// Callers must only use this when the extension is unchanged (case aside):
-/// `metadata`'s shape belongs to the asset type, so a `foo.png → foo.txt`
-/// rename must go through a full re-parse instead.
+/// file. `unity_guid` is re-derived from whatever `.meta` sits beside the new
+/// path. Only valid when the extension is unchanged (case aside).
 pub(crate) fn rekey_asset_info(
     old: &AssetInfo,
     new_path: &Path,
@@ -1840,12 +1667,9 @@ pub(crate) fn rekey_asset_info(
     }
 }
 
-/// Incremental scan — only re-parse changed files. Honors the same
-/// `respect_gitignore` semantics as `scan_directory_with_state` (they
-/// share `build_walker`). Toggling gitignore on after a previous "scan
-/// everything" run will cause newly-ignored files to look "deleted"
-/// and get pruned from the cache on the next run — desired but worth
-/// noting for users who flip the setting.
+/// Incremental scan — only re-parse changed files. Same `respect_gitignore`
+/// semantics as `scan_directory_with_state`. Turning gitignore on makes
+/// newly-ignored files look deleted and prunes them from the cache.
 pub fn scan_directory_incremental(
     path: &str,
     state: Option<Arc<ScanState>>,
@@ -1906,9 +1730,8 @@ pub fn scan_directory_incremental(
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        // Hidden files / dirs filtered upstream by build_walker(hidden=true);
-        // engine sidecars are per-asset metadata, not assets (see
-        // `crate::sidecar` and the matching filter in the full scan).
+        // Hidden files and dirs are filtered by build_walker; engine sidecars
+        // are per-asset metadata, not assets.
         if crate::sidecar::is_sidecar_name(&file_name) {
             continue;
         }
@@ -1926,25 +1749,19 @@ pub fn scan_directory_incremental(
         file_entries.push((entry_path.to_path_buf(), modified_nanos));
     }
 
-    // Collect all current file paths for pruning. Use normalized
-    // (forward-slash) paths so they align with what's stored in
-    // AssetInfo.path — the cache keys off the exact same string.
+    // Normalized (forward-slash) paths, matching the cache keys exactly.
     let current_paths: Vec<String> = file_entries
         .iter()
         .map(|(p, _)| path_to_string(p))
         .collect();
 
-    // Prune deleted files from cache. Files that just fell out of
-    // scope because of a new `.gitignore` rule also count as
-    // "deleted" here — see the function's doc comment.
+    // Prune deleted files. Files newly excluded by `.gitignore` count as
+    // deleted here.
     cache.prune(&current_paths);
 
-    // Determine which files need scanning. Sidecar mtimes only matter for
-    // Unity projects (the only place `.meta` is parsed) — everyone else
-    // skips the extra stat per file. Godot's `.import` / `.uid` are carried
-    // and hidden like `.meta`, but deliberately NOT stat'd here: no
-    // `AssetInfo` field is parsed out of them, so a touched `.import` has
-    // nothing to invalidate.
+    // Sidecar mtimes only matter for Unity, the only place `.meta` is parsed.
+    // Godot's `.import` / `.uid` are carried and hidden but not stat'd: no
+    // `AssetInfo` field is parsed out of them.
     let is_unity = matches!(project_type, Some(ProjectType::Unity));
     let files_to_scan: Vec<&(PathBuf, u64)> = file_entries
         .iter()
@@ -2018,10 +1835,8 @@ pub fn scan_directory_incremental(
         }
     }
 
-    // Update cache with parsed assets. The sidecar mtime is re-stat'ed here
-    // rather than carried from the filter pass — if the .meta changed in
-    // between, storing the later value just means one more (correct)
-    // re-parse next scan.
+    // The sidecar mtime is re-stat'ed here rather than carried from the filter
+    // pass; a change in between costs one more re-parse next scan.
     for (asset, modified_nanos) in parsed_assets {
         let meta_nanos = if is_unity {
             meta_mtime_nanos(Path::new(&asset.path))
@@ -2077,10 +1892,8 @@ pub fn scan_directory_incremental(
     let total_count = assets.len();
     let total_size = assets.iter().map(|a| a.size).sum();
 
-    // Save updated cache. Never fatal — a failed save just means the next scan
-    // is a full one — but logged and surfaced, because the silent version left
-    // "every scan is slow" with no clue that the cache directory was
-    // unwritable.
+    // Never fatal — a failed save means the next scan is a full one — but logged
+    // and surfaced, or "every scan is slow" has no visible cause.
     if let Err(e) = cache.save() {
         eprintln!(
             "[scan] failed to save scan cache (next scan will be full): {}",
@@ -2170,8 +1983,8 @@ mod tests {
     #[test]
     fn parse_failure_is_an_error_not_a_none() {
         let missing = Path::new("/definitely/not/here.png");
-        // The reported variant keeps the io error; the old wrapper keeps its
-        // Option shape for the watcher's call sites.
+        // The reported variant keeps the io error; the Option-shaped wrapper serves
+        // the watcher's call sites.
         assert!(parse_asset_file_reported(missing, &None).is_err());
         assert!(parse_asset_file(missing, &None).is_none());
         // No extension: not an asset, not an error.
@@ -2230,10 +2043,8 @@ mod tests {
         assert_eq!(rekeyed.unity_guid, None);
     }
 
-    /// The guid must be re-derived from the sidecar beside the NEW path, not
-    /// carried: an Explorer rename leaves the `.meta` behind (association is
-    /// by adjacency, so the renamed file genuinely has no guid), while an
-    /// engine-driven rename moves the sidecar and the guid must follow.
+    /// The guid must be re-derived from the sidecar beside the new path: an
+    /// Explorer rename leaves the `.meta` behind, an engine rename moves it.
     #[test]
     fn rekey_rederives_unity_guid_from_the_new_path() {
         let dir = tempdir().unwrap();
@@ -2257,10 +2068,8 @@ mod tests {
         assert_eq!(rekeyed.unity_guid.as_deref(), Some("abc123def456"));
     }
 
-    /// A symlink loop used to make `build_directory_tree` recurse forever —
-    /// `Path::is_dir()` follows links, so `loop -> ..` is an infinite tree.
-    /// The overflow aborts the process, which no panic strategy can catch.
-    /// Creating the loop needs no elevated rights on any platform.
+    /// `Path::is_dir()` follows links, so a `loop -> ..` symlink makes the tree
+    /// build recurse until the stack overflows, which aborts the process.
     #[cfg(unix)]
     #[test]
     fn directory_tree_does_not_follow_symlinks_into_a_cycle() {
@@ -2533,10 +2342,9 @@ mod tests {
             json.contains("\"width\":64"),
             "set field must serialize: {json}"
         );
-        // None fields must be ABSENT on the wire, not `null` — the frontend's
-        // `!== undefined` guards treat null as a real value and render
-        // "-bit" / "0.0 kHz" / "null" garbage rows, and types/asset.ts
-        // declares these as `field?: T` (absent), not `T | null`.
+        // None fields must be ABSENT on the wire, not `null`: the frontend's
+        // `!== undefined` guards treat null as a real value, and asset.ts
+        // declares these as `field?: T`.
         assert!(
             !json.contains("null"),
             "no field may serialize as null: {json}"
@@ -2564,8 +2372,8 @@ mod tests {
         fs::write(&path, make_dds_fourcc_bytes(b"DXT5")).unwrap();
 
         let meta = parse_dds_metadata(&path).expect("valid DDS should parse");
-        // DXT5/BC3 always carries an alpha block; the old ALPHAPIXELS-only
-        // check reported every compressed texture as opaque.
+        // DXT5/BC3 always carries an alpha block, which the ALPHAPIXELS bit does
+        // not record.
         assert_eq!(meta.has_alpha, Some(true));
     }
 
@@ -2623,10 +2431,8 @@ mod tests {
                     let _permit = GATE.acquire();
                     let now = live.fetch_add(1, Ordering::SeqCst) + 1;
                     peak.fetch_max(now, Ordering::SeqCst);
-                    // Linger until a peer arrives. Without this, a gate that
-                    // serialised everything would still pass: nothing would
-                    // force an overlap, and a peak of 1 would be reported as
-                    // a correct result.
+                    // Linger until a peer arrives; without it a gate that
+                    // serialised everything would still pass.
                     let deadline =
                         std::time::Instant::now() + std::time::Duration::from_millis(500);
                     while live.load(Ordering::SeqCst) < 2 && std::time::Instant::now() < deadline {
@@ -2730,11 +2536,9 @@ mod tests {
         assert_eq!(meta.face_count, Some(1));
     }
 
-    /// Minimal valid glTF JSON: one primitive over `position_count`
-    /// positions, optionally indexed (`indices_count`), with the given
-    /// topology `mode`. The gltf crate validates accessors, so bufferViews
-    /// and POSITION min/max must all be present even though we never read
-    /// the (absent) binary payload for counting.
+    /// Minimal valid glTF JSON: one primitive over `position_count` positions,
+    /// optionally indexed, with the given topology. The gltf crate validates
+    /// accessors, so bufferViews and POSITION min/max must be present.
     fn write_gltf(dir: &Path, position_count: u32, indices: Option<(u32, u32)>) -> PathBuf {
         let pos_bytes = position_count * 12;
         let (indices_json, mode_json, idx_view, total) = match indices {
@@ -2783,7 +2587,7 @@ mod tests {
         let meta = parse_gltf_metadata(&path).expect("valid glTF should parse");
         assert_eq!(meta.vertex_count, Some(6));
         // Non-indexed TRIANGLES draws straight from the position stream:
-        // 6 positions = 2 triangles (used to be reported as 0).
+        // 6 positions = 2 triangles.
         assert_eq!(meta.face_count, Some(2));
         assert_eq!(meta.material_count, Some(1));
     }
@@ -2997,10 +2801,9 @@ mod tests {
         assert_eq!(scan_result.total_count, 1);
     }
 
-    /// Godot writes one `.import` per imported asset and (4.4+) one `.uid` per
-    /// script, so leaving them in the list roughly doubles the asset count.
-    /// Both scan paths have their own copy of the filter — assert on each, or
-    /// the incremental one can silently drift back.
+    /// Godot writes one `.import` per imported asset and one `.uid` per script,
+    /// so leaving them in roughly doubles the asset count. Both scan paths have
+    /// their own copy of the filter.
     #[test]
     fn scans_skip_godot_sidecars() {
         let dir = tempdir().unwrap();
@@ -3085,11 +2888,9 @@ mod tests {
         assert!(matches!(project_type, Some(ProjectType::Generic)));
     }
 
-    /// Opening `Assets/` (or a folder inside it) instead of the project root
-    /// is a routine user action, and everything that says "Unity" —
-    /// `ProjectSettings/`, `Library/` — sits above it. Falling through to
-    /// Generic silently switches off the dependency graph, unused-asset
-    /// detection and the prefab component panel, with no message anywhere.
+    /// Opening `Assets/` instead of the project root is routine, and everything
+    /// that says "Unity" sits above it. Falling through to Generic silently
+    /// disables the dependency graph and unused-asset detection.
     #[test]
     fn unity_is_detected_when_the_assets_folder_is_the_scan_root() {
         let dir = tempdir().unwrap();
@@ -3237,8 +3038,8 @@ mod tests {
 
     #[test]
     fn png_iccp_linear_profile_reports_linear() {
-        // The whole point of parsing the profile: a linear-profiled normal
-        // map must NOT be reported as sRGB (the old behavior mis-warned it).
+        // The point of parsing the profile: a linear-profiled normal map must NOT
+        // be reported as sRGB.
         let dir = tempdir().unwrap();
         let profile = build_icc(&[(b"rTRC", curv_gamma(1.0))]);
         let png = png_with_chunks(&[(b"iCCP", iccp_chunk_payload(&profile)), (b"IEND", vec![])]);
@@ -3271,10 +3072,8 @@ mod tests {
         assert_eq!(parse_png_color_space(&path).as_deref(), Some("sRGB"));
     }
 
-    /// Move a file's mtime a fixed number of seconds into the future. Kept in
-    /// whole seconds because the tests using it are about *what* changed (a
-    /// sidecar, an asset), not about resolution — the cache stamp itself is
-    /// nanoseconds, which `set_mtime` below exercises directly.
+    /// Move a file's mtime a fixed number of seconds ahead. Whole seconds,
+    /// because the tests using it are about *what* changed, not resolution.
     fn bump_mtime(path: &Path, secs_ahead: u64) {
         let file = fs::File::options().write(true).open(path).unwrap();
         let t = std::time::SystemTime::now() + std::time::Duration::from_secs(secs_ahead);
@@ -3282,8 +3081,8 @@ mod tests {
             .unwrap();
     }
 
-    /// Pin a file's mtime to an exact instant so a test can place two writes
-    /// inside the same wall-clock second on purpose.
+    /// Pin a file's mtime to an exact instant, so a test can place two writes
+    /// inside one wall-clock second.
     fn set_mtime(path: &Path, secs: u64, nanos: u32) {
         let file = fs::File::options().write(true).open(path).unwrap();
         let t = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::new(secs, nanos);
@@ -3293,12 +3092,9 @@ mod tests {
 
     #[test]
     fn incremental_rescan_notices_a_rewrite_inside_one_second() {
-        // A file rewritten within the same second as the mtime the cache
-        // recorded, to the same length: whole-second mtimes make that
-        // indistinguishable from no change at all, and the scan hands back
-        // metadata parsed from content that is no longer there. Both writes
-        // are pinned to one second explicitly — reading the clock would let
-        // the second roll over and pass the test for the wrong reason.
+        // A same-length rewrite inside the second the cache recorded is
+        // indistinguishable under whole-second mtimes. Both writes are pinned
+        // explicitly — reading the clock would pass for the wrong reason.
         let dir = tempdir().unwrap();
         let root = dir.path().to_str().unwrap();
         let tex = dir.path().join("tex.png");

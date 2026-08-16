@@ -1,15 +1,6 @@
-//! Per-asset disk cache for LLM tag suggestions.
-//!
-//! Granularity is one cache entry per `(asset, provider, model, prompt_version)`
-//! tuple — NOT per batch. A 50-asset call can have 30 hits and 20 misses,
-//! and the provider only pays for the 20. The cache key embeds the
-//! thumbnail content hash so re-saving the same texture under a new
-//! filename invalidates the entry; conversely, renaming the file does NOT
-//! force a re-call as long as the bytes match (the prompt's path-context
-//! changes, but the suggestion is good enough to reuse).
-//!
-//! Storage layout: `dirs::cache_dir()/tidycraft/llm/<sha256-hex>.json`.
-//! Mirrors the pattern used by `thumbnail.rs` and `scan_cache.rs`.
+//! Per-asset disk cache for LLM tag suggestions, keyed per
+//! `(asset, provider, model, prompt_version)` rather than per batch. Storage is
+//! `dirs::cache_dir()/tidycraft/llm/<sha256-hex>.json`.
 
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -18,13 +9,9 @@ use std::path::PathBuf;
 
 use super::TagSuggestion;
 
-// Test-only override so the disk-roundtrip tests run against a tempdir
-// instead of the developer's real cache (writing there made the test fail
-// under sandboxed runners with PermissionDenied, and a failed assertion
-// would strand artifacts in a real user directory). Thread-local because
-// `cargo test` runs tests on separate threads — a global would leak the
-// override across unrelated tests. (Plain comment: rustdoc can't attach
-// docs to a macro invocation.)
+// Test-only override so the disk-roundtrip tests run against a tempdir instead of
+// the developer's real cache. Thread-local because `cargo test` runs tests on
+// separate threads. (Plain comment: rustdoc cannot document a macro invocation.)
 #[cfg(test)]
 thread_local! {
     static TEST_CACHE_DIR: std::cell::RefCell<Option<PathBuf>> =
@@ -39,23 +26,9 @@ fn cache_dir() -> Option<PathBuf> {
     dirs::cache_dir().map(|p| p.join("tidycraft").join("llm"))
 }
 
-/// Build the cache key from inputs that affect the LLM's response.
-///
-/// Components hashed:
-/// - `thumbnail_hash`: SHA256 of the raw thumbnail bytes (caller computes;
-///   pass `None` for text-only requests so they don't collide with vision
-///   ones)
-/// - `filename` + `relative_path`: included in the user prompt, so changing
-///   them changes the response context
-/// - `provider_id` + `model`: same input on different models gives
-///   different responses; cache them separately
-/// - `prompt_version`: bump in `prompts.rs` when the system prompt
-///   changes meaning, to invalidate every prior entry without manual rm
-/// - `context_hash`: digest of the project framing + existing-tag context
-///   (see [`hash_context`]). That context is part of the user prompt, so
-///   folding it in means editing tags / descriptions / sample bindings /
-///   `[project]` theme/goal invalidates suggestions generated under the
-///   old context instead of returning a stale hit.
+/// Build the cache key from every input that affects the LLM's response:
+/// thumbnail hash, filename, relative path, provider id, model, prompt version
+/// and the project/tag context digest, separated by NUL bytes.
 pub fn cache_key(
     thumbnail_hash: Option<&str>,
     filename: &str,
@@ -91,15 +64,9 @@ pub fn hash_bytes(bytes: &[u8]) -> String {
     hex::encode(h.finalize())
 }
 
-/// Stable digest of the project framing + existing-tag context the prompt is
-/// built from. Folded into every per-asset cache key (see [`cache_key`]) so
-/// editing a tag's description, adding/removing tags, changing a tag's sample
-/// bindings, or updating `[project]` theme/goal invalidates stale suggestions
-/// instead of returning advice generated under the old context.
-///
-/// `serde_json` gives a deterministic encoding here — struct field order is
-/// fixed and `Vec` order is preserved. The empty-context case hashes to a
-/// stable value, so no-context requests share a single cache namespace.
+/// Stable digest of the project framing and existing-tag context the prompt is
+/// built from, folded into every per-asset cache key so edits to tags or
+/// `[project]` invalidate stale suggestions. Empty context hashes stably.
 pub fn hash_context(
     project_ctx: Option<&super::project_meta::ProjectMeta>,
     existing_tags: &[super::ExistingTagContext],
@@ -127,10 +94,8 @@ pub fn get(key: &str) -> Option<TagSuggestion> {
     serde_json::from_str(&content).ok()
 }
 
-/// Persist a suggestion. Errors propagate so callers can decide whether
-/// to skip caching this entry (e.g. low disk space) or surface to the
-/// user. Most callers ignore the error after logging — a missed cache
-/// write costs at most one extra API call next time.
+/// Persist a suggestion. Errors propagate so callers can log or surface them; a
+/// missed cache write costs at most one extra API call next time.
 pub fn save(key: &str, suggestion: &TagSuggestion) -> io::Result<()> {
     let dir = cache_dir()
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no system cache dir available"))?;
@@ -143,10 +108,8 @@ pub fn save(key: &str, suggestion: &TagSuggestion) -> io::Result<()> {
     crate::fs_atomic::write_atomic(&path, content.as_bytes())
 }
 
-/// Remove a single cache entry. Test support: lets suggest_with_cache tests
-/// clean up the entries they wrote to the real cache dir (mirroring
-/// `save_then_get_roundtrip`'s cleanup) without reaching the private
-/// `cache_dir` from another module.
+/// Remove a single cache entry. Test support, so `suggest_with_cache` tests can
+/// clean up entries they wrote without reaching the private `cache_dir`.
 #[cfg(test)]
 pub(crate) fn remove(key: &str) {
     if let Some(dir) = cache_dir() {
@@ -355,11 +318,9 @@ mod tests {
 
     #[test]
     fn hash_context_is_deterministic_and_sensitive() {
-        // Folding project/tag context into the cache key only pays off if the
-        // digest is stable for an unchanged tag system (cache hits survive)
-        // and moves when the context actually changes (stale advice drops).
-        // Determinism relies on the caller handing us a stable sample order —
-        // see `TagsData::get_assets_with_tag`, which sorts for this reason.
+        // Folding context into the key only pays off if the digest is stable for an
+        // unchanged tag system and moves when the context changes. Determinism
+        // relies on a stable sample order — see `TagsData::get_assets_with_tag`.
         let tags = vec![crate::llm::ExistingTagContext {
             name: "hero".into(),
             description: Some("Player characters".into()),

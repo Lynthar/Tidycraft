@@ -1,10 +1,8 @@
 import { create } from "zustand";
 import { useProjectStore } from "./projectStore";
 
-/// Tracks transient UI state for app-level overlays (modals + command palette).
-/// Lives in a global store rather than App.tsx local state so that any
-/// component can trigger them without prop drilling — CommandPalette in
-/// particular needs to open Settings / TagManager from inside an action.
+// Transient UI state for app-level overlays. Global rather than App-local so any
+// component can trigger them without prop drilling.
 
 /// Mirrors the backend `llm::TagResponse` struct (see src-tauri/src/llm/mod.rs).
 /// Kept inline rather than re-exported from a types/ file because it's only
@@ -25,11 +23,9 @@ export interface AiTagSuggestion {
 
 export type AiTagCategory = "type" | "style" | "mood" | "subject" | "other";
 
-/// Per-category color so the user can scan a card and see at a glance which
-/// tags are types vs styles vs mood. These hex values match the rough vibe of
-/// `--c-texture` etc. but aren't tied to existing CSS vars because both panels
-/// apply them as `${color}1F` (12% alpha) backgrounds, which CSS vars don't
-/// support directly.
+/// Per-category colour so a card shows at a glance which tags are types, styles
+/// or mood. Not tied to CSS vars because both panels apply them as `${color}1F`
+/// (12% alpha) backgrounds, which CSS vars do not support directly.
 export const AI_CATEGORY_COLORS: Record<AiTagCategory, string> = {
   type: "#3b82f6", // blue
   style: "#a855f7", // purple
@@ -42,10 +38,8 @@ export interface AiSuggestedTag {
   label: string;
   category: AiTagCategory;
   confidence: number;
-  /** Whether this label matches an existing project tag (`existing`) or
-   *  the LLM coined it fresh (`new`). Older cached responses (PROMPT_VERSION
-   *  1) lack the field — backend serializes a default of `new` so they
-   *  load cleanly; frontend treats undefined the same way. */
+  /** Whether this label matches an existing project tag or the model coined it.
+   *  Older cached responses lack the field; the backend defaults it to `new`. */
   source?: "existing" | "new";
 }
 
@@ -106,10 +100,9 @@ interface UiState {
   tagManagerOpen: boolean;
   aiPanelOpen: boolean;
 
-  /** AI Analyze (cost preview + consent) modal. `aiAnalyzePaths` is
-   *  the asset selection that triggered it — passed instead of read
-   *  from selectionStore directly so multi-select + right-click both
-   *  work and the modal sees the snapshot at trigger time. */
+  /** AI Analyze (cost preview + consent) modal. `aiAnalyzePaths` is the asset
+   *  selection that triggered it, passed rather than read from selectionStore so
+   *  the modal sees the snapshot at trigger time. */
   aiAnalyzeOpen: boolean;
   aiAnalyzePaths: string[];
 
@@ -121,10 +114,9 @@ interface UiState {
 
   /** Learning-setup modal: theme/goal + sampling depth + cost preview. */
   learnSetupOpen: boolean;
-  /** Review panel for an LLM learning result. `learnReviewData` carries
-   *  either a fresh result (just-finished learning run) or a loaded
-   *  AiRulesDoc rehydrated into a synthetic LearningResult so "Review
-   *  rules" works without re-running the call. */
+  /** Review panel for an LLM learning result. `learnReviewData` carries either a
+   *  fresh result or a loaded `AiRulesDoc` rehydrated into a synthetic one, so
+   *  "Review rules" works without re-running the call. */
   learnReviewOpen: boolean;
   learnReviewData: AiLearningResult | null;
 
@@ -133,12 +125,9 @@ interface UiState {
   depGraphOpen: boolean;
   depGraphAssetPath: string | null;
 
-  /** True while a fullscreen media lightbox (image or 3D model) is up.
-   *  The lightboxes live as AssetPreview-local state; AssetPreview
-   *  mirrors them here so `isBlockingOverlayOpen` can gate global
-   *  shortcuts — otherwise Del inside a lightbox opens a delete-confirm
-   *  dialog HIDDEN BEHIND it with the confirm button focused (Enter
-   *  blind-deletes), and Ctrl+R rescans the whole project. */
+  /** True while a fullscreen media lightbox is up. The lightboxes are
+   *  AssetPreview-local state and mirror here so `isBlockingOverlayOpen` can gate
+   *  global shortcuts. */
   lightboxOpen: boolean;
 
   setCmdkOpen: (open: boolean) => void;
@@ -209,28 +198,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   setLightboxOpen: (open) => set({ lightboxOpen: open }),
 }));
 
-/// True when a blocking, backdrop-covered overlay is open (command palette,
-/// settings, tag manager, the AI analyze/result modals, the learning modals,
-/// the dependency graph, or a fullscreen media lightbox). Global window-level
-/// key handlers (delete, rescan, the command palette, …) consult this so they
-/// don't fire underneath a modal.
-///
-/// Deliberately EXCLUDES `aiPanelOpen` — the AI Tag panel is a floating side
-/// panel with no backdrop, so the asset list behind it stays interactive.
-/// AssetList's own file-op dialogs (rename / batch / delete / move) are
-/// component-local state and are checked by AssetList separately.
-/// Live count of mounted `ModalShell`s.
-///
-/// The uiStore flags below only cover overlays that HAVE a flag. The file-op
-/// dialogs — rename, batch rename, delete, move/copy, Fix-it — are `useState`
-/// in their parent component, so global shortcuts couldn't see them: Ctrl+2
-/// unmounted the host view and took the open dialog with it, Ctrl+K stacked
-/// the palette on top, Ctrl+R rescanned underneath. ModalShell is the one
-/// choke point every blocking dialog already passes through, so it reports
-/// here instead of each dialog inventing a flag.
-///
-/// A plain counter, not zustand state: it is read from imperative key
-/// handlers and never rendered, so it must not trigger re-renders.
+/// Live count of mounted `ModalShell`s, which is how the file-op dialogs held in
+/// component-local state become visible to global shortcuts. A plain counter, not
+/// zustand state: it is read from key handlers and never rendered.
 let openModalShells = 0;
 
 /// Called by `ModalShell` on mount; the returned function releases on unmount.
@@ -244,6 +214,9 @@ export function registerModalShell(): () => void {
   };
 }
 
+/// True when a blocking, backdrop-covered overlay is open. Global window-level
+/// key handlers consult this so they don't fire underneath a modal. Excludes
+/// `aiPanelOpen`, a floating panel with no backdrop.
 export function isBlockingOverlayOpen(): boolean {
   const s = useUiStore.getState();
   return (
@@ -260,15 +233,9 @@ export function isBlockingOverlayOpen(): boolean {
   );
 }
 
-// Dismiss the AI / learning write-flows (and the floating AI Tag panel) whenever
-// the active project changes. Their contents — tag suggestions, learning rules,
-// theme/goal edits, cost previews — were computed for the PREVIOUS project, and
-// every apply/save path resolves the project id live at write time, so applying
-// them after a switch would mutate the newly-active project's tags / config
-// (the cross-project-write bug). Closing them on switch is the safe behavior and
-// matches intent — the user navigated away. Read-only overlays (the dependency
-// graph) are intentionally left alone. Mirrors tagsStore's project subscription;
-// projectStore imports nothing from here, so there's no import cycle.
+// Dismiss the AI / learning write-flows and the floating AI Tag panel on
+// active-project change: their contents were computed for the previous project,
+// and every apply path resolves the project id live. Read-only overlays stay.
 useProjectStore.subscribe((state, prev) => {
   if (state.activeProjectId === prev.activeProjectId) return;
   const ui = useUiStore.getState();

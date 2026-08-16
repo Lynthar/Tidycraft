@@ -1,9 +1,6 @@
-/// The asset types the backend can emit, in the order the UI presents them.
-/// The union is derived from this list rather than declared beside it: adding
-/// a type used to mean editing the union and then four hand-kept copies of the
-/// same eleven strings — the advanced filter, the statistics palette, the
-/// command palette's filter section and the toolbar pills — with nothing to
-/// catch the one you forgot. Mirrors the Rust `AssetType` enum.
+/// The asset types the backend can emit, in the order the interface presents them.
+/// The union is derived from this list rather than declared beside it, so adding a
+/// type is one edit. Mirrors the Rust `AssetType` enum.
 export const ASSET_TYPES = [
   "texture",
   "model",
@@ -42,13 +39,9 @@ export interface AssetMetadata {
   // Texture extras
   color_space?: string;
   mipmap_count?: number;
-  /** When set, identifies this file as an authoring/source file from
-   *  a DCC tool ("blender" / "maya_ascii" / "maya_binary" / "max" /
-   *  "zbrush" / "substance_painter" / "substance_designer" / "marvelous"
-   *  / "photoshop" / "modo" / "houdini" / "cinema4d"). Drives the source
-   *  badge (list / grid / preview — display names in lib/dccSource.ts)
-   *  and exempts the file from naming-prefix checks backend-side.
-   *  Mirror of Rust `AssetMetadata.dcc_source_kind`. */
+  /** When set, identifies this file as an authoring/source file from a DCC tool.
+   *  Drives the source badge (display names in lib/dccSource.ts) and exempts the
+   *  file from naming-prefix checks. Mirrors Rust `AssetMetadata.dcc_source_kind`. */
   dcc_source_kind?: string;
 }
 
@@ -113,9 +106,8 @@ export type ProjectPathStatus =
   | { kind: "unreadable"; detail: string };
 
 /// The non-"ok" subset of ProjectPathStatus — what every `unavailable` field
-/// actually holds. `ok` is represented by `null` instead (see the field
-/// comments in projectStore), so this excludes it structurally: a project
-/// that IS available can no longer be typed as "unavailable: ok".
+/// actually holds. `ok` is represented by `null` instead, so this excludes it
+/// structurally.
 export type UnavailableStatus = Exclude<ProjectPathStatus, { kind: "ok" }>;
 
 /// Mirrors `project_path::ProjectPathReport`. One per input path, in input
@@ -148,20 +140,17 @@ export interface Issue {
   severity: Severity;
   message: string;
   asset_path: string;
-  /** Unlike every other optional field here, this one has no
-   *  `skip_serializing_if` on the Rust side (see Rust `Issue`), so a rule
-   *  that makes no suggestion arrives as `suggestion: null`, not an absent
-   *  key. Treat `null` and `undefined` the same at any call site. */
+  /** Unlike every other optional field here, this one has no `skip_serializing_if`
+   *  on the Rust side, so a rule that makes no suggestion arrives as
+   *  `suggestion: null`. Treat `null` and `undefined` the same at any call site. */
   suggestion?: string | null;
   auto_fixable: boolean;
   /** All members of the same finding, root-relative, original first.
    *  Currently only the `duplicate` rule fills this (see Rust `Issue`);
    *  the issue list collapses such issues into one group card. */
   related_paths?: string[];
-  /** Placeholder values for the localized rendering of `message` /
-   *  `suggestion` (see Rust `Issue`). Absent for rules that interpolate
-   *  nothing — every field on the Rust side is `skip_serializing_if`, so
-   *  unset arrives absent rather than null. */
+  /** Placeholder values for the localized rendering of `message` / `suggestion`.
+   *  Absent for rules that interpolate nothing — unset arrives absent, not null. */
   args?: Record<string, string>;
 }
 
@@ -176,11 +165,9 @@ export interface AnalysisResult {
 
 // ============ Fix-it (auto-fixable naming) Types ============
 
-/** Mirrors Rust `NamingFixPreview` — one proposed auto-fix from
- *  `preview_naming_fixes`. Only assets with an auto-fixable naming violation
- *  are returned, so `suggested_name` always differs from `original_name`.
- *  `collides` flags two proposals whose target name + directory clash (only
- *  the first would land; the second hits "target already exists"). */
+/** Mirrors Rust `NamingFixPreview` — one proposed auto-fix. Only assets with an
+ *  auto-fixable violation are returned, so `suggested_name` always differs from
+ *  `original_name`. `collides` flags two proposals whose target name clashes. */
 export interface NamingFixPreview {
   path: string;
   original_name: string;
@@ -294,15 +281,9 @@ export interface DependencyNode {
   path: string;
   name: string;
   file_type: string;
-  /** Mirrors Rust `DependencyNodeKind` — how firmly the node's identity
-   *  resolves. `asset` is a scanned project asset (real `path`, clickable).
-   *  The rest carry an empty `path` and are BFS terminals in the modal:
-   *  `package` (Unity GUID resolved via the Library/PackageCache index —
-   *  a package-manager asset, known to exist), `unresolved` (Unity GUID
-   *  outside both the scan and the package index — ambiguous by
-   *  construction), `unscanned` (Godot res:// target that exists on disk
-   *  but is outside the scan), `missing` (Godot res:// target absent from
-   *  disk — confirmed broken). */
+  /** Mirrors Rust `DependencyNodeKind` — how firmly the node's identity resolves.
+   *  `asset` is a scanned project asset with a real `path`; the rest carry an empty
+   *  `path` and are BFS terminals in the modal. */
   kind: "asset" | "package" | "unresolved" | "unscanned" | "missing";
   /** Tooltip's second identity line — the package id for `package` nodes. */
   detail?: string;
@@ -406,18 +387,16 @@ export interface FileOpResult {
 
 // ============ Filesystem Watcher Types ============
 
-/// Payload of the `fs-change-{projectId}` Tauri event.
-/** One external rename the watcher recognized (stitched OS pair, or a
- *  remove+create joined by identity). The scan delta still travels as
- *  `removed` (old path) + `updated` (new entry) — this is additive metadata
- *  for selection re-pointing and the tag-mirror refresh; the backend already
- *  migrated the tag bindings. */
+/** One external rename the watcher recognized (a stitched OS pair, or a
+ *  remove+create joined by identity). Additive metadata: the scan delta still
+ *  travels as `removed` + `updated`, and the backend already migrated the tags. */
 export interface RenamedPair {
   from: string;
   to: string;
   is_dir: boolean;
 }
 
+/// Payload of the `fs-change-{projectId}` Tauri event.
 export interface FsChangeEvent {
   /** Assets that were added or modified. Merge into scanResult.assets by `path`. */
   updated: AssetInfo[];

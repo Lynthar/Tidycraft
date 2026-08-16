@@ -1,21 +1,6 @@
-// The Tidycraft mark ("Gleam"): four-facet amber gem + cyan companion spark.
-// Same geometry AND framing as the app icon, whose master is app-icon.svg at
-// the repo root — the 96-unit space is inset so the gem's 62-unit diagonal
-// spans 94% of the box. Keep the two in step: a mark that sits smaller in its
-// box than the icon does reads as a different logo, not a smaller one.
-//
-// No halo, unlike earlier versions. It spilled out to x[11,85], past the inset
-// viewBox, so at this framing it would render with a flat edge sliced off it.
-//
-// Facet colors are baked per theme — SVG presentation attributes can't resolve
-// CSS var() — so a dark and a light group coexist and [data-theme] toggles them
-// via .tc-brand-mark rules in redesign-components.css. The light group is NOT
-// the dark one darkened: the header's --panel is pure white in that theme,
-// where the dark group's two brightest facets sit at 1.6:1 and 1.8:1 and melt
-// into the background. These hold the amber hue instead of drifting red-brown
-// the way the previous light set did (2.2 / 2.9 / 3.9 / 6.3 against white),
-// so the mark still reads as the same amber as the taskbar icon while the
-// darkest facet anchors the silhouette.
+// The Tidycraft mark ("Gleam"): four-facet amber gem + cyan companion spark. Same
+// geometry and framing as the app icon, whose master is app-icon.svg at the repo
+// root. Facet colours are baked per theme and toggled by [data-theme] in CSS.
 export function BrandMark({ size = 24 }: { size?: number }) {
   return (
     <svg

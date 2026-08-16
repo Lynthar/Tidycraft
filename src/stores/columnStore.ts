@@ -33,10 +33,8 @@ interface ColumnState {
 }
 
 const DEFAULT_COLUMNS: ColumnConfig[] = [
-  // Name is now a real fixed-width column (was flex-1 before v4). Together
-  // with all other columns being shrink-0 this lets the row truly grow when
-  // the user resizes a column — previously widening size compressed name on
-  // the left, making the dragged column's right edge appear stuck.
+  // A real fixed-width column. With every other column `shrink-0`, this lets the
+  // row truly grow when the user resizes a column.
   { id: "name", visible: true, width: 320 },
   { id: "type", visible: true, width: 96 },
   { id: "size", visible: true, width: 96 },
@@ -95,10 +93,8 @@ export const useColumnStore = create<ColumnState>()(
       name: "tidycraft-columns",
       version: COLUMNS_VERSION,
       migrate: (persistedState: unknown, version: number) => {
-        // v3 added viewMode; v4 made name a real fixed-width column. Older
-        // persisted blobs may have an outdated columns shape (pre-v2),
-        // miss viewMode, or have name.width=0 — all reconcile to: keep
-        // what we can, fill the rest with defaults.
+        // Older persisted blobs may carry a pre-v2 columns shape, miss viewMode,
+        // or have name.width=0. Keep what is usable, fill the rest from defaults.
         const prev = (persistedState as Partial<ColumnState>) ?? {};
         let columns =
           version < 2 || !Array.isArray(prev.columns)

@@ -24,14 +24,9 @@ const PROVIDER_LABEL_KEYS: Record<AiProviderId, string> = {
   ollama: "settings.aiProviderOllama",
 };
 
-/// AI Learning launch modal. Reads `[project]` from tidycraft.toml to
-/// pre-fill theme/goal inputs (read-only — to persist them the user
-/// edits tidycraft.toml directly via Settings → Analysis Rules → Edit;
-/// inline edits would risk clobbering the user's own toml comments
-/// since the toml crate doesn't preserve them on round-trip).
-///
-/// Continue invokes `learn_project_conventions`, on success swaps to
-/// LearnReviewPanel via uiStore.
+/// AI Learning launch modal. Reads `[project]` from tidycraft.toml to pre-fill the
+/// theme and goal inputs, then invokes `learn_project_conventions` and swaps to
+/// LearnReviewPanel on success.
 export function LearnSetupModal() {
   const { t } = useTranslation();
   const open = useUiStore((s) => s.learnSetupOpen);
@@ -66,12 +61,9 @@ export function LearnSetupModal() {
       .catch((e) => console.warn("[LearnSetup] read_project_meta failed:", e));
   }, [open, activeProjectId]);
 
-  // Cost preview via the dedicated learning estimator: the backend builds
-  // the SAME prompt the run would send (same sampler + seed + builder) and
-  // prices that, plus a bounded single-document output budget. The old
-  // `depth × 10` asset-equivalents fed into the per-asset tagging estimator
-  // were off by orders of magnitude on directory-heavy projects (its
-  // 150-output-tokens-per-"asset" math never described a learning call).
+  // Cost preview via the dedicated learning estimator: the backend builds the SAME
+  // prompt the run would send (same sampler, seed and builder) and prices that,
+  // plus a bounded single-document output budget.
   useEffect(() => {
     if (!open || !provider || !config || !activeProjectId) return;
     let cancelled = false;
@@ -101,13 +93,9 @@ export function LearnSetupModal() {
     setRunning(true);
     setError(null);
     try {
-      /// Persist theme/goal first so the learning call reads the same
-      /// tidycraft.toml the user just edited. Always writes — even
-      /// when meta hasn't changed — to keep "Continue = save + run"
-      /// a single mental model. Cost is negligible (toml_edit on a
-      /// small file). Failure here aborts the run rather than
-      /// proceeding with stale config that would mislead the user
-      /// about which framing the model saw.
+      /// Persist theme and goal first so the learning call reads the same
+      /// tidycraft.toml the user just edited. Always writes, keeping "Continue =
+      /// save + run" one mental model. A failure here aborts the run.
       await invoke("write_project_meta", {
         projectId: activeProjectId,
         theme: meta.theme ?? "",
@@ -122,12 +110,9 @@ export function LearnSetupModal() {
         endpoint: config.endpoint ?? null,
         samplingDepth: depth,
       });
-      // If the user switched projects while the call was in flight, the
-      // switch subscription already closed this modal — do NOT re-open the
-      // review panel over the new project: its Save resolves the active
-      // project at click time, so surfacing this (other-project) result
-      // would recreate the cross-project write. Discard; the staged rules
-      // sit harmlessly in the original project's pending_ai_rules.
+      // If the user switched projects while the call was in flight, do NOT re-open
+      // the review panel over the new project: its Save resolves the active project
+      // at click time. The staged rules sit in the original project's pending set.
       if (useProjectStore.getState().activeProjectId !== activeProjectId) return;
       setLearnReviewOpen(true, result);
       setOpen(false);

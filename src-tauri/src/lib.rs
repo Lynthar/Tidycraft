@@ -44,10 +44,9 @@ fn unregister_project(project_id: String) -> Result<(), String> {
     Ok(())
 }
 
-/// 一次问一批路径还能不能用。批量是因为启动恢复要问的是「上次开着的全部项目
-/// 加上最近列表」,逐条 IPC 在项目多时纯属浪费。异步是因为每条路径都要
-/// `metadata` + `read_dir`——挂载但无响应的网络共享会让 `stat` 一直卡到挂载
-/// 超时,同步命令会连带冻结整个窗口。
+/// Ask whether a batch of project paths is still usable. Batched because boot
+/// restore asks about every previously open project plus the recents list, and
+/// async because an unresponsive network mount can block `stat` for a long time.
 #[tauri::command(async)]
 fn check_project_paths(paths: Vec<String>) -> Vec<project_path::ProjectPathReport> {
     project_path::check_all(&paths)
@@ -55,13 +54,9 @@ fn check_project_paths(paths: Vec<String>) -> Vec<project_path::ProjectPathRepor
 
 // ============ Scan Commands ============
 
-/// Spawn a background thread that emits `scan-progress-{project_id}` events
-/// every 100ms until the scan reaches a terminal phase OR the caller flips
-/// `stop`. The `stop` flag matters: the scan function's early `Err` paths
-/// (folder moved/missing, not a directory, cancel during discovery) return
-/// without ever marking the phase `Completed`/`Cancelled`, so a phase-only loop
-/// would spin forever and the caller's `join()` would deadlock — which surfaced
-/// as the app hanging at "discovering files" with no error.
+/// Spawn a background thread emitting `scan-progress-{project_id}` every 100ms
+/// until the scan reaches a terminal phase or the caller flips `stop`. The scan's
+/// early `Err` paths never mark a terminal phase, so `stop` is what ends it.
 fn spawn_progress_reporter(
     app: AppHandle,
     project_id: String,
@@ -107,20 +102,17 @@ async fn scan_project_incremental(
     app: AppHandle,
     project_id: String,
     path: String,
-    // Frontend-visible: when true (default), the scanner honors
-    // `.gitignore` / `.ignore` files (and skips hidden dot dirs like
-    // `.git/`). Toggle exposed via Settings → Maintenance for users
-    // who need full coverage on a project with gitignored asset folders.
+    // Frontend-visible: when true (default) the scanner honors `.gitignore` /
+    // `.ignore` and skips hidden dot directories. Toggled in Settings →
+    // Maintenance.
     respect_gitignore: bool,
 ) -> Result<IncrementalScanResult, String> {
     project::register(project_id.clone(), path.clone());
 
     let state = Arc::new(ScanState::new());
-    // In-flight guard: `scan_state` being `Some` means another scan already
-    // owns this project. Reject the second one rather than overwriting the
-    // first's state (which would drop its cancellation, interleave the two
-    // progress reporters, and let an older scan's result clobber a newer one).
-    // The check + set is atomic under the project lock held by `with_mut`.
+    // In-flight guard: `scan_state` being `Some` means another scan already owns
+    // this project. Reject the second rather than overwrite the first's state.
+    // Check + set is atomic under the project lock held by `with_mut`.
     let already = project::with_mut(&project_id, |s| {
         if s.scan_state.is_some() {
             return Ok(true);
@@ -143,10 +135,8 @@ async fn scan_project_incremental(
     })
     .await;
 
-    // Stop the reporter and join it BEFORE propagating any error: the scan's
-    // early `Err` paths (e.g. the project folder was moved/deleted) never mark a
-    // terminal phase, so otherwise `join()` would block forever — the hang that
-    // left the UI stuck at "discovering files" with no error.
+    // Stop the reporter and join it before propagating any error: the scan's
+    // early `Err` paths never mark a terminal phase, so `join()` would block.
     stop.store(true, Ordering::SeqCst);
     let _ = progress_handle.join();
 
@@ -225,21 +215,12 @@ fn clear_thumbnail_cache() -> Result<u64, String> {
 }
 
 // ============ LLM Tagging Commands ============
-//
-// `llm_suggest_tags` dispatches to the configured provider's real HTTP
-// endpoint. `llm_estimate_cost` is pure math (no network) and the cache
-// commands just read/clear a directory, so both work without a provider.
+// `llm_suggest_tags` calls the configured provider; `llm_estimate_cost` and the
+// cache commands need no provider.
 
 /// Cost preview for the AIAnalyzeModal. No network and no API key required.
-///
-/// Carries the SAME project framing the real request will send (existing
-/// tags + `[project]` block, via `gather_llm_context`): every ≤20-asset
-/// chunk of the real dispatch re-sends that context, so a preview built on
-/// empty context under-charged in proportion to tag count × chunk count —
-/// against the estimator's err-high policy (2026-08 external review).
-// `(async)`: the context fetch takes the project lock briefly (and may
-// first-load the tags file); a main-thread command would let a rename
-// batch holding that lock freeze the window for the wait.
+/// Carries the same project framing the real request sends, since every
+/// ≤20-asset chunk of the real dispatch re-sends that context.
 #[tauri::command(async)]
 fn llm_estimate_cost(
     project_id: String,
@@ -257,10 +238,8 @@ fn llm_estimate_cost(
 
     let (_, existing_tags, project_ctx) = gather_llm_context(&project_id);
 
-    // Dummy per-asset entries: the estimator prices assets by count +
-    // thumbnail presence (paths are covered by a per-asset overhead
-    // constant), so placeholders are fine — the context above is what has
-    // to be real.
+    // Dummy per-asset entries: the estimator prices by count and thumbnail
+    // presence, so placeholders are fine — the context above has to be real.
     let assets = (0..asset_count)
         .map(|i| llm::AssetInput {
             path: format!("dummy/{i}"),
@@ -285,12 +264,9 @@ fn llm_estimate_cost(
     Ok(prov.estimate_cost(&req))
 }
 
-/// Convert an absolute asset path to a project-relative one for the LLM
-/// prompt + cache key, so cloud providers never receive the user's machine
-/// path (drive, username, directory layout). Folder structure under the
-/// project root is preserved — it's useful semantic context for tagging.
-/// Never returns the absolute path: with no project root (unregistered
-/// project) or a path outside the root, it falls back to the bare filename.
+/// Convert an absolute asset path to a project-relative one for the LLM prompt
+/// and cache key, so providers never receive the user's machine path. Falls back
+/// to the bare filename with no project root or for a path outside it.
 fn project_relative_path(abs: &str, root: &str) -> String {
     let basename = || abs.rsplit(['/', '\\']).next().unwrap_or(abs).to_string();
     if root.is_empty() {
@@ -303,10 +279,8 @@ fn project_relative_path(abs: &str, root: &str) -> String {
 }
 
 /// Relativize each existing-tag sample path against the project root before it
-/// enters an LLM prompt or the per-asset cache key. Without this, absolute
-/// paths (drive letter, username, full directory layout) ship to the provider
-/// and bake machine-specific data into the cache hash. Paths outside the root
-/// fall back to their basename — same policy as `project_relative_path`.
+/// enters an LLM prompt or the per-asset cache key. Paths outside the root fall
+/// back to their basename, matching `project_relative_path`.
 fn relativize_samples(samples: Vec<String>, root: &str) -> Vec<String> {
     samples
         .into_iter()
@@ -314,21 +288,9 @@ fn relativize_samples(samples: Vec<String>, root: &str) -> Vec<String> {
         .collect()
 }
 
-/// Minimal HTML escaping for project-derived strings (asset names, paths, rule
-/// messages) interpolated into the HTML report. Without it, a file named e.g.
-/// `<img src=x onerror=...>.png` injects markup/script that runs when the user
-/// opens the exported report. Escapes the five HTML-significant chars; `&` must
-/// go first so we don't double-escape the entities we just inserted.
-/// One quoted CSV cell built from a project-derived string (asset names,
-/// paths, extensions — none of which the user chose).
-///
-/// Quoting alone is not enough: spreadsheets read a leading `=`, `+`, `-`,
-/// `@`, tab or CR as the start of a *formula*, quotes and all, so a file
-/// named `=cmd|'/c calc'!A1.png` — a legal name on every filesystem — runs
-/// when the exported sheet is opened. A leading apostrophe is the standard
-/// neutralizer: the cell then reads as literal text and displays unchanged.
-/// This is the same threat the HTML report handles with [`html_escape`];
-/// only the CSV side was missing it.
+/// One quoted CSV cell built from a project-derived string. Quoting alone is not
+/// enough: a leading `=`, `+`, `-`, `@`, tab or CR makes spreadsheets read the
+/// cell as a formula, so those get a leading apostrophe.
 fn csv_cell(value: &str) -> String {
     let escaped = value.replace('"', "\"\"");
     let leads_a_formula = value.starts_with(['=', '+', '-', '@', '\t', '\r']);
@@ -336,6 +298,9 @@ fn csv_cell(value: &str) -> String {
     format!("\"{prefix}{escaped}\"")
 }
 
+/// Escape the five HTML-significant characters in project-derived strings
+/// interpolated into the HTML report. `&` goes first so the entities just
+/// inserted are not double-escaped.
 fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -344,10 +309,9 @@ fn html_escape(s: &str) -> String {
         .replace('\'', "&#39;")
 }
 
-/// Substitute `{{name}}` placeholders, i18next's syntax, so one locale
-/// template string works in the webview and in the HTML export alike.
-/// Unknown names are left in place — same as i18next, so a broken template
-/// fails identically at both ends instead of two different ways.
+/// Substitute `{{name}}` placeholders, i18next's syntax, so one locale template
+/// string works in the webview and in the HTML export alike. Unknown names are
+/// left in place, as i18next does.
 fn render_template(template: &str, args: &HashMap<String, String>) -> String {
     let mut out = String::with_capacity(template.len());
     let mut rest = template;
@@ -375,20 +339,15 @@ fn render_template(template: &str, args: &HashMap<String, String>) -> String {
 }
 
 /// The title and message an issue shows in the exported report. `templates`
-/// carries the UI's current locale, flattened as `<rule_id>.<field>`; absent
-/// (English) means the analyzer's own prose, so the English report stays
-/// byte-for-byte what it was.
+/// carries the interface's current locale, flattened as `<rule_id>.<field>`;
+/// absent (English) means the analyzer's own prose.
 fn localized_issue_cells(
     issue: &analyzer::Issue,
     templates: Option<&HashMap<String, String>>,
 ) -> (String, String) {
-    // dcc_source's age unit is the one placeholder whose value is itself a
-    // word: `args.age_unit` is the raw tag (`"d"`), not a noun. The bucket
-    // choice stays in Rust's `humanize_seconds`; only the noun is looked up,
-    // exactly as `localizeIssue` does in the UI — the two ends must do one
-    // lookup each or the report and the panel disagree on the same issue.
-    // No `duration.*` entry (a locale that skipped them) leaves the tag, which
-    // is what the English prose prints anyway.
+    // dcc_source's age unit is the one placeholder whose value is itself a word:
+    // `args.age_unit` is the raw tag (`"d"`), not a noun. Only the noun is looked
+    // up, exactly as `localizeIssue` does, so report and panel agree.
     let localized = issue
         .args
         .get("age_unit")
@@ -412,17 +371,9 @@ fn localized_issue_cells(
     )
 }
 
-/// Snapshot the project framing an LLM request carries: root path, existing
-/// tags (each with up to 5 relativized sample paths), and the `[project]`
-/// block from tidycraft.toml. Shared by `llm_suggest_tags` (the real
-/// request) and `llm_estimate_cost` (the preview) — the preview must price
-/// the same context the request will actually send.
-///
-/// Tag context is cloned inside the project lock (brief: names,
-/// descriptions, a few sample paths), the toml read happens outside it.
-/// An unregistered project (UI should always register first, but be
-/// defensive) degrades to empty context — the LLM still works, just
-/// without project framing.
+/// Snapshot the project framing an LLM request carries: root path, existing tags
+/// (each with up to 5 relativized sample paths), and the `[project]` block from
+/// tidycraft.toml. Shared by the real request and the cost preview.
 fn gather_llm_context(
     project_id: &str,
 ) -> (
@@ -430,11 +381,8 @@ fn gather_llm_context(
     Vec<llm::ExistingTagContext>,
     Option<llm::project_meta::ProjectMeta>,
 ) {
-    // SAMPLES_PER_TAG: how many existing-asset paths we ship per tag.
-    // 5 is a sweet spot between giving the LLM enough usage context
-    // to infer the tag's intent and not blowing the prompt budget on
-    // a project with hundreds of tags. Less than the tag count
-    // truncates; the LLM doesn't need exhaustive samples.
+    // How many existing-asset paths ship per tag: enough usage context for the
+    // model to infer a tag's intent without blowing the prompt budget.
     const SAMPLES_PER_TAG: usize = 5;
 
     let context_result = project::with_mut(project_id, |state| {
@@ -474,10 +422,9 @@ fn gather_llm_context(
     (root_path, existing_tags, project_ctx)
 }
 
-/// Main entry point for AI tagging. Loads thumbnails for the selected
-/// assets, gathers project context (theme/goal from tidycraft.toml +
-/// existing tags with up to 5 sample paths each), then dispatches to
-/// the chosen provider via `make_provider`.
+/// Main entry point for AI tagging: loads thumbnails for the selected assets,
+/// gathers project context, then dispatches to the chosen provider via
+/// `make_provider`.
 #[tauri::command]
 async fn llm_suggest_tags(
     project_id: String,
@@ -497,19 +444,9 @@ async fn llm_suggest_tags(
 
     let (root_path, existing_tags, project_ctx) = gather_llm_context(&project_id);
 
-    // Load thumbnails on the blocking pool — `get_thumbnail_base64`
-    // does PNG decode + resize + base64 encode, which would otherwise
-    // park the tokio runtime for tens of milliseconds per asset. The
-    // thumbnail layer already has its own disk cache so repeat calls
-    // for unchanged files are cheap.
-    //
-    // Per-asset failures (unsupported format, missing file, codec gap
-    // for HDR/EXR) downgrade silently to `thumbnail_base64=None` —
-    // the request still goes through, the LLM just falls back to
-    // filename + path context for those entries.
-    // Map the project-relative path (what we ship to the provider, cache,
-    // and the LLM echoes back) to the absolute path the frontend needs to
-    // bind tags. Built before `asset_paths` is moved into the builders.
+    // Map the project-relative path (what ships to the provider and comes back
+    // from the model) to the absolute path the frontend needs to bind tags.
+    // Built before `asset_paths` is moved into the builders.
     let abs_by_rel: HashMap<String, String> = asset_paths
         .iter()
         .map(|abs| (project_relative_path(abs, &root_path), abs.clone()))
@@ -562,11 +499,9 @@ async fn llm_suggest_tags(
         existing_tags,
     };
 
-    // The provider only ever saw project-relative paths, so suggestions come
-    // back keyed by those. Remap each to the absolute path so the frontend
-    // binds tags to the scanned (absolute-path) assets. A miss (LLM mangled
-    // the path) leaves it untouched — the same graceful degradation as the
-    // pre-relativization behavior.
+    // Suggestions come back keyed by project-relative paths. Remap each to the
+    // absolute path so the frontend binds tags to the scanned assets; a miss
+    // leaves it untouched.
     let mut response = prov.suggest_tags(&req).await.map_err(String::from)?;
     for s in &mut response.suggestions {
         if let Some(abs) = abs_by_rel.get(&s.asset_path) {
@@ -583,10 +518,9 @@ fn llm_clear_cache() -> Result<u64, String> {
     Ok(before)
 }
 
-/// Day 6: AI Learning entry point. Samples the project, sends the
-/// samples + tag system + project meta to the LLM, persists the
-/// returned heuristic rules to `<project>/tidycraft.ai.toml`, and
-/// returns the full `LearningResult` for the review panel.
+/// AI Learning entry point. Samples the project, sends the samples, tag system
+/// and project meta to the LLM, and returns the full `LearningResult` for the
+/// review panel.
 #[tauri::command]
 async fn learn_project_conventions(
     project_id: String,
@@ -621,12 +555,9 @@ async fn learn_project_conventions(
 
     let result = prov.learn_project(&request).await.map_err(String::from)?;
 
-    // Stage the rules in memory — NOTHING is written to disk here. The review
-    // panel's Save (`save_ai_rules`) is the single commit point: it takes this
-    // pending doc (true provider/model/depth metadata included) and persists
-    // the user-approved rule list. Closing the panel without saving therefore
-    // really discards the run, and unreviewed rules never influence
-    // `suggest_tags` (which reads only the on-disk tidycraft.ai.toml).
+    // Staged in memory — nothing is written to disk here. The review panel's Save
+    // (`save_ai_rules`) is the single commit point, so closing the panel without
+    // saving discards the run and unreviewed rules never reach `suggest_tags`.
     let doc = llm::rule_store::AiRulesDoc {
         last_learned: chrono::Utc::now().to_rfc3339(),
         prompt_version: llm::learning::LEARNING_PROMPT_VERSION,
@@ -651,14 +582,12 @@ type LearningInputs = (
     Vec<llm::ExistingTagContext>,
 );
 
-/// Snapshot + sample exactly what a learning run would send: scan / tags /
+/// Snapshot and sample exactly what a learning run would send: scan, tags and
 /// root under the project lock, then `[project]` meta and the deterministic
-/// per-project sampling outside it. Shared by the real call and its cost
-/// estimator so the preview prices the ACTUAL prompt, not an approximation.
+/// sampling outside it. Shared by the real call and its cost estimator.
 fn build_learning_inputs(project_id: &str, depth: usize) -> Result<LearningInputs, String> {
-    // Snapshot scan + tags + root_path inside the project lock.
-    // Drop the lock before any IO (toml read) or async work
-    // (provider call) — same pattern as `llm_suggest_tags`.
+    // Snapshot scan + tags + root_path inside the project lock, then drop it
+    // before any IO or async work.
     const SAMPLES_PER_TAG: usize = 5;
     let snapshot = project::with_mut(project_id, |state| {
         let root = state.root_path.clone();
@@ -705,11 +634,9 @@ fn build_learning_inputs(project_id: &str, depth: usize) -> Result<LearningInput
     Ok((samples, project_meta, existing_tags))
 }
 
-/// Cost preview for the LearnSetupModal. Pure local math — builds the SAME
-/// prompt a learning run would send (same sampler, same seed, same builder)
-/// and prices it, instead of shoehorning "directory count" into the per-asset
-/// tagging estimator (which budgets 150 output tokens per asset and can be
-/// off by orders of magnitude for a single-document learning call).
+/// Cost preview for the LearnSetupModal. Pure local math: builds the same prompt
+/// a learning run would send — same sampler, same seed, same builder — and prices
+/// that.
 #[tauri::command]
 fn estimate_learning_cost(
     project_id: String,
@@ -741,11 +668,9 @@ fn estimate_learning_cost(
     ))
 }
 
-/// Read the project's `tidycraft.ai.toml` if it exists. Frontend uses
-/// this to populate the AITagPanel header status badge ("AI · 5d ago,
-/// N rules"). Deliberately reads only the SAVED doc — a learning run
-/// that hasn't been confirmed in the review panel (still pending in
-/// `ProjectState.pending_ai_rules`) is not active and doesn't show here.
+/// Read the project's `tidycraft.ai.toml` if it exists, for the AITagPanel's
+/// status badge. Reads only the saved doc — a learning run still pending review
+/// is not active and does not show here.
 #[tauri::command]
 fn read_ai_rules(project_id: String) -> Result<Option<llm::rule_store::AiRulesDoc>, String> {
     project::with_ref(&project_id, |state| {
@@ -754,10 +679,8 @@ fn read_ai_rules(project_id: String) -> Result<Option<llm::rule_store::AiRulesDo
 }
 
 /// The review panel's Save: the single point where learned rules reach disk.
-/// Takes the pending doc staged by `learn_project_conventions` (carrying that
-/// run's true metadata) and writes it with the user-edited rule list; with no
-/// pending run (re-saving edits later), preserves the on-disk doc's metadata.
-/// See `AiRulesDoc::for_save` for the exact precedence.
+/// Takes the doc staged by `learn_project_conventions` and writes it with the
+/// user-edited rule list. See `AiRulesDoc::for_save` for the exact precedence.
 #[tauri::command]
 fn save_ai_rules(project_id: String, rules: Vec<llm::learning::LearnedRule>) -> Result<(), String> {
     project::with_mut(&project_id, |state| {
@@ -772,10 +695,9 @@ fn save_ai_rules(project_id: String, rules: Vec<llm::learning::LearnedRule>) -> 
     })
 }
 
-/// Read the `[project]` block from `tidycraft.toml`. Frontend uses this
-/// to pre-fill LearnSetupModal's theme/goal inputs from the project's
-/// existing config. Empty / missing → returns defaults (`None` fields)
-/// so the inputs render as placeholders.
+/// Read the `[project]` block from `tidycraft.toml`, used to pre-fill the
+/// LearnSetupModal. Empty or missing returns defaults so the inputs render as
+/// placeholders.
 #[tauri::command]
 fn read_project_meta(project_id: String) -> Result<llm::project_meta::ProjectMeta, String> {
     project::with_ref(&project_id, |state| {
@@ -790,17 +712,9 @@ fn read_project_meta(project_id: String) -> Result<llm::project_meta::ProjectMet
     })
 }
 
-/// Persist `theme` + `goal` from the LearnSetupModal into
-/// `tidycraft.toml`'s `[project]` block. Uses `toml_edit` under the
-/// hood so the user's analyzer-rule comments and other sections
-/// survive the round-trip. Empty strings clear the fields
-/// (template-style — keys remain but `from_toml` normalizes them
-/// back to `None` so the prompt builder skips the context block).
-///
-/// Creates the file from `DEFAULT_CONFIG_TEMPLATE` if it doesn't
-/// exist, mirroring `ensure_project_config`'s bootstrap path so
-/// users hitting "Save" before ever opening the rules editor still
-/// get the full annotated template.
+/// Persist `theme` and `goal` from the LearnSetupModal into `tidycraft.toml`'s
+/// `[project]` block via `toml_edit`, so the user's comments and other sections
+/// survive. Creates the file from `DEFAULT_CONFIG_TEMPLATE` when absent.
 #[tauri::command]
 fn write_project_meta(project_id: String, theme: String, goal: String) -> Result<(), String> {
     project::with_ref(&project_id, |state| {
@@ -813,15 +727,9 @@ fn llm_cache_size() -> u64 {
     llm::cache::size()
 }
 
-/// List the models installed on a local Ollama daemon. The endpoint
-/// argument is the user's Settings-configured base URL — we strip any
-/// path suffix and append `/api/tags`. Returns the raw model tag list
-/// (e.g. `["qwen2.5vl:32b", "llama3.2-vision:11b-q4_K_M", "llava:7b"]`).
-///
-/// We do NOT filter for vision-capable models server-side — the API
-/// doesn't expose the capability cleanly, and users may legitimately
-/// want to pick text-only models for filename-based tagging. The UI
-/// shows everything the user has installed and lets them choose.
+/// List the models installed on a local Ollama daemon. The endpoint argument is
+/// the user's Settings base URL, stripped of any path suffix. Vision capability
+/// is not filtered server-side — the interface shows everything installed.
 #[tauri::command]
 async fn llm_ollama_models(endpoint: String) -> Result<Vec<String>, String> {
     // Mirror the trim-and-append the provider does for /api/chat so
@@ -872,15 +780,8 @@ async fn llm_ollama_models(endpoint: String) -> Result<Vec<String>, String> {
 // ============ Analysis Commands ============
 
 /// Load the project's `RuleConfig` from `<root>/tidycraft.toml` for the report
-/// exporters, which (unlike `analyze_assets`) don't receive a config string from
-/// the frontend. Behavior mirrors the UI path so a report can never silently
-/// diverge from the Issues view:
-/// - file absent → defaults (same as the frontend sending no config string)
-/// - file present but unreadable or unparseable → `Err`, which the export
-///   command propagates (the Issues view fails the same way via `analyze_assets`)
-///
-/// Previously a malformed file degraded to defaults here, so a JSON/HTML report
-/// looked fine while quietly using default rules — the divergence this fixes.
+/// exporters. Absent file → defaults; present but unreadable or unparseable →
+/// `Err`, matching how the Issues view fails via `analyze_assets`.
 fn load_rule_config(root_path: &str) -> Result<RuleConfig, String> {
     let toml_path = Path::new(root_path).join("tidycraft.toml");
     match std::fs::read_to_string(&toml_path) {
@@ -912,11 +813,8 @@ fn build_ignore_set(config: &RuleConfig) -> Result<Option<globset::GlobSet>, Str
 }
 
 /// The single source of truth for the analysis pipeline: apply the
-/// `[ignore].patterns` filter, then run every analyzer phase — per-asset
-/// rules plus the four cross-asset checks (duplicates, missing references,
-/// PBR set, DCC source). `analyze_assets` (UI) and both report exporters
-/// route through this so they always produce the same issue set for a given
-/// project + config.
+/// `[ignore].patterns` filter, then run every analyzer phase. `analyze_assets`
+/// and both report exporters route through this for one issue set per config.
 fn run_full_analysis(
     scan_result: &ScanResult,
     root_path: &str,
@@ -955,10 +853,9 @@ fn run_full_analysis(
     let mut result = analyzer.analyze(scan_to_analyze);
     let duplicates = analyzer.find_duplicates(scan_to_analyze);
     result.merge(duplicates);
-    // Existence comes from the UNFILTERED scan: `[ignore]` limits what we
-    // report on, not what the project is understood to contain. (The other
-    // three cross-asset rules deliberately keep the filtered view — their
-    // documented suppression path is "drop the file"; see docs/analyzer-rules.md.)
+    // Existence comes from the UNFILTERED scan: `[ignore]` limits what is
+    // reported, not what the project contains. The other three cross-asset rules
+    // keep the filtered view — see docs/analyzer-rules.md.
     let missing = analyzer.find_missing_references(scan_to_analyze, scan_result, package_index);
     result.merge(missing);
     let pbr = analyzer.find_pbr_set_issues(scan_to_analyze, &config.pbr_set);
@@ -969,13 +866,8 @@ fn run_full_analysis(
 }
 
 /// Clone what an analysis or report export needs out of the project state,
-/// holding the project lock only for the duration of the clone. The heavy
-/// work — duplicate re-hashing, engine re-parsing, report templating — then
-/// runs with the lock released, so a seconds-long analysis can't stall the
-/// watcher, cancellation, or any other command on the same project. Same
-/// shape as `EngineScanSnapshot` (lock rule #2); the analysis simply
-/// describes the snapshot, exactly as it already did when the watcher's
-/// changes queued behind the lock instead.
+/// holding the project lock only for the clone. The heavy work — duplicate
+/// re-hashing, engine re-parsing, templating — then runs with the lock released.
 fn scan_snapshot(project_id: &str) -> Result<(ScanResult, String), String> {
     project::with_ref(project_id, |state| {
         let scan = state.require_scan()?;
@@ -983,10 +875,8 @@ fn scan_snapshot(project_id: &str) -> Result<(ScanResult, String), String> {
     })
 }
 
-// `(async)` runs this on Tauri's thread pool instead of the main thread.
-// duplicate-hashing + full Unity re-parse is heavy; on the main thread it
-// froze the whole UI (window drag/resize) for the duration. The frontend
-// contract is unchanged — `invoke` already awaits.
+// `(async)`: duplicate hashing plus a full engine re-parse is heavy. The frontend
+// contract is unchanged, since `invoke` already awaits.
 #[tauri::command(async)]
 fn analyze_assets(
     project_id: String,
@@ -1014,11 +904,9 @@ fn analyze_assets(
     ))
 }
 
-/// Make sure `<project_root>/tidycraft.toml` exists, writing the commented
-/// default template if it doesn't, then return its absolute path. The
-/// frontend hands that path to `open_with_default_app` so the user edits
-/// in their preferred editor; saving and re-clicking Run Analysis is all
-/// that's needed for changes to take effect.
+/// Ensure `<project_root>/tidycraft.toml` exists, writing the commented default
+/// template if it does not, then return its absolute path. The frontend hands
+/// that path to `open_with_default_app`.
 #[tauri::command]
 fn ensure_project_config(project_id: String) -> Result<String, String> {
     project::with_ref(&project_id, |state| {
@@ -1034,10 +922,9 @@ fn ensure_project_config(project_id: String) -> Result<String, String> {
     })
 }
 
-/// Read a project's `tidycraft.toml` from its registered root, if present.
-/// Returns `Ok(None)` when the file doesn't exist (a normal state — most
-/// projects use defaults), `Ok(Some(content))` on success, or `Err` for
-/// IO failures. Validation/parsing happens later in `analyze_assets`.
+/// Read a project's `tidycraft.toml` from its registered root. `Ok(None)` means
+/// the file does not exist, which is a normal state. Validation and parsing
+/// happen later in `analyze_assets`.
 #[tauri::command]
 fn read_project_config(project_id: String) -> Result<Option<String>, String> {
     project::with_ref(&project_id, |state| {
@@ -1056,11 +943,9 @@ fn read_project_config(project_id: String) -> Result<Option<String>, String> {
 #[tauri::command]
 fn suggest_tags(project_id: String) -> Result<analyzer::rule_suggest::TagSuggestions, String> {
     project::with_mut(&project_id, |state| {
-        // Snapshot the names of tags already created (e.g. from a previous
-        // suggest+apply round). We compare against `<group_name> (suggested)`
-        // because applyGroup in the frontend always appends that suffix —
-        // so a group whose suggested form is already in the tags list
-        // would just create a duplicate-named tag if surfaced again.
+        // Tags already created by an earlier suggest+apply round. Compared
+        // against `<group_name> (suggested)` because applyGroup always appends
+        // that suffix.
         let already_suggested: std::collections::HashSet<String> = state
             .ensure_tags()
             .tags
@@ -1070,19 +955,9 @@ fn suggest_tags(project_id: String) -> Result<analyzer::rule_suggest::TagSuggest
         let scan = state.require_scan()?;
         let root = Path::new(&state.root_path);
 
-        // Day 7: prefer AI-derived rules when present. RuleSuggester
-        // produces TagGroup[] in the same shape so the frontend treats
-        // both sources identically — only the `hint` string changes
-        // (heuristic groups say "filename token", AI groups say
-        // "ai · prefix Characters/Hero/" etc.).
-        //
-        // Fallback to heuristic suggester when:
-        //   - no `tidycraft.ai.toml` exists yet (user hasn't run learning)
-        //   - the file exists but the rule list is empty
-        //   - the file is corrupt (load error) — we fall back rather than
-        //     failing the whole call so AITagPanel still shows *something*,
-        //     and report it in `warnings` so the fallback isn't mistaken
-        //     for a working rule set.
+        // Prefer AI-derived rules when present; `RuleSuggester` produces the same
+        // `TagGroup[]` shape, so only the `hint` string differs. Falls back to the
+        // heuristic suggester, reporting the reason in `warnings`.
         let mut suggestions = analyzer::rule_suggest::load_or_fallback(scan, root);
 
         suggestions
@@ -1126,9 +1001,8 @@ fn get_git_statuses(project_id: String) -> GitStatusMap {
                 .iter()
                 .map(|(path, status)| {
                     // Normalize to forward slashes so keys match the scanner's
-                    // asset paths on Windows. `repo.workdir().join(rel)` produces
-                    // mixed `\`+`/` on Windows; without this the frontend lookup
-                    // `gitStatuses[asset.path]` never hit.
+                    // asset paths on Windows; `workdir().join(rel)` yields mixed
+                    // separators there.
                     (
                         scanner::path_to_string(path),
                         format!("{:?}", status).to_lowercase(),
@@ -1153,14 +1027,9 @@ pub struct DependencyGraph {
     pub edges: Vec<DependencyEdge>,
 }
 
-/// One node in a project's dependency graph. `id` is the engine-neutral graph
-/// identifier edges reference — a Unity GUID or a Godot `res://` path — while
-/// `path` is the absolute filesystem path the frontend uses to locate the asset.
-/// How firmly a graph node's identity resolves. From a disk scan this is a
-/// spectrum, not a boolean — the scan set undercounts what a project can
-/// legitimately reference (engine built-ins, package caches, gitignored
-/// files), so each variant asserts only what the evidence supports. Same
-/// doctrine as `missing_reference.rs`: "a miss is strong signal, not proof".
+/// How firmly a graph node's identity resolves. A disk scan undercounts what a
+/// project can legitimately reference (engine built-ins, package caches,
+/// gitignored files), so each variant asserts only what the evidence supports.
 #[derive(Serialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum DependencyNodeKind {
@@ -1170,11 +1039,9 @@ pub enum DependencyNodeKind {
     /// index — a package asset installed by the package manager. Known to
     /// exist; simply not part of the project's own assets.
     Package,
-    /// Unity: a referenced GUID with no scanned asset behind it and no
-    /// package-index hit. Ambiguous by construction — a package asset (when
-    /// no local `Library/` cache exists to resolve it), an ignore-excluded
-    /// file, and a genuinely broken reference are indistinguishable from a
-    /// disk scan. Rendered as a warning, never asserted broken.
+    /// Unity: a referenced GUID with neither a scanned asset nor a package-index
+    /// hit. Ambiguous by construction — a package asset, an ignore-excluded file
+    /// and a broken reference look alike from a disk scan.
     Unresolved,
     /// Godot: a `res://` target that exists on disk but sits outside the scan
     /// set (gitignored / hidden directory). Not breakage.
@@ -1183,16 +1050,18 @@ pub enum DependencyNodeKind {
     Missing,
 }
 
+/// One node in a project's dependency graph. `id` is the engine-neutral graph
+/// identifier edges reference — a Unity GUID or a Godot `res://` path — while
+/// `path` is the absolute filesystem path the frontend uses to locate the asset.
 #[derive(Serialize)]
 pub struct DependencyNode {
     pub id: String,
     pub path: String,
     pub name: String,
     pub file_type: String,
-    /// See `DependencyNodeKind`. Non-`asset` nodes carry an empty `path`
-    /// (nothing to locate) and are treated as BFS terminals by the frontend,
-    /// so a widely-shared unresolved GUID can't hub-connect its unrelated
-    /// referrers in the 2-hop view.
+    /// See `DependencyNodeKind`. Non-`asset` nodes carry an empty `path` and are
+    /// BFS terminals in the frontend, so a widely-shared unresolved GUID cannot
+    /// hub-connect unrelated referrers in the 2-hop view.
     pub kind: DependencyNodeKind,
     /// Secondary identity line for the tooltip — the package id for
     /// `package` nodes ("com.unity.render-pipelines.universal"). Absent
@@ -1201,12 +1070,9 @@ pub struct DependencyNode {
     pub detail: Option<String>,
 }
 
-/// Cached GUID→package index for this project, built lazily and rebuilt only
-/// when `Library/PackageCache`'s directory listing changes. Takes the project
-/// lock briefly — callers grab the Arc BEFORE their own `with_ref` block
-/// (`with_mut` inside `with_ref` would self-deadlock on the project mutex).
-/// Unknown project / no cache dir both yield an empty index, which every
-/// consumer treats as "resolve nothing".
+/// Cached GUID→package index for this project, rebuilt only when
+/// `Library/PackageCache`'s directory listing changes. Callers must grab the Arc
+/// BEFORE their own `with_ref` block, or the inner `with_mut` self-deadlocks.
 fn package_index_for(project_id: &str) -> std::sync::Arc<unity::PackageGuidIndex> {
     project::with_mut(project_id, |state| {
         let root = Path::new(&state.root_path);
@@ -1224,20 +1090,8 @@ fn package_index_for(project_id: &str) -> std::sync::Arc<unity::PackageGuidIndex
 }
 
 /// The slice of project state the engine-walk commands need, cloned under a
-/// brief lock so the walk itself runs with the lock released.
-///
-/// `get_unity_dependencies`, `find_unused_assets`, `get_godot_dependencies` and
-/// `godot_asset_references` all re-open and re-parse every scene / prefab /
-/// material / script in the project — seconds on a large one. Doing that inside
-/// `with_ref` held the per-project mutex for the entire walk, which stalls the
-/// watcher's 500ms batches, every other command for that project, and the
-/// cancel path. Nothing in the walk reads state beyond these three values, so a
-/// snapshot is sufficient — the same "snapshot inside the lock, IO outside"
-/// discipline `llm_suggest_tags` already follows.
-///
-/// Worst case the snapshot is one scan stale (a watcher batch lands mid-walk).
-/// That was already true of the returned graph the moment it crossed the IPC
-/// boundary, so it costs no accuracy that existed before.
+/// brief lock so the walk itself runs with the lock released. Worst case the
+/// snapshot is one scan stale, which the returned graph already was.
 struct EngineScanSnapshot {
     root_path: String,
     assets: Vec<scanner::AssetInfo>,
@@ -1291,18 +1145,9 @@ fn get_unity_dependencies(project_id: String) -> Result<DependencyGraph, String>
         }
     }
 
-    // References the scan can't resolve. Two classes never enter the
-    // graph at all — the all-zero "no reference" sentinel and the
-    // editor-shipped built-in bundles (`unity default resources` /
-    // `unity_builtin_extra`), the same exemptions the missing_reference
-    // rule applies: they aren't project assets, and the built-ins are
-    // exactly the GUIDs every material / UI element shares, so one node
-    // for them would hub-connect the whole project in the 2-hop view.
-    // The rest resolves through the PackageCache index when a local
-    // Library/ exists — a `package` node with its file and package name
-    // — and only what's left is genuinely ambiguous (no cache to check,
-    // ignore-excluded, or truly deleted): one deduped `unresolved` node,
-    // a warning with its edge intact, not an asserted breakage.
+    // References the scan cannot resolve. The all-zero sentinel and the built-in
+    // bundles never enter the graph; the rest resolves through the PackageCache
+    // index, and what remains becomes one deduped `unresolved` node.
     let mut unresolved_guids: std::collections::HashSet<String> = std::collections::HashSet::new();
     for asset in &scan_result.assets {
         if unity::is_reference_source(&asset.extension) {
@@ -1349,16 +1194,9 @@ fn get_unity_dependencies(project_id: String) -> Result<DependencyGraph, String>
     Ok(DependencyGraph { nodes, edges })
 }
 
-/// Result of an unused-asset scan.
-///
-/// `unreadable_sources` counts referenceable files whose text could not be
-/// read. That is almost always a project set to Force Binary (or Mixed) asset
-/// serialization: `unity::parse_unity_file` reads YAML, so a binary `.prefab`
-/// or `.unity` yields NO outgoing references, and every asset only those files
-/// referenced then looks unused. Silently returning that list invites the user
-/// to delete assets that are very much in use — the one genuinely destructive
-/// failure mode in the app — so the count travels with the result and the UI
-/// says the answer can't be trusted.
+/// Result of an unused-asset scan. `unreadable_sources` counts referenceable
+/// files whose text could not be read — almost always binary asset
+/// serialization, which makes every asset they referenced look unused.
 #[derive(Debug, Serialize)]
 struct UnusedAssetsResult {
     unused: Vec<String>,
@@ -1394,11 +1232,9 @@ fn find_unused_assets(project_id: String) -> Result<UnusedAssetsResult, String> 
     let mut all_guids: HashMap<String, String> = HashMap::new();
 
     for asset in &scan_result.assets {
-        // Scenes are graph roots (loaded via build settings / the editor /
-        // SceneManager.LoadScene by name), so having no incoming GUID
-        // reference doesn't make a scene unused — drop them as candidates.
-        // They're still parsed as reference *sources* below, so assets a
-        // scene references aren't falsely flagged.
+        // Scenes are graph roots (build settings, the editor, LoadScene by name),
+        // so having no incoming GUID reference does not make one unused. They are
+        // still parsed as reference sources below.
         if matches!(asset.asset_type, scanner::AssetType::Scene) {
             continue;
         }
@@ -1438,10 +1274,7 @@ fn find_unused_assets(project_id: String) -> Result<UnusedAssetsResult, String> 
 
 /// Godot counterpart to `get_unity_dependencies`. Nodes are every non-metadata
 /// asset keyed by its `res://` id; edges come from the `res://` references in
-/// scenes / resources / scripts (target filtered to known nodes). Same parser
-/// and known gaps as the unused-asset check (uid-only / dynamic `load()` missed).
-// `(async)`: parses every scene/resource/script under the lock — off the
-// main thread (mirrors get_unity_dependencies).
+/// scenes, resources and scripts. Same parser and known gaps as the unused check.
 #[tauri::command(async)]
 fn get_godot_dependencies(project_id: String) -> Result<DependencyGraph, String> {
     let scan_result = engine_scan_snapshot(&project_id)?;
@@ -1469,12 +1302,9 @@ fn get_godot_dependencies(project_id: String) -> Result<DependencyGraph, String>
         }
     }
 
-    // Keep every edge, but classify unknown `res://` targets honestly:
-    // unlike Unity GUIDs, a res path can be checked against the disk, so
-    // "outside the scan but present" (gitignored addons/, hidden dirs —
-    // not breakage) and "genuinely gone" (a broken reference) get
-    // different nodes instead of one scary bucket. One deduped node per
-    // distinct target either way.
+    // Keep every edge but classify unknown `res://` targets honestly: unlike a
+    // Unity GUID a res path can be checked against disk, so "outside the scan but
+    // present" and "genuinely gone" get different nodes.
     let mut edges: Vec<DependencyEdge> = Vec::new();
     let mut unknown: std::collections::HashSet<String> = std::collections::HashSet::new();
     for (from, to) in godot::godot_dependency_edges(root, &scan_result.assets) {
@@ -1502,12 +1332,8 @@ fn get_godot_dependencies(project_id: String) -> Result<DependencyGraph, String>
 }
 
 /// Rename guardrail: for each of `paths` (absolute), the project files that
-/// reference it by `res://` path — root-relative names, `project.godot`
-/// included. Godot-only: Unity references are GUID-based and survive renames
-/// (the `.meta` sidecar moves with the file), so the frontend never calls
-/// this for other project types.
-// `(async)`: re-reads every scene/resource/script under the lock — off the
-// main thread (same shape as get_godot_dependencies).
+/// reference it by `res://` path, root-relative, `project.godot` included.
+/// Godot-only — Unity references are GUID-based and survive renames.
 #[tauri::command(async)]
 fn godot_asset_references(
     project_id: String,
@@ -1525,16 +1351,11 @@ fn godot_asset_references(
 }
 
 // ============ Engine Info Commands ============
-//
-// Path-only commands (no project_id): they re-read small marker/config files
-// fresh on every call, so there's no per-project state to consult. Each
-// returns `None` instead of an error when the info isn't there — an absent
-// card is the correct UI for a project without the marker file.
+// Path-only commands (no project_id): they re-read small marker or config files
+// on every call, and return `None` rather than an error when the info is absent.
 
-/// On-demand parse of a single Unity YAML asset for the preview panel:
-/// component list (prefab/scene only, sorted) + GUID references.
-// `(async)`: reads + line-scans a potentially multi-MB scene file — off the
-// main thread.
+/// On-demand parse of a single Unity YAML asset for the preview panel: component
+/// list (prefab and scene only, sorted) plus GUID references.
 #[tauri::command(async)]
 fn get_unity_file_info(path: String) -> Option<unity::UnityFileInfo> {
     unity::parse_unity_file(Path::new(&path))
@@ -1700,11 +1521,8 @@ fn export_issues_to_json(project_id: String) -> Result<String, String> {
     let package_index = package_index_for(&project_id);
     let (scan_result, root_path) = scan_snapshot(&project_id)?;
 
-    // Mirror the UI's Run Analysis: honor the project's tidycraft.toml
-    // (rule thresholds + [ignore].patterns) and run every phase,
-    // including the PBR-set and DCC-source cross-asset checks. Without
-    // this the exported report would silently diverge from the Issues
-    // view under any custom config.
+    // Mirror the interface's Run Analysis: honor the project's tidycraft.toml and
+    // run every phase, so the exported report cannot diverge from the Issues view.
     let config = load_rule_config(&root_path)?;
     let ignore_set = build_ignore_set(&config)?;
     let result = run_full_analysis(
@@ -1718,11 +1536,9 @@ fn export_issues_to_json(project_id: String) -> Result<String, String> {
     serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
 }
 
-/// The one-line admission at the top of the HTML report when the scan under
-/// it was incomplete. Empty when there is nothing to admit — the healthy
-/// report carries no banner element at all. CacheNotSaved is deliberately
-/// not reported here: cache health changes nothing about THIS report's
-/// numbers.
+/// The one-line admission at the top of the HTML report when the scan under it
+/// was incomplete. Empty when there is nothing to admit. CacheNotSaved is not
+/// reported: cache health changes nothing about this report's numbers.
 fn warning_banner_html(warnings: &[warning::ScanWarning]) -> String {
     use warning::ScanWarning;
     let mut unread = 0usize;
@@ -1844,11 +1660,7 @@ const REPORT_STYLE: &str = r#"    <style>
 "#;
 
 /// `issue_limit` / `asset_limit` cap the report's table rows (Settings →
-/// Export). `None` keeps the historical defaults (100 / 500); `Some(0)`
-/// means unlimited — a 100k-file project then produces a very large file,
-/// which is the user's explicit choice.
-// `(async)`: runs a full analysis (incl. duplicate re-hashing) — off the
-// main thread, and via `scan_snapshot` off the project lock too.
+/// Export). `None` keeps the defaults (100 / 500); `Some(0)` means unlimited.
 #[tauri::command(async)]
 fn export_to_html(
     project_id: String,
@@ -1873,11 +1685,9 @@ fn export_to_html(
     // Block kept (not a lock): the body below predates the de-locking and
     // stays at its old indentation so blame survives.
     {
-        // Same analysis pipeline as Run Analysis / the JSON export, so the
-        // HTML report's issue list matches the Issues view (custom config,
-        // [ignore].patterns, PBR/DCC phases all applied). The asset
-        // inventory cards below intentionally stay on the full scan —
-        // [ignore].patterns scope analysis, not the project's file census.
+        // Same analysis pipeline as Run Analysis and the JSON export, so the
+        // report's issue list matches the Issues view. The asset inventory cards
+        // stay on the full scan — `[ignore]` scopes analysis, not the census.
         let config = load_rule_config(&root_path)?;
         let ignore_set = build_ignore_set(&config)?;
         let analysis_result = run_full_analysis(
@@ -1909,10 +1719,9 @@ fn export_to_html(
             }
         }
 
-        // "Passed" = assets with zero issues. `issue_count` counts ISSUES, not
-        // assets, and one asset can raise several — so `total - issue_count`
-        // under-counts and saturates to 0 on issue-heavy projects. Count the
-        // DISTINCT asset paths that have an issue instead.
+        // "Passed" = assets with zero issues. `issue_count` counts issues, not
+        // assets, and one asset can raise several, so count the DISTINCT asset
+        // paths that have an issue.
         let pass_count = {
             let with_issues: std::collections::HashSet<&str> = analysis_result
                 .issues
@@ -2139,10 +1948,9 @@ pub struct BatchRenameResult {
 
 fn apply_rename_operation(name: &str, operation: &RenameOperation) -> String {
     match operation {
-        // An empty `find` is a no-op, NOT `str::replace("")` — that inserts
-        // the replacement between every character ("abc" → "XaXbXcX"). The
-        // preview shares this function, so the no-op also zeroes the
-        // dialog's changed-count and disables Apply.
+        // An empty `find` is a no-op, not `str::replace("")`, which would insert
+        // the replacement between every character. The preview shares this, so the
+        // no-op also zeroes the dialog's changed count.
         RenameOperation::FindReplace { find, replace } => {
             if find.is_empty() {
                 name.to_string()
@@ -2187,11 +1995,6 @@ fn apply_rename_operation(name: &str, operation: &RenameOperation) -> String {
     }
 }
 
-/// Reject rename targets that would escape the file's own directory. The
-/// dialogs validate too, but the IPC boundary must not rely on frontend
-/// checks — a separator in `new_name` turns `parent.join(new_name)` into a
-/// directory traversal, and a find→replace text can inject one just as
-/// easily as a direct call.
 /// MS-DOS device names. Win32 still resolves them as devices whatever the
 /// extension carried — `CON.png` is the console, not a file — so such a file
 /// cannot be created on Windows at all.
@@ -2201,10 +2004,8 @@ const WINDOWS_RESERVED_STEMS: &[&str] = &[
 ];
 
 /// The last gate before a rename touches the disk. The two Windows rules below
-/// are enforced on every platform on purpose: a name minted on macOS lands in
-/// the repository a Windows teammate checks out, and a guard behind
-/// `cfg(windows)` is a guard that never runs where the work is being done —
-/// the same trap as a policy that only applies in production.
+/// are enforced on every platform: a name minted on macOS lands in the repository
+/// a Windows teammate checks out.
 fn validate_new_name(new_name: &str) -> Result<(), String> {
     if new_name.is_empty() || new_name == "." || new_name == ".." {
         return Err("Invalid file name".to_string());
@@ -2284,13 +2085,9 @@ fn execute_batch_rename(
     result
 }
 
-/// Rename a heterogeneous batch — each file to its own new *file name* within
-/// its current directory: validate → same-file guard → fs::rename → carry the
-/// Unity .meta sidecar. Returns the successes as `(old_path, normalized new
-/// path)` alongside the tallied result. Deliberately free of project-state
-/// side effects (no undo, no tags) so it's unit-testable with a tempdir and
-/// shared by both batch-rename entry points; `commit_renames` layers undo +
-/// tag migration on top.
+/// Rename a heterogeneous batch — each file to its own new *file name* within its
+/// current directory. Returns the successes as `(old_path, normalized new path)`.
+/// Free of project-state side effects; `commit_renames` layers undo and tags on.
 fn rename_batch_on_disk(
     planned: Vec<(String, String)>,
 ) -> (Vec<(String, String)>, BatchRenameResult) {
@@ -2322,25 +2119,18 @@ fn rename_batch_on_disk(
 
         let new_path = path_obj.with_file_name(&new_name);
 
-        // The target may `exists()`-resolve to the source file itself — a pure
-        // case change (foo.PNG → foo.png) on case-insensitive filesystems
-        // (NTFS/APFS), or an NFC/NFD Unicode variant on macOS. `fs::rename`
-        // handles those fine, so only reject when the occupant is genuinely a
-        // *different* file. Identity is checked by dev+inode (undo.rs), not by
-        // name: on case-sensitive filesystems `foo.png` and `FOO.PNG` can
-        // coexist, and a name-based "case-only ⇒ allow" guess would let the
-        // rename silently clobber the other file.
+        // The target may `exists()`-resolve to the source file itself — a case-only
+        // change or an NFC/NFD variant — so only a genuinely different occupant is
+        // rejected. Identity is dev+inode (undo.rs), never the name.
         if new_path.exists() && !undo::paths_are_same_file(path_obj, &new_path) {
             errors.push(format!("Target already exists: {}", new_path.display()));
             error_count += 1;
             continue;
         }
 
-        // Same guard for the engine sidecars, run BEFORE the primary rename:
-        // a stray sidecar squatting on the destination name would otherwise
-        // surface only after the main file had already moved — stranding the
-        // asset's identity (Unity silently re-GUIDs it). Refusing the whole
-        // item keeps asset + sidecar together. See sidecar::rename_conflicts.
+        // Same guard for the engine sidecars, run BEFORE the primary rename: a
+        // stray sidecar squatting on the destination name would otherwise strand
+        // the asset's identity. See sidecar::rename_conflicts.
         let sidecar_conflicts = sidecar::rename_conflicts(path_obj, &new_path);
         if !sidecar_conflicts.is_empty() {
             errors.push(format!("{}: {}", name, sidecar_conflicts.join("; ")));
@@ -2360,10 +2150,8 @@ fn rename_batch_on_disk(
                     );
                 }
                 success_count += 1;
-                // Normalize the new path to forward slashes (scanner::path_to_string)
-                // so the undo record and the tag binding key off the same string
-                // the next scan will produce — a raw to_string_lossy() keeps
-                // Windows backslashes and the tag key would never match.
+                // Normalize to forward slashes so the undo record and the tag
+                // binding key off the same string the next scan produces.
                 done.push((path.clone(), scanner::path_to_string(&new_path)));
             }
             Err(e) => {
@@ -2383,28 +2171,14 @@ fn rename_batch_on_disk(
     )
 }
 
-/// Files renamed per lock window.
-///
-/// A file's disk rename and its tag migration must not be separated by a lock
-/// release: the watcher reaps tag bindings for paths that have vanished, so a
-/// gap there loses the tags of every file renamed before the watcher fired.
-/// Holding the project lock across a five-thousand-file batch would instead
-/// freeze every other command for that project, so the batch is chunked —
-/// bounded hold, and between chunks the watcher can only see files whose tags
-/// have already moved or files not yet touched.
+/// Files renamed per lock window. A file's disk rename and its tag migration must
+/// not be separated by a lock release, and holding the lock across a whole batch
+/// would freeze the project's other commands — so the batch is chunked.
 const RENAME_LOCK_CHUNK: usize = 100;
 
-/// Rename a heterogeneous batch on disk, migrating tag bindings as it goes, and
-/// — if anything moved — record ONE undo batch (so the whole set reverts with a
-/// single Ctrl+Z). `label` names the undo entry ("Batch rename" / "Fix
-/// naming"); the recorded description is `"{label}: {N} files"` with N = the
-/// number of files actually renamed. Shared by execute_batch_rename and
-/// apply_naming_fixes.
-///
-/// The rename itself runs *inside* the project lock, in `RENAME_LOCK_CHUNK`
-/// slices — see that constant for why, and
-/// `commit_renames_does_not_expose_renamed_files_before_tags_follow` for the
-/// regression this shape exists to prevent.
+/// Rename a heterogeneous batch on disk, migrating tag bindings as it goes, and —
+/// if anything moved — record ONE undo batch. `label` names the undo entry; the
+/// rename runs inside the project lock in `RENAME_LOCK_CHUNK` slices.
 fn commit_renames(
     project_id: &str,
     planned: Vec<(String, String)>,
@@ -2455,11 +2229,8 @@ fn commit_renames(
                 all_done.extend(done);
             }
             Err(e) => {
-                // Project not registered. We could still rename on disk, but
-                // with no undo record and no tag migration — renaming files
-                // with no way back is worse than refusing, so report it. (The
-                // previous shape swallowed this with `let _ =` and renamed
-                // anyway.)
+                // Project not registered: renaming with no undo record and no tag
+                // migration is worse than refusing, so report it.
                 let untouched = total - result.success_count - result.error_count;
                 result.error_count += untouched;
                 result.errors.push(format!("Renames aborted: {}", e));
@@ -2517,14 +2288,9 @@ pub struct NamingFix {
     pub new_name: String,
 }
 
-/// Compute compliant-name suggestions for every asset with an auto-fixable
-/// naming violation, using the same `tidycraft.toml` the analysis ran with.
-/// Read-only — nothing is renamed until `apply_naming_fixes`.
-// `(async)`: iterates the whole scan under the project lock, and that lock
-// can be held by a chunked rename/move batch — a main-thread command would
-// turn the wait into a whole-window freeze. (Analysis no longer holds the
-// lock — it runs on a `scan_snapshot` — but the iteration itself is still
-// O(assets) work that doesn't belong on the main thread.)
+/// Compute compliant-name suggestions for every asset with an auto-fixable naming
+/// violation, using the same `tidycraft.toml` the analysis ran with. Read-only —
+/// nothing is renamed until `apply_naming_fixes`.
 #[tauri::command(async)]
 fn preview_naming_fixes(
     project_id: String,
@@ -2559,8 +2325,7 @@ fn preview_naming_fixes(
 }
 
 /// Flag proposals whose target (parent directory + suggested name) is shared by
-/// more than one file in the batch — only the first would land, the rest would
-/// hit "target already exists". Keyed case-insensitively so it also catches
+/// more than one file in the batch. Keyed case-insensitively so it also catches
 /// collisions that only surface on case-insensitive filesystems.
 fn mark_naming_fix_collisions(previews: &mut [NamingFixPreview]) {
     use std::collections::HashMap;
@@ -2582,13 +2347,9 @@ fn mark_naming_fix_collisions(previews: &mut [NamingFixPreview]) {
     }
 }
 
-/// Apply the renames the user accepted from the Fix-it dialog. Routes through
-/// the shared batch engine, so it validates each target, guards against
-/// clobbering a different file, carries Unity .meta sidecars, records ONE undo
-/// batch, and migrates tags — identical guarantees to Batch Rename.
-// `(async)`: "Fix all naming" can submit thousands of renames (plus .meta
-// probes and the undo/tags write-back) in one batch — off the main thread,
-// same rationale as delete_assets.
+/// Apply the renames the user accepted from the Fix-it dialog through the shared
+/// batch engine, so validation, clobber guards, sidecar carrying, one undo batch
+/// and tag migration all match Batch Rename.
 #[tauri::command(async)]
 fn apply_naming_fixes(
     app: AppHandle,
@@ -2611,9 +2372,8 @@ fn apply_naming_fixes(
 // ============ File System Commands ============
 
 /// Open the OS file manager focused on `path` (Finder reveal / Explorer
-/// `/select,` / xdg-open parent). We keep the per-OS dispatch here because
-/// `tauri-plugin-shell::open` has no "select-this-file" mode — it can only
-/// open a file/url, not highlight it inside a folder view.
+/// `/select,` / xdg-open parent). The per-OS dispatch lives here because
+/// `tauri-plugin-shell::open` has no "select this file" mode.
 #[tauri::command]
 fn show_in_file_manager(path: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
@@ -2625,15 +2385,9 @@ fn show_in_file_manager(path: String) -> Result<(), String> {
     }
     #[cfg(target_os = "windows")]
     {
-        // Two quirks of explorer's `/select,` we kept stepping on:
-        //   1. The flag and path must be a SINGLE cmdline argument
-        //      (`/select,C:\foo`). `Command::args(["/select,", &path])`
-        //      inserts a space between them and explorer interprets that
-        //      as "open the grandparent and select the parent folder",
-        //      which is what users were seeing.
-        //   2. `/select,` only follows backslash-separator paths.
-        //      `path_to_string` normalizes to `/` for cross-platform
-        //      consistency, so undo it here at the boundary.
+        // Two explorer `/select,` quirks: the flag and the path must be a SINGLE
+        // command-line argument, and it only follows backslash-separated paths —
+        // so `path_to_string`'s normalization is undone here at the boundary.
         let win_path = path.replace('/', "\\");
         std::process::Command::new("explorer")
             .arg(format!("/select,{}", win_path))
@@ -2652,11 +2406,9 @@ fn show_in_file_manager(path: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Launch a file with the OS-default application associated to its
-/// extension. Routed through `tauri-plugin-opener` so Windows codepage,
-/// path quoting, and `%` variable expansion are handled by the platform
-/// shell helper — previous hand-rolled `cmd /C start` worked for ASCII
-/// paths but broke on Chinese / `%`-containing paths.
+/// Launch a file with the OS-default application for its extension, routed
+/// through `tauri-plugin-opener` so Windows codepage, path quoting and `%`
+/// expansion are handled by the platform shell helper.
 #[tauri::command]
 fn open_with_default_app(app: tauri::AppHandle, path: String) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
@@ -2676,12 +2428,9 @@ fn open_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-/// Write an export payload to a user-chosen destination. The frontend gets
-/// `path` from the native save dialog (plugin-dialog), so the user has
-/// already pointed at this exact location — the command only performs the
-/// write the webview itself cannot. Replaces the old blob-`<a download>`
-/// trick, which saved silently to Downloads on Windows and is unreliable
-/// in WKWebView.
+/// Write an export payload to a user-chosen destination. The frontend gets `path`
+/// from the native save dialog, so the command only performs the write the
+/// webview itself cannot.
 #[tauri::command]
 fn save_text_file(path: String, contents: String) -> Result<(), String> {
     if path.trim().is_empty() {
@@ -2690,10 +2439,9 @@ fn save_text_file(path: String, contents: String) -> Result<(), String> {
     std::fs::write(&path, contents).map_err(|e| e.to_string())
 }
 
-/// Open a file with a specific external application — `editor` is the
-/// absolute path to a binary or .app bundle (`Photoshop.exe`,
-/// `/Applications/Blender.app`, …). Errors bubble up to the caller as a
-/// string for inline UI display.
+/// Open a file with a specific external application — `editor` is the absolute
+/// path to a binary or .app bundle. Errors bubble up to the caller as a string
+/// for inline display.
 #[tauri::command]
 fn open_in_editor(app: tauri::AppHandle, path: String, editor: String) -> Result<(), String> {
     use tauri_plugin_opener::OpenerExt;
@@ -2703,13 +2451,8 @@ fn open_in_editor(app: tauri::AppHandle, path: String, editor: String) -> Result
 }
 
 // ============ Texture resolution for 3D model loaders ============
-//
-// FBX/OBJ/DAE files often embed texture filenames without a directory part
-// (e.g. just "colormap.png"), or with a directory that was valid on the author's
-// machine but is wrong for the recipient. When Three.js's loaders ask for such a
-// texture, the Tauri asset protocol returns 500. We pre-walk common sibling
-// directories (`Textures/`, `Materials/`, etc.) for the model and return a
-// filename → absolute-path lookup that the frontend uses in its URL modifier.
+// FBX/OBJ/DAE files often embed texture filenames with no directory part, or one
+// valid only on the author's machine, which the asset protocol cannot resolve.
 
 const TEXTURE_EXTS: &[&str] = &[
     "png", "jpg", "jpeg", "tga", "bmp", "gif", "dds", "hdr", "exr", "tif", "tiff", "webp", "psd",
@@ -2882,10 +2625,9 @@ fn commit_moves(
         return FileOpResult { successes, errors };
     }
 
-    // Chunked, and the moves happen INSIDE the project lock: a file that has
-    // left its old path but whose tag binding hasn't moved yet is exactly what
-    // the watcher's orphan cleanup reaps. Same shape and same reasoning as
-    // `commit_renames` — see `RENAME_LOCK_CHUNK`.
+    // Chunked, and the moves happen INSIDE the project lock: a file that has left
+    // its old path while its tag binding has not is exactly what the watcher's
+    // orphan cleanup reaps. See `RENAME_LOCK_CHUNK`.
     for chunk in paths.chunks(RENAME_LOCK_CHUNK) {
         let outcome = project::with_mut(project_id, |state| {
             let mut moved: Vec<FileOpSuccess> = Vec::new();
@@ -2906,14 +2648,9 @@ fn commit_moves(
                 let dst = target.join(&name);
 
                 if src == dst || undo::paths_are_same_file(src, &dst) {
-                    // No-op: source already in target directory. Skip silently.
-                    // The literal comparison alone only catches the spelling
-                    // the caller happened to send; a case variant on a
-                    // case-insensitive filesystem, a symlinked folder, or a
-                    // `..` names the same directory and used to fall through
-                    // to the guard below, which reported "Target already
-                    // exists" about the very file being moved. Same identity
-                    // check the rename guard uses, same reason.
+                    // No-op: the source is already in the target directory. Checked
+                    // by identity, not by string — a case variant, a symlinked
+                    // folder or a `..` all name the same directory.
                     continue;
                 }
                 if dst.exists() {
@@ -3145,15 +2882,9 @@ fn duplicate_assets(paths: Vec<String>) -> FileOpResult {
     FileOpResult { successes, errors }
 }
 
-/// Send each path to the OS recycle bin / trash. Per-path success/error is
-/// reported separately so the UI can show partial results (e.g. some files on
-/// a network drive that doesn't support trash).
-///
-/// No `project_id` parameter: the filesystem watcher will pick up the resulting
-/// remove events and update `scanResult.assets` automatically.
-// `(async)`: each trash operation is an OS call; the duplicate-group cleanup
-// can submit thousands of paths at once (Kenney-scale groups), which would
-// freeze the window if run on the main thread.
+/// Send each path to the OS recycle bin. Per-path success and error are reported
+/// separately so the interface can show partial results. No `project_id`: the
+/// watcher picks up the remove events and updates the scan.
 #[tauri::command(async)]
 fn delete_assets(paths: Vec<String>) -> DeleteResult {
     let mut success_paths = Vec::new();
@@ -3228,10 +2959,9 @@ fn commit_single_rename(
         .unwrap_or("")
         .to_string();
 
-    // The target may `exists()`-resolve to the source itself (case-only rename
-    // on a case-insensitive filesystem, NFC/NFD variant on macOS) — allowed,
-    // `fs::rename` handles it. Only a genuinely different occupant is a
-    // conflict; identity is by dev+inode, not name (see execute_batch_rename).
+    // The target may `exists()`-resolve to the source itself (case-only rename,
+    // NFC/NFD variant); only a genuinely different occupant is a conflict, and
+    // identity is by dev+inode, not by name.
     if new_path.exists() && !undo::paths_are_same_file(old_path_ref, &new_path) {
         return Err("A file with this name already exists".to_string());
     }
@@ -3251,10 +2981,8 @@ fn commit_single_rename(
 
     std::fs::rename(old_path_ref, &new_path).map_err(|e| e.to_string())?;
 
-    // Carry engine sidecars so the renamed asset keeps its identity (Unity
-    // GUID, Godot UID) and references don't break. Best-effort: a missing
-    // sidecar (another engine) is a no-op, and a carry failure only logs —
-    // the rename already succeeded.
+    // Carry engine sidecars so the renamed asset keeps its identity and its
+    // references. Best-effort: a missing sidecar is a no-op, a carry failure logs.
     if let Err(e) = sidecar::carry_on_rename(old_path_ref, &new_path) {
         eprintln!(
             "[rename_file] engine sidecar not carried for {}: {}",
@@ -3280,11 +3008,9 @@ fn commit_single_rename(
             vec![operation],
         );
 
-        // Carry tags from the old path to the new one. Best-effort — tag
-        // bookkeeping must never fail a rename that already landed on disk —
-        // but logged, not silent, so a persistently unwritable tags file is
-        // diagnosable (same treatment as watcher.rs / the batch paths).
-        // new_path_str is already normalized (scanner::path_to_string above).
+        // Carry tags from the old path to the new one. Best-effort — this must
+        // never fail a rename that already landed on disk — but logged, so a
+        // persistently unwritable tags file stays diagnosable.
         state.ensure_tags().rename_path(&old_path, &new_path_str);
         if let Err(e) = state.save_tags() {
             eprintln!("[rename_file] failed to save tags after rename: {}", e);
@@ -3300,15 +3026,9 @@ fn commit_single_rename(
 
 // ============ Undo Commands ============
 
-/// After an undo reverts renames/moves, carry each reverted file's tag binding
-/// back the same direction (new_path → original_path), mirroring the forward
-/// carry in `move_assets` / `rename_file`. The pairs passed in are exactly the
-/// ones the undo ACTUALLY reverted (`UndoResult.reverted_pairs`), so a file
-/// whose undo failed (source lost, or target occupied by an unrelated
-/// placeholder) keeps its binding at `new_path` instead of having it stripped.
-/// Using the real per-file result — rather than an `original.exists()` guess —
-/// also correctly handles case-only rename undos, where `new_path` still
-/// `exists()`-resolves to the restored file on case-insensitive filesystems.
+/// After an undo reverts renames or moves, carry each reverted file's tag binding
+/// back (new_path → original_path). The pairs are exactly the ones the undo
+/// actually reverted, so a failed file keeps its binding at `new_path`.
 fn carry_tags_after_undo(
     state: &mut project::ProjectState,
     reverted_pairs: &[(String, String)],
@@ -3395,10 +3115,8 @@ fn update_tag(
     tag_id: String,
     name: Option<String>,
     color: Option<String>,
-    // `Option<Option<String>>` lets the frontend send three states:
-    //   omitted        → don't touch description (Option = None outer)
-    //   null           → clear description (Some(None))
-    //   "some text"    → set description (Some(Some(s)))
+    // `Option<Option<String>>` carries three states: omitted leaves the
+    // description alone, null clears it, a string sets it.
     description: Option<Option<String>>,
 ) -> Result<tags::Tag, String> {
     project::with_mut(&project_id, |state| {
@@ -3472,17 +3190,9 @@ fn get_all_asset_tags(project_id: String) -> Result<HashMap<String, Vec<tags::Ta
     })
 }
 
-/// Toggle the webview inspector. Debug builds open it automatically at
-/// startup (see the setup hook below), so this exists for the one case that
-/// hook doesn't cover: getting it back after closing it. The frontend
-/// suppresses the native context menu app-wide, which takes the "Inspect
-/// Element" entry with it, and neither WKWebView nor WebView2 gives us a
-/// cross-platform key for this — hence a command plus a frontend binding.
-///
-/// Compiles to a no-op in release: the `devtools` cargo feature is off, so
-/// these methods only exist under `debug_assertions` and there is no
-/// inspector to toggle. The command stays registered either way so the
-/// keybinding needs no build-mode branch of its own.
+/// Toggle the webview inspector. Debug builds open it at startup, so this covers
+/// getting it back after closing it. It compiles to a no-op in release, where the
+/// `devtools` feature is off, but stays registered so the keybinding is uniform.
 #[tauri::command]
 fn toggle_devtools(window: tauri::WebviewWindow) {
     #[cfg(debug_assertions)]
@@ -3510,12 +3220,9 @@ pub fn run() {
             // off the main thread: it stats every file in the cache directory.
             std::thread::spawn(thumbnail::prune_cache);
 
-            // Debug builds auto-open the inspector. `open_devtools` (and the
-            // inspector itself) only exists under `debug_assertions` now that
-            // the `devtools` cargo feature is off — release builds ship
-            // without it (see the tauri dependency note in Cargo.toml).
-            // `_app` + the scoped Manager import keep release builds free of
-            // unused warnings once this block compiles away.
+            // Debug builds auto-open the inspector; `open_devtools` only exists
+            // under `debug_assertions` now that the `devtools` cargo feature is
+            // off. `_app` keeps release builds free of unused warnings.
             #[cfg(debug_assertions)]
             {
                 use tauri::Manager;
@@ -3620,10 +3327,9 @@ mod tests {
 
     use crate::scanner::AssetType;
 
-    /// A report that says "1,234 assets" over a scan that skipped a subtree
-    /// is lying. The banner is the admission; a healthy scan gets NO banner
-    /// element at all (not an empty one), and cache trouble alone changes
-    /// nothing about this report's numbers so it stays silent too.
+    /// A report that says "1,234 assets" over a scan that skipped a subtree is
+    /// lying. A healthy scan gets no banner element at all, and cache trouble
+    /// alone stays silent.
     #[test]
     fn report_banner_admits_an_incomplete_scan() {
         use warning::ScanWarning;
@@ -3662,11 +3368,9 @@ mod tests {
 
     #[test]
     fn every_asset_type_has_a_report_badge_rule() {
-        // The HTML report derives each badge's class from the variant name at
-        // runtime (`format!("{:?}", asset_type).to_lowercase()`), so a variant
-        // with no matching CSS rule ships as a silently unstyled badge. The
-        // exhaustive match makes a new variant a compile error here; the
-        // assertions then tie the derived name to the rule that must exist.
+        // The report derives each badge's class from the variant name at runtime,
+        // so a variant with no matching CSS rule ships as an unstyled badge. The
+        // exhaustive match makes a new variant a compile error here.
         fn badge_class(t: &AssetType) -> &'static str {
             match t {
                 AssetType::Texture => "texture",
@@ -3741,10 +3445,8 @@ mod tests {
         assert!(validate_new_name(".hidden").is_ok());
     }
 
-    /// Two Windows landmines, rejected on every platform deliberately: a name
-    /// minted on macOS lands in the repository a Windows teammate has to check
-    /// out, and a guard compiled only on one platform is a guard nobody
-    /// exercises where the work gets done.
+    /// Two Windows landmines, rejected on every platform: a name minted on macOS
+    /// lands in the repository a Windows teammate has to check out.
     #[test]
     fn rename_targets_reject_windows_reserved_names_and_trailing_punctuation() {
         // Win32 resolves these to devices whatever the extension, so the file
@@ -3825,17 +3527,9 @@ mod tests {
         }
     }
 
-    /// A sprite atlas exists to list the sprites it packs — it is a pure
-    /// reference holder. Leaving `.spriteatlas` out of the reference-source
-    /// set made every sprite that only an atlas points at look unused, which
-    /// is the one failure mode that talks a user into deleting a live asset.
-    ///
-    /// `unreadable_sources` is asserted too, and that is the sharp end: the
-    /// extension list in this file and `UnityFileType::from_extension` are two
-    /// gates in series. Widening only the first one gets the atlas handed to a
-    /// parser that still refuses it, which counts as an unreadable source and
-    /// raises the "don't trust this list" banner on every atlas project —
-    /// swapping a silent false positive for a loud one.
+    /// A sprite atlas is a pure reference holder, so leaving `.spriteatlas` out of
+    /// the reference-source set made every sprite only an atlas points at look
+    /// unused. `unreadable_sources` is asserted too: the two gates run in series.
     #[test]
     fn sprite_atlas_keeps_the_sprites_it_packs_out_of_the_unused_list() {
         use tempfile::tempdir;
@@ -3883,17 +3577,9 @@ mod tests {
         );
     }
 
-    /// `move_assets` guarded its destination with a bare `dst.exists()` while
-    /// the rename path beside it asks `paths_are_same_file`. So any spelling
-    /// of the target directory that isn't byte-identical to the source's
-    /// parent — a case variant on a case-insensitive filesystem, a symlinked
-    /// folder, a `..` in the middle — reported "Target already exists" about
-    /// the very file being moved.
-    ///
-    /// The fixture uses `..` rather than a case variant because case is not
-    /// portable: the same fixture is a no-op on macOS and two distinct files
-    /// on Linux CI. `..` names the same directory on every filesystem, and it
-    /// reaches the identical guard.
+    /// Any spelling of the target directory that is not byte-identical to the
+    /// source's parent must not report "Target already exists" about the very file
+    /// being moved. The fixture uses `..` because case behaviour is not portable.
     #[test]
     fn moving_a_file_into_its_own_directory_under_another_spelling_is_a_no_op() {
         use tempfile::tempdir;
@@ -4032,22 +3718,9 @@ mod tests {
         assert_eq!(rel, vec!["x.png"]);
     }
 
-    /// The tag-migration race. `commit_renames` used to run the ENTIRE disk
-    /// batch with the project lock free and only then take the lock to migrate
-    /// tag bindings. The watcher releases events by individual age (500ms
-    /// timeout, 125ms tick — see notify-debouncer-full's `debounced_events`),
-    /// not after a quiet period, so on a batch longer than the window it fires
-    /// mid-flight, sees the early files' old paths gone, and reaps their tag
-    /// bindings as orphans (watcher.rs). The later migration then looked up an
-    /// old key that no longer existed and silently did nothing: the tags of
-    /// every early file were lost from memory AND disk, with no log line. Small
-    /// batches finished inside the window and looked fine.
-    ///
-    /// Deterministic proof of the fix — no sleep-and-hope for the race itself:
+    /// The tag-migration race, proved deterministically rather than by sleeping:
     /// hold the project lock, start the rename on another thread, and assert it
-    /// cannot touch the disk while the lock is held. That mutual exclusion is
-    /// precisely what leaves the watcher no window to observe a renamed-away
-    /// file whose tag hasn't moved yet.
+    /// cannot touch the disk while the lock is held.
     #[test]
     fn commit_renames_does_not_expose_renamed_files_before_tags_follow() {
         use tempfile::tempdir;
@@ -4057,7 +3730,7 @@ mod tests {
         let project_id = "test_commit_renames_tag_race";
         project::register(project_id.to_string(), root);
 
-        // Enough files that the old code's unlocked batch is plainly observable.
+        // Enough files that an unlocked batch would be plainly observable.
         let planned: Vec<(String, String)> = (0..12)
             .map(|i| {
                 let src = dir.path().join(format!("old_{}.png", i));
@@ -4123,10 +3796,9 @@ mod tests {
         project::unregister(project_id);
     }
 
-    /// The tags file lives at the project root; a read-only root makes
-    /// save_tags fail while renames inside a writable subdirectory still
-    /// succeed — the exact "operation landed, bookkeeping didn't" split the
-    /// warning exists for. chmod is a no-op on Windows.
+    /// The tags file lives at the project root, so a read-only root makes
+    /// save_tags fail while renames inside a writable subdirectory still succeed.
+    /// chmod is a no-op on Windows.
     #[cfg(unix)]
     #[test]
     fn commit_renames_reports_a_tags_save_failure_instead_of_swallowing_it() {
@@ -4251,17 +3923,8 @@ mod tests {
     }
 
     /// A rename must carry the tag binding even when nothing has loaded tags in
-    /// this session. The migration used to be skipped while `tags_data` was
-    /// still `None`, which held only because every UI route to a rename passed
-    /// through the tag panel first — call order, not an invariant. Restoring a
-    /// session and renaming straight away is enough to lose the binding: it
-    /// stays on a path that no longer exists, and the first thing to load the
-    /// file hands it to the watcher's orphan cleanup, which deletes it.
-    ///
-    /// The tag is written through a detached `TagsData` so the project's own
-    /// state is genuinely unloaded when the rename arrives, and the assertion
-    /// reads the file back from disk rather than from memory — memory alone
-    /// would pass on a migration that never got saved.
+    /// this session. The tag is written through a detached `TagsData` and read back
+    /// from disk, since memory alone would pass on a migration never saved.
     #[test]
     fn rename_carries_tags_that_were_never_loaded_this_session() {
         use tempfile::tempdir;
@@ -4314,12 +3977,9 @@ mod tests {
         project::unregister(project_id);
     }
 
-    /// The CSV export faces the same threat the HTML export already defends
-    /// against, from the same source (file names the user did not choose):
-    /// a cell whose text starts with `=`, `+`, `-` or `@` is a *formula* to
-    /// Excel / LibreOffice / Sheets, and `=cmd|'/c calc'!A1` is the classic
-    /// proof that it reaches the shell. Such names are perfectly legal on
-    /// disk, so an asset library shared as CSV carries the payload along.
+    /// A CSV cell whose text starts with `=`, `+`, `-` or `@` is a formula to
+    /// Excel, LibreOffice and Sheets, and `=cmd|'/c calc'!A1` is the classic proof
+    /// that it reaches the shell. Such file names are legal on disk.
     #[test]
     fn csv_cells_cannot_smuggle_a_formula_into_a_spreadsheet() {
         for dangerous in ["=cmd|'/c calc'!A1", "+1+1", "-1+1", "@SUM(A1)"] {
@@ -4481,10 +4141,8 @@ mod tests {
 
     #[test]
     fn html_escaping_happens_after_interpolation_not_before() {
-        // The template is ours and carries no markup; the arg values come from
-        // file names and can. Escaping the composed string once covers both —
-        // escaping the template first would double-escape nothing and escaping
-        // only the template would let `<` through from the args.
+        // The template is ours and carries no markup; the arg values come from file
+        // names and can. Escaping the composed string once covers both.
         let issue = analyzer::Issue {
             rule_id: "naming.forbidden_char".to_string(),
             rule_name: "Forbidden Character".to_string(),
@@ -4504,12 +4162,9 @@ mod tests {
         assert_eq!(html_escape(&message), "文件名含禁用字符 &lt;");
     }
 
-    /// End of the wire the panel actually reads: a real corrupt rules file on
-    /// disk, through the real command (registry, tags snapshot, the
-    /// already-suggested filter), serialized the way Tauri serializes it.
-    /// `rule_suggest`'s own tests cover the decision; this covers the plumbing
-    /// between it and the frontend, which is the part with no type checking
-    /// across it.
+    /// The end of the wire the panel actually reads: a real corrupt rules file on
+    /// disk, through the real command, serialized the way Tauri serializes it.
+    /// `rule_suggest`'s own tests cover the branch; this covers the plumbing.
     #[test]
     fn suggest_tags_reports_a_corrupt_rules_file_over_the_wire() {
         use tempfile::tempdir;

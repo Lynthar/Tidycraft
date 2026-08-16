@@ -1,8 +1,6 @@
-//! Per-project backend state.
-//!
-//! Replaces the previous global `Mutex<Option<...>>` singletons in `lib.rs`.
-//! Each project the frontend opens is registered here with a unique id and gets
-//! its own `ScanState`, `ScanResult`, `GitManager`, `UndoManager`, and `TagsData`.
+//! Per-project backend state. Each project the frontend opens is registered
+//! under a unique id with its own scan state, git manager, undo history and
+//! tags.
 
 use parking_lot::Mutex;
 use std::collections::HashMap;
@@ -16,9 +14,7 @@ use crate::undo::UndoManager;
 use crate::watcher::ProjectWatcher;
 
 pub struct ProjectState {
-    /// Mirrors the project_id key in the registry. Kept on the state itself
-    /// so future emit-from-inside-state code paths don't need the key
-    /// passed through; not currently read.
+    /// Mirrors the project_id key in the registry. Not currently read.
     #[allow(dead_code)]
     pub id: String,
     pub root_path: String,
@@ -27,26 +23,19 @@ pub struct ProjectState {
     pub git_manager: Option<GitManager>,
     pub undo_manager: UndoManager,
     pub tags_data: Option<TagsData>,
-    /// Whether the most recent scan honored `.gitignore` / `.ignore` (the
-    /// per-machine "Respect .gitignore" setting). Recorded on each scan so
-    /// the filesystem watcher applies the same exclusions and doesn't re-add
-    /// scan-excluded files on FS events. Defaults to true (matches the
-    /// frontend default) until the first scan overwrites it.
+    /// Whether the most recent scan honored `.gitignore` / `.ignore`. The
+    /// watcher applies the same exclusions. Defaults to true until the first
+    /// scan overwrites it.
     pub respect_gitignore: bool,
     /// Live filesystem watcher. Dropping this stops the background watch.
     pub watcher: Option<ProjectWatcher>,
     /// Rules from the most recent AI-learning run, staged in memory until the
-    /// user confirms them in the review panel. `save_ai_rules` takes this and
-    /// writes it to `tidycraft.ai.toml` — the single commit point — so closing
-    /// the panel without saving leaves the project untouched and the rules
-    /// never reach `suggest_tags`. Replaced wholesale by the next learning
-    /// run; dropped with the project state (an unsaved run does not survive
-    /// closing the project — accepted trade-off of review-before-commit).
+    /// review panel's Save writes them to `tidycraft.ai.toml`. Replaced
+    /// wholesale by the next run; dropped with the project state.
     pub pending_ai_rules: Option<crate::llm::rule_store::AiRulesDoc>,
-    /// GUID → package-asset index from `Library/PackageCache`, cached with
-    /// the key it was built for (the sorted package-dir listing — those dirs
-    /// are immutable, so the listing changing is the only staleness signal).
-    /// Built lazily by `lib.rs::package_index_for`; `None` until first use.
+    /// GUID → package-asset index from `Library/PackageCache`, cached with the
+    /// sorted package-dir listing it was built for. Built lazily by
+    /// `lib.rs::package_index_for`.
     pub package_index: Option<(Vec<String>, Arc<crate::unity::PackageGuidIndex>)>,
 }
 
@@ -69,19 +58,9 @@ impl ProjectState {
         }
     }
 
-    /// Tags, loaded from disk on first use and kept in memory after.
-    ///
-    /// Anything that *migrates* a binding — rename, move, undo, the watcher's
-    /// rename pairing — must call this unconditionally rather than skipping the
-    /// work when `tags_data` is still `None`. Skipping leaves the binding on a
-    /// path that no longer exists, and the watcher's orphan cleanup deletes it
-    /// the moment something else loads the file. Whether the tag panel happened
-    /// to be opened first is not something tag preservation may depend on, and
-    /// the load it costs is one small file, once per session.
-    ///
-    /// Deleting bindings is the one case that may stay lazy: an orphan nobody
-    /// has loaded sits harmlessly on disk, so reading the file purely to strip
-    /// it is churn (watcher.rs makes that distinction explicitly).
+    /// Tags, loaded from disk on first use and kept in memory after. Anything
+    /// that migrates a binding must call this unconditionally; only deleting
+    /// bindings may stay lazy.
     pub fn ensure_tags(&mut self) -> &mut TagsData {
         if self.tags_data.is_none() {
             self.tags_data = Some(TagsData::load(Path::new(&self.root_path)));
@@ -111,27 +90,18 @@ fn registry() -> &'static Mutex<ProjectMap> {
     REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// 注册(或查出)一个项目。id 已存在且路径相同时返回既有条目,这是每次
-/// `openProject` 都会走的幂等路径。
-///
-/// **路径不同则整体重建**:同一个 id 指向另一个文件夹,意味着它现在是另一个
-/// 项目。曾经这里只改 `root_path` 一个字段,于是旧项目的 undo 历史、标签、
-/// watcher 和缓存扫描会留给新路径——那个分支当时不可达(前端按路径查已有
-/// 条目,id 相同必然路径相同),重新定位是第一个走进去的调用者。
+/// Register (or look up) a project. An existing id with the same path returns
+/// the existing entry; a different path rebuilds the whole state, because that
+/// id now names a different project.
 pub fn register(project_id: String, root_path: String) -> Arc<Mutex<ProjectState>> {
-    // The registry lock is global — every project-scoped command passes through
-    // it — so nothing slow may happen while it is held. Two things here are
-    // slow: `ProjectState::new` reads the persisted undo history off disk, and
-    // `entry.lock()` waits on the *project* lock, which a scan, a watcher batch
-    // or a dependency-graph rebuild can hold for seconds. Doing either under the
-    // registry lock made one busy project stall commands for all of them,
-    // cancel_scan included.
+    // Nothing slow may run under the global registry lock: `ProjectState::new`
+    // reads the undo history off disk, and `entry.lock()` can wait seconds on a
+    // scan or a watcher batch.
     let existing = registry().lock().get(&project_id).cloned();
     let entry = match existing {
         Some(e) => e,
         None => {
-            // Built outside the lock; if another thread registered the same id
-            // meanwhile, `or_insert` keeps theirs and this one is dropped.
+            // Built outside the lock; a concurrent registration of the same id wins.
             let fresh = Arc::new(Mutex::new(ProjectState::new(
                 project_id.clone(),
                 root_path.clone(),
@@ -144,16 +114,12 @@ pub fn register(project_id: String, root_path: String) -> Arc<Mutex<ProjectState
     // Registry lock is released by here — only the project lock is taken.
     let needs_rebuild = entry.lock().root_path != root_path;
     if needs_rebuild {
-        // 锁外构造:`ProjectState::new` 要读一次 undo 历史,而项目锁里不放慢活
-        // 是全仓的规矩(注册表锁那段同理)。
+        // Constructed outside the lock: it reads the undo history off disk.
         let fresh = ProjectState::new(project_id, root_path.clone());
         let mut state = entry.lock();
-        // 锁外构造的这段时间,另一个并发调用可能已经把这个 id 重建到了同一个
-        // 新路径——不重新核对就覆盖,会把那次构造(同样读了一遍 undo 历史)
-        // 出来的状态悄悄丢掉。这里落空就让 fresh 直接被丢弃,谁先到就用谁的。
+        // Another caller may have rebuilt the same id meanwhile; first one wins.
         if state.root_path != root_path {
-            // 旧路径上的扫描还在跑就取消它:它的结果属于一个这个 id 已经不再指向
-            // 的文件夹,回来只会覆盖新项目的状态。
+            // A scan on the old path would come back and overwrite the new state.
             if let Some(scan) = state.scan_state.as_ref() {
                 scan.cancel();
             }
@@ -163,19 +129,9 @@ pub fn register(project_id: String, root_path: String) -> Arc<Mutex<ProjectState
     entry
 }
 
-/// Drop a project's state, cancelling any scan still running for it.
-///
-/// The cancel is the whole reason this isn't a one-line `remove`: the scan
-/// holds its own clone of the `Arc<ScanState>` for its entire run, so after
-/// the registry entry is gone nothing can reach the flag and the walk
-/// finishes at its own pace — minutes, on a project big enough for the user
-/// to have given up and closed it. The scan then returns `Cancelled`, whose
-/// error path is a no-op in the frontend because the closed project is
-/// already out of the projects Map.
-///
-/// The `remove` releases the registry lock before the project lock is taken
-/// (registry → project is the order `with_mut` uses; taking them the other
-/// way round would stall every project on one busy one).
+/// Drop a project's state, cancelling any scan still running for it. The
+/// `remove` releases the registry lock before the project lock is taken,
+/// matching the registry → project order `with_mut` uses.
 pub fn unregister(project_id: &str) -> bool {
     let removed = registry().lock().remove(project_id);
     let Some(entry) = removed else {
@@ -221,22 +177,15 @@ mod tests {
         p.to_string_lossy().replace('\\', "/")
     }
 
-    // Neither test below exercises the TOCTOU re-check in the rebuild branch
-    // (`if state.root_path != root_path` after the lock-free construction) —
-    // both drive `register` from a single thread, so they pass whether or not
-    // that re-check is there. Proving it would need a barrier injected into
-    // production code to force a second `register` call to land mid-construction;
-    // this note exists so the two green tests below aren't mistaken for coverage.
-
-    /// 换路径 = 这个 id 现在是另一个项目。只换 `root_path` 会把旧项目的标签、
-    /// 缓存扫描和 watcher 留给新路径,于是新项目一开就带着别人的标签。
+    /// A different path means a different project: the old tags, cached scan
+    /// and watcher must not carry over.
     #[test]
     fn registering_a_new_path_under_the_same_id_rebuilds_the_state() {
         let old = tempdir().unwrap();
         let new = tempdir().unwrap();
         let id = "relocate_test_project".to_string();
 
-        // 旧项目:载入标签、加一条绑定、装一份缓存扫描。
+        // Old project: load tags, add a binding, install a cached scan.
         fs::write(old.path().join("hero.png"), b"x").unwrap();
         register(id.clone(), s(old.path()));
         with_mut(&id, |st| {
@@ -250,7 +199,7 @@ mod tests {
         })
         .unwrap();
 
-        // 同一个 id、新路径。
+        // Same id, new path.
         register(id.clone(), s(new.path()));
 
         with_ref(&id, |st| {
@@ -261,9 +210,7 @@ mod tests {
             );
             assert!(st.cached_scan.is_none(), "the old scan must not survive");
             assert!(st.tags_data.is_none(), "the old tags must not survive");
-            // Documents intent, not a guarantee: installing a watcher needs an
-            // `AppHandle`, which a unit test has no way to provide, so this field
-            // is `None` whether or not the rebuild actually drops the old one.
+            // A unit test cannot install a watcher, so this documents intent only.
             assert!(st.watcher.is_none(), "the old watcher must not survive");
             assert!(
                 st.respect_gitignore,
@@ -273,7 +220,7 @@ mod tests {
         })
         .unwrap();
 
-        // 新根上重新载入标签,拿到的是空的——旧绑定没有跟过来。
+        // Re-loading tags at the new root yields nothing.
         with_mut(&id, |st| {
             assert!(
                 st.ensure_tags().get_asset_tags("hero.png").is_empty(),
@@ -286,7 +233,7 @@ mod tests {
         unregister(&id);
     }
 
-    /// 同一个路径重复注册仍然是幂等的——这是每次 openProject 都会走的路。
+    /// Re-registering the same path is idempotent.
     #[test]
     fn registering_the_same_path_twice_keeps_the_state() {
         let dir = tempdir().unwrap();
@@ -315,11 +262,9 @@ mod tests {
         unregister(&id);
     }
 
-    /// Closing a project has to stop its scan, not just forget about it.
-    /// `scan_project_incremental` clones the `Arc<ScanState>` before it starts
-    /// and holds that clone for the whole run, so once the registry entry is
-    /// gone the cancel flag is unreachable — a big project would keep walking
-    /// the disk with nobody left to want the result.
+    /// Closing a project must stop its scan: `scan_project_incremental` holds
+    /// its own clone of the `Arc<ScanState>`, so once the registry entry is
+    /// gone the cancel flag is unreachable.
     #[test]
     fn unregister_cancels_an_in_flight_scan() {
         let dir = tempdir().unwrap();

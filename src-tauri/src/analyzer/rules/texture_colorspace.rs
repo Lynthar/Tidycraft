@@ -1,14 +1,6 @@
-//! Flag likely color-space / data-channel mismatches on textures.
-//!
-//! Common shipping bug: artist exports a normal map / roughness mask as PNG
-//! with an `sRGB` chunk. At import the engine de-gammas the pixels, silently
-//! corrupting the data channel. We catch this by combining two cheap signals:
-//!
-//! 1. The file's declared color space (from PNG's `sRGB` / `iCCP` chunks).
-//! 2. A filename-suffix heuristic for "this should be linear data, not color".
-//!
-//! Both signals must fire for a warning, so pure color textures and old PNGs
-//! without a color profile don't produce false positives.
+//! Flag likely colour-space / data-channel mismatches on textures: a normal map
+//! or roughness mask exported as PNG with an `sRGB` chunk is de-gammaed at
+//! import. Both the declared colour space and a filename hint must fire.
 
 use std::path::Path;
 
@@ -19,12 +11,9 @@ use crate::scanner::{AssetInfo, AssetType};
 
 use super::Rule;
 
-/// Color-space rule lives under `[texture.color_space]` in the TOML —
-/// it used to share `[texture]`'s enabled flag, but disabling the size
-/// / PoT / file-size checks shouldn't also turn off this safety net,
-/// so the flag is split. Default ON because this catches a real
-/// corruption bug (engine de-gammas sRGB-flagged data textures), not
-/// a stylistic convention.
+/// Lives under `[texture.color_space]` in the TOML, gated separately from
+/// `[texture]`'s own flag. Default ON: this catches a real corruption bug, not a
+/// stylistic convention.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TextureColorSpaceConfig {
@@ -42,16 +31,9 @@ impl Default for TextureColorSpaceConfig {
     }
 }
 
-/// Stem suffixes (case-insensitive, `ends_with` match after lowercasing)
-/// that imply the texture is data, not sRGB color.
-///
-/// Single letters other than `_n` are deliberately absent: `_r` ("right") and
-/// `_m` ("medium" / UI size) collide with ordinary non-PBR names too readily —
-/// the same reasoning behind tag_suggest's suffix list (see the comment on
-/// `KNOWN_CHANNEL_SUFFIXES` in `analyzer/tag_suggest.rs`, which omits all
-/// three). `_n` is kept here because it's the
-/// dominant normal-map shorthand and an sRGB-de-gammaed normal map is the
-/// worst-case corruption this rule exists to catch.
+/// Stem suffixes (case-insensitive, `ends_with` after lowercasing) that imply the
+/// texture is data, not sRGB colour. `_n` is the only single-letter entry; `_r`
+/// and `_m` collide with ordinary names too readily.
 const DATA_HINTS: &[&str] = &[
     "_n",
     "_normal",
@@ -90,10 +72,8 @@ impl Rule for TextureColorSpaceRule {
     }
 
     fn check(&self, asset: &AssetInfo) -> Option<Issue> {
-        // Only fire when we KNOW the file is sRGB-encoded. If color_space
-        // is None (unknown), skip — some perfectly fine data maps don't
-        // carry an explicit chunk, and we'd rather miss those than spam
-        // false positives.
+        // Only fire when the file is KNOWN to be sRGB-encoded. An unknown colour
+        // space is skipped: many perfectly fine data maps carry no explicit chunk.
         let metadata = asset.metadata.as_ref()?;
         let color_space = metadata.color_space.as_deref()?;
         if color_space != "sRGB" {

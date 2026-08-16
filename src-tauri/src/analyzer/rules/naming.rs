@@ -47,20 +47,13 @@ fn default_enabled() -> bool {
 
 fn default_forbidden_chars() -> Vec<char> {
     vec![
-        // Awkward in shells, build scripts and asset paths. `@` is
-        // deliberately NOT here: `@2x` retina suffixes and Unity's
-        // `model@anim.fbx` animation convention make it a *convention*
-        // character, not a hazard — flagging it by default proposed a
-        // build-breaking rename of Tauri's own `128x128@2x.png` icon
-        // (2026-08 external review). Strict pipelines can add it back in
-        // tidycraft.toml.
+        // Awkward in shells, build scripts and asset paths. `@` is not here:
+        // `@2x` retina suffixes and Unity's `model@anim.fbx` make it a convention
+        // character. Strict pipelines can add it back in tidycraft.toml.
         ' ', '!', '#', '$', '%', '^', '&', '*', '(', ')', '+', '=',
-        // Illegal in Windows filenames (`< > : " | ? *`, plus the separators
-        // `/` and `\`). These are the only entries that make the rule a
-        // portability check rather than a style preference: a file named with
-        // any of them cannot be checked out on Windows at all. `*` is already
-        // above; `/` and `\` can't occur in a single path component, so they
-        // are omitted rather than listed for show.
+        // Illegal in Windows filenames. These are what make the rule a portability
+        // check rather than a style preference. `/` and `\` cannot occur in a
+        // single path component, so they are omitted.
         '<', '>', ':', '"', '|', '?',
     ]
 }
@@ -86,11 +79,9 @@ fn default_case_style() -> String {
 impl Default for NamingConfig {
     fn default() -> Self {
         Self {
-            // Stays enabled — `forbidden_chars` catches genuinely
-            // shell-unsafe / Windows-illegal characters and is a real
-            // bug check, not a stylistic convention. Other sub-rules
-            // are loosened so default behavior produces almost no
-            // issues unless a real problem exists.
+            // Stays enabled: `forbidden_chars` catches shell-unsafe and
+            // Windows-illegal characters, a real bug check rather than a stylistic
+            // convention. The other sub-rules are loosened.
             enabled: true,
             forbidden_chars: default_forbidden_chars(),
             forbid_chinese: false,
@@ -149,17 +140,8 @@ impl NamingRule {
     }
 
     /// Split `stem` into (configured prefix, remainder). The prefix is what
-    /// `check_prefix` requires for this asset type, and only when the stem
-    /// actually carries it; otherwise the whole stem is the remainder.
-    ///
-    /// Case style applies to the remainder only. The two rules are orthogonal
-    /// requirements, but a prefix like `T_` is uppercase-plus-underscore by
-    /// construction and NO case style accepts it — PascalCase rejects the `_`,
-    /// snake/kebab/camel reject the capital. Checking the full stem made every
-    /// compliant `T_rock.png` report naming.case, and Fix-it's answer
-    /// (`t_rock.png`) then violated naming.prefix, whose answer was
-    /// `T_t_rock.png`… the two rules generated each other's violations and the
-    /// name grew on every pass. See `case_fix_under_a_prefix_converges`.
+    /// `check_prefix` requires for this asset type, and only when the stem actually
+    /// carries it. Case style applies to the remainder only.
     fn split_required_prefix<'a>(
         &self,
         stem: &'a str,
@@ -178,27 +160,14 @@ impl NamingRule {
             "PascalCase" => is_pascal_case(name),
             "snake_case" => is_snake_case(name),
             "camelCase" => is_camel_case(name),
-            // Documented in the sample config since day one, but the branch
-            // was missing — a `case_style = "kebab-case"` silently behaved
-            // like "any".
             "kebab-case" => is_kebab_case(name),
             _ => true, // "any" or unknown
         }
     }
 
-    /// Generate a compliant filename for the single naming violation this rule
-    /// WOULD report for `asset`, following `check`'s exact priority order but
-    /// acting only on the three auto-fixable kinds: forbidden characters,
-    /// missing prefix, and case style. Returns `None` when the violation that
-    /// fires isn't auto-fixable (length / Chinese), when the asset is already
-    /// compliant, or when no safe fix exists.
-    ///
-    /// Invariant: any returned name is re-checked against the very predicate
-    /// that flagged the asset, so Fix-it never proposes a rename that leaves
-    /// the same issue standing (which would just re-fire on the next scan).
-    /// That is what makes odd inputs fall through to `None` instead of a bogus
-    /// rename — a stem of only forbidden characters, a name with `.` / `~` that
-    /// no case style accepts, or a config that forbids the separator itself.
+    /// Generate a compliant filename for the single naming violation `check` would
+    /// report, for the three auto-fixable kinds (forbidden characters, missing
+    /// prefix, case style). `None` when no safe fix exists.
     pub fn suggest_compliant_name(&self, asset: &AssetInfo) -> Option<String> {
         let name = &asset.name;
         // Same stem/extension split the case check uses (rsplit_once on '.'),
@@ -228,10 +197,9 @@ impl NamingRule {
             return None;
         }
 
-        // Missing prefix — DCC authoring sources are exempt (same as `check`).
-        // Prepending can lengthen a name that sat just under the limit; a fix
-        // must never mint a NEW violation — least of all naming.length, which
-        // isn't auto-fixable — so over-long candidates fall through to `None`.
+        // Missing prefix — DCC authoring sources are exempt, as in `check`.
+        // Prepending can push a name over the length limit, and a fix must never
+        // mint a new violation, so over-long candidates fall through to `None`.
         let is_dcc_source = asset
             .metadata
             .as_ref()
@@ -247,10 +215,9 @@ impl NamingRule {
             }
         }
 
-        // Case style. Conversion can lengthen too (snake_case inserts a `_`
-        // at each camel hump), so the same length gate applies. Convert only
-        // the part past the configured prefix and put the prefix back verbatim
-        // — converting it too is what used to make the fix oscillate.
+        // Case style. Conversion can lengthen too, so the same length gate applies.
+        // Only the part past the configured prefix is converted; the prefix goes
+        // back verbatim.
         let (case_prefix, case_target) = self.split_required_prefix(stem, &asset.asset_type);
         if !self.check_case_style(case_target) {
             let fixed_stem = format!(
@@ -273,11 +240,8 @@ impl NamingRule {
     }
 
     /// Rewrite `stem` so it carries no forbidden character: replace each with a
-    /// separator, collapse runs of that separator, and trim it from the ends.
-    /// The separator is `_`, unless the config forbids `_` (then `-`, then — if
-    /// that is forbidden too — outright removal), so the fix can never
-    /// reintroduce a forbidden character. Returns `None` if nothing survives
-    /// (e.g. a stem of only forbidden characters).
+    /// separator, collapse runs of it, and trim it from the ends. The separator is
+    /// `_`, else `-`, else outright removal. `None` if nothing survives.
     fn fix_forbidden_chars(&self, stem: &str) -> Option<String> {
         let sep = if !self.config.forbidden_chars.contains(&'_') {
             Some('_')
@@ -380,12 +344,9 @@ impl Rule for NamingRule {
             });
         }
 
-        // Check prefix. DCC authoring sources (`.blend` / `.psd` / `.spp` /
-        // ...) are exempt: type-prefix conventions (`SM_` / `T_`) target the
-        // engine-runtime exports, while source files follow the DCC's own
-        // naming habits — flagging every `.blend` for a missing `SM_` is
-        // noise, not a finding (UX audit P2-9). The other naming checks
-        // (forbidden chars / length / case) still apply to sources.
+        // DCC authoring sources are exempt from type prefixes: those conventions
+        // target the engine-runtime exports, while source files follow the DCC's
+        // own habits. The other naming checks still apply to sources.
         let is_dcc_source = asset
             .metadata
             .as_ref()
@@ -432,9 +393,7 @@ impl Rule for NamingRule {
 }
 
 /// All-caps stems pass: `HUD` is an acronym, which is one capitalized word.
-/// There is no way to tell it apart from a SHOUTED word without an underscore
-/// to key on, and guessing "shouted" was the wrong bet — it reported compliant
-/// files and then "fixed" `HUD` to `Hud`.
+/// Nothing tells it apart from a shouted word without an underscore to key on.
 fn is_pascal_case(s: &str) -> bool {
     if s.is_empty() {
         return true;
@@ -483,13 +442,9 @@ fn collapse_and_trim(s: &str, sep: char) -> String {
     out.trim_matches(sep).to_string()
 }
 
-/// Split a stem into words for case conversion: break on `_`, `-`, space, and
-/// camelCase / PascalCase humps (a lowercase or digit followed by an uppercase
-/// letter). Empty fragments are dropped. Deliberately does NOT split on `.` —
-/// a dotted stem (`archive.tar`) has no clean case form, and the caller's
-/// re-check turns that into `None` rather than a bogus rename. Acronym
-/// boundaries (`XMLParser`) are best-effort; the goal is a name that passes the
-/// case predicate, not perfect word segmentation.
+/// Split a stem into words for case conversion: break on `_`, `-`, space and
+/// camelCase humps, never on `.`, so a dotted stem falls through to `None`.
+/// Acronym boundaries are best-effort.
 fn tokenize_words(stem: &str) -> Vec<String> {
     let mut words: Vec<String> = Vec::new();
     let mut current = String::new();
@@ -516,10 +471,9 @@ fn tokenize_words(stem: &str) -> Vec<String> {
     words
 }
 
-/// First character uppercase, the rest lowercase. The tail is lowercased so
-/// the conversion is idempotent and keeps its word boundaries: without it
-/// `SOME_THING` would convert to `SOMETHING`, erasing the split it was just
-/// tokenized on, and a second pass could never recover it.
+/// First character uppercase, the rest lowercase. Lowercasing the tail keeps the
+/// conversion idempotent and preserves word boundaries — otherwise `SOME_THING`
+/// becomes `SOMETHING` and the split can never be recovered.
 fn capitalize(word: &str) -> String {
     let mut chars = word.chars();
     match chars.next() {
@@ -528,10 +482,9 @@ fn capitalize(word: &str) -> String {
     }
 }
 
-/// Rebuild `stem` in the requested case style. `None` for `any` / unknown
-/// styles (no canonical form) or when the stem tokenizes to nothing. The result
-/// is only a proposal — the caller re-checks it against the rule's own case
-/// predicate and discards anything that still doesn't pass.
+/// Rebuild `stem` in the requested case style. `None` for `any` / unknown styles
+/// or when the stem tokenizes to nothing. The result is only a proposal — the
+/// caller re-checks it against the rule's own case predicate.
 fn to_case_style(stem: &str, style: &str) -> Option<String> {
     let words = tokenize_words(stem);
     if words.is_empty() {
@@ -569,12 +522,9 @@ fn to_case_style(stem: &str, style: &str) -> Option<String> {
 mod tests {
     #[test]
     fn default_forbidden_chars_flag_space_but_not_at() {
-        // `@` was removed from the defaults on purpose (2026-08-15): `@2x`
-        // retina icons and Unity's `model@anim.fbx` animation convention are
-        // ordinary names — with `@` listed, the default rule set proposed a
-        // build-breaking rename of this repo's own Tauri icon. Space stays:
-        // it breaks this app's own 3D-preview texture resolution (README)
-        // and Unreal asset naming.
+        // `@` is not in the defaults: `@2x` retina icons and Unity's
+        // `model@anim.fbx` convention are ordinary names. Space stays — it breaks
+        // the 3D preview's texture resolution and Unreal asset naming.
         let defaults = super::default_forbidden_chars();
         assert!(defaults.contains(&' '));
         assert!(!defaults.contains(&'@'));
@@ -607,11 +557,9 @@ mod tests {
         })
     }
 
-    /// The default list is what makes this rule a portability check rather
-    /// than a style preference, and the Windows-illegal set is the only part
-    /// that is unambiguously a bug: such a file cannot be checked out on
-    /// Windows at all. It used to hold only shell-awkward punctuation while
-    /// the surrounding comments advertised Windows coverage.
+    /// The default list is what makes this rule a portability check rather than a
+    /// style preference, and the Windows-illegal set is the unambiguous part: such
+    /// a file cannot be checked out on Windows at all.
     #[test]
     fn default_forbidden_chars_cover_windows_illegal_characters() {
         let rule = NamingRule::new(NamingConfig::default());
@@ -634,10 +582,9 @@ mod tests {
 
     #[test]
     fn prefix_and_case_compose_instead_of_contradicting() {
-        // The UE-style pipeline: `T_` prefix AND snake_case. Every one of the
-        // four case styles rejects `T_` on its own terms (uppercase and/or
-        // underscore), so checking the *full* stem made every compliant asset
-        // report naming.case.
+        // The UE-style pipeline: `T_` prefix AND snake_case. Every case style
+        // rejects `T_` on its own terms, so checking the full stem made every
+        // compliant asset report naming.case.
         for style in ["snake_case", "PascalCase", "camelCase", "kebab-case"] {
             let rule = NamingRule::new(NamingConfig {
                 texture_prefix: Some("T_".to_string()),
@@ -692,10 +639,8 @@ mod tests {
     }
 
     /// An acronym is a single capitalized word, so `HUD.png` and `UI.png` are
-    /// PascalCase. Rejecting every all-caps stem reported compliant files and
-    /// then "fixed" `HUD` into `Hud`, destroying the acronym — and for a
-    /// one-letter stem like `A.png` the only candidate is the name itself, so
-    /// the fix generator returned nothing and the issue was unfixable.
+    /// PascalCase. Rejecting every all-caps stem reported compliant files and then
+    /// "fixed" `HUD` into `Hud`.
     #[test]
     fn pascal_case_accepts_all_caps_acronyms() {
         let rule = cased_rule("PascalCase");
@@ -952,9 +897,9 @@ mod tests {
 
     #[test]
     fn fix_targets_only_the_reported_violation() {
-        // Both a forbidden space and a case problem are present; the rule
-        // reports forbidden first, so the fix addresses only that. The leftover
-        // case issue re-surfaces on the next scan (by design).
+        // Both a forbidden space and a case problem are present; the rule reports
+        // forbidden first, so the fix addresses only that and the leftover case
+        // issue re-surfaces on the next scan.
         let rule = NamingRule::new(NamingConfig {
             case_style: "snake_case".to_string(),
             ..Default::default()

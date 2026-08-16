@@ -28,11 +28,9 @@ export function RenameDialog({
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Godot rename guardrail: `res://` references are path strings, so a
-  // rename silently breaks every scene/resource/script (and project.godot
-  // entry) that points here. Warn — don't block — with the referencing
-  // files. Unity is exempt by design: its references are GUID-based and the
-  // .meta sidecar moves with the file.
+  // Godot rename guardrail: `res://` references are path strings, so a rename
+  // silently breaks every scene, resource, script and project.godot entry pointing
+  // here. Warn, don't block. Unity is exempt — its references are GUID-based.
   const [godotRefs, setGodotRefs] = useState<string[] | null>(null);
   useEffect(() => {
     if (!isOpen || projectType !== "godot" || !activeProjectId) {
@@ -58,13 +56,9 @@ export function RenameDialog({
     };
   }, [isOpen, projectType, activeProjectId, assetPath]);
 
-  // The input carries the WHOLE filename and the initial selection covers only
-  // the base name — Explorer / Finder behaviour, so typing replaces the name
-  // and leaves `.png` alone while editing the extension on purpose stays
-  // possible. Holding just the base name and appending a static suffix label
-  // instead invites `hero.png` -> `hero.png.png`: the habit users arrive with
-  // is to type the whole name they can see.
-  // `> 0` keeps a dotfile (`.gitignore`) all name and no extension.
+  // The input carries the WHOLE filename with the initial selection over the base
+  // name only — Explorer / Finder behaviour, so typing replaces the name and leaves
+  // `.png` alone. `> 0` keeps a dotfile (`.gitignore`) all name, no extension.
   const lastDotIndex = currentName.lastIndexOf(".");
 
   useEffect(() => {

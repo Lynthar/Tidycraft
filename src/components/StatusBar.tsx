@@ -7,9 +7,8 @@ import { basename } from "../lib/pathUtils";
 import type { ScanWarning, ProjectWarning } from "../types/asset";
 
 /// How long the watcher "syncing" badge stays visible after the most recent
-/// fs-change event. Coalescing window in `watcher.rs` is 500ms, so this
-/// sits just above it: each event burst flashes once, back-to-back bursts
-/// keep the badge lit continuously.
+/// fs-change event. The coalescing window in `watcher.rs` is 500ms, so this sits
+/// just above it: back-to-back bursts keep the badge lit continuously.
 const WATCHER_PULSE_DURATION_MS = 700;
 
 export function StatusBar() {
@@ -56,11 +55,9 @@ export function StatusBar() {
     };
   }, [watcherPulse]);
 
-  /// Bucket file-level git statuses into the four counters the StatusBar
-  /// renders. Memoized on `gitStatuses` identity — refreshGitInfo replaces
-  /// the map by reference, so this only re-runs on actual git refreshes.
-  /// `renamed` and `typechange` roll into `mod` because visually they're
-  /// modifications; `untracked` and `new` both bucket into `add`.
+  /// Bucket file-level git statuses into the four counters the StatusBar renders.
+  /// Memoized on `gitStatuses` identity. `renamed` and `typechange` roll into
+  /// `mod` because they read as modifications; `untracked` and `new` into `add`.
   const gitChanges = useMemo(() => {
     let add = 0, mod = 0, del = 0, conflict = 0;
     for (const status of Object.values(gitStatuses)) {
@@ -291,12 +288,9 @@ export function StatusBar() {
   );
 }
 
-/// Details for the status bar's warning badge. Deliberately NOT a ModalShell
-/// dialog: one warning is the common case, and a blocking overlay would also
-/// suppress Ctrl+1/2/3 via isBlockingOverlayOpen. Escape is handled here in
-/// the CAPTURE phase with stopPropagation so the global Escape ladder
-/// (cancel scan → clear selection → close preview → clear search, a BUBBLE
-/// listener in useKeyboardShortcuts) cannot also fire on the same press.
+/// Details for the status bar's warning badge. Not a ModalShell dialog: a blocking
+/// overlay would suppress Ctrl+1/2/3. Escape is handled here in the CAPTURE phase
+/// so the global Escape ladder cannot also fire on the same press.
 function WarningPopover({
   warnings,
   onClose,

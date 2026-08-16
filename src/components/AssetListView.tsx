@@ -31,18 +31,16 @@ import { intentFromMouse, type SelectIntent } from "../lib/selectIntent";
 import { registerAssetListFocus } from "../lib/menuActions";
 
 const ROW_HEIGHT = 40; // matches .tc-row + 22px glyph + padding
-/// Height of the sticky header strip. Must track `.tc-list-header`'s `height`
-/// in redesign-components.css: the header sits inside the same scroll box as
-/// the rows, so this number is both the virtualizer's `scrollMargin` and the
-/// slice of the container that is not list space.
+/// Height of the sticky header strip. Must track `.tc-list-header`'s `height` in
+/// redesign-components.css: the header sits inside the same scroll box as the
+/// rows, so this is both the virtualizer's `scrollMargin` and non-list space.
 const LIST_HEADER_HEIGHT = 30;
 const MIN_COL_WIDTH = 60;
 const MAX_COL_WIDTH = 500;
 
 /// DOM id for the row at `index`, referenced by the container's
-/// `aria-activedescendant`. Keyed by index, not path: paths may contain
-/// spaces, which are illegal in an HTML id, and both sides of the reference
-/// are computed in the same render pass so the index is consistent.
+/// `aria-activedescendant`. Keyed by index, not path: paths may contain spaces,
+/// which are illegal in an HTML id.
 const rowDomId = (index: number) => `tc-asset-row-${index}`;
 
 function AssetIcon({ type }: { type: AssetType }) {
@@ -63,15 +61,9 @@ function AssetIcon({ type }: { type: AssetType }) {
   );
 }
 
-/// Props that make a header cell operable from the keyboard. The header row is
-/// a strip of flex divs rather than a real table, so the sort trigger has to be
-/// spelled out: the role, the tab stop, and Enter by hand.
-///
-/// Deliberately no `aria-sort`: that attribute is only defined on
-/// `columnheader`/`rowheader`, and there is no `table`/`grid` above these divs
-/// to carry those roles. Announcing the direction properly means giving the
-/// whole virtualized list grid semantics — a much larger change than this one,
-/// and an invalid attribute in the meantime is worse than none.
+/// Props that make a header cell operable from the keyboard. The header row is a
+/// strip of flex divs rather than a real table, so the role, the tab stop and
+/// Enter are spelled out. No `aria-sort`: there is no grid above these divs.
 function sortableHeaderProps(activate: () => void) {
   return {
     role: "button",
@@ -87,9 +79,8 @@ function sortableHeaderProps(activate: () => void) {
 }
 
 /// Drag-to-resize grab handle on the right edge of a header cell. Uses
-/// document-level mousemove/mouseup so cursor leaving the handle mid-drag
-/// doesn't abort. Stops propagation to avoid triggering the parent header's
-/// sort-on-click.
+/// document-level mousemove/mouseup so the cursor leaving the handle mid-drag
+/// does not abort, and stops propagation so it never triggers sort-on-click.
 function ColumnResizeHandle({
   columnId,
   currentWidth,
@@ -139,9 +130,8 @@ interface AssetRowProps {
   asset: AssetInfo;
   domId: string;
   /// 1-based position in the whole list and the length of that list. Under
-  /// virtualization only a screenful of rows exists in the DOM, so assistive
-  /// tech would otherwise count the set from what it can see and announce
-  /// "12 of 31" in a ten-thousand-file project.
+  /// virtualization only a screenful of rows exists in the DOM, so assistive tech
+  /// would otherwise announce "12 of 31" in a ten-thousand-file project.
   posInSet: number;
   setSize: number;
   isSelected: boolean;
@@ -255,15 +245,13 @@ function AssetRow({
           onClick={(e) => e.stopPropagation()}
           // A click must toggle without taking focus: focus lives on the list
           // itself, and parking it on an input here would make the guard at the
-          // top of the key handler reject every arrow key until the user
-          // clicked somewhere else. Preventing the default on mousedown stops
-          // the focus change; the click still activates the checkbox.
+          // top of the key handler reject every arrow key.
           onMouseDown={(e) => e.preventDefault()}
           className="w-4 h-4 accent-primary cursor-pointer"
           aria-label={t("assetList.selectForBatch")}
-          // Out of the tab order on purpose: a screenful of rows is a screenful
-          // of identically-labelled checkboxes, so tabbing out of the list took
-          // thirty presses. Ticking an individual box is a mouse-only action.
+          // Out of the tab order: a screenful of rows is a screenful of
+          // identically-labelled checkboxes. Ticking an individual box is a
+          // mouse-only action.
           tabIndex={-1}
         />
       </div>
@@ -467,12 +455,9 @@ export function AssetListView({
     return map;
   }, [columns]);
 
-  // Total intrinsic row width = sum of all visible columns + the batch-select
-  // checkbox lane (always reserved, 32px) + the trailing ColumnConfigDropdown
-  // wrapper (~36px). Used to size the header and the virtualizer's spacer so
-  // the row can exceed the viewport horizontally — critical for column resize:
-  // with a shrink-0 layout, growing one column has to make total content
-  // wider, not push siblings around.
+  // Total intrinsic row width = visible columns + the 32px checkbox lane + the
+  // ~36px column-config wrapper. Sizes the header and the virtualizer's spacer so
+  // a resized column widens the content instead of pushing siblings around.
   const totalRowWidth = useMemo(() => {
     let sum = 32; // batch-select checkbox lane (always reserved)
     for (const id of visibleColumns) sum += columnWidths[id] ?? 0;
@@ -497,28 +482,19 @@ export function AssetListView({
     getScrollElement: () => parentRef.current,
     estimateSize: () => ROW_HEIGHT,
     overscan: 10,
-    // The rows live in a sibling of the sticky header, inside the same scroll
-    // box, so a row's real position is the header's height further down than
-    // its index alone implies. Without this the virtualizer scrolls every
-    // downward jump 30px short and lands the target row three-quarters off the
-    // bottom edge; upward jumps look fine, which is what hid it.
+    // The rows sit in a sibling of the sticky header inside the same scroll box,
+    // so a row's real position is one header height further down. Without this
+    // every downward jump scrolls 30px short.
     scrollMargin: LIST_HEADER_HEIGHT,
-    // The counterpart on the way up. Once offsets are honest, "top of the
-    // scroll box" is *behind* the sticky header, so aligning a row to it would
-    // park the row out of sight; this reserves the header's strip, and the
-    // same number is what lets `align: "auto"` notice a row hidden under it.
+    // The counterpart on the way up: "top of the scroll box" is behind the sticky
+    // header, so this reserves its strip and is what lets `align: "auto"` notice a
+    // row hidden under it.
     scrollPaddingStart: LIST_HEADER_HEIGHT,
   });
 
-  // Focus is not its own state: "the focused row" and "the previewed row" are
-  // the same row by design, so a second source of truth would only have to be
-  // kept in sync with the first. -1 means there is no cursor right now, either
-  // because the keyboard has not entered the list or because a filter has
-  // taken the previewed row out of view.
-  //
-  // Memoized because this component re-renders on every scroll notification
-  // and twice per filesystem event, and the scan behind it is O(n) over a list
-  // that can hold ten thousand files.
+  // Focus is not its own state: the focused row and the previewed row are the same
+  // row. -1 means no cursor right now. Memoized because this component re-renders
+  // on every scroll notification and twice per filesystem event.
   const focusedIndex = useMemo(
     () =>
       selectedAsset
@@ -527,35 +503,19 @@ export function AssetListView({
     [assets, selectedAsset?.path]
   );
 
-  // Where the cursor last was, kept so it can be restored if the file under it
-  // is deleted or a filter hides it. A ref, not state: it never needs to
-  // trigger a render. -1 means no cursor has ever been placed, which is a
-  // different thing from "the cursor is not on a visible row right now".
+  // Where the cursor last was, kept so it can be restored if the file under it is
+  // deleted or a filter hides it. A ref, not state. -1 means no cursor has ever
+  // been placed, which differs from "not on a visible row right now".
   const lastIndexRef = useRef(-1);
   if (focusedIndex >= 0) lastIndexRef.current = focusedIndex;
 
-  // The store drops the previewed asset when the watcher reports its file was
-  // removed, and publishes that as a counter. Depending on the counter — and
-  // on nothing else — is what makes this correct: the selection also goes away
-  // for reasons that must NOT move the cursor, the loudest being the escape
-  // key, whose job here is to close the preview. Inferring the cause from the
-  // state afterwards cannot tell those apart.
-  //
-  // The gate is that the list holds focus, which is true after clicking a row,
-  // after arrowing to one, and again once a dialog hands focus back —
-  // ModalShell restores focus to whatever opened it when it unmounts, and the
-  // watcher's removal event arrives on the far side of that, so an in-app
-  // delete through the batch-delete dialog also moves the cursor. The
-  // remembered index is where the cursor was, not where the deleted block
-  // began, so when a run of checked rows goes at once the cursor can land
-  // several rows past them; the index is clamped to the shortened list, so it
-  // always lands on a real row. What the gate actually keeps out is focus
-  // genuinely elsewhere — another panel, another window, a dialog still open.
+  // The store publishes "the previewed asset was dropped because its file was
+  // removed" as a counter, and this depends on the counter alone: the selection
+  // also goes away for reasons that must NOT move the cursor, Escape loudest.
   const selectionRemovedPulse = useProjectStore((s) => s.selectionRemovedPulse);
-  // Seeded with whatever the counter already was at mount, so a remount —
-  // switching between list and grid view, or the scanning state swapping this
-  // subtree out and back — never re-runs the body against a pulse this
-  // instance already handled, or one that was raised while it was unmounted.
+  // Seeded with whatever the counter already was at mount, so a remount never
+  // re-runs the body against a pulse this instance already handled, or one raised
+  // while it was unmounted.
   const lastHandledPulseRef = useRef(selectionRemovedPulse);
   useEffect(() => {
     if (selectionRemovedPulse === lastHandledPulseRef.current) return;
@@ -571,16 +531,13 @@ export function AssetListView({
       toggle: false,
       extend: false,
     });
-    // Deliberately keyed on the counter alone. Adding `assets` would make this
-    // re-run on every filesystem event and fire long after the deletion that
-    // set it.
+    // Keyed on the counter alone. Adding `assets` would re-run this on every
+    // filesystem event and fire long after the deletion that set it.
   }, [selectionRemovedPulse]);
 
-  // One screen minus a row of context, the way list widgets conventionally
-  // page. The container's height includes the sticky header, which is not list
-  // space — counting it cancelled out the row of overlap exactly. Floored at
-  // one row so an unmeasured or zero-height container still advances instead
-  // of leaving PageUp/PageDown as no-ops.
+  // One screen minus a row of context, the way list widgets conventionally page.
+  // The container's height includes the sticky header, which is not list space.
+  // Floored at one row so an unmeasured container still advances.
   const pageStep = () => {
     const h = parentRef.current?.clientHeight ?? ROW_HEIGHT * 10;
     return Math.max(1, Math.floor((h - LIST_HEADER_HEIGHT) / ROW_HEIGHT) - 1);
@@ -598,34 +555,22 @@ export function AssetListView({
     });
   };
 
-  // Where to pick up when there is no cursor on screen: wherever it last was.
-  // A search or a type filter can take the previewed row out of the list
-  // without the user having gone anywhere, and jumping to the far end for that
-  // is a teleport they did not ask for. The fallback is reached only by a list
-  // the keyboard has never touched, which is why each caller passes its own.
+  // Where to pick up when there is no cursor on screen: wherever it last was. A
+  // search or type filter can take the previewed row out of the list, and jumping
+  // to the far end for that is a teleport the user did not ask for.
   const resumeIndex = (fallback: number) =>
     lastIndexRef.current >= 0 ? lastIndexRef.current : fallback;
 
-  // Entering the list from somewhere else — today, a down arrow in the search
-  // box. A cursor the filter took away is put back at the same time, on the
-  // row a movement key would have resumed from, so the ring never lights
-  // around a list with no row marked in it.
-  //
-  // The mark is what makes the ring show at all. WebKit does not carry the
-  // "focus should be visible" state across a focus moved by script: measured
-  // here, the list matches `:focus-visible` after neither route into it, not
-  // even when the search box was reached by its own shortcut and never
-  // touched by the mouse. So the one case the browser cannot see is stated
-  // outright, and dropped again as soon as focus leaves or a click lands.
+  // Entering the list from elsewhere — today, a down arrow in the search box. A
+  // cursor the filter took away is put back at the same time. The explicit
+  // focus-visible mark is needed: WebKit drops that state across a scripted focus.
   const enterList = () => {
     const el = listRef.current;
     if (!el) return;
     el.dataset.kbdFocus = "true";
-    // Without this the browser scrolls the newly focused element into view,
-    // and the rows container starts exactly where the sticky header ends —
-    // so the box scrolls by the header's height and the first row spends the
-    // rest of its life three quarters hidden behind it. Placing the cursor
-    // below does the scrolling that is actually wanted.
+    // Without this the browser scrolls the newly focused element into view, and
+    // the rows container starts exactly where the sticky header ends — so the box
+    // scrolls by the header's height and hides the first row behind it.
     el.focus({ preventScroll: true });
     if (focusedIndex < 0 && assets.length > 0) moveTo(resumeIndex(0), false);
   };
@@ -635,11 +580,9 @@ export function AssetListView({
     if (el) delete el.dataset.kbdFocus;
   };
 
-  // No dependency array on purpose: the registered function closes over the
-  // current cursor and the current list, so it has to be replaced whenever
-  // either changes, and assigning one module slot is cheaper than working out
-  // when that was. Cleared on unmount so the search box can tell there is no
-  // list to enter — see `focusAssetList`.
+  // No dependency array: the registered function closes over the current cursor
+  // and the current list, so it has to be replaced whenever either changes.
+  // Cleared on unmount so the search box can tell there is no list to enter.
   useEffect(() => {
     registerAssetListFocus(enterList);
     return () => registerAssetListFocus(null);
@@ -685,11 +628,9 @@ export function AssetListView({
     }
   };
 
-  // Scroll the selected row into view on selection change / locate pulse.
-  // align:"auto" is a no-op when the row is already visible, so ordinary
-  // clicks don't jump the list; the pulse makes a repeat "locate" of the
-  // same asset scroll again (assets is deliberately not a dependency —
-  // re-filtering while searching must not fight the user's scrolling).
+  // Scroll the selected row into view on selection change or locate pulse.
+  // `align: "auto"` is a no-op when the row is already visible. `assets` is not a
+  // dependency — re-filtering must not fight the user's scroll.
   const locatePulse = useProjectStore((s) => s.locatePulse);
   useEffect(() => {
     if (!selectedAsset) return;
@@ -701,11 +642,9 @@ export function AssetListView({
 
   const virtualItems = virtualizer.getVirtualItems();
 
-  // Only name a row that is actually mounted. The scroll-into-view effect runs
-  // after paint, so a jump from elsewhere in the app — locating an asset from
-  // the command palette or the dependency graph — commits the new selection a
-  // frame before the virtualizer renders its row, and a reference to an id
-  // that is not in the document is invalid and announces nothing.
+  // Only name a row that is actually mounted. A jump from elsewhere in the app
+  // commits the new selection a frame before the virtualizer renders its row, and
+  // a reference to an id not in the document is invalid and announces nothing.
   const activeRowId =
     focusedIndex >= 0 && virtualItems.some((v) => v.index === focusedIndex)
       ? rowDomId(focusedIndex)
@@ -837,9 +776,8 @@ export function AssetListView({
                     width: "100%",
                     height: `${virtualItem.size}px`,
                     // `start` is measured from the top of the scroll box and so
-                    // includes the scroll margin, while these rows are placed
-                    // against a container that already begins below the header.
-                    // Subtracting it back out is the counterpart of setting it.
+                    // includes the scroll margin, while these rows sit in a
+                    // container that already begins below the header.
                     transform: `translateY(${virtualItem.start - LIST_HEADER_HEIGHT}px)`,
                   }}
                 />

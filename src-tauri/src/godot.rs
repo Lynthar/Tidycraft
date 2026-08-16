@@ -1,7 +1,4 @@
-//! Godot 引擎项目支持模块
-//!
-//! 解析 project.godot 配置文件，提取项目信息。
-//! 为未来完整的 .tscn/.tres 解析预留扩展接口。
+//! Godot project support: parses `project.godot` for project information.
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -10,42 +7,31 @@ use std::path::Path;
 
 use crate::scanner::AssetInfo;
 
-/// Godot 项目配置信息
+/// Godot project configuration read from `project.godot`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GodotProjectInfo {
-    /// 配置文件路径
     pub path: String,
-    /// 项目名称
     pub project_name: String,
-    /// Godot 版本（从 config_version 或 features 推断）
+    /// Inferred from `config_version` or the features list.
     pub godot_version: Option<String>,
-    /// 主场景路径
     pub main_scene: Option<String>,
-    /// 图标路径
     pub icon: Option<String>,
-    /// 项目特性列表
     pub features: Vec<String>,
-    /// 自动加载脚本
     pub autoloads: Vec<GodotAutoload>,
-    /// 输入动作名称列表
     pub input_actions: Vec<String>,
-    /// 渲染器设置
     pub renderer: Option<String>,
 }
 
-/// Godot 自动加载脚本配置
+/// One autoload entry from `project.godot`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GodotAutoload {
-    /// 脚本名称（全局变量名）
+    /// The global variable name the script is bound to.
     pub name: String,
-    /// 脚本路径
     pub path: String,
-    /// 是否单例
     pub singleton: bool,
 }
 
-/// Godot 资源类型（预留扩展）
-// Stub for the planned Godot deep-integration; only tests use it today.
+/// Godot resource type. Only tests use it.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -62,42 +48,33 @@ pub enum GodotResourceType {
     Other,
 }
 
-/// 解析 project.godot 配置文件
+/// Parse `project.godot`.
 pub fn parse_project_godot(path: &Path) -> Option<GodotProjectInfo> {
     let content = fs::read_to_string(path).ok()?;
     let config = parse_godot_config(&content);
 
-    // 获取 application 部分
     let application = config.get("application").cloned().unwrap_or_default();
 
-    // 提取项目名称
     let project_name = application
         .get("config/name")
         .map(|s| unquote(s))
         .unwrap_or_else(|| "Unknown".to_string());
 
-    // 提取主场景
     let main_scene = application.get("run/main_scene").map(|s| unquote(s));
 
-    // 提取图标
     let icon = application.get("config/icon").map(|s| unquote(s));
 
-    // 提取特性列表
     let features = application
         .get("config/features")
         .map(|s| parse_godot_array(s))
         .unwrap_or_default();
 
-    // 推断 Godot 版本
     let godot_version = infer_godot_version(&config, &features);
 
-    // 提取自动加载
     let autoloads = extract_autoloads(&config);
 
-    // 提取输入动作
     let input_actions = extract_input_actions(&config);
 
-    // 提取渲染器设置
     let renderer = config
         .get("rendering")
         .and_then(|r| r.get("renderer/rendering_method"))
@@ -123,7 +100,7 @@ pub fn parse_project_godot(path: &Path) -> Option<GodotProjectInfo> {
     })
 }
 
-/// 解析 Godot INI 格式的配置文件
+/// Parse Godot's INI-shaped config into `section -> key -> value`.
 fn parse_godot_config(content: &str) -> HashMap<String, HashMap<String, String>> {
     let mut result: HashMap<String, HashMap<String, String>> = HashMap::new();
     let mut current_section = String::new();
@@ -131,19 +108,17 @@ fn parse_godot_config(content: &str) -> HashMap<String, HashMap<String, String>>
     for line in content.lines() {
         let line = line.trim();
 
-        // 跳过空行和注释
         if line.is_empty() || line.starts_with(';') || line.starts_with('#') {
             continue;
         }
 
-        // 解析 section header: [section_name]
+        // Section header: [section_name]
         if line.starts_with('[') && line.ends_with(']') {
             current_section = line[1..line.len() - 1].to_string();
             result.entry(current_section.clone()).or_default();
             continue;
         }
 
-        // 解析 key=value
         if let Some(eq_pos) = line.find('=') {
             let key = line[..eq_pos].trim().to_string();
             let value = line[eq_pos + 1..].trim().to_string();
@@ -151,7 +126,7 @@ fn parse_godot_config(content: &str) -> HashMap<String, HashMap<String, String>>
             if let Some(section) = result.get_mut(&current_section) {
                 section.insert(key, value);
             } else {
-                // 如果没有 section（文件开头），使用空字符串作为 section
+                // Keys before the first header use an empty section name.
                 result.entry(String::new()).or_default().insert(key, value);
             }
         }
@@ -160,13 +135,13 @@ fn parse_godot_config(content: &str) -> HashMap<String, HashMap<String, String>>
     result
 }
 
-/// 从配置中提取自动加载信息
+/// Extract the autoload entries from a parsed config.
 fn extract_autoloads(config: &HashMap<String, HashMap<String, String>>) -> Vec<GodotAutoload> {
     let mut autoloads = Vec::new();
 
     if let Some(autoload_section) = config.get("autoload") {
         for (name, value) in autoload_section {
-            // 格式: name="*res://path/to/script.gd" 或 name="res://path/to/script.gd"
+            // Shape: name="*res://path/to/script.gd" or name="res://path/to/script.gd"
             let value = unquote(value);
             let (singleton, path) = match value.strip_prefix('*') {
                 Some(rest) => (true, rest.to_string()),
@@ -184,14 +159,14 @@ fn extract_autoloads(config: &HashMap<String, HashMap<String, String>>) -> Vec<G
     autoloads
 }
 
-/// 从配置中提取输入动作
+/// Extract the input action names from a parsed config.
 fn extract_input_actions(config: &HashMap<String, HashMap<String, String>>) -> Vec<String> {
     let mut actions = Vec::new();
 
     if let Some(input_section) = config.get("input") {
         for key in input_section.keys() {
-            // 输入动作的键通常是 "action_name" 或带有 deadzone 等后缀
-            // 只取动作名称部分
+            // Input action keys are the action name, sometimes with a suffix
+            // such as deadzone; keep only the name.
             if !key.contains('/') {
                 actions.push(key.clone());
             }
@@ -203,14 +178,14 @@ fn extract_input_actions(config: &HashMap<String, HashMap<String, String>>) -> V
     actions
 }
 
-/// 从特性列表或配置版本推断 Godot 版本
+/// Infer the Godot version from the features list or `config_version`.
 fn infer_godot_version(
     config: &HashMap<String, HashMap<String, String>>,
     features: &[String],
 ) -> Option<String> {
-    // 首先从 features 中查找版本号
+    // Prefer a version number in `features`.
     for feature in features {
-        // 版本号通常是 "4.2", "4.3", "3.5" 等格式
+        // Shaped like "4.2", "4.3", "3.5".
         if feature
             .chars()
             .next()
@@ -222,7 +197,7 @@ fn infer_godot_version(
         }
     }
 
-    // 从 config_version 推断
+    // Fall back to config_version.
     if let Some(gd_resource) = config.get("gd_resource") {
         if let Some(version) = gd_resource.get("config_version") {
             let version_num: i32 = version.parse().unwrap_or(0);
@@ -234,7 +209,7 @@ fn infer_godot_version(
         }
     }
 
-    // 从空 section 中查找 config_version
+    // config_version lives in the unnamed leading section.
     if let Some(root) = config.get("") {
         if let Some(version) = root.get("config_version") {
             let version_num: i32 = version.parse().unwrap_or(0);
@@ -249,12 +224,11 @@ fn infer_godot_version(
     None
 }
 
-/// 解析 Godot 数组格式: PackedStringArray("a", "b", "c") 或 ["a", "b", "c"]
+/// Parse Godot's array literals: `PackedStringArray("a", "b")` or `["a", "b"]`.
 fn parse_godot_array(s: &str) -> Vec<String> {
     let mut result = Vec::new();
     let s = s.trim();
 
-    // 处理 PackedStringArray(...) 格式
     let inner = if s.starts_with("PackedStringArray(") && s.ends_with(')') {
         &s[18..s.len() - 1]
     } else if s.starts_with('[') && s.ends_with(']') {
@@ -263,7 +237,6 @@ fn parse_godot_array(s: &str) -> Vec<String> {
         return result;
     };
 
-    // 简单的逗号分隔解析
     for item in inner.split(',') {
         let item = item.trim();
         let item = unquote(item);
@@ -275,13 +248,11 @@ fn parse_godot_array(s: &str) -> Vec<String> {
     result
 }
 
-/// 去除字符串两端的引号
+/// Strip matching quotes from both ends of a value.
 fn unquote(s: &str) -> String {
     let s = s.trim();
-    // The length guard is load-bearing, not defensive noise: on a lone `"` the
-    // starts_with and ends_with checks both match the *same* character, and the
-    // slice below would be `1..0`. A half-typed `config/name="` is enough to hit
-    // it, and release builds are `panic = "abort"`.
+    // The length guard is load-bearing: on a lone `"` both starts_with and
+    // ends_with match the same character, and the slice below would be `1..0`.
     if s.len() >= 2
         && ((s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')))
     {
@@ -291,9 +262,7 @@ fn unquote(s: &str) -> String {
     }
 }
 
-/// 根据扩展名获取 Godot 资源类型
-/// 预留接口，用于未来扩展
-// Stub for the planned Godot deep-integration; only tests call it today.
+/// Godot resource type from the file extension. Only tests call it.
 #[allow(dead_code)]
 pub fn get_godot_resource_type(path: &Path) -> Option<GodotResourceType> {
     let ext = path.extension()?.to_str()?;
@@ -313,16 +282,9 @@ pub fn get_godot_resource_type(path: &Path) -> Option<GodotResourceType> {
 
 // ============ Unused-asset detection ============
 
-/// Whether `extension` is Godot metadata (not a real asset): `.import`
-/// (texture import settings), `.uid` (4.4 script UID sidecar), `.godot`
-/// (project.godot / editor config), `.cfg` (export presets / editor config).
-/// Excluded from unused-asset reporting.
-///
-/// In practice only `.godot` and `.cfg` reach the callers: `.import` and
-/// `.uid` are per-asset sidecars and the scanner already keeps them out of the
-/// asset list (see `crate::sidecar`). They stay listed here anyway — this
-/// answers "is this Godot metadata", and an answer that quietly depended on
-/// another module's filter would be wrong the moment that filter moved.
+/// Whether `extension` is Godot metadata rather than a real asset: `.import`,
+/// `.uid`, `.godot`, `.cfg`. Excluded from unused-asset reporting. Answers on
+/// its own rather than depending on the scanner's sidecar filter.
 pub fn is_godot_metadata(extension: &str) -> bool {
     matches!(
         extension.to_lowercase().as_str(),
@@ -343,9 +305,7 @@ pub fn asset_to_res_path(abs: &str, root: &Path) -> Option<String> {
 
 /// Inverse of `asset_to_res_path`: the absolute filesystem path a `res://`
 /// reference points at under `root`. `None` for non-`res://` strings
-/// (`user://`, `uid://`, plain paths) and the bare `res://` root. Used by the
-/// dependency graph to tell "outside the scan but on disk" (gitignored) from
-/// "genuinely missing".
+/// (`user://`, `uid://`, plain paths) and for the bare `res://` root.
 pub fn res_path_to_abs(res: &str, root: &Path) -> Option<std::path::PathBuf> {
     let rel = res.strip_prefix("res://")?;
     if rel.is_empty() {
@@ -354,40 +314,26 @@ pub fn res_path_to_abs(res: &str, root: &Path) -> Option<std::path::PathBuf> {
     Some(root.join(rel))
 }
 
-/// Pull every `res://` reference out of a scene / resource / script's text:
-/// `ext_resource ... path="res://..."`, `preload("res://...")`,
-/// `load("res://...")`. All such refs sit inside double quotes, so one
-/// quoted-`res://` scan catches them. `uid://`-only refs are intentionally
-/// NOT matched — a known gap (see `find_unused_godot_assets`).
+/// Pull every `res://` reference out of a scene, resource or script's text. All
+/// such refs sit inside double quotes, so one quoted-`res://` scan catches them.
+/// `uid://`-only refs are not matched — a known gap.
 fn extract_res_references(content: &str, re: &regex::Regex) -> Vec<String> {
     re.captures_iter(content)
         .filter_map(|c| c.get(1).map(|m| m.as_str().to_string()))
         .collect()
 }
 
-/// Comparison key for a `res://` path: the same name can reach us in two
-/// different Unicode encodings — decomposed (NFD) from a macOS directory
-/// listing, composed (NFC) from a scene file the editor wrote — and they are
-/// equal to every human and unequal to `HashSet`/`HashMap`. Both sides of
-/// every path comparison go through here.
-///
-/// Only comparisons are keyed this way; the raw reference string keeps
-/// flowing to [`res_path_to_abs`] and to anything the user sees, so nothing
-/// downstream inherits a form the project didn't actually write.
+/// Comparison key for a `res://` path, normalizing NFD (macOS directory
+/// listings) and NFC (editor-written scene files) to one form. Only comparisons
+/// are keyed this way; the raw reference string keeps flowing downstream.
 fn res_key(res: &str) -> String {
     use unicode_normalization::UnicodeNormalization;
     res.nfc().collect()
 }
 
-/// Find assets in a Godot project that no scene / resource / script references,
-/// mirroring the Unity unused-asset check. Heuristic: collects the literal
-/// `res://` paths from `.tscn` / `.tres` / `.gd` files plus the project's entry
-/// points (main scene + autoloads); any asset whose `res://` path is in neither
-/// set is reported. Returns absolute paths (same shape as the Unity command).
-///
-/// Known false-positive sources (the UI warns accordingly): `load(variable)`
-/// dynamic paths, refs carrying only a `uid://` (no path), and hand-written
-/// relative paths the editor never emits.
+/// Find assets no scene, resource or script references, mirroring the Unity
+/// check. Returns absolute paths. Known false-positive sources: `load(variable)`
+/// dynamic paths, `uid://`-only refs, and hand-written relative paths.
 pub fn find_unused_godot_assets(root_path: &str, assets: &[AssetInfo]) -> Vec<String> {
     let root = Path::new(root_path);
     let mut referenced: HashSet<String> = HashSet::new();
@@ -398,12 +344,8 @@ pub fn find_unused_godot_assets(root_path: &str, assets: &[AssetInfo]) -> Vec<St
     let re = regex::Regex::new(r#""(res://[^"]*)""#).expect("static regex compiles");
 
     // 1. Entry points from project.godot — used roots even when nothing else
-    //    references them. A generic quoted-res:// scan captures the main scene,
-    //    config/icon, boot splash image, default bus layout, default
-    //    environment, and every other res:// key, so a *default* project's
-    //    icon.svg / splash / bus layout aren't falsely reported as unused.
-    //    Autoloads carry a leading `*` inside the quotes (`"*res://..."`), which
-    //    the quoted-res:// scan can't match, so parse those explicitly.
+    //    references them. Autoloads carry a leading `*` inside the quotes, which
+    //    the quoted-res:// scan cannot match, so parse those explicitly.
     if let Ok(content) = fs::read_to_string(root.join("project.godot")) {
         for r in extract_res_references(&content, &re) {
             referenced.insert(res_key(&r));
@@ -414,9 +356,7 @@ pub fn find_unused_godot_assets(root_path: &str, assets: &[AssetInfo]) -> Vec<St
     }
 
     // 2. Every res:// path referenced by a scene / resource / script / C# file.
-    //    `.cs` is included so Mono projects' GD.Load("res://…") / ResourceLoader
-    //    references count — they were previously invisible, so any asset used
-    //    only from C# was mis-reported as unused.
+    //    `.cs` is included so Mono projects' GD.Load("res://…") references count.
     for asset in assets {
         let ext = asset.extension.to_lowercase();
         if ext == "tscn" || ext == "tres" || ext == "gd" || ext == "cs" {
@@ -428,12 +368,9 @@ pub fn find_unused_godot_assets(root_path: &str, assets: &[AssetInfo]) -> Vec<St
         }
     }
 
-    // 3. Assets whose res:// path nobody referenced (skipping Godot metadata
-    //    and scenes). Scenes are graph roots — the main scene, scenes loaded
-    //    via (often dynamic) change_scene_to_file()/load(), or opened straight
-    //    from the editor — so "no incoming res:// reference" doesn't make a
-    //    scene unused. They still count as reference *sources* in step 2, so
-    //    assets a scene references aren't falsely flagged.
+    // 3. Assets nobody referenced, skipping Godot metadata and scenes. Scenes
+    //    are graph roots, so "no incoming reference" does not make one unused;
+    //    they still count as reference sources in step 2.
     assets
         .iter()
         .filter(|a| !is_godot_metadata(&a.extension))
@@ -446,16 +383,9 @@ pub fn find_unused_godot_assets(root_path: &str, assets: &[AssetInfo]) -> Vec<St
         .collect()
 }
 
-/// Rename guardrail: for each target path (absolute), collect the project
-/// files that reference it by `res://` path. Sources are the same set the
-/// unused-asset scan reads (`.tscn` / `.tres` / `.gd` / `.cs`) **plus
-/// `project.godot` itself** — renaming the main scene or an autoload breaks
-/// the project before any scene does. Each referencing file counts once per
-/// target no matter how often it repeats the path. Self-references are
-/// skipped: a file naming its own `res://` path would technically break too,
-/// but "this file references itself" reads as noise in a rename warning and
-/// such files are vanishingly rare. Returned source names are root-relative;
-/// targets nobody references are absent from the map.
+/// Rename guardrail: for each absolute target path, the project files that
+/// reference it by `res://` path. Sources are the unused-asset scan's set plus
+/// `project.godot`. Self-references are skipped; unreferenced targets are absent.
 pub fn referencing_files(
     root: &Path,
     assets: &[AssetInfo],
@@ -519,11 +449,9 @@ pub fn referencing_files(
     result
 }
 
-/// Build the raw `(from_res, to_res)` dependency edges for a Godot project:
-/// each scene / resource / script (`from`, its own `res://` path) → every
-/// `res://` resource it references (`to`). The caller turns these into a graph
-/// after filtering `to` to known nodes. Same `res://` parsing as
-/// `find_unused_godot_assets`; uid-only refs are likewise not captured.
+/// Build the raw `(from_res, to_res)` dependency edges: each scene / resource /
+/// script → every `res://` resource it references. The caller filters `to` down
+/// to known nodes. uid-only refs are likewise not captured.
 pub fn godot_dependency_edges(root: &Path, assets: &[AssetInfo]) -> Vec<(String, String)> {
     let re = regex::Regex::new(r#""(res://[^"]*)""#).expect("static regex compiles");
     let mut edges = Vec::new();
@@ -691,10 +619,8 @@ config/name="Minimal"
     }
 
     /// A half-typed `config/name="` yields a value of one lone quote, where
-    /// starts_with and ends_with match the *same* character. Slicing `1..0`
-    /// there used to panic — and release builds are `panic = "abort"`, so a
-    /// malformed project.godot took the whole app down instead of failing the
-    /// one command.
+    /// starts_with and ends_with match the same character. Slicing `1..0` there
+    /// panics, and release builds are `panic = "abort"`.
     #[test]
     fn unquote_tolerates_a_lone_quote_character() {
         assert_eq!(unquote("\""), "\"");
@@ -830,17 +756,9 @@ config/name="Minimal"
         assert!(!unused.iter().any(|p| p.ends_with("level_2.tscn")));
     }
 
-    /// macOS writes decomposed (NFD) file names to disk in a number of
-    /// routine situations — HFS+ volumes, zips round-tripped through other
-    /// systems, older sync tools — while the Godot editor writes the
-    /// composed (NFC) form into scene files. The two are the same name to
-    /// every user-visible surface and different strings to a `HashSet`.
-    ///
-    /// Both directions of that mismatch are silent and destructive: the
-    /// rename guard reports "nothing references this", the user renames, and
-    /// the game breaks — which is the single thing the guard exists to
-    /// prevent — while unused-asset detection invites deleting a file that
-    /// is very much in use.
+    /// macOS writes decomposed (NFD) file names to disk in routine situations,
+    /// while the Godot editor writes the composed (NFC) form into scene files.
+    /// The two are one name to the user and two strings to a `HashSet`.
     #[test]
     fn nfd_disk_names_match_nfc_scene_references() {
         use crate::scanner::AssetType;
@@ -889,11 +807,8 @@ config/name="Minimal"
     }
 
     /// Both Godot consumers read `project.godot` straight off disk rather than
-    /// looking it up in the scan's asset list. That independence is what makes
-    /// it safe for the scanner to drop files from that list, so pin it: a
-    /// refactor that "tidied" the disk read into an asset-list lookup would
-    /// turn every autoload into an unused asset (inviting deletion) and every
-    /// autoload rename into an unguarded one — both silent.
+    /// from the scan's asset list. Turning that into an asset-list lookup would
+    /// silently make every autoload unused and every autoload rename unguarded.
     #[test]
     fn project_godot_is_a_reference_source_outside_the_asset_list() {
         use crate::scanner::AssetType;
@@ -925,8 +840,8 @@ config/name="Minimal"
             unity_guid: None,
         };
 
-        // Deliberately WITHOUT project.godot: this is the list a scan hands
-        // over, and the point is that the references survive its absence.
+        // Without project.godot: this is the list a scan hands over, and the
+        // references must survive its absence.
         let script = Path::new("autoload").join("game_state.gd");
         let assets = vec![
             mk(&script, "gd", AssetType::Script),

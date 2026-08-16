@@ -24,12 +24,9 @@ const FIT_SIZE = 2;
 interface ModelViewer3DProps {
   filePath: string;
   extension: string;
-  /// Backend's canonical unique-vertex count (from Rust scan metadata).
-  /// When present it's shown in the footer instead of three.js's own
-  /// count, which inflates for non-indexed OBJ/FBX (the loader expands
-  /// vertices per-face) and so wouldn't match the preview card / analyzer.
-  /// Undefined for formats the backend doesn't parse (dae/3ds/vox) — the
-  /// footer then falls back to the three.js count.
+  /// The backend's canonical unique-vertex count. Shown instead of three.js's own
+  /// count, which inflates for non-indexed OBJ/FBX. Undefined for formats the
+  /// backend does not parse, where the footer falls back to the three.js count.
   vertexCount?: number;
   onFullscreen?: () => void;
 }
@@ -47,13 +44,9 @@ export function ModelViewer3D({ filePath, extension, vertexCount, onFullscreen }
   // The loaded model, held apart from the scene's permanent contents (lights
   // and grid) so that swapping files disposes only the model.
   const modelRef = useRef<THREE.Object3D | null>(null);
-  // Monotonic token identifying the current load. Loader callbacks capture
-  // their run's value and re-check it before touching any state — a shared
-  // boolean can't do this, because the next run resets it to "alive" and a
-  // still-in-flight onLoad/onError from the previous model then passes the
-  // guard (hijacking mixerRef, adding the stale mesh to the scene, or
-  // painting "Failed to load" over a successfully rendered model). Both
-  // effects below bump it, so unmount invalidates in-flight callbacks too.
+  // Monotonic token identifying the current load. Loader callbacks capture their
+  // run's value and re-check it before touching state; a shared boolean cannot do
+  // this. Both effects bump it, so unmount invalidates in-flight callbacks too.
   const runIdRef = useRef(0);
   const mixerRef = useRef<THREE.AnimationMixer | null>(null);
   const clockRef = useRef<THREE.Clock>(new THREE.Clock());
@@ -62,24 +55,9 @@ export function ModelViewer3D({ filePath, extension, vertexCount, onFullscreen }
   const [error, setError] = useState<ModelError | null>(null);
   const [stats, setStats] = useState<LoadingStats | null>(null);
 
-  // The viewer — renderer, scene, camera, controls, lights, grid — is built
-  // once per mount and outlives every file shown in it.
-  //
-  // It used to be rebuilt for each file, which cost one WebGL context per
-  // model previewed. `releaseRenderer` force-loses the old context, but
-  // WebKit does not hand the slot back until GC, so walking a folder of
-  // models climbs to the engine's ~16-context ceiling; from there on it logs
-  // "There are too many active WebGL contexts on this page" on every
-  // creation, and — because it force-loses the oldest context itself, which
-  // is always one we had already abandoned — our own teardown then adds
-  // "INVALID_OPERATION: loseContext: context already lost". Measured
-  // 2026-08-15 on a fresh page, 16 models walked with the arrow keys: 17
-  // contexts and that pair of errors before, 2 contexts and a clean console
-  // after (the 2 is React.StrictMode double-invoking this effect in dev;
-  // production creates one).
-  //
-  // `theme` is read here only for the starting backdrop; the effect further
-  // down keeps it current without rebuilding any of this.
+  // The viewer — renderer, scene, camera, controls, lights, grid — is built once
+  // per mount and outlives every file shown in it. `theme` is read here only for
+  // the starting backdrop; the effect further down keeps it current.
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -150,10 +128,9 @@ export function ModelViewer3D({ filePath, extension, vertexCount, onFullscreen }
     };
     animate();
 
-    // Handle resize. Observe the container (not just window) so the canvas
-    // also tracks react-resizable-panels divider drags — those resize the
-    // panel without firing a window `resize` event. A container observer
-    // covers window resizes too, since the container is responsive.
+    // Handle resize. Observe the container, not just the window, so the canvas
+    // also tracks react-resizable-panels divider drags, which fire no window
+    // `resize` event. A container observer covers window resizes too.
     const handleResize = () => {
       const newWidth = container.clientWidth || 250;
       const newHeight = container.clientHeight || 250;
@@ -183,7 +160,7 @@ export function ModelViewer3D({ filePath, extension, vertexCount, onFullscreen }
       sceneRef.current = null;
       cameraRef.current = null;
     };
-    // Deliberately empty: nothing about this viewer depends on the props.
+    // Empty: nothing about this viewer depends on the props.
   }, []);
 
   // Changing file swaps the model and nothing else.
@@ -250,10 +227,9 @@ export function ModelViewer3D({ filePath, extension, vertexCount, onFullscreen }
     };
   }, [filePath, extension]);
 
-  // Theme is read at scene construction above but deliberately kept out of that
-  // effect's dependencies: it would tear down and rebuild the renderer, reload
-  // the model and reset the camera every time the user toggles the theme. The
-  // backdrop is the only thing that has to follow, so it follows on its own.
+  // Theme is read at scene construction above but kept out of that effect's
+  // dependencies: it would tear down the renderer, reload the model and reset the
+  // camera on every theme toggle. Only the backdrop has to follow.
   useEffect(() => {
     if (sceneRef.current) {
       sceneRef.current.background = new THREE.Color(VIEWER_BACKDROP[theme]);

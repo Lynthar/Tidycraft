@@ -1,17 +1,6 @@
-//! Rule-driven tag suggestions — runs `LearnedRule`s produced by AI
-//! Learning over the current scan and groups matched assets by tag
-//! label.
-//!
-//! Uses the same `TagSuggester` interface as `HeuristicSuggester` so the
-//! `suggest_tags` command can swap between them transparently. Output
-//! is `Vec<TagGroup>` with the same shape — frontend doesn't need to
-//! know whether suggestions came from heuristic clustering or LLM-
-//! derived rules.
-//!
-//! Rules apply independently per asset; the suggester aggregates by tag
-//! label (multiple rules may target the same tag, in which case the
-//! group inherits the highest confidence and a hint pointing to the
-//! winning rule).
+//! Rule-driven tag suggestions: runs the `LearnedRule`s AI Learning produced over
+//! the current scan and groups matched assets by tag label. Same `TagSuggester`
+//! interface and `Vec<TagGroup>` output as `HeuristicSuggester`.
 
 use std::collections::{HashMap, HashSet};
 
@@ -50,25 +39,18 @@ fn stem(name: &str) -> &str {
     }
 }
 
-/// A non-fatal problem that stopped AI-learned rules from running as
-/// written.
-///
-/// These reached `eprintln!` and nowhere else, which in a shipped app means
-/// nowhere at all — a Finder-launched `.app` has no stderr attached to
-/// anything. Nor does the panel give the user another signal to read: rule
-/// groups and heuristic groups render identically, so falling back looks
-/// exactly like a rule set that happened to produce these groups. They now
-/// ride back with the suggestions and the panel states them.
+/// A non-fatal problem that stopped AI-learned rules from running as written.
+/// Rule groups and heuristic groups render identically, so these ride back with
+/// the suggestions and the panel states them.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RuleWarning {
     /// `tidycraft.ai.toml` is there but unreadable or malformed: every rule
     /// in it was skipped and the heuristic suggester ran in their place.
     RulesUnreadable { detail: String },
-    /// One `filename_regex` rule's pattern didn't compile, so that rule
-    /// matched nothing. The review panel pre-validates with JS `RegExp`,
-    /// which accepts what this engine rejects (backreferences `\1`,
-    /// look-around `(?=`) — those pass review and land here.
+    /// One `filename_regex` rule's pattern did not compile, so that rule matched
+    /// nothing. The review panel pre-validates with JS `RegExp`, which accepts what
+    /// this engine rejects (backreferences `\1`, look-around `(?=`).
     InvalidPattern { pattern: String, detail: String },
 }
 
@@ -80,13 +62,9 @@ pub struct TagSuggestions {
     pub warnings: Vec<RuleWarning>,
 }
 
-/// Load AI-derived rules from `<root>/tidycraft.ai.toml` and run them.
-/// Falls back to `HeuristicSuggester` when there is nothing to run — no
-/// rules file (the user hasn't run AI Learning yet) or an empty rule list.
-///
-/// A corrupt rules file falls back the same way rather than failing the
-/// call, so the panel still shows something, but it comes back as a
-/// `RulesUnreadable` warning instead of vanishing.
+/// Load AI-derived rules from `<root>/tidycraft.ai.toml` and run them. Falls back
+/// to `HeuristicSuggester` when there is nothing to run; a corrupt file falls back
+/// the same way but comes back as a `RulesUnreadable` warning.
 pub fn load_or_fallback(scan: &ScanResult, project_root: &std::path::Path) -> TagSuggestions {
     match crate::llm::rule_store::AiRulesDoc::load(project_root) {
         Ok(Some(d)) if !d.rules.is_empty() => {
@@ -141,17 +119,9 @@ impl RuleSuggester {
     }
 }
 
-/// Compile one rule. For `FilenameRegex`, attempts `Regex::new`; on
-/// failure returns a `None` regex so the rule skips at match time, plus
-/// the warning that says so. We deliberately do NOT propagate the error —
-/// a single malformed pattern shouldn't poison the whole rule set when the
-/// rest are usable. The LearnReviewPanel runs a similar validity check on
-/// the UI side via JS `RegExp` — close enough for the simple patterns the
-/// LLM emits, but the dialects diverge both ways: JS accepts what this
-/// engine rejects (backreferences `\1`, look-around `(?=`), and those land
-/// here and skip; while this engine accepts what JS rejects
-/// (`(?P<name>...)` named groups), so the panel can warn about a pattern
-/// that compiles fine here.
+/// Compile one rule. A `FilenameRegex` that fails `Regex::new` gets a `None` regex
+/// so it skips at match time, plus the warning that says so — one malformed
+/// pattern must not poison the rest. The two regex dialects diverge both ways.
 fn compile_one(rule: LearnedRule) -> (CompiledRule, Option<RuleWarning>) {
     let (regex, warning) = match &rule {
         LearnedRule::FilenameRegex { pattern, .. } => match Regex::new(pattern) {
@@ -249,18 +219,9 @@ impl TagSuggester for RuleSuggester {
     }
 }
 
-/// Decide whether a rule fires on the given asset. Returns `(tags,
-/// confidence, hint)` on hit, `None` on miss.
-///
-/// Matching semantics:
-/// - filename_token: case-insensitive substring of basename
-/// - path_prefix: case-sensitive prefix of relative path
-/// - path_segment: case-insensitive equality against any `/`-split
-///   segment of the relative path (so "hero" matches "a/hero/b" but
-///   not "a/heroic/b")
-/// - filename_regex: pre-compiled regex (linear-time `regex` crate, no
-///   backtracking) applied to the relative path. Patterns that failed
-///   to compile at construction time silent-skip here.
+/// Decide whether a rule fires on the given asset, returning `(tags, confidence,
+/// hint)` on a hit. filename_token is a case-insensitive substring of the
+/// basename, path_prefix is case-sensitive, path_segment is whole-segment.
 fn match_rule<'r>(
     cr: &'r CompiledRule,
     rel_path: &str,
@@ -461,11 +422,9 @@ mod tests {
 
     #[test]
     fn prompt_example_regex_is_alive_in_subdirectories() {
-        // The learning system prompt's filename_regex example must produce a
-        // rule that matches files inside subdirectories. The old example
-        // `^SM_.*\.fbx$` anchored to the START OF THE PATH — models imitating
-        // it emitted rules that never matched anything below the project
-        // root ("dead rules" the review panel's syntax check can't catch).
+        // The learning system prompt's filename_regex example must produce a rule
+        // that matches files inside subdirectories: an example anchored to the start
+        // of the path makes models emit rules that never match anything.
         let s = scan(
             "/p",
             &[
@@ -487,11 +446,8 @@ mod tests {
         assert!(hits[0].ends_with("Props/Rocks/SM_Rock.fbx"));
         assert!(hits[1].ends_with("SM_Root.fbx"));
 
-        // And the prompt's JSON example must carry the live pattern — guard
-        // against a regression back to the dead string-start anchor. (The
-        // prose may still MENTION "^SM_" as the counter-example; only the
-        // example rule's pattern value matters, since that's what models
-        // imitate.)
+        // The prompt's JSON example must carry the live pattern. Only the example
+        // rule's pattern value matters, since that is what models imitate.
         let prompt = crate::llm::prompts::SYSTEM_PROMPT_LEARNING;
         assert!(prompt.contains(r#""pattern": "(^|/)SM_[^/]*\\.fbx$""#));
         assert!(!prompt.contains(r#""pattern": "^SM_"#));
@@ -499,11 +455,9 @@ mod tests {
 
     #[test]
     fn invalid_regex_is_skipped_and_reported_other_rules_still_fire() {
-        // A malformed regex should NOT poison the whole call — it's
-        // skipped at compile time, the remaining rules carry on. But the
-        // skip has to be visible: the user saved that rule and would
-        // otherwise just see one fewer group, with no way to tell whether
-        // the rule is broken or simply matched nothing.
+        // A malformed regex must not poison the whole call, and the skip has to be
+        // visible: otherwise the user sees one fewer group with no way to tell a
+        // broken rule from one that simply matched nothing.
         let s = scan("/p", &["/p/SM_Sword.fbx", "/p/T_Hero.png"]);
         let rules = vec![
             LearnedRule::FilenameRegex {
@@ -598,11 +552,9 @@ mod tests {
         );
     }
 
-    /// `AITagPanel.tsx` mirrors this enum by hand and branches on the exact
-    /// `kind` strings — there is no codegen between the two sides. Renaming
-    /// a variant without touching the mirror would take the wrong branch and
-    /// render an interpolated `undefined`, which is how the warning would
-    /// end up as unreadable as the stderr line it replaced.
+    /// `AITagPanel.tsx` mirrors this enum by hand and branches on the exact `kind`
+    /// strings — there is no codegen between the two sides. A renamed variant would
+    /// take the wrong branch and render an interpolated `undefined`.
     #[test]
     fn warning_wire_shape_matches_the_frontends_mirror() {
         let unreadable = serde_json::to_value(RuleWarning::RulesUnreadable {

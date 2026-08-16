@@ -5,10 +5,9 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useProjectStore } from "../stores/projectStore";
 import { basename } from "../lib/pathUtils";
 
-/// Which project a check belongs to is part of the state on purpose: two
-/// unavailable projects side by side reuse this component across a switch
-/// (App.tsx renders it without a key), so a bare timestamp would surface on a
-/// project the user never asked to re-check.
+/// Which project a check belongs to is part of the state: two unavailable
+/// projects side by side reuse this component across a switch, so a bare timestamp
+/// would surface on a project the user never asked to re-check.
 type CheckState =
   | { projectId: string; phase: "checking" }
   | { projectId: string; phase: "checked"; at: string };

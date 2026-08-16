@@ -67,12 +67,9 @@ pub fn find_duplicates(assets: &[AssetInfo], root: &str) -> AnalysisResult {
         by_size.entry(asset.size).or_default().push(asset);
     }
 
-    // Then by the first few kilobytes, and only then in full. Size on its own
-    // barely narrows a texture library: block-compressed formats give every
-    // image of the same dimensions and format exactly the same byte count, so
-    // a project with five hundred 1024² BC7 maps used to read all five hundred
-    // of them end to end on every analysis. Files that differ do so almost
-    // always in their header, and the prefix pass settles them for 8 KB each.
+    // Then by the first few kilobytes, and only then in full. Size alone barely
+    // narrows a texture library: block-compressed images of one size and format
+    // have identical byte counts, and differing files differ in their header.
     for (_, same_size_assets) in by_size {
         if same_size_assets.len() < 2 {
             continue;
@@ -86,14 +83,9 @@ pub fn find_duplicates(assets: &[AssetInfo], root: &str) -> AnalysisResult {
         // Report duplicates (ordering fixed after the loops — the grouping
         // map iterates in random order)
         for duplicates in candidates {
-            // ONE issue per content group, carrying the full member list
-            // (original first — the group arrives path-sorted from the
-            // scan). An earlier revision emitted one issue per extra copy
-            // with the member list cloned onto each: quadratic in group
-            // size, and a real asset library (Kenney all-in-one: one 3178-
-            // file group) ballooned the IPC payload past 1 GB and OOM'd
-            // the webview. The group card in the UI never needed per-copy
-            // issues anyway.
+            // ONE issue per content group, carrying the full member list with the
+            // original first (the group arrives path-sorted from the scan). One
+            // issue per copy with the list cloned onto each is quadratic.
             let original = duplicates[0];
             let first_copy = duplicates[1];
             let group: Vec<String> = duplicates
@@ -119,17 +111,9 @@ pub fn find_duplicates(assets: &[AssetInfo], root: &str) -> AnalysisResult {
                 )),
                 auto_fixable: false,
                 related_paths: Some(group),
-                // `file_count` not `count` — see the model rules' note on
-                // i18next's plural selector.
-                //
-                // The suggestion interpolates two values the message does not:
-                // the original's root-relative path (the message carries only
-                // its name) and the count of redundant copies. Both have to
-                // ship, or a locale template cannot reproduce the English and
-                // the translation ends up carrying less than the string it
-                // replaces. Nothing gates this — the harvest pins declared
-                // against emitted, but no test reads the `format!` calls — so
-                // it surfaces only when someone tries to translate the rule.
+                // `file_count` not `count` — i18next reads `count` as a plural
+                // selector. The suggestion interpolates two values the message does
+                // not, so both must ship for a locale to reproduce the English.
                 args: issue_args([
                     ("file_count", duplicates.len().to_string()),
                     ("original", original.name.clone()),
@@ -140,11 +124,9 @@ pub fn find_duplicates(assets: &[AssetInfo], root: &str) -> AnalysisResult {
         }
     }
 
-    // Both grouping maps above are HashMaps, so issue order was random per
-    // run — the report reshuffled on every analysis while every sibling rule
-    // emits deterministically. Pin it by path. (Members within a group are
-    // already path-ordered: `assets` arrives sorted from the scan, so each
-    // group's "original" is the lexicographically first path.)
+    // Both grouping maps are HashMaps, so issue order is otherwise random per run.
+    // Pin it by path; members within a group are already path-ordered, so each
+    // group's "original" is the lexicographically first path.
     result
         .issues
         .sort_by(|a, b| a.asset_path.cmp(&b.asset_path));
@@ -196,10 +178,9 @@ mod tests {
 
     #[test]
     fn files_sharing_a_prefix_are_still_compared_in_full() {
-        // Guards the second pass. Two files with an identical 8 KB header and
-        // different bodies hash the same in the first pass, so dropping the
-        // full comparison would report them as duplicates of each other —
-        // and this rule's suggestion is to delete one of them.
+        // Guards the second pass: two files with an identical 8 KB header and
+        // different bodies hash the same in the first pass, and this rule's
+        // suggestion is to delete one of them.
         let dir = tempfile::tempdir().unwrap();
         let mut body_a = vec![0u8; PREFIX_BYTES as usize];
         let mut body_b = body_a.clone();

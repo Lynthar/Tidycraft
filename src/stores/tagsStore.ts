@@ -42,12 +42,9 @@ interface TagsState {
 const activeProjectId = (): string | null =>
   useProjectStore.getState().activeProjectId;
 
-/// Run a tag mutation against the backend, reporting failure instead of
-/// throwing. Every write action's declared type is `Promise<void>` or
-/// `Promise<Tag | null>`, but a failed `invoke` used to reject straight through
-/// them — and every call site does a bare `await`, so a failed delete became an
-/// unhandled rejection, no toast, and an edit form stuck in its pending state.
-/// `null` means "it didn't happen"; callers must not patch the mirror.
+/// Run a tag mutation against the backend, reporting failure instead of throwing:
+/// every call site does a bare `await`, so a rejected `invoke` became an unhandled
+/// rejection. `null` means "it didn't happen" — callers must not patch the mirror.
 async function tagWrite<T>(op: () => Promise<T>): Promise<T | null> {
   try {
     return await op();
@@ -108,13 +105,9 @@ export const useTagsStore = create<TagsState>((set, get) => ({
       invoke<Tag>("create_tag", { projectId, name, color })
     );
     if (!tag) return null;
-    // The backend write above targeted the snapshot projectId and stays
-    // valid; the in-memory mirror, however, belongs to whatever project is
-    // active NOW. If the user switched projects mid-flight, skip the mirror
-    // update (same snapshot-and-check as loadTags) — otherwise this project's
-    // tag shows up as a phantom in the other project's UI until its next
-    // loadTags. Switching back re-loads the truth from disk. Same guard in
-    // every mutation action below.
+    // The backend write targeted the snapshot projectId and stays valid, but the
+    // in-memory mirror belongs to whatever project is active NOW. Skip the mirror
+    // update after a switch; switching back re-loads the truth from disk.
     if (activeProjectId() !== projectId) return tag;
     set((state) => ({ tags: [...state.tags, tag] }));
     return tag;
@@ -128,15 +121,9 @@ export const useTagsStore = create<TagsState>((set, get) => ({
   ) => {
     const projectId = activeProjectId();
     if (!projectId) return;
-    // Backend accepts `Option<Option<String>>` for description, mapping:
-    //   undefined → don't send the field (leave unchanged)
-    //   null / "" → clear the description
-    //   string    → set to Some(s)
-    // IMPORTANT: plain serde deserializes JSON `null` to the OUTER `None`
-    // ("leave unchanged"), NOT `Some(None)` — so sending `null` is a silent
-    // no-op and the description could never actually be cleared. We send an
-    // empty string instead; the backend (`tags.rs::update_tag`) normalizes a
-    // blank string to `None`. An omitted field still means "leave unchanged".
+    // The backend takes `Option<Option<String>>`: omitted = leave unchanged,
+    // empty string = clear. Plain serde maps JSON `null` to the OUTER `None`, so
+    // sending null is a silent no-op — send `""`, which the backend normalizes.
     const payload: Record<string, unknown> = { projectId, tagId, name, color };
     if (description !== undefined) {
       payload.description = description ?? ""; // null → "" so the clear lands
@@ -286,10 +273,9 @@ useProjectStore.subscribe((state, prev) => {
   }
 });
 
-// Give projectStore.locateAsset a way to clear tag filters that would hide
-// the located asset (it can't import this store — see the bridge's comment).
-// The exclusion test mirrors AssetList's AND semantics: an asset is visible
-// only when it carries EVERY active filter tag.
+// Gives projectStore.locateAsset a way to clear tag filters that would hide the
+// located asset. The exclusion test mirrors AssetList's AND semantics: an asset
+// is visible only when it carries EVERY active filter tag.
 registerTagFilterBridge({
   clearIfFiltering: (path: string) => {
     const { tagFilters, assetTags, clearTagFilters } = useTagsStore.getState();
