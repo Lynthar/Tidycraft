@@ -5,6 +5,7 @@ mod git;
 mod godot;
 mod llm;
 mod project;
+mod project_path;
 mod scanner;
 mod sidecar;
 mod tags;
@@ -41,6 +42,15 @@ fn register_project(project_id: String, path: String) -> Result<(), String> {
 fn unregister_project(project_id: String) -> Result<(), String> {
     project::unregister(&project_id);
     Ok(())
+}
+
+/// 一次问一批路径还能不能用。批量是因为启动恢复要问的是「上次开着的全部项目
+/// 加上最近列表」,逐条 IPC 在项目多时纯属浪费。异步是因为每条路径都要
+/// `metadata` + `read_dir`——挂载但无响应的网络共享会让 `stat` 一直卡到挂载
+/// 超时,同步命令会连带冻结整个窗口。
+#[tauri::command(async)]
+fn check_project_paths(paths: Vec<String>) -> Vec<project_path::ProjectPathReport> {
+    project_path::check_all(&paths)
 }
 
 // ============ Scan Commands ============
@@ -3519,6 +3529,7 @@ pub fn run() {
             // Project lifecycle
             register_project,
             unregister_project,
+            check_project_paths,
             // Scan
             scan_project_incremental,
             cancel_scan,
