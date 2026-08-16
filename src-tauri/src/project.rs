@@ -111,11 +111,13 @@ fn registry() -> &'static Mutex<ProjectMap> {
     REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Register (or look up) a project. If the id is already registered, the
-/// existing entry is returned and `root_path` is ignored — callers can rely on
-/// idempotency. If `root_path` differs from what's stored, the stored value is
-/// updated (handles the case where the frontend re-opens the same project at a
-/// different path).
+/// 注册(或查出)一个项目。id 已存在且路径相同时返回既有条目,这是每次
+/// `openProject` 都会走的幂等路径。
+///
+/// **路径不同则整体重建**:同一个 id 指向另一个文件夹,意味着它现在是另一个
+/// 项目。曾经这里只改 `root_path` 一个字段,于是旧项目的 undo 历史、标签、
+/// watcher 和缓存扫描会留给新路径——那个分支当时不可达(前端按路径查已有
+/// 条目,id 相同必然路径相同),重新定位是第一个走进去的调用者。
 pub fn register(project_id: String, root_path: String) -> Arc<Mutex<ProjectState>> {
     // The registry lock is global — every project-scoped command passes through
     // it — so nothing slow may happen while it is held. Two things here are
@@ -135,15 +137,27 @@ pub fn register(project_id: String, root_path: String) -> Arc<Mutex<ProjectState
                 root_path.clone(),
             )));
             let mut map = registry().lock();
-            map.entry(project_id).or_insert(fresh).clone()
+            map.entry(project_id.clone()).or_insert(fresh).clone()
         }
     };
 
     // Registry lock is released by here — only the project lock is taken.
-    {
+    let needs_rebuild = entry.lock().root_path != root_path;
+    if needs_rebuild {
+        // 锁外构造:`ProjectState::new` 要读一次 undo 历史,而项目锁里不放慢活
+        // 是全仓的规矩(注册表锁那段同理)。
+        let fresh = ProjectState::new(project_id, root_path.clone());
         let mut state = entry.lock();
+        // 锁外构造的这段时间,另一个并发调用可能已经把这个 id 重建到了同一个
+        // 新路径——不重新核对就覆盖,会把那次构造(同样读了一遍 undo 历史)
+        // 出来的状态悄悄丢掉。这里落空就让 fresh 直接被丢弃,谁先到就用谁的。
         if state.root_path != root_path {
-            state.root_path = root_path;
+            // 旧路径上的扫描还在跑就取消它:它的结果属于一个这个 id 已经不再指向
+            // 的文件夹,回来只会覆盖新项目的状态。
+            if let Some(scan) = state.scan_state.as_ref() {
+                scan.cancel();
+            }
+            *state = fresh;
         }
     }
     entry
@@ -200,7 +214,106 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
     use tempfile::tempdir;
+
+    fn s(p: &std::path::Path) -> String {
+        p.to_string_lossy().replace('\\', "/")
+    }
+
+    // Neither test below exercises the TOCTOU re-check in the rebuild branch
+    // (`if state.root_path != root_path` after the lock-free construction) —
+    // both drive `register` from a single thread, so they pass whether or not
+    // that re-check is there. Proving it would need a barrier injected into
+    // production code to force a second `register` call to land mid-construction;
+    // this note exists so the two green tests below aren't mistaken for coverage.
+
+    /// 换路径 = 这个 id 现在是另一个项目。只换 `root_path` 会把旧项目的标签、
+    /// 缓存扫描和 watcher 留给新路径,于是新项目一开就带着别人的标签。
+    #[test]
+    fn registering_a_new_path_under_the_same_id_rebuilds_the_state() {
+        let old = tempdir().unwrap();
+        let new = tempdir().unwrap();
+        let id = "relocate_test_project".to_string();
+
+        // 旧项目:载入标签、加一条绑定、装一份缓存扫描。
+        fs::write(old.path().join("hero.png"), b"x").unwrap();
+        register(id.clone(), s(old.path()));
+        with_mut(&id, |st| {
+            let tag = st.ensure_tags().create_tag("wip".into(), "#ff0000".into());
+            st.ensure_tags().add_tag_to_asset("hero.png", &tag.id);
+            st.cached_scan = Some(
+                crate::scanner::scan_directory_with_state(&s(old.path()), None, true).unwrap(),
+            );
+            st.respect_gitignore = false;
+            Ok(())
+        })
+        .unwrap();
+
+        // 同一个 id、新路径。
+        register(id.clone(), s(new.path()));
+
+        with_ref(&id, |st| {
+            assert_eq!(
+                st.root_path,
+                s(new.path()),
+                "root path follows the new folder"
+            );
+            assert!(st.cached_scan.is_none(), "the old scan must not survive");
+            assert!(st.tags_data.is_none(), "the old tags must not survive");
+            // Documents intent, not a guarantee: installing a watcher needs an
+            // `AppHandle`, which a unit test has no way to provide, so this field
+            // is `None` whether or not the rebuild actually drops the old one.
+            assert!(st.watcher.is_none(), "the old watcher must not survive");
+            assert!(
+                st.respect_gitignore,
+                "a rebuilt state is back at its defaults"
+            );
+            Ok(())
+        })
+        .unwrap();
+
+        // 新根上重新载入标签,拿到的是空的——旧绑定没有跟过来。
+        with_mut(&id, |st| {
+            assert!(
+                st.ensure_tags().get_asset_tags("hero.png").is_empty(),
+                "the old project's binding must not reach the new path"
+            );
+            Ok(())
+        })
+        .unwrap();
+
+        unregister(&id);
+    }
+
+    /// 同一个路径重复注册仍然是幂等的——这是每次 openProject 都会走的路。
+    #[test]
+    fn registering_the_same_path_twice_keeps_the_state() {
+        let dir = tempdir().unwrap();
+        let id = "idempotent_test_project".to_string();
+
+        register(id.clone(), s(dir.path()));
+        with_mut(&id, |st| {
+            st.cached_scan = Some(
+                crate::scanner::scan_directory_with_state(&s(dir.path()), None, true).unwrap(),
+            );
+            Ok(())
+        })
+        .unwrap();
+
+        register(id.clone(), s(dir.path()));
+
+        with_ref(&id, |st| {
+            assert!(
+                st.cached_scan.is_some(),
+                "re-registering the same path must not throw away the scan"
+            );
+            Ok(())
+        })
+        .unwrap();
+
+        unregister(&id);
+    }
 
     /// Closing a project has to stop its scan, not just forget about it.
     /// `scan_project_incremental` clones the `Arc<ScanState>` before it starts
