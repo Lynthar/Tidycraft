@@ -40,17 +40,17 @@ export function TagSelector({ assetPath, assetTags, onOpenManager }: TagSelector
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-1 px-2 py-1 text-xs text-text-secondary hover:text-text-primary hover:bg-background rounded transition-colors"
+        className="flex items-center gap-1 px-2 py-1 text-xs text-ink-2 hover:text-ink hover:bg-base rounded transition-colors"
       >
         <TagIcon size={12} />
         <span>{t("tags.addTag")}</span>
       </button>
 
       {isOpen && (
-        <div className="absolute top-full left-0 mt-1 w-48 bg-card-bg border border-border rounded-lg shadow-lg z-50 overflow-hidden">
+        <div className="absolute top-full left-0 mt-1 w-48 bg-panel border border-line rounded-lg shadow-lg z-50 overflow-hidden">
           <div className="max-h-48 overflow-auto">
             {tags.length === 0 ? (
-              <p className="p-3 text-sm text-text-secondary text-center">
+              <p className="p-3 text-sm text-ink-2 text-center">
                 {t("tags.noTags")}
               </p>
             ) : (
@@ -61,7 +61,7 @@ export function TagSelector({ assetPath, assetTags, onOpenManager }: TagSelector
                     key={tag.id}
                     onClick={() => handleToggleTag(tag.id)}
                     className={cn(
-                      "flex items-center gap-2 w-full px-3 py-2 text-sm text-left hover:bg-background transition-colors",
+                      "flex items-center gap-2 w-full px-3 py-2 text-sm text-left hover:bg-base transition-colors",
                       isSelected && "bg-primary-tint"
                     )}
                   >
@@ -76,13 +76,13 @@ export function TagSelector({ assetPath, assetTags, onOpenManager }: TagSelector
               })
             )}
           </div>
-          <div className="border-t border-border">
+          <div className="border-t border-line">
             <button
               onClick={() => {
                 setIsOpen(false);
                 onOpenManager();
               }}
-              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-background transition-colors"
+              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-ink-2 hover:text-ink hover:bg-base transition-colors"
             >
               <Settings size={14} />
               {t("tags.manageTitle")}
@@ -158,10 +158,10 @@ export function BatchTagSelector({ selectedPaths, onOpenManager }: BatchTagSelec
       </button>
 
       {isOpen && (
-        <div className="absolute top-full left-0 mt-1 w-48 bg-card-bg border border-border rounded-lg shadow-lg z-50 overflow-hidden">
+        <div className="absolute top-full left-0 mt-1 w-48 bg-panel border border-line rounded-lg shadow-lg z-50 overflow-hidden">
           <div className="max-h-48 overflow-auto">
             {tags.length === 0 ? (
-              <p className="p-3 text-sm text-text-secondary text-center">
+              <p className="p-3 text-sm text-ink-2 text-center">
                 {t("tags.noTags")}
               </p>
             ) : (
@@ -169,25 +169,25 @@ export function BatchTagSelector({ selectedPaths, onOpenManager }: BatchTagSelec
                 <button
                   key={tag.id}
                   onClick={() => handleAddTag(tag.id)}
-                  className="flex items-center gap-2 w-full px-3 py-2 text-sm text-left hover:bg-background transition-colors"
+                  className="flex items-center gap-2 w-full px-3 py-2 text-sm text-left hover:bg-base transition-colors"
                 >
                   <span
                     className="w-3 h-3 rounded-full shrink-0"
                     style={{ backgroundColor: tag.color }}
                   />
                   <span className="flex-1 truncate">{tag.name}</span>
-                  <Plus size={14} className="text-text-secondary" />
+                  <Plus size={14} className="text-ink-2" />
                 </button>
               ))
             )}
           </div>
-          <div className="border-t border-border">
+          <div className="border-t border-line">
             <button
               onClick={() => {
                 setIsOpen(false);
                 onOpenManager();
               }}
-              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-text-secondary hover:text-text-primary hover:bg-background transition-colors"
+              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-ink-2 hover:text-ink hover:bg-base transition-colors"
             >
               <Settings size={14} />
               {t("tags.manageTitle")}

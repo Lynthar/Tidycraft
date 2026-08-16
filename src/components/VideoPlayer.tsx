@@ -108,7 +108,7 @@ export function VideoPlayer({ filePath }: VideoPlayerProps) {
   };
 
   return (
-    <div className="w-full bg-background rounded overflow-hidden">
+    <div className="w-full bg-base rounded overflow-hidden">
       {/* Video Element */}
       <div className="relative aspect-video bg-black">
         <video
@@ -143,7 +143,7 @@ export function VideoPlayer({ filePath }: VideoPlayerProps) {
       <div className="p-2 space-y-2">
         {/* Progress bar */}
         <div
-          className="h-1.5 bg-border rounded-full cursor-pointer group"
+          className="h-1.5 bg-line rounded-full cursor-pointer group"
           onClick={handleSeek}
         >
           <div
@@ -159,23 +159,23 @@ export function VideoPlayer({ filePath }: VideoPlayerProps) {
           <div className="flex items-center gap-2">
             <button
               onClick={togglePlay}
-              className="p-1 rounded hover:bg-card-bg text-text-secondary hover:text-text-primary transition-colors"
+              className="p-1 rounded hover:bg-panel text-ink-2 hover:text-ink transition-colors"
             >
               {isPlaying ? <Pause size={16} /> : <Play size={16} />}
             </button>
             <button
               onClick={toggleMute}
-              className="p-1 rounded hover:bg-card-bg text-text-secondary hover:text-text-primary transition-colors"
+              className="p-1 rounded hover:bg-panel text-ink-2 hover:text-ink transition-colors"
             >
               {isMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
             </button>
-            <span className="text-text-secondary">
+            <span className="text-ink-2">
               {formatTime(currentTime)} / {formatTime(duration)}
             </span>
           </div>
           <button
             onClick={handleFullscreen}
-            className="p-1 rounded hover:bg-card-bg text-text-secondary hover:text-text-primary transition-colors"
+            className="p-1 rounded hover:bg-panel text-ink-2 hover:text-ink transition-colors"
           >
             <Maximize2 size={16} />
           </button>

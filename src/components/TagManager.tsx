@@ -72,13 +72,13 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
       ariaLabel={t("tags.manageTitle")}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
     >
-      <div className="bg-card-bg border border-border rounded-lg shadow-xl w-full max-w-md">
+      <div className="bg-panel border border-line rounded-lg shadow-xl w-full max-w-md">
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-line">
           <h2 className="text-lg font-semibold">{t("tags.manageTitle")}</h2>
           <button
             onClick={onClose}
-            className="p-1 rounded hover:bg-background text-text-secondary hover:text-text-primary transition-colors"
+            className="p-1 rounded hover:bg-base text-ink-2 hover:text-ink transition-colors"
           >
             <X size={18} />
           </button>
@@ -92,8 +92,8 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
               <div
                 key={tag.id}
                 className={cn(
-                  "rounded hover:bg-background group",
-                  editingId === tag.id ? "p-2 bg-background" : "p-2"
+                  "rounded hover:bg-base group",
+                  editingId === tag.id ? "p-2 bg-base" : "p-2"
                 )}
               >
                 {editingId === tag.id ? (
@@ -120,7 +120,7 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
                         type="text"
                         value={editName}
                         onChange={(e) => setEditName(e.target.value)}
-                        className="flex-1 px-2 py-1 text-sm bg-card-bg border border-border rounded"
+                        className="flex-1 px-2 py-1 text-sm bg-panel border border-line rounded"
                         autoFocus
                       />
                       <button
@@ -131,7 +131,7 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
                       </button>
                       <button
                         onClick={() => setEditingId(null)}
-                        className="p-1 rounded hover:bg-background text-text-secondary"
+                        className="p-1 rounded hover:bg-base text-ink-2"
                       >
                         <X size={16} />
                       </button>
@@ -141,7 +141,7 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
                       value={editDescription}
                       onChange={(e) => setEditDescription(e.target.value)}
                       placeholder={t("tags.descriptionPlaceholder")}
-                      className="w-full px-2 py-1 text-xs bg-card-bg border border-border rounded"
+                      className="w-full px-2 py-1 text-xs bg-panel border border-line rounded"
                       style={{ color: "var(--text-2)" }}
                     />
                   </div>
@@ -167,13 +167,13 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
                     {!tag.description && <span className="flex-1" />}
                     <button
                       onClick={() => handleStartEdit(tag)}
-                      className="p-1 rounded hover:bg-background text-text-secondary opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="p-1 rounded hover:bg-base text-ink-2 opacity-0 group-hover:opacity-100 transition-opacity"
                     >
                       <Pencil size={14} />
                     </button>
                     <button
                       onClick={() => handleDelete(tag.id)}
-                      className="p-1 rounded hover:bg-error-soft text-error opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="p-1 rounded hover:bg-err-soft text-err opacity-0 group-hover:opacity-100 transition-opacity"
                     >
                       <Trash2 size={14} />
                     </button>
@@ -183,14 +183,14 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
             ))}
 
             {tags.length === 0 && !isCreating && (
-              <p className="text-center text-text-secondary py-4">
+              <p className="text-center text-ink-2 py-4">
                 {t("tags.noTags")}
               </p>
             )}
 
             {/* Create New Tag */}
             {isCreating ? (
-              <div className="flex items-center gap-2 p-2 bg-background rounded">
+              <div className="flex items-center gap-2 p-2 bg-base rounded">
                 <div className="flex gap-1">
                   {PRESET_COLORS.map((c) => (
                     <button
@@ -209,7 +209,7 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   placeholder={t("tags.tagName")}
-                  className="flex-1 px-2 py-1 text-sm bg-card-bg border border-border rounded"
+                  className="flex-1 px-2 py-1 text-sm bg-panel border border-line rounded"
                   autoFocus
                   onKeyDown={(e) => e.key === "Enter" && handleCreate()}
                 />
@@ -224,7 +224,7 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
                     setIsCreating(false);
                     setNewName("");
                   }}
-                  className="p-1 rounded hover:bg-background text-text-secondary"
+                  className="p-1 rounded hover:bg-base text-ink-2"
                 >
                   <X size={16} />
                 </button>
@@ -232,7 +232,7 @@ export function TagManager({ isOpen, onClose }: TagManagerProps) {
             ) : (
               <button
                 onClick={() => setIsCreating(true)}
-                className="flex items-center gap-2 w-full p-2 text-sm text-text-secondary hover:text-text-primary hover:bg-background rounded transition-colors"
+                className="flex items-center gap-2 w-full p-2 text-sm text-ink-2 hover:text-ink hover:bg-base rounded transition-colors"
               >
                 <Plus size={16} />
                 {t("tags.createTag")}

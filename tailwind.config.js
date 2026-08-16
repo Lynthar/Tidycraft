@@ -15,6 +15,9 @@ export default {
         primary: {
           DEFAULT: "var(--color-primary)",
           hover: "var(--color-primary-hover)",
+          // v2 name for the hover step — same token the bridge resolves
+          // `hover` to; the legacy key goes away with the bridge.
+          strong: "var(--primary-strong)",
           glow: "var(--color-primary-glow)",
           // Same reason as the status tints below: `bg-primary/20` emits no
           // rule, so the two tint steps the design system already defines have
@@ -29,9 +32,9 @@ export default {
         // Solid tints for status surfaces. Tailwind 3 silently drops opacity
         // modifiers on `var()` colours (`bg-error/10` emits no rule), so a tint
         // has to be its own token — same reason --primary-soft exists.
-        "success-soft": "var(--ok-soft)",
-        "warning-soft": "var(--warn-soft)",
-        "error-soft": "var(--err-soft)",
+        "ok-soft": "var(--ok-soft)",
+        "warn-soft": "var(--warn-soft)",
+        "err-soft": "var(--err-soft)",
         "info-soft": "var(--info-soft)",
 
         // === Redesign tokens (Forge system, OKLCH) ===

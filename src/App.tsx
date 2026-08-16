@@ -232,7 +232,7 @@ function App() {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-background">
+    <div className="h-screen flex flex-col bg-base">
       <div className="tc-titlebar" data-tauri-drag-region>
         <span className="tc-title-text" data-tauri-drag-region>
           Tidycraft
@@ -261,7 +261,7 @@ function App() {
           >
             <Sidebar />
           </Panel>
-          <Separator className="w-1 bg-border hover:bg-[color-mix(in_oklch,var(--primary)_50%,var(--line))] active:bg-primary transition-colors cursor-col-resize" />
+          <Separator className="w-1 bg-line hover:bg-[color-mix(in_oklch,var(--primary)_50%,var(--line))] active:bg-primary transition-colors cursor-col-resize" />
 
           <Panel
             id="main"
@@ -269,12 +269,12 @@ function App() {
             minSize="30%"
             className="overflow-hidden"
           >
-            <main className="h-full bg-background overflow-hidden">
+            <main className="h-full bg-base overflow-hidden">
               {renderMainContent()}
             </main>
           </Panel>
 
-          <Separator className="w-1 bg-border hover:bg-[color-mix(in_oklch,var(--primary)_50%,var(--line))] active:bg-primary transition-colors cursor-col-resize" />
+          <Separator className="w-1 bg-line hover:bg-[color-mix(in_oklch,var(--primary)_50%,var(--line))] active:bg-primary transition-colors cursor-col-resize" />
           <Panel
             id="preview"
             panelRef={previewPanelRef}

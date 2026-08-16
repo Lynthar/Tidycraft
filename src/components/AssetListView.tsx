@@ -298,12 +298,12 @@ function AssetRow({
                     <TagBadge key={tag.id} tag={tag} />
                   ))}
                   {assetTags.length > 2 && (
-                    <span className="text-[10px] text-text-secondary">
+                    <span className="text-[10px] text-ink-2">
                       +{assetTags.length - 2}
                     </span>
                   )}
                   {assetTags.length === 0 && (
-                    <span className="text-text-secondary text-xs">-</span>
+                    <span className="text-ink-2 text-xs">-</span>
                   )}
                 </div>
               </div>
@@ -314,7 +314,7 @@ function AssetRow({
             return (
               <div
                 key={columnId}
-                className="py-2 px-3 text-text-secondary shrink-0 overflow-hidden truncate text-right font-mono text-xs"
+                className="py-2 px-3 text-ink-2 shrink-0 overflow-hidden truncate text-right font-mono text-xs"
                 style={{ width }}
               >
                 {count != null ? (
@@ -339,7 +339,7 @@ function AssetRow({
             <div
               key={columnId}
               className={cn(
-                "py-2 px-3 text-text-secondary shrink-0 overflow-hidden truncate",
+                "py-2 px-3 text-ink-2 shrink-0 overflow-hidden truncate",
                 columnId !== "type" && "text-right",
                 (columnId === "dimensions" || columnId === "faces") &&
                   "font-mono text-xs"
@@ -389,17 +389,17 @@ function ColumnConfigDropdown({ t }: { t: (key: string) => string }) {
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="p-1.5 text-text-secondary hover:text-text-primary hover:bg-background rounded transition-colors"
+        className="p-1.5 text-ink-2 hover:text-ink hover:bg-base rounded transition-colors"
         title={t("columns.configure")}
       >
         <Settings size={14} />
       </button>
       {isOpen && (
-        <div className="absolute right-0 top-full mt-1 bg-card-bg border border-border rounded-lg shadow-lg z-50 py-1 min-w-[160px]">
+        <div className="absolute right-0 top-full mt-1 bg-panel border border-line rounded-lg shadow-lg z-50 py-1 min-w-[160px]">
           {columns.map((col) => (
             <label
               key={col.id}
-              className="flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-background transition-colors"
+              className="flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-base transition-colors"
             >
               <input
                 type="checkbox"
@@ -408,7 +408,7 @@ function ColumnConfigDropdown({ t }: { t: (key: string) => string }) {
                 disabled={col.id === "name"}
                 className="w-4 h-4 accent-primary"
               />
-              <span className={col.id === "name" ? "text-text-secondary" : ""}>
+              <span className={col.id === "name" ? "text-ink-2" : ""}>
                 {t(`columns.${col.id}`)}
               </span>
             </label>
@@ -721,7 +721,7 @@ export function AssetListView({
           {/* Header spacer for the always-reserved checkbox lane. */}
           <div className="w-8 py-2 px-2 shrink-0" />
           <div
-            className="py-2 px-3 shrink-0 flex items-center gap-1 cursor-pointer hover:text-text-primary transition-colors select-none relative overflow-hidden"
+            className="py-2 px-3 shrink-0 flex items-center gap-1 cursor-pointer hover:text-ink transition-colors select-none relative overflow-hidden"
             style={{ width: columnWidths.name }}
             {...sortableHeaderProps(() => setSortField("name"))}
           >
@@ -749,7 +749,7 @@ export function AssetListView({
                     columnId !== "type" &&
                       columnId !== "tags" &&
                       "justify-end text-right",
-                    isSortable && "cursor-pointer hover:text-text-primary"
+                    isSortable && "cursor-pointer hover:text-ink"
                   )}
                   style={{ width }}
                   {...(isSortable

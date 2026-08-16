@@ -39,11 +39,11 @@ export function SearchHistory({ isVisible, onSelect, onClose, searchQuery }: Sea
   return (
     <div
       ref={panelRef}
-      className="absolute left-0 right-0 top-full mt-1 bg-card-bg border border-border rounded-lg shadow-lg z-50 overflow-hidden"
+      className="absolute left-0 right-0 top-full mt-1 bg-panel border border-line rounded-lg shadow-lg z-50 overflow-hidden"
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-border bg-background">
-        <span className="text-xs text-text-secondary flex items-center gap-1.5">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-line bg-base">
+        <span className="text-xs text-ink-2 flex items-center gap-1.5">
           <Clock size={12} />
           {t("search.recentSearches", "Recent Searches")}
         </span>
@@ -52,7 +52,7 @@ export function SearchHistory({ isVisible, onSelect, onClose, searchQuery }: Sea
             e.stopPropagation();
             clearHistory();
           }}
-          className="text-xs text-text-secondary hover:text-error transition-colors flex items-center gap-1"
+          className="text-xs text-ink-2 hover:text-err transition-colors flex items-center gap-1"
         >
           <Trash2 size={12} />
           {t("search.clearAll", "Clear")}
@@ -64,17 +64,17 @@ export function SearchHistory({ isVisible, onSelect, onClose, searchQuery }: Sea
         {filteredHistory.map((query, index) => (
           <div
             key={`${query}-${index}`}
-            className="flex items-center gap-2 px-3 py-2 hover:bg-background transition-colors cursor-pointer group"
+            className="flex items-center gap-2 px-3 py-2 hover:bg-base transition-colors cursor-pointer group"
             onClick={() => onSelect(query)}
           >
-            <Clock size={12} className="text-text-secondary shrink-0" />
-            <span className="flex-1 text-sm text-text-primary truncate">{query}</span>
+            <Clock size={12} className="text-ink-2 shrink-0" />
+            <span className="flex-1 text-sm text-ink truncate">{query}</span>
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 removeFromHistory(query);
               }}
-              className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-card-bg text-text-secondary hover:text-error transition-all"
+              className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-panel text-ink-2 hover:text-err transition-all"
             >
               <X size={12} />
             </button>

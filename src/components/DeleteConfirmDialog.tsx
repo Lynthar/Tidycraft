@@ -86,50 +86,50 @@ export function DeleteConfirmDialog({
       initialFocusRef={cancelButtonRef}
       disabled={isDeleting}
     >
-      <div className="bg-card-bg border border-border rounded-lg shadow-2xl w-[480px] max-h-[80vh] flex flex-col">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-          <div className="flex items-center gap-2 text-error">
+      <div className="bg-panel border border-line rounded-lg shadow-2xl w-[480px] max-h-[80vh] flex flex-col">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-line">
+          <div className="flex items-center gap-2 text-err">
             <Trash2 size={18} />
-            <h3 className="font-medium text-text-primary">{title}</h3>
+            <h3 className="font-medium text-ink">{title}</h3>
           </div>
           <button
             onClick={onClose}
             disabled={isDeleting}
-            className="text-text-secondary hover:text-text-primary disabled:opacity-50"
+            className="text-ink-2 hover:text-ink disabled:opacity-50"
           >
             <X size={16} />
           </button>
         </div>
 
         <div className="flex-1 overflow-auto p-4 space-y-3">
-          <p className="text-sm text-text-secondary">{t("deleteConfirm.hint")}</p>
+          <p className="text-sm text-ink-2">{t("deleteConfirm.hint")}</p>
 
-          <ul className="bg-background border border-border rounded px-3 py-2 text-sm font-mono space-y-0.5">
+          <ul className="bg-base border border-line rounded px-3 py-2 text-sm font-mono space-y-0.5">
             {preview.map((p) => (
-              <li key={p} className="truncate text-text-primary" title={p}>
+              <li key={p} className="truncate text-ink" title={p}>
                 {basename(p)}
               </li>
             ))}
             {overflow > 0 && (
-              <li className="text-text-secondary italic">
+              <li className="text-ink-2 italic">
                 {t("deleteConfirm.andMore", { count: overflow })}
               </li>
             )}
           </ul>
 
           {errors.length > 0 && (
-            <div className="border border-error bg-error-soft rounded p-3 space-y-2">
-              <div className="flex items-center gap-2 text-error font-medium text-sm">
+            <div className="border border-err bg-err-soft rounded p-3 space-y-2">
+              <div className="flex items-center gap-2 text-err font-medium text-sm">
                 <AlertCircle size={14} />
                 {t("deleteConfirm.errorsTitle")}
               </div>
-              <ul className="text-xs text-error space-y-1 max-h-32 overflow-auto">
+              <ul className="text-xs text-err space-y-1 max-h-32 overflow-auto">
                 {errors.map((e, i) => (
                   <li key={i} className="font-mono">
                     <span className="truncate block" title={e.path}>
                       {e.path ? basename(e.path) : "(unknown)"}
                     </span>
-                    <span className="text-error">{e.message}</span>
+                    <span className="text-err">{e.message}</span>
                   </li>
                 ))}
               </ul>
@@ -137,12 +137,12 @@ export function DeleteConfirmDialog({
           )}
         </div>
 
-        <div className="flex justify-end gap-2 px-4 py-3 border-t border-border">
+        <div className="flex justify-end gap-2 px-4 py-3 border-t border-line">
           <button
             ref={cancelButtonRef}
             onClick={onClose}
             disabled={isDeleting}
-            className="px-3 py-1.5 text-sm rounded hover:bg-background text-text-secondary disabled:opacity-50"
+            className="px-3 py-1.5 text-sm rounded hover:bg-base text-ink-2 disabled:opacity-50"
           >
             {errors.length > 0 ? t("common.done") : t("common.cancel")}
           </button>
@@ -153,8 +153,8 @@ export function DeleteConfirmDialog({
               className={cn(
                 "px-3 py-1.5 text-sm rounded font-medium transition-colors",
                 isDeleting
-                  ? "bg-error-soft text-error cursor-not-allowed"
-                  : "bg-error hover:brightness-105 text-on-error"
+                  ? "bg-err-soft text-err cursor-not-allowed"
+                  : "bg-err hover:brightness-105 text-on-error"
               )}
             >
               {isDeleting ? t("deleteConfirm.deleting") : t("deleteConfirm.confirm")}

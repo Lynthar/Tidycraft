@@ -137,7 +137,7 @@ export function AdvancedFiltersPanel() {
         className={`flex items-center gap-1.5 px-2.5 py-1.5 text-sm rounded border transition-colors ${
           hasActiveFilters
             ? "bg-primary-tint border-primary text-primary"
-            : "bg-background border-border text-text-secondary hover:text-text-primary hover:border-primary"
+            : "bg-base border-line text-ink-2 hover:text-ink hover:border-primary"
         }`}
       >
         <Filter size={14} />
@@ -171,15 +171,15 @@ export function AdvancedFiltersPanel() {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 top-full mt-2 w-80 bg-card-bg border border-border rounded-lg shadow-xl z-50">
+        <div className="absolute right-0 top-full mt-2 w-80 bg-panel border border-line rounded-lg shadow-xl z-50">
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-line">
             <h3 className="font-medium text-sm">{t("filters.advancedFilters", "Advanced Filters")}</h3>
             <div className="flex items-center gap-2">
               {hasActiveFilters && (
                 <button
                   onClick={handleReset}
-                  className="flex items-center gap-1 px-2 py-1 text-xs text-text-secondary hover:text-text-primary transition-colors"
+                  className="flex items-center gap-1 px-2 py-1 text-xs text-ink-2 hover:text-ink transition-colors"
                 >
                   <RotateCcw size={12} />
                   {t("filters.reset", "Reset")}
@@ -187,7 +187,7 @@ export function AdvancedFiltersPanel() {
               )}
               <button
                 onClick={() => setIsOpen(false)}
-                className="p-1 rounded hover:bg-background text-text-secondary hover:text-text-primary"
+                className="p-1 rounded hover:bg-base text-ink-2 hover:text-ink"
               >
                 <X size={14} />
               </button>
@@ -197,7 +197,7 @@ export function AdvancedFiltersPanel() {
           <div className="p-4 space-y-4 max-h-[400px] overflow-y-auto">
             {/* Asset Type */}
             <div>
-              <label className="block text-xs text-text-secondary uppercase mb-2">
+              <label className="block text-xs text-ink-2 uppercase mb-2">
                 {t("filters.assetType", "Asset Type")}
               </label>
               <div className="flex flex-wrap gap-1.5">
@@ -206,7 +206,7 @@ export function AdvancedFiltersPanel() {
                   className={`px-2 py-1 text-xs rounded transition-colors ${
                     typeFilter === null
                       ? "bg-primary text-[var(--on-primary)]"
-                      : "bg-background text-text-secondary hover:text-text-primary"
+                      : "bg-base text-ink-2 hover:text-ink"
                   }`}
                 >
                   {t("assetTypes.all")}
@@ -220,7 +220,7 @@ export function AdvancedFiltersPanel() {
                     className={`px-2 py-1 text-xs rounded transition-colors ${
                       typeFilter?.includes(type)
                         ? "bg-primary text-[var(--on-primary)]"
-                        : "bg-background text-text-secondary hover:text-text-primary"
+                        : "bg-base text-ink-2 hover:text-ink"
                     }`}
                   >
                     {t(`assetTypes.${type}`)}
@@ -231,7 +231,7 @@ export function AdvancedFiltersPanel() {
 
             {/* File Size */}
             <div>
-              <label className="block text-xs text-text-secondary uppercase mb-2">
+              <label className="block text-xs text-ink-2 uppercase mb-2">
                 {t("filters.fileSize", "File Size (MB)")}
               </label>
               <div className="flex items-center gap-2">
@@ -240,59 +240,59 @@ export function AdvancedFiltersPanel() {
                   placeholder={t("filters.min", "Min")}
                   value={advancedFilters.minSize != null ? (advancedFilters.minSize / 1024 / 1024).toFixed(2) : ""}
                   onChange={(e) => handleSizeChange("minSize", e.target.value)}
-                  className="flex-1 px-2 py-1.5 text-sm bg-background border border-border rounded text-text-primary focus:outline-none focus:border-primary"
+                  className="flex-1 px-2 py-1.5 text-sm bg-base border border-line rounded text-ink focus:outline-none focus:border-primary"
                 />
-                <span className="text-text-secondary">-</span>
+                <span className="text-ink-2">-</span>
                 <input
                   type="number"
                   placeholder={t("filters.max", "Max")}
                   value={advancedFilters.maxSize != null ? (advancedFilters.maxSize / 1024 / 1024).toFixed(2) : ""}
                   onChange={(e) => handleSizeChange("maxSize", e.target.value)}
-                  className="flex-1 px-2 py-1.5 text-sm bg-background border border-border rounded text-text-primary focus:outline-none focus:border-primary"
+                  className="flex-1 px-2 py-1.5 text-sm bg-base border border-line rounded text-ink focus:outline-none focus:border-primary"
                 />
               </div>
             </div>
 
             {/* Image Dimensions */}
             <div>
-              <label className="block text-xs text-text-secondary uppercase mb-2">
+              <label className="block text-xs text-ink-2 uppercase mb-2">
                 {t("filters.dimensions", "Image Dimensions (px)")}
               </label>
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-text-secondary w-8">{t("filters.width", "W")}:</span>
+                  <span className="text-xs text-ink-2 w-8">{t("filters.width", "W")}:</span>
                   <input
                     type="number"
                     placeholder={t("filters.min", "Min")}
                     value={advancedFilters.minWidth ?? ""}
                     onChange={(e) => handleDimensionChange("minWidth", e.target.value)}
-                    className="flex-1 px-2 py-1.5 text-sm bg-background border border-border rounded text-text-primary focus:outline-none focus:border-primary"
+                    className="flex-1 px-2 py-1.5 text-sm bg-base border border-line rounded text-ink focus:outline-none focus:border-primary"
                   />
-                  <span className="text-text-secondary">-</span>
+                  <span className="text-ink-2">-</span>
                   <input
                     type="number"
                     placeholder={t("filters.max", "Max")}
                     value={advancedFilters.maxWidth ?? ""}
                     onChange={(e) => handleDimensionChange("maxWidth", e.target.value)}
-                    className="flex-1 px-2 py-1.5 text-sm bg-background border border-border rounded text-text-primary focus:outline-none focus:border-primary"
+                    className="flex-1 px-2 py-1.5 text-sm bg-base border border-line rounded text-ink focus:outline-none focus:border-primary"
                   />
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-text-secondary w-8">{t("filters.height", "H")}:</span>
+                  <span className="text-xs text-ink-2 w-8">{t("filters.height", "H")}:</span>
                   <input
                     type="number"
                     placeholder={t("filters.min", "Min")}
                     value={advancedFilters.minHeight ?? ""}
                     onChange={(e) => handleDimensionChange("minHeight", e.target.value)}
-                    className="flex-1 px-2 py-1.5 text-sm bg-background border border-border rounded text-text-primary focus:outline-none focus:border-primary"
+                    className="flex-1 px-2 py-1.5 text-sm bg-base border border-line rounded text-ink focus:outline-none focus:border-primary"
                   />
-                  <span className="text-text-secondary">-</span>
+                  <span className="text-ink-2">-</span>
                   <input
                     type="number"
                     placeholder={t("filters.max", "Max")}
                     value={advancedFilters.maxHeight ?? ""}
                     onChange={(e) => handleDimensionChange("maxHeight", e.target.value)}
-                    className="flex-1 px-2 py-1.5 text-sm bg-background border border-border rounded text-text-primary focus:outline-none focus:border-primary"
+                    className="flex-1 px-2 py-1.5 text-sm bg-base border border-line rounded text-ink focus:outline-none focus:border-primary"
                   />
                 </div>
               </div>
@@ -300,52 +300,52 @@ export function AdvancedFiltersPanel() {
 
             {/* Model complexity */}
             <div>
-              <label className="block text-xs text-text-secondary uppercase mb-2">
+              <label className="block text-xs text-ink-2 uppercase mb-2">
                 {t("filters.model", "Model (vertices / faces)")}
               </label>
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-text-secondary w-8">{t("filters.verts", "V")}:</span>
+                  <span className="text-xs text-ink-2 w-8">{t("filters.verts", "V")}:</span>
                   <input type="number" placeholder={t("filters.min", "Min")} value={advancedFilters.minVertices ?? ""}
                     onChange={(e) => handleNumberChange("minVertices", e.target.value)}
-                    className="flex-1 px-2 py-1.5 text-sm bg-background border border-border rounded text-text-primary focus:outline-none focus:border-primary" />
-                  <span className="text-text-secondary">-</span>
+                    className="flex-1 px-2 py-1.5 text-sm bg-base border border-line rounded text-ink focus:outline-none focus:border-primary" />
+                  <span className="text-ink-2">-</span>
                   <input type="number" placeholder={t("filters.max", "Max")} value={advancedFilters.maxVertices ?? ""}
                     onChange={(e) => handleNumberChange("maxVertices", e.target.value)}
-                    className="flex-1 px-2 py-1.5 text-sm bg-background border border-border rounded text-text-primary focus:outline-none focus:border-primary" />
+                    className="flex-1 px-2 py-1.5 text-sm bg-base border border-line rounded text-ink focus:outline-none focus:border-primary" />
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-text-secondary w-8">{t("filters.faces", "F")}:</span>
+                  <span className="text-xs text-ink-2 w-8">{t("filters.faces", "F")}:</span>
                   <input type="number" placeholder={t("filters.min", "Min")} value={advancedFilters.minFaces ?? ""}
                     onChange={(e) => handleNumberChange("minFaces", e.target.value)}
-                    className="flex-1 px-2 py-1.5 text-sm bg-background border border-border rounded text-text-primary focus:outline-none focus:border-primary" />
-                  <span className="text-text-secondary">-</span>
+                    className="flex-1 px-2 py-1.5 text-sm bg-base border border-line rounded text-ink focus:outline-none focus:border-primary" />
+                  <span className="text-ink-2">-</span>
                   <input type="number" placeholder={t("filters.max", "Max")} value={advancedFilters.maxFaces ?? ""}
                     onChange={(e) => handleNumberChange("maxFaces", e.target.value)}
-                    className="flex-1 px-2 py-1.5 text-sm bg-background border border-border rounded text-text-primary focus:outline-none focus:border-primary" />
+                    className="flex-1 px-2 py-1.5 text-sm bg-base border border-line rounded text-ink focus:outline-none focus:border-primary" />
                 </div>
               </div>
             </div>
 
             {/* Duration */}
             <div>
-              <label className="block text-xs text-text-secondary uppercase mb-2">
+              <label className="block text-xs text-ink-2 uppercase mb-2">
                 {t("filters.duration", "Duration (sec)")}
               </label>
               <div className="flex items-center gap-2">
                 <input type="number" placeholder={t("filters.min", "Min")} value={advancedFilters.minDuration ?? ""}
                   onChange={(e) => handleNumberChange("minDuration", e.target.value)}
-                  className="flex-1 px-2 py-1.5 text-sm bg-background border border-border rounded text-text-primary focus:outline-none focus:border-primary" />
-                <span className="text-text-secondary">-</span>
+                  className="flex-1 px-2 py-1.5 text-sm bg-base border border-line rounded text-ink focus:outline-none focus:border-primary" />
+                <span className="text-ink-2">-</span>
                 <input type="number" placeholder={t("filters.max", "Max")} value={advancedFilters.maxDuration ?? ""}
                   onChange={(e) => handleNumberChange("maxDuration", e.target.value)}
-                  className="flex-1 px-2 py-1.5 text-sm bg-background border border-border rounded text-text-primary focus:outline-none focus:border-primary" />
+                  className="flex-1 px-2 py-1.5 text-sm bg-base border border-line rounded text-ink focus:outline-none focus:border-primary" />
               </div>
             </div>
 
             {/* Alpha */}
             <div>
-              <label className="block text-xs text-text-secondary uppercase mb-2">
+              <label className="block text-xs text-ink-2 uppercase mb-2">
                 {t("filters.alpha", "Alpha Channel")}
               </label>
               <div className="flex flex-wrap gap-1.5">
@@ -360,7 +360,7 @@ export function AdvancedFiltersPanel() {
                     className={`px-2 py-1 text-xs rounded transition-colors ${
                       advancedFilters.hasAlpha === v
                         ? "bg-primary text-[var(--on-primary)]"
-                        : "bg-background text-text-secondary hover:text-text-primary"
+                        : "bg-base text-ink-2 hover:text-ink"
                     }`}
                   >
                     {label}
@@ -371,7 +371,7 @@ export function AdvancedFiltersPanel() {
 
             {/* Color Space */}
             <div>
-              <label className="block text-xs text-text-secondary uppercase mb-2">
+              <label className="block text-xs text-ink-2 uppercase mb-2">
                 {t("filters.colorSpace", "Color Space")}
               </label>
               <div className="flex flex-wrap gap-1.5">
@@ -391,7 +391,7 @@ export function AdvancedFiltersPanel() {
                     className={`px-2 py-1 text-xs rounded transition-colors ${
                       advancedFilters.colorSpace === v
                         ? "bg-primary text-[var(--on-primary)]"
-                        : "bg-background text-text-secondary hover:text-text-primary"
+                        : "bg-base text-ink-2 hover:text-ink"
                     }`}
                   >
                     {label}
@@ -402,7 +402,7 @@ export function AdvancedFiltersPanel() {
 
             {/* Extensions */}
             <div>
-              <label className="block text-xs text-text-secondary uppercase mb-2">
+              <label className="block text-xs text-ink-2 uppercase mb-2">
                 {t("filters.extensions", "File Extensions")}
               </label>
               <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
@@ -413,14 +413,14 @@ export function AdvancedFiltersPanel() {
                     className={`px-2 py-1 text-xs rounded transition-colors ${
                       advancedFilters.extensions.includes(ext)
                         ? "bg-primary text-[var(--on-primary)]"
-                        : "bg-background text-text-secondary hover:text-text-primary hover:bg-panel-hover"
+                        : "bg-base text-ink-2 hover:text-ink hover:bg-panel-hover"
                     }`}
                   >
                     .{ext}
                   </button>
                 ))}
                 {availableExtensions.length === 0 && (
-                  <span className="text-xs text-text-secondary italic">
+                  <span className="text-xs text-ink-2 italic">
                     {t("filters.noExtensions", "No files scanned")}
                   </span>
                 )}
@@ -429,7 +429,7 @@ export function AdvancedFiltersPanel() {
 
             {gitInfo?.is_repo && (
               <div>
-                <label className="block text-xs text-text-secondary uppercase mb-2">
+                <label className="block text-xs text-ink-2 uppercase mb-2">
                   {t("filters.gitStatus")}
                 </label>
                 <div className="flex flex-wrap gap-1.5">
@@ -440,7 +440,7 @@ export function AdvancedFiltersPanel() {
                       className={`px-2 py-1 text-xs rounded transition-colors ${
                         advancedFilters.gitStatusFilter.includes(status)
                           ? "bg-primary text-[var(--on-primary)]"
-                          : "bg-background text-text-secondary hover:text-text-primary"
+                          : "bg-base text-ink-2 hover:text-ink"
                       }`}
                     >
                       {t(`git.status.${status}`)}

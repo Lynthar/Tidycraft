@@ -194,16 +194,16 @@ export function NamingFixDialog({ isOpen, onClose, scopePaths, onComplete }: Nam
       className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
       disabled={isApplying}
     >
-      <div className="bg-card-bg border border-border rounded-lg w-[620px] max-w-[92vw] max-h-[82vh] flex flex-col">
+      <div className="bg-panel border border-line rounded-lg w-[620px] max-w-[92vw] max-h-[82vh] flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-border">
+        <div className="flex items-center justify-between p-4 border-b border-line">
           <h2 className="text-lg font-semibold flex items-center gap-2">
             <Wand2 size={17} style={{ color: "var(--primary)" }} />
             {t("namingFix.title")}
           </h2>
           <button
             onClick={onClose}
-            className="p-1 rounded hover:bg-background text-text-secondary"
+            className="p-1 rounded hover:bg-base text-ink-2"
           >
             <X size={20} />
           </button>
@@ -211,26 +211,26 @@ export function NamingFixDialog({ isOpen, onClose, scopePaths, onComplete }: Nam
 
         {/* Content */}
         <div className="flex-1 overflow-auto p-4 space-y-4">
-          <p className="text-xs text-text-secondary">{t("namingFix.desc")}</p>
+          <p className="text-xs text-ink-2">{t("namingFix.desc")}</p>
 
           {isLoading ? (
-            <div className="p-6 text-center text-text-secondary text-sm">
+            <div className="p-6 text-center text-ink-2 text-sm">
               {t("namingFix.loading")}
             </div>
           ) : previews.length === 0 ? (
-            <div className="p-6 text-center text-text-secondary text-sm">
+            <div className="p-6 text-center text-ink-2 text-sm">
               {t("namingFix.nothingToFix")}
             </div>
           ) : (
-            <div className="border border-border rounded overflow-hidden">
+            <div className="border border-line rounded overflow-hidden">
               <table className="w-full text-sm">
-                <thead className="bg-background sticky top-0">
+                <thead className="bg-base sticky top-0">
                   <tr>
-                    <th className="w-8 p-2 border-b border-border"></th>
-                    <th className="text-left p-2 border-b border-border">
+                    <th className="w-8 p-2 border-b border-line"></th>
+                    <th className="text-left p-2 border-b border-line">
                       {t("namingFix.original")}
                     </th>
-                    <th className="text-left p-2 border-b border-border">
+                    <th className="text-left p-2 border-b border-line">
                       {t("namingFix.newName")}
                     </th>
                   </tr>
@@ -241,7 +241,7 @@ export function NamingFixDialog({ isOpen, onClose, scopePaths, onComplete }: Nam
                     const collides = collidingPaths.has(p.path);
                     return (
                       <tr key={p.path} style={{ opacity: included ? 1 : 0.5 }}>
-                        <td className="p-2 border-b border-border align-top">
+                        <td className="p-2 border-b border-line align-top">
                           <input
                             type="checkbox"
                             checked={!excluded.has(p.path)}
@@ -257,15 +257,15 @@ export function NamingFixDialog({ isOpen, onClose, scopePaths, onComplete }: Nam
                             style={{ width: 13, height: 13, marginTop: 4 }}
                           />
                         </td>
-                        <td className="p-2 border-b border-border align-top">
+                        <td className="p-2 border-b border-line align-top">
                           <div
-                            className="truncate max-w-[210px] text-text-secondary"
+                            className="truncate max-w-[210px] text-ink-2"
                             title={p.path}
                           >
                             {p.original_name}
                           </div>
                         </td>
-                        <td className="p-2 border-b border-border align-top">
+                        <td className="p-2 border-b border-line align-top">
                           <input
                             type="text"
                             value={edited[p.path] ?? p.suggested_name}
@@ -273,7 +273,7 @@ export function NamingFixDialog({ isOpen, onClose, scopePaths, onComplete }: Nam
                               setEdited((prev) => ({ ...prev, [p.path]: e.target.value }))
                             }
                             disabled={excluded.has(p.path)}
-                            className="w-full px-2 py-1 bg-background border rounded text-text-primary focus:outline-none focus:border-primary disabled:opacity-50"
+                            className="w-full px-2 py-1 bg-base border rounded text-ink focus:outline-none focus:border-primary disabled:opacity-50"
                             style={{ borderColor: collides ? "var(--warn)" : "var(--line)" }}
                           />
                           {collides && (
@@ -321,7 +321,7 @@ export function NamingFixDialog({ isOpen, onClose, scopePaths, onComplete }: Nam
           )}
 
           {error && (
-            <div className="flex items-center gap-2 p-3 bg-error-soft border border-error rounded text-error text-sm">
+            <div className="flex items-center gap-2 p-3 bg-err-soft border border-err rounded text-err text-sm">
               <AlertCircle size={16} />
               {error}
             </div>
@@ -331,8 +331,8 @@ export function NamingFixDialog({ isOpen, onClose, scopePaths, onComplete }: Nam
             <div
               className={`flex items-center gap-2 p-3 rounded text-sm ${
                 result.error_count > 0
-                  ? "bg-warning-soft border border-warning text-warning"
-                  : "bg-success-soft border border-success text-success"
+                  ? "bg-warn-soft border border-warn text-warn"
+                  : "bg-ok-soft border border-ok text-ok"
               }`}
             >
               <Check size={16} />
@@ -345,7 +345,7 @@ export function NamingFixDialog({ isOpen, onClose, scopePaths, onComplete }: Nam
           )}
 
           {result && result.errors.length > 0 && (
-            <div className="max-h-32 overflow-auto p-3 bg-error-soft border border-error rounded text-error text-sm">
+            <div className="max-h-32 overflow-auto p-3 bg-err-soft border border-err rounded text-err text-sm">
               <div className="font-medium mb-1">{t("namingFix.errors")}</div>
               <ul className="space-y-1">
                 {result.errors.map((e, i) => (
@@ -358,15 +358,15 @@ export function NamingFixDialog({ isOpen, onClose, scopePaths, onComplete }: Nam
           )}
 
           {result && (
-            <p className="text-xs text-text-secondary">{t("namingFix.reopenToRetry")}</p>
+            <p className="text-xs text-ink-2">{t("namingFix.reopenToRetry")}</p>
           )}
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-3 p-4 border-t border-border">
+        <div className="flex items-center justify-end gap-3 p-4 border-t border-line">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm text-text-secondary hover:text-text-primary"
+            className="px-4 py-2 text-sm text-ink-2 hover:text-ink"
           >
             {t("common.cancel")}
           </button>
@@ -377,7 +377,7 @@ export function NamingFixDialog({ isOpen, onClose, scopePaths, onComplete }: Nam
           <button
             onClick={handleApply}
             disabled={isApplying || changedCount === 0 || result !== null}
-            className="flex items-center gap-2 px-4 py-2 text-sm bg-primary text-[var(--on-primary)] rounded hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-2 px-4 py-2 text-sm bg-primary text-[var(--on-primary)] rounded hover:bg-primary-strong disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isApplying ? (
               <>

@@ -444,7 +444,7 @@ export function AssetList() {
 
   if (isScanning) {
     return (
-      <div className="flex items-center justify-center h-full text-text-secondary">
+      <div className="flex items-center justify-center h-full text-ink-2">
         {t("assetList.scanning")}
       </div>
     );
@@ -452,7 +452,7 @@ export function AssetList() {
 
   if (!scanResult) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-text-secondary gap-2">
+      <div className="flex flex-col items-center justify-center h-full text-ink-2 gap-2">
         <Image size={48} className="opacity-50" />
         <p>{t("assetList.openFolder")}</p>
       </div>
@@ -470,7 +470,7 @@ export function AssetList() {
     );
     const otherFiltersActive = typeFilter !== null || tagFilters.length > 0 || advancedActive;
     return (
-      <div className="flex flex-col items-center justify-center h-full text-text-secondary gap-3">
+      <div className="flex flex-col items-center justify-center h-full text-ink-2 gap-3">
         <p>
           {hasQuery
             ? t("assetList.noSearchResults", { query: searchQuery.trim() })

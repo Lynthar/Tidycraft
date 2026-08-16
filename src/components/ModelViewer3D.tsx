@@ -268,14 +268,14 @@ export function ModelViewer3D({ filePath, extension, vertexCount, onFullscreen }
   };
 
   return (
-    <div className="w-full bg-background rounded overflow-hidden">
+    <div className="w-full bg-base rounded overflow-hidden">
       <div
         ref={containerRef}
         className="w-full aspect-square relative"
       >
         {isLoading && (
           <div className="absolute inset-0 flex items-center justify-center bg-panel z-10">
-            <div className="text-center text-text-secondary">
+            <div className="text-center text-ink-2">
               <Box size={32} className="mx-auto mb-2 animate-pulse text-[var(--accent)]" />
               <span className="text-sm">{t("modelViewer.loading", "Loading model...")}</span>
             </div>
@@ -283,15 +283,15 @@ export function ModelViewer3D({ filePath, extension, vertexCount, onFullscreen }
         )}
         {error && (
           <div className="absolute inset-0 flex items-center justify-center bg-panel z-10">
-            <div className="text-center text-error px-4">
+            <div className="text-center text-err px-4">
               <Box size={32} className="mx-auto mb-2 opacity-50" />
               <span className="text-sm">{error.fallback ? t(error.key, error.fallback) : t(error.key)}</span>
             </div>
           </div>
         )}
       </div>
-      <div className="p-2 flex items-center justify-between border-t border-border">
-        <div className="text-xs text-text-secondary space-y-0.5">
+      <div className="p-2 flex items-center justify-between border-t border-line">
+        <div className="text-xs text-ink-2 space-y-0.5">
           <div>{t("modelViewer.controls", "Drag to rotate • Scroll to zoom")}</div>
           {stats && (
             <div className="text-[10px] text-ink-3">
@@ -307,7 +307,7 @@ export function ModelViewer3D({ filePath, extension, vertexCount, onFullscreen }
           {onFullscreen && (
             <button
               onClick={onFullscreen}
-              className="p-1 rounded hover:bg-card-bg text-text-secondary hover:text-text-primary transition-colors"
+              className="p-1 rounded hover:bg-panel text-ink-2 hover:text-ink transition-colors"
               title={t("modelViewer.fullscreen", "Fullscreen")}
             >
               <Maximize2 size={14} />
@@ -315,7 +315,7 @@ export function ModelViewer3D({ filePath, extension, vertexCount, onFullscreen }
           )}
           <button
             onClick={resetCamera}
-            className="p-1 rounded hover:bg-card-bg text-text-secondary hover:text-text-primary transition-colors"
+            className="p-1 rounded hover:bg-panel text-ink-2 hover:text-ink transition-colors"
             title={t("modelViewer.reset", "Reset view")}
           >
             <RotateCcw size={14} />

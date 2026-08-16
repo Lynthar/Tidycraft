@@ -260,16 +260,16 @@ export function DependencyGraphModal() {
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
     >
       <div
-        className="bg-card-bg border border-border rounded-lg flex flex-col overflow-hidden"
+        className="bg-panel border border-line rounded-lg flex flex-col overflow-hidden"
         style={{ width: "82vw", height: "82vh", maxWidth: 1100 }}
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-          <h2 className="text-sm font-semibold text-text-primary truncate">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-line">
+          <h2 className="text-sm font-semibold text-ink truncate">
             {t("depGraph.title", { name: centerName })}
           </h2>
           <button
             onClick={() => setOpen(false)}
-            className="text-text-secondary hover:text-text-primary shrink-0"
+            className="text-ink-2 hover:text-ink shrink-0"
             title={t("depGraph.close")}
           >
             <X size={16} />
@@ -278,15 +278,15 @@ export function DependencyGraphModal() {
 
         <div style={{ flex: 1, minHeight: 0 }}>
           {loading ? (
-            <div className="flex items-center justify-center h-full text-text-secondary text-sm">
+            <div className="flex items-center justify-center h-full text-ink-2 text-sm">
               {t("depGraph.loading")}
             </div>
           ) : error ? (
-            <div className="flex items-center justify-center h-full text-text-secondary text-sm">
+            <div className="flex items-center justify-center h-full text-ink-2 text-sm">
               {error}
             </div>
           ) : nodes.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-text-secondary text-sm">
+            <div className="flex items-center justify-center h-full text-ink-2 text-sm">
               {t("depGraph.empty")}
             </div>
           ) : (
@@ -309,7 +309,7 @@ export function DependencyGraphModal() {
           )}
         </div>
 
-        <div className="px-4 py-2 text-[11px] text-text-secondary border-t border-border flex items-center gap-4 flex-wrap">
+        <div className="px-4 py-2 text-[11px] text-ink-2 border-t border-line flex items-center gap-4 flex-wrap">
           <span>{t("depGraph.hint")}</span>
           <span style={{ flex: 1 }} />
           {specialKinds.map((k) => (

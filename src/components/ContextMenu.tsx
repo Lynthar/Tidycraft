@@ -328,7 +328,7 @@ export function ContextMenu({
   return (
     <div
       ref={menuRef}
-      className="fixed z-50 bg-card-bg border border-border rounded-lg shadow-xl py-1 min-w-[180px]"
+      className="fixed z-50 bg-panel border border-line rounded-lg shadow-xl py-1 min-w-[180px]"
       style={{
         left: menuSize ? clamp(position.x, menuSize.width, window.innerWidth) : position.x,
         top: menuSize ? clamp(position.y, menuSize.height, window.innerHeight) : position.y,
@@ -341,12 +341,12 @@ export function ContextMenu({
         onMouseEnter={openSubmenu}
         onMouseLeave={scheduleCloseSubmenu}
       >
-        <button className="flex items-center justify-between gap-2 w-full px-3 py-1.5 text-sm text-left hover:bg-background transition-colors">
+        <button className="flex items-center justify-between gap-2 w-full px-3 py-1.5 text-sm text-left hover:bg-base transition-colors">
           <div className="flex items-center gap-2">
             <TagIcon size={14} />
             <span>{t("contextMenu.tags")}</span>
           </div>
-          <ChevronRight size={12} className="text-text-secondary" />
+          <ChevronRight size={12} className="text-ink-2" />
         </button>
 
         {/* Tag Submenu — zero gap to avoid a "no-element" transit zone between
@@ -359,12 +359,12 @@ export function ContextMenu({
             onMouseLeave={scheduleCloseSubmenu}
             style={{ top: submenu.shift }}
             className={cn(
-              "absolute bg-card-bg border border-border rounded-lg shadow-xl py-1 min-w-[160px]",
+              "absolute bg-panel border border-line rounded-lg shadow-xl py-1 min-w-[160px]",
               submenu.side === "right" ? "left-full" : "right-full"
             )}
           >
             {tags.length === 0 ? (
-              <div className="px-3 py-2 text-sm text-text-secondary">{t("tags.noTags")}</div>
+              <div className="px-3 py-2 text-sm text-ink-2">{t("tags.noTags")}</div>
             ) : (
               tags.map((tag) => {
                 const isSelected = assetTags.some((t) => t.id === tag.id);
@@ -372,7 +372,7 @@ export function ContextMenu({
                   <button
                     key={tag.id}
                     onClick={() => handleTagToggle(tag.id)}
-                    className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-left hover:bg-background transition-colors"
+                    className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-left hover:bg-base transition-colors"
                   >
                     <span
                       className="w-3 h-3 rounded-full shrink-0"
@@ -384,13 +384,13 @@ export function ContextMenu({
                 );
               })
             )}
-            <div className="border-t border-border mt-1 pt-1">
+            <div className="border-t border-line mt-1 pt-1">
               <button
                 onClick={() => {
                   onOpenTagManager();
                   onClose();
                 }}
-                className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-text-secondary hover:text-text-primary hover:bg-background transition-colors"
+                className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-ink-2 hover:text-ink hover:bg-base transition-colors"
               >
                 {t("tags.manageTitle")}
               </button>
@@ -399,21 +399,21 @@ export function ContextMenu({
         )}
       </div>
 
-      <div className="border-t border-border my-1" />
+      <div className="border-t border-line my-1" />
 
       {/* Other Menu Items */}
       {menuItems.map((item, index) => {
         if (item.type === "separator") {
-          return <div key={index} className="border-t border-border my-1" />;
+          return <div key={index} className="border-t border-line my-1" />;
         }
         return (
           <button
             key={index}
             onClick={item.onClick}
             className={cn(
-              "flex items-center gap-2 w-full px-3 py-1.5 text-sm text-left hover:bg-background transition-colors",
-              (item as { danger?: boolean }).danger && "text-error",
-              (item as { muted?: boolean }).muted && "italic text-text-secondary"
+              "flex items-center gap-2 w-full px-3 py-1.5 text-sm text-left hover:bg-base transition-colors",
+              (item as { danger?: boolean }).danger && "text-err",
+              (item as { muted?: boolean }).muted && "italic text-ink-2"
             )}
           >
             {item.icon}

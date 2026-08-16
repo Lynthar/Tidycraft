@@ -375,7 +375,7 @@ export function ModelLightbox({ isOpen, filePath, extension, vertexCount, modelN
         )}
         {error && (
           <div className="absolute inset-0 flex items-center justify-center bg-panel z-10">
-            <div className="text-center text-error px-4">
+            <div className="text-center text-err px-4">
               <Box size={48} className="mx-auto mb-3 opacity-50" />
               <span className="text-sm">
                 {error.fallback ? t(error.key, error.fallback) : t(error.key)}

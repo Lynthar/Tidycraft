@@ -108,7 +108,7 @@ const ENGINE_NAMES: Record<EngineInfo["kind"], string> = {
 function EngineRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline justify-between gap-4 min-w-0 text-sm">
-      <span className="text-xs text-text-secondary shrink-0">{label}</span>
+      <span className="text-xs text-ink-2 shrink-0">{label}</span>
       <span className="truncate text-right" title={value}>
         {value}
       </span>
@@ -268,7 +268,7 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full text-text-secondary">
+      <div className="flex items-center justify-center h-full text-ink-2">
         {t("assetPreview.loading")}
       </div>
     );
@@ -276,7 +276,7 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
 
   if (error || !stats) {
     return (
-      <div className="flex items-center justify-center h-full text-text-secondary">
+      <div className="flex items-center justify-center h-full text-ink-2">
         {error || t("stats.noData")}
       </div>
     );
@@ -357,7 +357,7 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
     <div className="h-full overflow-auto p-4 space-y-4">
       {/* Engine card: identity + key config from the project's marker file */}
       {engineInfo && (
-        <div className="bg-card-bg border border-border rounded-lg p-4">
+        <div className="bg-panel border border-line rounded-lg p-4">
           <div className={`flex items-center gap-2 ${engineRows.length > 0 ? "mb-3" : ""}`}>
             <h3 className="text-sm font-medium">
               {ENGINE_NAMES[engineInfo.kind]}
@@ -383,50 +383,50 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
 
       {/* Summary Cards */}
       <div className="grid grid-cols-4 gap-4">
-        <div className="bg-card-bg border border-border rounded-lg p-4">
+        <div className="bg-panel border border-line rounded-lg p-4">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-primary-soft rounded-lg">
               <Files className="text-primary" size={24} />
             </div>
             <div>
-              <p className="text-2xl font-bold text-text-primary">{stats.total_assets.toLocaleString()}</p>
-              <p className="text-xs text-text-secondary">{t("statusBar.total")} {t("statusBar.assets")}</p>
+              <p className="text-2xl font-bold text-ink">{stats.total_assets.toLocaleString()}</p>
+              <p className="text-xs text-ink-2">{t("statusBar.total")} {t("statusBar.assets")}</p>
             </div>
           </div>
         </div>
 
-        <div className="bg-card-bg border border-border rounded-lg p-4">
+        <div className="bg-panel border border-line rounded-lg p-4">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-info-soft rounded-lg">
               <HardDrive className="text-info" size={24} />
             </div>
             <div>
-              <p className="text-2xl font-bold text-text-primary">{formatFileSize(stats.total_size)}</p>
-              <p className="text-xs text-text-secondary">{t("assetList.size")}</p>
+              <p className="text-2xl font-bold text-ink">{formatFileSize(stats.total_size)}</p>
+              <p className="text-xs text-ink-2">{t("assetList.size")}</p>
             </div>
           </div>
         </div>
 
-        <div className="bg-card-bg border border-border rounded-lg p-4">
+        <div className="bg-panel border border-line rounded-lg p-4">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-warning-soft rounded-lg">
-              <AlertTriangle className="text-warning" size={24} />
+            <div className="p-2 bg-warn-soft rounded-lg">
+              <AlertTriangle className="text-warn" size={24} />
             </div>
             <div>
-              <p className="text-2xl font-bold text-text-primary">{issueCount}</p>
-              <p className="text-xs text-text-secondary">{t("issues.title")}</p>
+              <p className="text-2xl font-bold text-ink">{issueCount}</p>
+              <p className="text-xs text-ink-2">{t("issues.title")}</p>
             </div>
           </div>
         </div>
 
-        <div className="bg-card-bg border border-border rounded-lg p-4">
+        <div className="bg-panel border border-line rounded-lg p-4">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-success-soft rounded-lg">
-              <CheckCircle className="text-success" size={24} />
+            <div className="p-2 bg-ok-soft rounded-lg">
+              <CheckCircle className="text-ok" size={24} />
             </div>
             <div>
-              <p className="text-2xl font-bold text-text-primary">{passCount}</p>
-              <p className="text-xs text-text-secondary">{t("stats.passed")}</p>
+              <p className="text-2xl font-bold text-ink">{passCount}</p>
+              <p className="text-xs text-ink-2">{t("stats.passed")}</p>
             </div>
           </div>
         </div>
@@ -435,7 +435,7 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
       {/* Charts Row */}
       <div className="grid grid-cols-2 gap-4">
         {/* Type Distribution Pie Chart */}
-        <div className="bg-card-bg border border-border rounded-lg p-4">
+        <div className="bg-panel border border-line rounded-lg p-4">
           <h3 className="text-sm font-medium mb-4">{t("stats.typeDistribution")}</h3>
           <ResponsiveContainer width="100%" height={200}>
             <PieChart>
@@ -464,7 +464,7 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
         </div>
 
         {/* Size Distribution Bar Chart */}
-        <div className="bg-card-bg border border-border rounded-lg p-4">
+        <div className="bg-panel border border-line rounded-lg p-4">
           <h3 className="text-sm font-medium mb-4">{t("stats.sizeDistribution")}</h3>
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={sizeData}>
@@ -482,7 +482,7 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
       </div>
 
       {/* Extension Distribution */}
-      <div className="bg-card-bg border border-border rounded-lg p-4">
+      <div className="bg-panel border border-line rounded-lg p-4">
         <h3 className="text-sm font-medium mb-4">{t("stats.topExtensions")}</h3>
         <ResponsiveContainer width="100%" height={150}>
           <BarChart data={extensionData} layout="vertical" margin={{ top: 8, right: 12, bottom: 2, left: 0 }}>
@@ -499,13 +499,13 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
       </div>
 
       {/* Largest Files */}
-      <div className="bg-card-bg border border-border rounded-lg p-4">
+      <div className="bg-panel border border-line rounded-lg p-4">
         <h3 className="text-sm font-medium mb-4">{t("stats.largestFiles")}</h3>
         <div className="space-y-2">
           {stats.largest_files.slice(0, 5).map((file, index) => (
             <div key={index} className="flex items-center justify-between text-sm">
               <div className="flex items-center gap-2 min-w-0">
-                <span className="text-text-secondary">{index + 1}.</span>
+                <span className="text-ink-2">{index + 1}.</span>
                 <span className="truncate">{file.name}</span>
                 <span
                   className="px-1.5 py-0.5 text-[10px] rounded"
@@ -517,7 +517,7 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
                   {t(`assetTypes.${file.asset_type}` as const)}
                 </span>
               </div>
-              <span className="text-text-secondary shrink-0">{formatFileSize(file.size)}</span>
+              <span className="text-ink-2 shrink-0">{formatFileSize(file.size)}</span>
             </div>
           ))}
         </div>
@@ -525,13 +525,13 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
 
       {/* Unused Assets (Unity + Godot; on-demand scan) */}
       {(projectType === "unity" || projectType === "godot") && (
-        <div className="bg-card-bg border border-border rounded-lg p-4">
+        <div className="bg-panel border border-line rounded-lg p-4">
           <div className="flex items-center justify-between mb-1">
             <h3 className="text-sm font-medium flex items-center gap-2">
               <Unlink size={14} />
               {t("stats.unusedAssets")}
               {unused !== null && (
-                <span className="text-text-secondary">· {unused.length}</span>
+                <span className="text-ink-2">· {unused.length}</span>
               )}
             </h3>
             <button
@@ -546,20 +546,20 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
                 : t("stats.rescanUnused")}
             </button>
           </div>
-          <p className="text-[11px] text-text-secondary mb-3">
+          <p className="text-[11px] text-ink-2 mb-3">
             {projectType === "godot"
               ? t("stats.unusedAssetsHintGodot")
               : t("stats.unusedAssetsHint")}
           </p>
           {unusedUnreadable > 0 && (
-            <p className="text-xs text-warning mb-2">
+            <p className="text-xs text-warn mb-2">
               {t("stats.unusedAssetsBinaryWarning", { count: unusedUnreadable })}
             </p>
           )}
           {unusedError ? (
-            <p className="text-xs text-warning">{unusedError}</p>
+            <p className="text-xs text-warn">{unusedError}</p>
           ) : unused === null ? null : unused.length === 0 ? (
-            <p className="text-xs text-text-secondary">{t("stats.noUnusedAssets")}</p>
+            <p className="text-xs text-ink-2">{t("stats.noUnusedAssets")}</p>
           ) : (
             <div className="space-y-1 max-h-64 overflow-auto">
               {unused.slice(0, UNUSED_MAX_RENDERED).map((path) => (
@@ -579,7 +579,7 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
                 </div>
               ))}
               {unused.length > UNUSED_MAX_RENDERED && (
-                <p className="pt-1 text-xs text-text-secondary">
+                <p className="pt-1 text-xs text-ink-2">
                   {t("stats.unusedTruncated", {
                     count: unused.length - UNUSED_MAX_RENDERED,
                   })}
@@ -608,7 +608,7 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
         </button>
         <button
           onClick={onExportHtml}
-          className="flex items-center gap-2 px-4 py-2 bg-success-soft text-success rounded hover:brightness-95 transition-[filter]"
+          className="flex items-center gap-2 px-4 py-2 bg-ok-soft text-ok rounded hover:brightness-95 transition-[filter]"
         >
           <FileDown size={16} />
           {t("stats.exportHtml")}

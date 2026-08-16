@@ -207,15 +207,15 @@ export function BatchRenameDialog({
       className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
       disabled={isLoading}
     >
-      <div className="bg-card-bg border border-border rounded-lg w-[600px] max-h-[80vh] flex flex-col">
+      <div className="bg-panel border border-line rounded-lg w-[600px] max-h-[80vh] flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-border">
+        <div className="flex items-center justify-between p-4 border-b border-line">
           <h2 className="text-lg font-semibold">
             {t("batchRename.title", "Batch Rename")} ({t("batchRename.fileCount", { count: selectedPaths.length })})
           </h2>
           <button
             onClick={handleClose}
-            className="p-1 rounded hover:bg-background text-text-secondary"
+            className="p-1 rounded hover:bg-base text-ink-2"
           >
             <X size={20} />
           </button>
@@ -231,7 +231,7 @@ export function BatchRenameDialog({
             <select
               value={operationType}
               onChange={(e) => setOperationType(e.target.value as RenameOperationType)}
-              className="w-full h-9 px-3 bg-background border border-border rounded text-text-primary focus:outline-none focus:border-primary"
+              className="w-full h-9 px-3 bg-base border border-line rounded text-ink focus:outline-none focus:border-primary"
             >
               <option value="FindReplace">{t("batchRename.findReplace", "Find & Replace")}</option>
               <option value="AddPrefix">{t("batchRename.addPrefix", "Add Prefix")}</option>
@@ -256,7 +256,7 @@ export function BatchRenameDialog({
                   value={findText}
                   onChange={(e) => setFindText(e.target.value)}
                   placeholder={t("batchRename.findPlaceholder", "Text to find...")}
-                  className="w-full h-9 px-3 bg-background border border-border rounded text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-primary"
+                  className="w-full h-9 px-3 bg-base border border-line rounded text-ink placeholder:text-ink-2 focus:outline-none focus:border-primary"
                 />
               </div>
               <div>
@@ -268,7 +268,7 @@ export function BatchRenameDialog({
                   value={replaceText}
                   onChange={(e) => setReplaceText(e.target.value)}
                   placeholder={t("batchRename.replacePlaceholder", "Replace with...")}
-                  className="w-full h-9 px-3 bg-background border border-border rounded text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-primary"
+                  className="w-full h-9 px-3 bg-base border border-line rounded text-ink placeholder:text-ink-2 focus:outline-none focus:border-primary"
                 />
               </div>
             </div>
@@ -293,7 +293,7 @@ export function BatchRenameDialog({
                     ? t("batchRename.prefixPlaceholder", "Enter prefix...")
                     : t("batchRename.suffixPlaceholder", "Enter suffix...")
                 }
-                className="w-full h-9 px-3 bg-background border border-border rounded text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-primary"
+                className="w-full h-9 px-3 bg-base border border-line rounded text-ink placeholder:text-ink-2 focus:outline-none focus:border-primary"
               />
             </div>
           )}
@@ -303,19 +303,19 @@ export function BatchRenameDialog({
             <label className="block text-sm font-medium mb-2">
               {t("batchRename.preview", "Preview")} ({changedCount} {t("batchRename.willChange", "will change")})
             </label>
-            <div className="max-h-48 overflow-auto bg-background border border-border rounded">
+            <div className="max-h-48 overflow-auto bg-base border border-line rounded">
               {previews.length === 0 ? (
-                <div className="p-4 text-center text-text-secondary">
+                <div className="p-4 text-center text-ink-2">
                   {t("batchRename.noPreview", "No preview available")}
                 </div>
               ) : (
                 <table className="w-full text-sm">
-                  <thead className="bg-card-bg sticky top-0">
+                  <thead className="bg-panel sticky top-0">
                     <tr>
-                      <th className="text-left p-2 border-b border-border">
+                      <th className="text-left p-2 border-b border-line">
                         {t("batchRename.original", "Original")}
                       </th>
-                      <th className="text-left p-2 border-b border-border">
+                      <th className="text-left p-2 border-b border-line">
                         {t("batchRename.newName", "New Name")}
                       </th>
                     </tr>
@@ -326,21 +326,21 @@ export function BatchRenameDialog({
                         key={index}
                         className={preview.will_change ? "bg-primary-tint" : ""}
                       >
-                        <td className="p-2 border-b border-border truncate max-w-[200px]">
+                        <td className="p-2 border-b border-line truncate max-w-[200px]">
                           {preview.original_name}
                         </td>
-                        <td className="p-2 border-b border-border truncate max-w-[200px]">
+                        <td className="p-2 border-b border-line truncate max-w-[200px]">
                           {preview.will_change ? (
                             <span className="text-primary">{preview.new_name}</span>
                           ) : (
-                            <span className="text-text-secondary">{preview.new_name}</span>
+                            <span className="text-ink-2">{preview.new_name}</span>
                           )}
                         </td>
                       </tr>
                     ))}
                     {previews.length > 50 && (
                       <tr>
-                        <td colSpan={2} className="p-2 text-center text-text-secondary">
+                        <td colSpan={2} className="p-2 text-center text-ink-2">
                           {t("batchRename.andMore", { count: previews.length - 50 })}
                         </td>
                       </tr>
@@ -373,7 +373,7 @@ export function BatchRenameDialog({
 
           {/* Error */}
           {error && (
-            <div className="flex items-center gap-2 p-3 bg-error-soft border border-error rounded text-error text-sm">
+            <div className="flex items-center gap-2 p-3 bg-err-soft border border-err rounded text-err text-sm">
               <AlertCircle size={16} />
               {error}
             </div>
@@ -384,8 +384,8 @@ export function BatchRenameDialog({
             <div
               className={`flex items-center gap-2 p-3 rounded text-sm ${
                 result.error_count > 0
-                  ? "bg-warning-soft border border-warning text-warning"
-                  : "bg-success-soft border border-success text-success"
+                  ? "bg-warn-soft border border-warn text-warn"
+                  : "bg-ok-soft border border-ok text-ok"
               }`}
             >
               <Check size={16} />
@@ -399,7 +399,7 @@ export function BatchRenameDialog({
           {/* Per-file failure details — the whole reason the dialog stays
               open on partial failure. */}
           {result && result.errors.length > 0 && (
-            <div className="max-h-32 overflow-auto p-3 bg-error-soft border border-error rounded text-error text-sm">
+            <div className="max-h-32 overflow-auto p-3 bg-err-soft border border-err rounded text-err text-sm">
               <div className="font-medium mb-1">{t("batchRename.errors", "Errors")}</div>
               <ul className="space-y-1">
                 {result.errors.map((e, i) => (
@@ -413,17 +413,17 @@ export function BatchRenameDialog({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-3 p-4 border-t border-border">
+        <div className="flex items-center justify-end gap-3 p-4 border-t border-line">
           <button
             onClick={handleClose}
-            className="px-4 py-2 text-sm text-text-secondary hover:text-text-primary transition-colors"
+            className="px-4 py-2 text-sm text-ink-2 hover:text-ink transition-colors"
           >
             {t("common.cancel", "Cancel")}
           </button>
           <button
             onClick={handleExecute}
             disabled={isLoading || changedCount === 0}
-            className="flex items-center gap-2 px-4 py-2 text-sm bg-primary text-[var(--on-primary)] rounded hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-2 px-4 py-2 text-sm bg-primary text-[var(--on-primary)] rounded hover:bg-primary-strong transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isLoading ? (
               <>

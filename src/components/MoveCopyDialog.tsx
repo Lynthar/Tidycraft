@@ -74,7 +74,7 @@ function TreeRow({
         className={cn(
           "flex items-center gap-1 px-2 py-1 text-sm rounded cursor-pointer select-none",
           isSelected && "bg-primary-soft text-primary",
-          !isSelected && !isDisabled && "hover:bg-background text-text-primary",
+          !isSelected && !isDisabled && "hover:bg-base text-ink",
           isDisabled && "opacity-40 cursor-not-allowed"
         )}
         style={{ paddingLeft: 8 + depth * 14 }}
@@ -87,24 +87,24 @@ function TreeRow({
               e.stopPropagation();
               toggleExpanded(node.path);
             }}
-            className="p-0.5 rounded hover:bg-card-bg"
+            className="p-0.5 rounded hover:bg-panel"
           >
             {isExpanded ? (
-              <ChevronDown size={12} className="text-text-secondary" />
+              <ChevronDown size={12} className="text-ink-2" />
             ) : (
-              <ChevronRight size={12} className="text-text-secondary" />
+              <ChevronRight size={12} className="text-ink-2" />
             )}
           </button>
         ) : (
           <span className="w-4" />
         )}
         {isExpanded && hasChildren ? (
-          <FolderOpen size={14} className="text-warning shrink-0" />
+          <FolderOpen size={14} className="text-warn shrink-0" />
         ) : (
-          <Folder size={14} className="text-warning shrink-0" />
+          <Folder size={14} className="text-warn shrink-0" />
         )}
         <span className="truncate flex-1">{node.name}</span>
-        <span className="text-xs text-text-secondary">{node.file_count}</span>
+        <span className="text-xs text-ink-2">{node.file_count}</span>
       </div>
       {isExpanded &&
         hasChildren &&
@@ -220,16 +220,16 @@ export function MoveCopyDialog({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
       disabled={isWorking}
     >
-      <div className="bg-card-bg border border-border rounded-lg shadow-2xl w-[560px] max-h-[80vh] flex flex-col">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+      <div className="bg-panel border border-line rounded-lg shadow-2xl w-[560px] max-h-[80vh] flex flex-col">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-line">
           <div className="flex items-center gap-2 text-primary">
             {mode === "move" ? <FolderInput size={18} /> : <CopyPlus size={18} />}
-            <h3 className="font-medium text-text-primary">{title}</h3>
+            <h3 className="font-medium text-ink">{title}</h3>
           </div>
           <button
             onClick={onClose}
             disabled={isWorking}
-            className="text-text-secondary hover:text-text-primary disabled:opacity-50"
+            className="text-ink-2 hover:text-ink disabled:opacity-50"
           >
             <X size={16} />
           </button>
@@ -238,17 +238,17 @@ export function MoveCopyDialog({
         <div className="flex-1 overflow-hidden flex flex-col gap-3 p-4 min-h-0">
           {/* Source list */}
           <div>
-            <div className="text-xs text-text-secondary mb-1">
+            <div className="text-xs text-ink-2 mb-1">
               {t("moveCopy.sourceList")}
             </div>
-            <ul className="bg-background border border-border rounded px-3 py-2 text-sm font-mono space-y-0.5 max-h-28 overflow-auto">
+            <ul className="bg-base border border-line rounded px-3 py-2 text-sm font-mono space-y-0.5 max-h-28 overflow-auto">
               {preview.map((p) => (
-                <li key={p} className="truncate text-text-primary" title={p}>
+                <li key={p} className="truncate text-ink" title={p}>
                   {basename(p)}
                 </li>
               ))}
               {overflow > 0 && (
-                <li className="text-text-secondary italic">
+                <li className="text-ink-2 italic">
                   {t("moveCopy.andMore", { count: overflow })}
                 </li>
               )}
@@ -257,10 +257,10 @@ export function MoveCopyDialog({
 
           {/* Target picker */}
           <div className="flex-1 flex flex-col min-h-0">
-            <div className="text-xs text-text-secondary mb-1">
+            <div className="text-xs text-ink-2 mb-1">
               {t("moveCopy.pickTarget")}
             </div>
-            <div className="flex-1 bg-background border border-border rounded overflow-auto py-1">
+            <div className="flex-1 bg-base border border-line rounded overflow-auto py-1">
               {scanResult ? (
                 <TreeRow
                   node={scanResult.directory_tree}
@@ -272,31 +272,31 @@ export function MoveCopyDialog({
                   disabledDirs={disabledDirs}
                 />
               ) : (
-                <div className="p-3 text-sm text-text-secondary">
+                <div className="p-3 text-sm text-ink-2">
                   {t("moveCopy.noTree", "No project loaded")}
                 </div>
               )}
             </div>
             {selectedPath && (
-              <div className="mt-2 text-xs text-text-secondary truncate" title={selectedPath}>
+              <div className="mt-2 text-xs text-ink-2 truncate" title={selectedPath}>
                 → {selectedPath}
               </div>
             )}
           </div>
 
           {errors.length > 0 && (
-            <div className="border border-error bg-error-soft rounded p-3 space-y-2">
-              <div className="flex items-center gap-2 text-error font-medium text-sm">
+            <div className="border border-err bg-err-soft rounded p-3 space-y-2">
+              <div className="flex items-center gap-2 text-err font-medium text-sm">
                 <AlertCircle size={14} />
                 {t("moveCopy.errorsTitle")}
               </div>
-              <ul className="text-xs text-error space-y-1 max-h-32 overflow-auto">
+              <ul className="text-xs text-err space-y-1 max-h-32 overflow-auto">
                 {errors.map((e, i) => (
                   <li key={i} className="font-mono">
                     <span className="truncate block" title={e.path}>
                       {e.path ? basename(e.path) : "(unknown)"}
                     </span>
-                    <span className="text-error">{e.message}</span>
+                    <span className="text-err">{e.message}</span>
                   </li>
                 ))}
               </ul>
@@ -304,11 +304,11 @@ export function MoveCopyDialog({
           )}
         </div>
 
-        <div className="flex justify-end gap-2 px-4 py-3 border-t border-border">
+        <div className="flex justify-end gap-2 px-4 py-3 border-t border-line">
           <button
             onClick={onClose}
             disabled={isWorking}
-            className="px-3 py-1.5 text-sm rounded hover:bg-background text-text-secondary disabled:opacity-50"
+            className="px-3 py-1.5 text-sm rounded hover:bg-base text-ink-2 disabled:opacity-50"
           >
             {errors.length > 0 ? t("common.done") : t("common.cancel")}
           </button>
@@ -321,7 +321,7 @@ export function MoveCopyDialog({
                 "px-3 py-1.5 text-sm rounded font-medium transition-colors",
                 isWorking || !selectedPath
                   ? "bg-primary opacity-50 text-[var(--on-primary)] cursor-not-allowed"
-                  : "bg-primary hover:bg-primary-hover text-[var(--on-primary)]"
+                  : "bg-primary hover:bg-primary-strong text-[var(--on-primary)]"
               )}
             >
               {isWorking ? workingLabel : confirmLabel}

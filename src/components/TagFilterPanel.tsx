@@ -49,7 +49,7 @@ export function TagFilterPanel() {
   };
 
   return (
-    <div className="border-b border-border shrink-0">
+    <div className="border-b border-line shrink-0">
       {/* Header - Collapsible. Right-click anywhere on the header
           opens the TagManager modal — quicker than navigating through
           a per-tag edit pencil for users who want to bulk-edit tags or
@@ -60,7 +60,7 @@ export function TagFilterPanel() {
           e.preventDefault();
           setTagManagerOpen(true);
         }}
-        className="w-full h-8 px-3 flex items-center justify-between text-xs text-text-secondary font-medium uppercase tracking-wide hover:bg-background transition-colors"
+        className="w-full h-8 px-3 flex items-center justify-between text-xs text-ink-2 font-medium uppercase tracking-wide hover:bg-base transition-colors"
       >
         <div className="flex items-center gap-1.5">
           {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
@@ -82,7 +82,7 @@ export function TagFilterPanel() {
                 e.stopPropagation();
                 setTagManagerOpen(true);
               }}
-              className="p-1 rounded hover:bg-card-bg text-text-secondary hover:text-primary transition-colors"
+              className="p-1 rounded hover:bg-panel text-ink-2 hover:text-primary transition-colors"
               title={t("tags.manageTitle")}
             >
               <Settings2 size={12} />
@@ -92,7 +92,7 @@ export function TagFilterPanel() {
                 e.stopPropagation();
                 setIsCreating(true);
               }}
-              className="p-1 rounded hover:bg-card-bg text-text-secondary hover:text-primary transition-colors"
+              className="p-1 rounded hover:bg-panel text-ink-2 hover:text-primary transition-colors"
               title={t("tags.createTag")}
             >
               <Plus size={12} />
@@ -105,17 +105,17 @@ export function TagFilterPanel() {
         <div className="px-2 pb-2">
           {/* Create New Tag Form */}
           {isCreating && (
-            <div className="mb-2 p-2 bg-background rounded border border-border">
+            <div className="mb-2 p-2 bg-base rounded border border-line">
               <div className="flex items-center gap-2 mb-2">
                 <div className="relative">
                   <button
                     onClick={() => setShowColorPicker(!showColorPicker)}
-                    className="w-6 h-6 rounded border border-border"
+                    className="w-6 h-6 rounded border border-line"
                     style={{ backgroundColor: newTagColor }}
                   />
                   {showColorPicker && (
                     <div
-                      className="absolute left-0 top-full mt-1 p-2 bg-card-bg border border-border rounded-lg shadow-lg z-50"
+                      className="absolute left-0 top-full mt-1 p-2 bg-panel border border-line rounded-lg shadow-lg z-50"
                       style={{ width: '160px' }}
                     >
                       <div className="grid grid-cols-7 gap-1">
@@ -147,21 +147,21 @@ export function TagFilterPanel() {
                     if (e.key === "Escape") setIsCreating(false);
                   }}
                   placeholder={t("tags.tagName")}
-                  className="flex-1 px-2 py-1 text-xs bg-card-bg border border-border rounded text-text-primary focus:outline-none focus:border-primary"
+                  className="flex-1 px-2 py-1 text-xs bg-panel border border-line rounded text-ink focus:outline-none focus:border-primary"
                   autoFocus
                 />
               </div>
               <div className="flex items-center gap-1 justify-end">
                 <button
                   onClick={() => setIsCreating(false)}
-                  className="px-2 py-1 text-xs text-text-secondary hover:text-text-primary transition-colors"
+                  className="px-2 py-1 text-xs text-ink-2 hover:text-ink transition-colors"
                 >
                   {t("common.cancel")}
                 </button>
                 <button
                   onClick={handleCreateTag}
                   disabled={!newTagName.trim()}
-                  className="px-2 py-1 text-xs bg-primary text-[var(--on-primary)] rounded hover:bg-primary-hover transition-colors disabled:opacity-50"
+                  className="px-2 py-1 text-xs bg-primary text-[var(--on-primary)] rounded hover:bg-primary-strong transition-colors disabled:opacity-50"
                 >
                   {t("tags.createTag")}
                 </button>
@@ -171,7 +171,7 @@ export function TagFilterPanel() {
 
           {/* Tags List */}
           {tags.length === 0 && !isCreating ? (
-            <div className="text-xs text-text-secondary italic py-2 px-1">
+            <div className="text-xs text-ink-2 italic py-2 px-1">
               {t("tags.noTags")}
             </div>
           ) : (
@@ -180,7 +180,7 @@ export function TagFilterPanel() {
               {tagFilters.length > 0 && (
                 <button
                   onClick={() => clearTagFilters()}
-                  className="w-full flex items-center gap-1.5 px-2 py-1 text-xs text-text-secondary hover:text-text-primary hover:bg-background rounded transition-colors"
+                  className="w-full flex items-center gap-1.5 px-2 py-1 text-xs text-ink-2 hover:text-ink hover:bg-base rounded transition-colors"
                 >
                   <X size={10} />
                   {t("tags.clearFilters", "Clear filters")}
@@ -192,7 +192,7 @@ export function TagFilterPanel() {
 
                 if (isEditing) {
                   return (
-                    <div key={tag.id} className="flex items-center gap-1 p-1 bg-background rounded">
+                    <div key={tag.id} className="flex items-center gap-1 p-1 bg-base rounded">
                       <span
                         className="w-3 h-3 rounded-full shrink-0"
                         style={{ backgroundColor: tag.color }}
@@ -208,7 +208,7 @@ export function TagFilterPanel() {
                             setEditingTagId(null);
                           }
                         }}
-                        className="flex-1 px-1 py-0.5 text-xs bg-card-bg border border-border rounded text-text-primary focus:outline-none focus:border-primary min-w-0"
+                        className="flex-1 px-1 py-0.5 text-xs bg-panel border border-line rounded text-ink focus:outline-none focus:border-primary min-w-0"
                         autoFocus
                       />
                       <button
@@ -216,13 +216,13 @@ export function TagFilterPanel() {
                           const input = (e.currentTarget.previousElementSibling as HTMLInputElement);
                           handleUpdateTag(tag.id, input.value);
                         }}
-                        className="p-1 text-success hover:bg-card-bg rounded transition-colors"
+                        className="p-1 text-ok hover:bg-panel rounded transition-colors"
                       >
                         <Check size={12} />
                       </button>
                       <button
                         onClick={() => setEditingTagId(null)}
-                        className="p-1 text-text-secondary hover:text-text-primary hover:bg-card-bg rounded transition-colors"
+                        className="p-1 text-ink-2 hover:text-ink hover:bg-panel rounded transition-colors"
                       >
                         <X size={12} />
                       </button>
@@ -236,8 +236,8 @@ export function TagFilterPanel() {
                     className={cn(
                       "flex items-center gap-1 group rounded transition-colors",
                       isActive
-                        ? "ring-1 ring-offset-1 ring-offset-card-bg"
-                        : "hover:bg-background"
+                        ? "ring-1 ring-offset-1 ring-offset-panel"
+                        : "hover:bg-base"
                     )}
                     style={{
                       backgroundColor: isActive ? `${tag.color}30` : `${tag.color}15`,
@@ -263,7 +263,7 @@ export function TagFilterPanel() {
                           e.stopPropagation();
                           setEditingTagId(tag.id);
                         }}
-                        className="p-1 text-text-secondary hover:text-text-primary rounded transition-colors"
+                        className="p-1 text-ink-2 hover:text-ink rounded transition-colors"
                         title={t("tags.editTag")}
                       >
                         <Pencil size={10} />
@@ -273,7 +273,7 @@ export function TagFilterPanel() {
                           e.stopPropagation();
                           handleDeleteTag(tag.id);
                         }}
-                        className="p-1 text-text-secondary hover:text-error rounded transition-colors"
+                        className="p-1 text-ink-2 hover:text-err rounded transition-colors"
                         title={t("tags.deleteTag")}
                       >
                         <Trash2 size={10} />

@@ -412,7 +412,7 @@ export function LearnReviewPanel() {
                       </span>
                       <button
                         onClick={() => handleDeleteRule(idx)}
-                        className="p-1 rounded hover:bg-background shrink-0"
+                        className="p-1 rounded hover:bg-base shrink-0"
                         style={{ color: "var(--text-3)" }}
                         title={t("learnReview.ruleDelete")}
                       >

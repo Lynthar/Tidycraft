@@ -70,11 +70,11 @@ function ToggleSwitch({
         </button>
       </div>
       <div className="flex-1">
-        <span className="text-sm font-medium text-text-primary group-hover:text-primary transition-colors">
+        <span className="text-sm font-medium text-ink group-hover:text-primary transition-colors">
           {label}
         </span>
         {description && (
-          <p className="text-xs text-text-secondary mt-0.5">{description}</p>
+          <p className="text-xs text-ink-2 mt-0.5">{description}</p>
         )}
       </div>
     </label>
@@ -94,7 +94,7 @@ function SegmentedControl<T extends string>({
 }) {
   return (
     <div className="flex items-center justify-between gap-3">
-      <span className="text-sm font-medium text-text-primary">{label}</span>
+      <span className="text-sm font-medium text-ink">{label}</span>
       <div
         className="inline-flex p-0.5 rounded-md"
         style={{ background: "var(--panel-2)", border: "1px solid var(--line)" }}
@@ -194,13 +194,13 @@ function ExternalEditorsSection() {
               const newPath = await pickEditorPath();
               if (newPath) setExternalEditor(ext, newPath);
             }}
-            className="px-2 py-1 text-xs rounded border border-border hover:bg-background text-text-secondary hover:text-text-primary transition-colors shrink-0"
+            className="px-2 py-1 text-xs rounded border border-line hover:bg-base text-ink-2 hover:text-ink transition-colors shrink-0"
           >
             {t("settings.editorBrowse")}
           </button>
           <button
             onClick={() => removeExternalEditor(ext)}
-            className="p-1 rounded hover:bg-background transition-colors shrink-0"
+            className="p-1 rounded hover:bg-base transition-colors shrink-0"
             title={t("settings.editorRemove")}
             style={{ color: "var(--text-3)" }}
           >
@@ -243,7 +243,7 @@ function ExternalEditorsSection() {
               const newPath = await pickEditorPath();
               if (newPath) setDraft({ ...draft, path: newPath });
             }}
-            className="px-2 py-1 text-xs rounded border border-border hover:bg-background text-text-secondary hover:text-text-primary transition-colors shrink-0"
+            className="px-2 py-1 text-xs rounded border border-line hover:bg-base text-ink-2 hover:text-ink transition-colors shrink-0"
           >
             {t("settings.editorBrowse")}
           </button>
@@ -266,7 +266,7 @@ function ExternalEditorsSection() {
           </button>
           <button
             onClick={() => setDraft(null)}
-            className="p-1 rounded hover:bg-background text-text-secondary transition-colors shrink-0"
+            className="p-1 rounded hover:bg-base text-ink-2 transition-colors shrink-0"
           >
             <X size={12} />
           </button>
@@ -276,7 +276,7 @@ function ExternalEditorsSection() {
       {!draft && (
         <button
           onClick={() => setDraft({ ext: "", path: "" })}
-          className="px-3 py-1 text-xs rounded border border-border hover:bg-background text-text-secondary hover:text-text-primary transition-colors inline-flex items-center gap-1"
+          className="px-3 py-1 text-xs rounded border border-line hover:bg-base text-ink-2 hover:text-ink transition-colors inline-flex items-center gap-1"
         >
           + {t("settings.addEditor")}
         </button>
@@ -510,7 +510,7 @@ function AiTaggingSection() {
                 />
                 <button
                   onClick={() => setShowApiKey(!showApiKey)}
-                  className="px-2 py-1 text-xs rounded border border-border hover:bg-background text-text-secondary hover:text-text-primary transition-colors"
+                  className="px-2 py-1 text-xs rounded border border-line hover:bg-base text-ink-2 hover:text-ink transition-colors"
                   style={{ minWidth: 56 }}
                 >
                   {showApiKey
@@ -573,7 +573,7 @@ function AiTaggingSection() {
             <button
               onClick={() => resetAiPrivacyConsent(activeId)}
               disabled={!aiPrivacyConsented[activeId]}
-              className="px-2 py-1 text-xs rounded border border-border hover:bg-background text-text-secondary hover:text-text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-2 py-1 text-xs rounded border border-line hover:bg-base text-ink-2 hover:text-ink transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {t("settings.aiResetConsent")}
             </button>
@@ -623,7 +623,7 @@ function LimitInput({ value, onCommit }: { value: number; onCommit: (n: number) 
         if (Number.isFinite(n)) onCommit(n);
       }}
       onBlur={() => setDraft(null)}
-      className="w-24 h-8 px-2 text-sm text-right bg-background border border-border rounded text-text-primary focus:outline-none focus:border-primary"
+      className="w-24 h-8 px-2 text-sm text-right bg-base border border-line rounded text-ink focus:outline-none focus:border-primary"
     />
   );
 }
@@ -778,13 +778,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           this, opening Settings on a non-fullscreen window (or after we
           add more sections) clips the bottom (Maintenance / Done button
           becomes unreachable). */}
-      <div className="bg-card-bg border border-border rounded-lg shadow-xl w-full max-w-2xl flex flex-col max-h-[90vh]">
+      <div className="bg-panel border border-line rounded-lg shadow-xl w-full max-w-2xl flex flex-col max-h-[90vh]">
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-line shrink-0">
           <h2 className="text-lg font-semibold">{t("settings.title")}</h2>
           <button
             onClick={onClose}
-            className="p-1 rounded hover:bg-background text-text-secondary hover:text-text-primary transition-colors"
+            className="p-1 rounded hover:bg-base text-ink-2 hover:text-ink transition-colors"
           >
             <X size={18} />
           </button>
@@ -794,13 +794,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             content, so the long settings page is navigable instead of one
             endless scroll. */}
         <div className="flex flex-1 min-h-0">
-          <nav className="shrink-0 w-40 border-r border-border p-3 space-y-1 overflow-y-auto">
+          <nav className="shrink-0 w-40 border-r border-line p-3 space-y-1 overflow-y-auto">
             {sections.map((s) => (
               <button
                 key={s.id}
                 type="button"
                 onClick={() => scrollToSection(s.id)}
-                className="block w-full text-left text-xs px-2 py-1.5 rounded text-text-secondary hover:bg-background hover:text-text-primary transition-colors"
+                className="block w-full text-left text-xs px-2 py-1.5 rounded text-ink-2 hover:bg-base hover:text-ink transition-colors"
               >
                 {t(s.titleKey)}
               </button>
@@ -812,7 +812,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           <div>
             <div className="flex items-center gap-2 mb-3">
               <Palette size={16} className="text-primary" />
-              <h3 id="set-appearance" className="text-sm font-semibold text-text-primary uppercase tracking-wide scroll-mt-4">
+              <h3 id="set-appearance" className="text-sm font-semibold text-ink uppercase tracking-wide scroll-mt-4">
                 {t("settings.appearanceSection")}
               </h3>
             </div>
@@ -843,7 +843,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           <div>
             <div className="flex items-center gap-2 mb-3">
               <GitBranch size={16} className="text-primary" />
-              <h3 id="set-git" className="text-sm font-semibold text-text-primary uppercase tracking-wide scroll-mt-4">
+              <h3 id="set-git" className="text-sm font-semibold text-ink uppercase tracking-wide scroll-mt-4">
                 {t("settings.gitSection")}
               </h3>
             </div>
@@ -873,17 +873,17 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           <div>
             <div className="flex items-center gap-2 mb-3">
               <FileCode size={16} className="text-primary" />
-              <h3 id="set-analysis" className="text-sm font-semibold text-text-primary uppercase tracking-wide scroll-mt-4">
+              <h3 id="set-analysis" className="text-sm font-semibold text-ink uppercase tracking-wide scroll-mt-4">
                 {t("settings.analysisRulesSection")}
               </h3>
             </div>
             <div className="space-y-3 pl-6">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 min-w-0">
-                  <span className="text-sm font-medium text-text-primary">
+                  <span className="text-sm font-medium text-ink">
                     {t("settings.analysisRulesEdit")}
                   </span>
-                  <p className="text-xs text-text-secondary mt-0.5">
+                  <p className="text-xs text-ink-2 mt-0.5">
                     {!activeProjectId
                       ? t("settings.analysisRulesNoProject")
                       : hasCustomConfig
@@ -899,7 +899,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 <button
                   onClick={handleEditRules}
                   disabled={!activeProjectId || editingRules}
-                  className="px-3 py-1 text-xs rounded border border-border hover:bg-background text-text-secondary hover:text-text-primary disabled:opacity-50 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-1"
+                  className="px-3 py-1 text-xs rounded border border-line hover:bg-base text-ink-2 hover:text-ink disabled:opacity-50 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-1"
                 >
                   <ExternalLink size={11} />
                   {editingRules ? t("settings.opening") : t("settings.analysisRulesEditButton")}
@@ -912,7 +912,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           <div>
             <div className="flex items-center gap-2 mb-3">
               <ExternalLink size={16} className="text-primary" />
-              <h3 id="set-editors" className="text-sm font-semibold text-text-primary uppercase tracking-wide scroll-mt-4">
+              <h3 id="set-editors" className="text-sm font-semibold text-ink uppercase tracking-wide scroll-mt-4">
                 {t("settings.externalEditorsSection")}
               </h3>
             </div>
@@ -929,7 +929,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           <div>
             <div className="flex items-center gap-2 mb-3">
               <Sparkles size={16} className="text-primary" />
-              <h3 id="set-ai" className="text-sm font-semibold text-text-primary uppercase tracking-wide scroll-mt-4">
+              <h3 id="set-ai" className="text-sm font-semibold text-ink uppercase tracking-wide scroll-mt-4">
                 {t("settings.aiTaggingSection")}
               </h3>
             </div>
@@ -942,7 +942,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           <div>
             <div className="flex items-center gap-2 mb-3">
               <Filter size={16} className="text-primary" />
-              <h3 id="set-scanning" className="text-sm font-semibold text-text-primary uppercase tracking-wide scroll-mt-4">
+              <h3 id="set-scanning" className="text-sm font-semibold text-ink uppercase tracking-wide scroll-mt-4">
                 {t("settings.scanningSection")}
               </h3>
             </div>
@@ -962,7 +962,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           <div>
             <div className="flex items-center gap-2 mb-3">
               <FileDown size={16} className="text-primary" />
-              <h3 id="set-export" className="text-sm font-semibold text-text-primary uppercase tracking-wide scroll-mt-4">
+              <h3 id="set-export" className="text-sm font-semibold text-ink uppercase tracking-wide scroll-mt-4">
                 {t("settings.exportSection")}
               </h3>
             </div>
@@ -982,11 +982,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 ] as const
               ).map((row) => (
                 <div key={row.label} className="flex items-center justify-between gap-3">
-                  <span className="text-sm text-text-primary">{row.label}</span>
+                  <span className="text-sm text-ink">{row.label}</span>
                   <LimitInput value={row.value} onCommit={row.onChange} />
                 </div>
               ))}
-              <p className="text-xs text-text-secondary">
+              <p className="text-xs text-ink-2">
                 {t("settings.exportLimitHint")}
               </p>
             </div>
@@ -996,7 +996,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           <div>
             <div className="flex items-center gap-2 mb-3">
               <Wrench size={16} className="text-primary" />
-              <h3 id="set-maintenance" className="text-sm font-semibold text-text-primary uppercase tracking-wide scroll-mt-4">
+              <h3 id="set-maintenance" className="text-sm font-semibold text-ink uppercase tracking-wide scroll-mt-4">
                 {t("settings.maintenanceSection")}
               </h3>
             </div>
@@ -1005,13 +1005,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 <div className="flex items-start gap-2 flex-1 min-w-0">
                   <ImageIcon
                     size={14}
-                    className="text-text-secondary mt-0.5 shrink-0"
+                    className="text-ink-2 mt-0.5 shrink-0"
                   />
                   <div className="flex-1 min-w-0">
-                    <span className="text-sm font-medium text-text-primary">
+                    <span className="text-sm font-medium text-ink">
                       {t("settings.thumbnailCache")}
                     </span>
-                    <p className="text-xs text-text-secondary mt-0.5">
+                    <p className="text-xs text-ink-2 mt-0.5">
                       {thumbCacheBytes === null
                         ? t("settings.cacheSizeUnknown")
                         : t("settings.cacheSize", {
@@ -1027,7 +1027,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     thumbCacheBytes === null ||
                     thumbCacheBytes === 0
                   }
-                  className="px-3 py-1 text-xs rounded border border-border hover:bg-background text-text-secondary hover:text-text-primary disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="px-3 py-1 text-xs rounded border border-line hover:bg-base text-ink-2 hover:text-ink disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   {clearingCache
                     ? t("settings.clearing")
@@ -1039,13 +1039,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 <div className="flex items-start gap-2 flex-1 min-w-0">
                   <Sparkles
                     size={14}
-                    className="text-text-secondary mt-0.5 shrink-0"
+                    className="text-ink-2 mt-0.5 shrink-0"
                   />
                   <div className="flex-1 min-w-0">
-                    <span className="text-sm font-medium text-text-primary">
+                    <span className="text-sm font-medium text-ink">
                       {t("settings.llmCache")}
                     </span>
-                    <p className="text-xs text-text-secondary mt-0.5">
+                    <p className="text-xs text-ink-2 mt-0.5">
                       {llmCacheBytes === null
                         ? t("settings.cacheSizeUnknown")
                         : t("settings.cacheSize", {
@@ -1061,7 +1061,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     llmCacheBytes === null ||
                     llmCacheBytes === 0
                   }
-                  className="px-3 py-1 text-xs rounded border border-border hover:bg-background text-text-secondary hover:text-text-primary disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="px-3 py-1 text-xs rounded border border-line hover:bg-base text-ink-2 hover:text-ink disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   {clearingLlmCache
                     ? t("settings.clearing")
@@ -1073,13 +1073,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 <div className="flex items-start gap-2 flex-1 min-w-0">
                   <Trash2
                     size={14}
-                    className="text-text-secondary mt-0.5 shrink-0"
+                    className="text-ink-2 mt-0.5 shrink-0"
                   />
                   <div className="flex-1 min-w-0">
-                    <span className="text-sm font-medium text-text-primary">
+                    <span className="text-sm font-medium text-ink">
                       {t("settings.undoHistory")}
                     </span>
-                    <p className="text-xs text-text-secondary mt-0.5">
+                    <p className="text-xs text-ink-2 mt-0.5">
                       {!activeProjectId
                         ? t("settings.undoNoProject")
                         : t("settings.undoEntries", {
@@ -1095,7 +1095,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     !activeProjectId ||
                     undoHistory.length === 0
                   }
-                  className="px-3 py-1 text-xs rounded border border-border hover:bg-background text-text-secondary hover:text-text-primary disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="px-3 py-1 text-xs rounded border border-line hover:bg-base text-ink-2 hover:text-ink disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   {clearingUndo
                     ? t("settings.clearing")
@@ -1108,10 +1108,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end px-4 py-3 border-t border-border shrink-0">
+        <div className="flex justify-end px-4 py-3 border-t border-line shrink-0">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm font-medium bg-primary text-[var(--on-primary)] rounded hover:bg-primary-hover transition-colors"
+            className="px-4 py-2 text-sm font-medium bg-primary text-[var(--on-primary)] rounded hover:bg-primary-strong transition-colors"
           >
             {t("common.done")}
           </button>
