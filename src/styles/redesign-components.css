@@ -2826,3 +2826,16 @@
   background: var(--panel-hover);
   color: var(--text);
 }
+.tc-unavail-secondary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.tc-unavail-secondary:disabled:hover {
+  background: transparent;
+  color: var(--text-2);
+}
+.tc-unavail-result {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-3);
+}

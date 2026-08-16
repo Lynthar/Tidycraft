@@ -59,6 +59,8 @@
       "bodyUnreadable": "文件夹还在，但列不出里面的内容：{{detail}}",
       "relocate": "重新定位…",
       "checkAgain": "重新检查",
+      "checking": "检查中…",
+      "checkedAt": "刚刚检查过（{{time}}），仍然不可用",
       "remove": "从工作区移除",
       "badge": "不可用",
       "alreadyOpen": "{{name}} 已经在这个工作区里打开了。"

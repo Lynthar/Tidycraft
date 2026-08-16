@@ -59,6 +59,8 @@
       "bodyUnreadable": "The folder is there, but its contents can't be listed: {{detail}}",
       "relocate": "Locate folder…",
       "checkAgain": "Check again",
+      "checking": "Checking…",
+      "checkedAt": "Checked just now ({{time}}) — still unavailable",
       "remove": "Remove from workspace",
       "badge": "Unavailable",
       "alreadyOpen": "{{name}} is already open in this workspace."

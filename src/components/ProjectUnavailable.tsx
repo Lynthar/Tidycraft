@@ -1,8 +1,17 @@
+import { useEffect, useRef, useState } from "react";
 import { FolderX } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useProjectStore } from "../stores/projectStore";
 import { basename } from "../lib/pathUtils";
+
+/// Which project a check belongs to is part of the state on purpose: two
+/// unavailable projects side by side reuse this component across a switch
+/// (App.tsx renders it without a key), so a bare timestamp would surface on a
+/// project the user never asked to re-check.
+type CheckState =
+  | { projectId: string; phase: "checking" }
+  | { projectId: string; phase: "checked"; at: string };
 
 /// Shown in the main area instead of the asset list when the active project's
 /// folder is unusable. Without it the user gets an empty AssetList, which
@@ -15,6 +24,42 @@ export function ProjectUnavailable() {
   const relocateProject = useProjectStore((s) => s.relocateProject);
   const removeProject = useProjectStore((s) => s.removeProject);
   const rescan = useProjectStore((s) => s.rescan);
+
+  const [check, setCheck] = useState<CheckState | null>(null);
+
+  // The check crosses an await, and "remove from workspace" sits right next to
+  // it — the user can unmount this panel while the check is still running.
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+
+  const checking = check?.projectId === activeProjectId && check.phase === "checking";
+  const checkedAt =
+    check?.projectId === activeProjectId && check.phase === "checked" ? check.at : null;
+
+  const handleCheckAgain = async () => {
+    if (!activeProjectId || checking) return;
+    setCheck({ projectId: activeProjectId, phase: "checking" });
+    try {
+      await rescan();
+    } finally {
+      // A folder that came back unmounts this panel, so the only state worth
+      // writing here is the one nobody sees unless it is still gone.
+      if (alive.current) {
+        setCheck({
+          projectId: activeProjectId,
+          phase: "checked",
+          // Seconds, not just minutes: two clicks inside one minute would
+          // otherwise leave the line unchanged and read as no response again.
+          at: new Date().toLocaleTimeString(),
+        });
+      }
+    }
+  };
 
   const handleRelocate = async () => {
     if (!activeProjectId) return;
@@ -70,8 +115,13 @@ export function ProjectUnavailable() {
         <button className="tc-cta" type="button" onClick={handleRelocate}>
           {t("projects.unavailable.relocate")}
         </button>
-        <button className="tc-unavail-secondary" type="button" onClick={() => rescan()}>
-          {t("projects.unavailable.checkAgain")}
+        <button
+          className="tc-unavail-secondary"
+          type="button"
+          disabled={checking}
+          onClick={handleCheckAgain}
+        >
+          {checking ? t("projects.unavailable.checking") : t("projects.unavailable.checkAgain")}
         </button>
         <button
           className="tc-unavail-secondary"
@@ -81,6 +131,11 @@ export function ProjectUnavailable() {
           {t("projects.unavailable.remove")}
         </button>
       </div>
+      {checkedAt && (
+        <div className="tc-unavail-result">
+          {t("projects.unavailable.checkedAt", { time: checkedAt })}
+        </div>
+      )}
     </div>
   );
 }
