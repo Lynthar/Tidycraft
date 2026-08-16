@@ -123,19 +123,21 @@ export function ProjectUnavailable() {
         >
           {checking ? t("projects.unavailable.checking") : t("projects.unavailable.checkAgain")}
         </button>
-        <button
-          className="tc-unavail-secondary"
-          type="button"
-          onClick={() => activeProjectId && removeProject(activeProjectId)}
-        >
-          {t("projects.unavailable.remove")}
-        </button>
       </div>
       {checkedAt && (
         <div className="tc-unavail-result">
           {t("projects.unavailable.checkedAt", { time: checkedAt })}
         </div>
       )}
+      <div className="tc-unavail-forget">
+        <button
+          className="tc-unavail-danger"
+          type="button"
+          onClick={() => activeProjectId && removeProject(activeProjectId)}
+        >
+          {t("projects.unavailable.remove")}
+        </button>
+      </div>
     </div>
   );
 }

@@ -2839,3 +2839,23 @@
   font-size: 12px;
   color: var(--text-3);
 }
+.tc-unavail-forget {
+  margin-top: 16px;
+}
+/* Not red at rest: this drops the project from the workspace and the recents
+   list, it deletes nothing on disk. The distance from the retry above it is
+   what says "this one gives up". */
+.tc-unavail-danger {
+  height: 26px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 12px;
+  cursor: pointer;
+}
+.tc-unavail-danger:hover {
+  background: var(--err-soft);
+  color: var(--err);
+}
