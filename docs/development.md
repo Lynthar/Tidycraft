@@ -509,15 +509,15 @@ transient state (`isLoading`, inline errors) internally and resets on
 
 ### Colours in a new component
 
-Use the palette, not Tailwind's default scale: `text-error` / `bg-primary` /
+Use the palette, not Tailwind's default scale: `text-err` / `bg-primary` /
 `text-ink-2` and friends resolve to CSS variables that follow the theme, while
 `text-red-400` is tuned for the dark theme and drops to 2.8:1 on the light one.
 
 **An opacity modifier on a palette colour compiles to nothing.** Every colour in
 `tailwind.config.js` is a `var(--x)`, and Tailwind 3 cannot apply an alpha to
-that: `bg-error/10`, `text-warning/80` and `hover:bg-primary/30` emit no rule at
+that: `bg-err/10`, `text-warn/80` and `hover:bg-primary/30` emit no rule at
 all, and the element silently inherits whatever is behind it. Use a tint token
-(`bg-primary-soft`, `bg-primary-tint`, `bg-error-soft` and the other three
+(`bg-primary-soft`, `bg-primary-tint`, `bg-err-soft` and the other three
 status colours) or, when real translucency is the point, an arbitrary value:
 
 ```jsx
