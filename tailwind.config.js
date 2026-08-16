@@ -4,33 +4,17 @@ export default {
   theme: {
     extend: {
       colors: {
-        // === Legacy tokens (kept until each component migrates in Phase 1) ===
-        background: "var(--color-background)",
-        "card-bg": "var(--color-card-bg)",
-        "card-bg-hover": "var(--color-card-bg-hover)",
-        border: "var(--color-border)",
-        "border-subtle": "var(--color-border-subtle)",
-        "text-primary": "var(--color-text-primary)",
-        "text-secondary": "var(--color-text-secondary)",
         primary: {
-          DEFAULT: "var(--color-primary)",
-          hover: "var(--color-primary-hover)",
-          // v2 name for the hover step — same token the bridge resolves
-          // `hover` to; the legacy key goes away with the bridge.
+          DEFAULT: "var(--primary)",
           strong: "var(--primary-strong)",
-          glow: "var(--color-primary-glow)",
-          // Same reason as the status tints below: `bg-primary/20` emits no
-          // rule, so the two tint steps the design system already defines have
-          // to be reachable by name.
+          // `bg-primary/20` emits no rule (see the status tints below), so the
+          // two tint steps the design system defines have to be reachable by
+          // name.
           soft: "var(--primary-soft)",
           tint: "var(--primary-tint)",
         },
-        success: "var(--color-success)",
-        warning: "var(--color-warning)",
-        error: "var(--color-error)",
-        info: "var(--color-info)",
         // Solid tints for status surfaces. Tailwind 3 silently drops opacity
-        // modifiers on `var()` colours (`bg-error/10` emits no rule), so a tint
+        // modifiers on `var()` colours (`bg-err/10` emits no rule), so a tint
         // has to be its own token — same reason --primary-soft exists.
         "ok-soft": "var(--ok-soft)",
         "warn-soft": "var(--warn-soft)",
@@ -87,10 +71,11 @@ export default {
         "git-modified": "var(--git-modified)",
         "git-deleted": "var(--git-deleted)",
         "git-renamed": "var(--git-renamed)",
-        // Semantic status (new tokens — existing success/warning/error/info above remain for legacy)
+        // Semantic status
         ok: "var(--ok)",
         warn: "var(--warn)",
         err: "var(--err)",
+        info: "var(--info)",
       },
       borderRadius: {
         sm: "var(--radius-sm)",
@@ -102,7 +87,6 @@ export default {
         sm: "var(--shadow-sm)",
         md: "var(--shadow-md)",
         lg: "var(--shadow-lg)",
-        glow: "var(--shadow-glow)",
         // Redesign
         card: "var(--shadow-card)",
         pop: "var(--shadow-pop)",

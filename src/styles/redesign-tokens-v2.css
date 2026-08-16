@@ -7,11 +7,13 @@
    [data-theme="dark"|"light"] 分组（useThemeStore 写在 <html>
    上的属性）。
 
-   下方「legacy bridge」段把 globals.css 的 --color-* / --scrollbar-*
-   重映射到 Forge 取值，让尚未迁移的组件不改 markup 也能用上新
-   配色——该桥接是过渡手段，见 #28（双样式迁移）待退场。
+   本文件是唯一的取色事实源：曾经桥接 globals.css --color-* 的
+   legacy bridge 已随双样式迁移（#28）退场，滚动条 token 也住在
+   这里。深色块带 :root 联合选择器——data-theme 属性由 themeStore
+   在 JS 里写上，首帧前的一瞬没有属性，深色即默认。
    ============================================================ */
 
+:root,
 [data-theme="dark"] {
   /* Surfaces — 5 层递进，主背景 14% 比 v1 显著加深 */
   --bg:           oklch(14% 0.005 50);
@@ -87,34 +89,7 @@
   --shadow-pop:  0 32px 70px -28px oklch(0% 0 0 / 0.9),
                  0 1px 0 oklch(40% 0.010 50 / 0.6);
 
-  /* ---------- Legacy bridge (PREVIEW ONLY) ----------
-     绝大多数组件目前仍使用 globals.css 定义的 --color-* 变量
-     (bg-card-bg / text-primary / bg-primary / 等)。这一段把
-     legacy 变量重定义为 v2 对应值，让 v2 视觉立即覆盖整个 UI
-     而不必改组件代码。
-
-     ⚠️  这是预览 hack，不是终态。Phase 1 正式视觉换肤时要：
-         1. 把组件 utility 从 legacy (bg-card-bg) 迁到新 token
-            (bg-panel)
-         2. 删除本段 legacy bridge
-         3. 最终从 globals.css 移除 --color-* 定义
-     ---------------------------------------------------- */
-  --color-background: var(--bg);
-  --color-card-bg: var(--panel);
-  --color-card-bg-hover: var(--panel-hover);
-  --color-border: var(--line);
-  --color-border-subtle: var(--line-soft);
-  --color-text-primary: var(--text);
-  --color-text-secondary: var(--text-2);
-  --color-primary: var(--primary);
-  --color-primary-hover: var(--primary-strong);
-  --color-primary-glow: oklch(74% 0.15 70 / 0.3);
-  --color-error: var(--err);
-  --color-warning: var(--warn);
-  --color-success: var(--ok);
-  --color-info: var(--info);
-
-  /* Scrollbar — warm bridge (globals.css default is cold #1a1a2e/#3a3a5c) */
+  /* Scrollbar */
   --scrollbar-track: var(--bg-soft);
   --scrollbar-thumb: var(--line-strong);
   --scrollbar-thumb-hover: var(--text-3);
@@ -188,23 +163,7 @@
   --shadow-pop:  0 24px 60px -28px oklch(40% 0.08 60 / 0.35),
                  0 1px 0 oklch(90% 0.008 60 / 0.4);
 
-  /* Legacy bridge (PREVIEW ONLY) — 同 dark 块说明 */
-  --color-background: var(--bg);
-  --color-card-bg: var(--panel);
-  --color-card-bg-hover: var(--panel-hover);
-  --color-border: var(--line);
-  --color-border-subtle: var(--line-soft);
-  --color-text-primary: var(--text);
-  --color-text-secondary: var(--text-2);
-  --color-primary: var(--primary);
-  --color-primary-hover: var(--primary-strong);
-  --color-primary-glow: oklch(60% 0.16 60 / 0.18);
-  --color-error: var(--err);
-  --color-warning: var(--warn);
-  --color-success: var(--ok);
-  --color-info: var(--info);
-
-  /* Scrollbar — warm bridge (globals.css default is cold #f1f5f9/#cbd5e1) */
+  /* Scrollbar */
   --scrollbar-track: var(--bg-soft);
   --scrollbar-thumb: var(--line-strong);
   --scrollbar-thumb-hover: var(--text-3);

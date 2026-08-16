@@ -10,7 +10,7 @@
 //   node scripts/check-palette.mjs snapshot <out.json>
 //   node scripts/check-palette.mjs worklist <namemap.json> <classmap-out.json>
 //   node scripts/check-palette.mjs rename <classmap.json> <dir>
-//   node scripts/check-palette.mjs compare <base.json> <new.json> <classmap.json>
+//   node scripts/check-palette.mjs compare <base.json> <new.json> <classmap.json> [expected-gone.json]
 //   node scripts/check-palette.mjs dangling
 //
 // snapshot  — {theme: {selector: {prop: resolvedValue}}} plus two byproducts:
@@ -26,6 +26,8 @@
 //             first, guarded so no match starts or ends inside a longer token.
 // compare   — every selector in the base snapshot, renamed through the map,
 //             must exist in the new snapshot with identical resolved values.
+//             expected-gone.json (a selector array) names rules whose deletion
+//             is the point of the change; those may go missing, nothing else.
 // dangling  — every var() in the product must resolve to a definition.
 //
 // Run `pnpm build` first; this reads the build output, not the sources.
@@ -36,8 +38,9 @@ import postcss from "postcss";
 
 const DIST = "dist/assets";
 const UTILITY_PREFIXES = [
-  "bg", "text", "border", "ring", "divide", "placeholder", "from", "to",
-  "via", "outline", "decoration", "caret", "fill", "stroke", "accent", "shadow",
+  "bg", "text", "border", "ring-offset", "ring", "divide", "placeholder",
+  "from", "to", "via", "outline", "decoration", "caret", "fill", "stroke",
+  "accent", "shadow",
 ];
 
 function readDist() {
@@ -188,22 +191,39 @@ function decompose(token, namemap) {
 function buildWorklist(root, namemap) {
   const classmap = {}; // base class → base class, changed names only
   const repointOnly = new Set();
-  const unknownLegacy = new Set();
+  const unknownLegacy = new Set(); // utility-shaped: ends in a legacy name → hard error
+  const handwritten = new Set(); // hand-written CSS on legacy vars → migrate by hand
+  const names = Object.keys(namemap);
   root.walkRules((rule) => {
     let touchesLegacyVar = false;
     rule.walkDecls((d) => { if (d.value.includes("var(--color-")) touchesLegacyVar = true; });
+    if (!touchesLegacyVar) {
+      // Renamed-but-not-legacy classes (the soft tints) still need entries.
+      for (const token of classTokensOf(rule.selector)) {
+        const d = decompose(token, namemap);
+        if (d && namemap[d.name] !== d.name) classmap[d.base] = `${d.prefix}-${namemap[d.name]}`;
+      }
+      return;
+    }
     for (const token of classTokensOf(rule.selector)) {
       const d = decompose(token, namemap);
       if (!d) {
-        if (touchesLegacyVar) unknownLegacy.add(token);
+        const base = token.split(":").pop();
+        if (names.some((n) => base === n || base.endsWith(`-${n}`))) unknownLegacy.add(token);
+        else handwritten.add(token);
         continue;
       }
       const to = namemap[d.name];
-      if (to === d.name) { if (touchesLegacyVar) repointOnly.add(d.base); continue; }
-      classmap[d.base] = `${d.prefix}-${to}`;
+      if (to === d.name) repointOnly.add(d.base);
+      else classmap[d.base] = `${d.prefix}-${to}`;
     }
   });
-  return { classmap, repointOnly: [...repointOnly].sort(), unknownLegacy: [...unknownLegacy].sort() };
+  return {
+    classmap,
+    repointOnly: [...repointOnly].sort(),
+    unknownLegacy: [...unknownLegacy].sort(),
+    handwritten: [...handwritten].sort(),
+  };
 }
 
 // Longest key first, and a match may not start or end inside a longer token
@@ -262,22 +282,25 @@ if (mode === "snapshot") {
   const [namemapPath, out] = args;
   if (!namemapPath || !out) fail("worklist needs <namemap.json> <classmap-out.json>");
   const namemap = JSON.parse(fs.readFileSync(namemapPath, "utf8"));
-  const { classmap, repointOnly, unknownLegacy } = buildWorklist(readDist(), namemap);
+  const { classmap, repointOnly, unknownLegacy, handwritten } = buildWorklist(readDist(), namemap);
   if (unknownLegacy.length)
-    fail(`classes reference var(--color-*) but decompose to no known name: ${unknownLegacy.join(", ")}`);
+    fail(`utility-shaped classes on var(--color-*) with no mapping: ${unknownLegacy.join(", ")}`);
   fs.writeFileSync(out, JSON.stringify(classmap, null, 1));
   console.log(`worklist: ${Object.keys(classmap).length} classes to rename → ${out}`);
   console.log(`repoint-only (name kept, config must move off --color-*): ${repointOnly.join(", ")}`);
+  if (handwritten.length)
+    console.log(`hand-written rules still on var(--color-*), migrate by hand: ${handwritten.join(", ")}`);
 } else if (mode === "rename") {
   const [mapPath, dir] = args;
   if (!mapPath || !dir) fail("rename needs <classmap.json> <dir>");
   renameInDir(dir, JSON.parse(fs.readFileSync(mapPath, "utf8")));
 } else if (mode === "compare") {
-  const [basePath, newPath, mapPath] = args;
+  const [basePath, newPath, mapPath, gonePath] = args;
   if (!basePath || !newPath || !mapPath) fail("compare needs <base.json> <new.json> <classmap.json>");
   const base = JSON.parse(fs.readFileSync(basePath, "utf8"));
   const next = JSON.parse(fs.readFileSync(newPath, "utf8"));
   const replace = replacerFor(JSON.parse(fs.readFileSync(mapPath, "utf8")));
+  const expectedGone = new Set(gonePath ? JSON.parse(fs.readFileSync(gonePath, "utf8")) : []);
   let bad = 0;
   for (const theme of ["dark", "light"]) {
     const mappedKeys = new Set();
@@ -285,6 +308,7 @@ if (mode === "snapshot") {
       const mapped = replace(key).text;
       mappedKeys.add(mapped);
       const got = next.themes[theme][mapped];
+      if (!got && expectedGone.has(key)) { console.log(`gone as expected ${theme}: ${key}`); continue; }
       if (!got) { console.log(`MISSING ${theme}: ${mapped}  (from: ${key})`); bad++; continue; }
       const want = JSON.stringify(props), have = JSON.stringify(got);
       if (want !== have) { console.log(`MISMATCH ${theme}: ${mapped}\n  base: ${want}\n  new:  ${have}`); bad++; }
