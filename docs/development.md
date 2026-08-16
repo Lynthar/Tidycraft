@@ -721,7 +721,11 @@ tidycraft/
 │   │   └── recentsStore.ts           # Recently-opened projects (persisted)
 │   ├── styles/                       # globals.css + redesign-tokens-v2 + redesign-components
 │   ├── types/asset.ts                # TS mirrors of Rust structs
-│   ├── lib/                          # Shared utilities (pathUtils, platform, modelUrlResolver, utils)
+│   ├── lib/                          # Shared pure modules — no React, no store imports
+│   │   ├── modelLoading.ts           # Everything ModelViewer3D and ModelLightbox do identically
+│   │   ├── issueText.ts              # Issue rule_id + args → localized copy (English prose as fallback)
+│   │   ├── menuActions.ts            # Shared command layer for shortcuts + the macOS menu bar
+│   │   └── …                         # pathUtils, platform, dccSource, thumbnailQueue, …
 │   ├── hooks/                        # React hooks (useKeyboardShortcuts)
 │   ├── i18n/locales/                 # en.json + zh.json
 │   ├── main.tsx                      # React entry, imports global CSS
@@ -732,8 +736,10 @@ tidycraft/
 │   └── src/
 │       ├── lib.rs                    # All #[tauri::command] functions
 │       ├── project.rs                # Per-project state registry
+│       ├── project_path.rs           # Root health (missing / not-a-dir / unreadable) as a state
 │       ├── scanner.rs                # Scan + metadata dispatch
 │       ├── watcher.rs                # FS watcher + fs-change events
+│       ├── warning.rs                # ScanWarning / ProjectWarning — "unread" ≠ "clean"
 │       ├── cache.rs                  # Disk scan cache
 │       ├── analyzer/
 │       │   ├── mod.rs                # Analyzer / Issue / Severity
@@ -762,6 +768,9 @@ tidycraft/
 │       ├── undo.rs                   # Undo manager
 │       ├── git/mod.rs                # libgit2 wrapper
 │       └── thumbnail.rs              # Image thumbnail generation + cache
+├── scripts/                          # Repo tooling (plain Node, run by hand)
+│   ├── check-palette.mjs             # Compiled-palette audit (see §5 "Auditing the compiled palette")
+│   └── sync-version.mjs              # Propagates package.json version to tauri.conf.json + Cargo.toml
 ├── examples/                         # User-copyable starter configs
 │   └── tidycraft.example.toml        # Annotated sample rule config
 ├── docs/                             # Auxiliary docs
