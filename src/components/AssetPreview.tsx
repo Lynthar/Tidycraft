@@ -139,6 +139,19 @@ export function AssetPreview() {
   const settledIs3DModel =
     settledAsset && MODEL_3D_EXTENSIONS.includes(settledAsset.extension.toLowerCase());
 
+  // Close a lightbox whose host condition just went away. Both are rendered
+  // conditionally at the bottom of this component, and the only thing that lowers
+  // their `open` flag is the onClose of the very component the condition unmounts
+  // — so a file deleted under an open lightbox (or a settled asset that stops
+  // being a model) leaves the flag raised. That flag feeds uiStore's
+  // blocking-overlay gate, so it would keep every global shortcut disabled over an
+  // overlay nobody can see, and re-raise the lightbox on the next model picked.
+  // The conditions here mirror those render conditions; keep the two in step.
+  useEffect(() => {
+    if (!settledAsset || !thumbnail) setLightboxOpen(false);
+    if (!settledAsset || !settledIs3DModel) setModelLightboxOpen(false);
+  }, [settledAsset, thumbnail, settledIs3DModel]);
+
   useEffect(() => {
     if (!settledAsset || settledAsset.asset_type !== "texture") {
       setThumbnail(null);

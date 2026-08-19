@@ -233,6 +233,46 @@ mod tests {
         unregister(&id);
     }
 
+    /// The premise `scan_project_incremental`'s epilogue is fenced on: after a
+    /// rebuild, the scan handle a running scan holds is no longer the one in the
+    /// state, so `Arc::ptr_eq` tells "my scan" from "the scan that replaced me".
+    /// If a rebuild ever carried `scan_state` over, that fence would pass for a
+    /// scan it was written to stop, and the epilogue would strip a live scan of
+    /// its cancel handle — silently, which is why this premise is pinned here.
+    #[test]
+    fn a_rebuild_leaves_a_running_scans_handle_no_longer_installed() {
+        let old = tempdir().unwrap();
+        let new = tempdir().unwrap();
+        let id = "rebuild_scan_handle_project".to_string();
+
+        register(id.clone(), s(old.path()));
+        let mine = Arc::new(crate::scanner::ScanState::new());
+        with_mut(&id, |st| {
+            st.scan_state = Some(mine.clone());
+            Ok(())
+        })
+        .unwrap();
+
+        register(id.clone(), s(new.path()));
+
+        with_ref(&id, |st| {
+            assert!(
+                !st.scan_state
+                    .as_ref()
+                    .is_some_and(|current| Arc::ptr_eq(current, &mine)),
+                "the pre-rebuild scan handle must not still be the installed one"
+            );
+            Ok(())
+        })
+        .unwrap();
+        assert!(
+            mine.is_cancelled(),
+            "the rebuild cancels the scan it orphans"
+        );
+
+        unregister(&id);
+    }
+
     /// Re-registering the same path is idempotent.
     #[test]
     fn registering_the_same_path_twice_keeps_the_state() {

@@ -71,7 +71,9 @@
     "searchPlaceholder": "Search assets...",
     "rescan": "Rescan",
     "selectProjectFolder": "Select Project Folder",
-    "clearSearch": "Clear"
+    "clearSearch": "Clear",
+    "undoFailed": "Could not undo: {{reason}}",
+    "undoPartial": "Part of this undo was refused ({{failed}} of {{total}}): {{reason}}"
   },
   "sidebar": {
     "assets": "Assets",

@@ -749,15 +749,21 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           get().setActiveProject(winner.id);
           return;
         }
-      } else if (!get().projects.has(existingProject.id)) {
-        // The mirror image: the entry was CLOSED while the health check ran.
-        // Writing the pre-await snapshot back would resurrect a project the user
-        // just removed, with its backend registration already gone.
-        return;
       }
+      // The mirror image: the entry was CLOSED while the health check ran — or
+      // RELOCATED, which keeps the id and changes the path. Writing the pre-await
+      // snapshot back would resurrect a project the user just removed (its backend
+      // registration already gone), or drag a just-relocated project back to the
+      // folder it left. The check is slow enough to make both reachable: it stats
+      // every path, and a dead network mount can hold that for tens of seconds
+      // while this panel — and its Locate button — stay on screen.
+      const stillOurs = existingProject
+        ? get().projects.get(existingProject.id)
+        : undefined;
+      if (existingProject && stillOurs?.projectPath !== path) return;
       const id = existingProject?.id ?? generateProjectId();
-      const data: ProjectData = existingProject
-        ? resetProjectData(existingProject, path, health)
+      const data: ProjectData = stillOurs
+        ? resetProjectData(stillOurs, path, health)
         : { ...createDefaultProjectData(id, path), unavailable: health };
       const newMap = new Map(get().projects);
       newMap.set(id, data);
@@ -769,6 +775,26 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // Reuse the existing projectId on force-rescan so the backend's
     // ProjectState (undo history, watcher, tags, git manager) survives.
     const projectId = existingProject?.id ?? generateProjectId();
+
+    // Same two races as the unavailable branch above, re-checked after ITS await:
+    // registering now would rebuild the backend against a path this project has
+    // since left, or resurrect one that was closed.
+    const current = existingProject ? get().projects.get(projectId) : undefined;
+    if (existingProject && current?.projectPath !== path) {
+      return;
+    }
+
+    // A project coming back from `unavailable` may still hold a watcher that no
+    // longer reports anything: the OS watch does not reliably survive its root
+    // being deleted or renamed (notify documents this as platform-dependent), and
+    // the install below is skipped whenever `fsWatchers` already has an entry. So
+    // without this teardown a recovered project runs watcher-less, and the only
+    // symptom is that live updates quietly never arrive again. relocateProject
+    // does the same before its own rebuild; a plain force-rescan, whose watcher is
+    // healthy, deliberately keeps it.
+    if (current?.unavailable && fsWatchers.has(projectId)) {
+      await stopFsWatch(projectId);
+    }
 
     // Register with the backend BEFORE flipping activeProjectId, so subscribers
     // that re-load on that change don't race an unregistered project into their
@@ -798,6 +824,12 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         get().setActiveProject(winner.id);
         return;
       }
+    } else if (get().projects.get(projectId)?.projectPath !== path) {
+      // Closed or relocated during register_project itself. That registration has
+      // already rebuilt the backend against `path`, and a relocation's own
+      // openProject re-registers the new root behind us — so what is left to
+      // prevent is writing this call's snapshot into the store on top of it.
+      return;
     }
 
     // For force-rescan, keep the user's UI state (view mode, filters,
@@ -869,10 +901,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         console.warn("Failed to probe tidycraft.toml:", err);
       }
 
-      // Apply scan result to the project that owns it (not necessarily active).
+      // Apply scan result to the project that owns it (not necessarily active),
+      // and only while it still points at the folder this scan walked — a
+      // relocation keeps the id and changes the path, so the id alone would let a
+      // scan of the old root install itself as the new one's result.
       const state = get();
       const target = state.projects.get(projectId);
-      if (target) {
+      if (target && target.projectPath === path) {
         // Force-rescan keeps UI state, including the directory selection. Falls
         // back to `null` (= whole project) when the directory vanished between
         // scans — never the root path, which must not be a second spelling.
@@ -906,6 +941,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           Object.assign(patch, syncFromActiveProject(updated));
         }
         set(patch);
+      } else {
+        // Closed, or relocated while this scan ran. The result describes a folder
+        // the project has left, and the git refresh and watcher install below
+        // belong to whoever owns it now. `finally` still unlistens.
+        return;
       }
 
       // refreshGitInfo patches the right entry in the Map regardless of which
@@ -945,7 +985,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // scanResult — don't clobber it here. The finally block still unlistens.
       if (String(err).includes("already in progress")) return;
       const errorMessage = String(err);
-      if (!get().projects.get(projectId)) return;
+      // Gone, or relocated while this scan ran: a failure on the old root says
+      // nothing about the folder the project points at now, and the recheck below
+      // would ask about the wrong path.
+      if (get().projects.get(projectId)?.projectPath !== path) return;
       const isCancelled = errorMessage.includes("cancelled");
       // The folder can go away between the pre-check and the scan. Ask again
       // rather than pattern-matching the error prose, which breaks silently the
@@ -958,7 +1001,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // different project, and this project may have been closed meanwhile.
       const latest = get();
       const target = latest.projects.get(projectId);
-      if (!target) return;
+      if (!target || target.projectPath !== path) return;
       // The folder disappearing invalidates everything derived from it, not just
       // scanResult, so the whole entry resets through the same `resetProjectData`
       // relocateProject and the pre-check branch use.
@@ -1424,7 +1467,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }
       return result;
     } catch (err) {
+      // Console-only left the undo button looking inert; the caller gets `null`
+      // and stays quiet, so the toast has to happen here.
       console.error("Failed to undo:", err);
+      useToastStore.getState().push({
+        kind: "error",
+        message: i18n.t("header.undoFailed", { reason: String(err) }),
+      });
       return null;
     }
   },

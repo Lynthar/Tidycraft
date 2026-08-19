@@ -71,7 +71,9 @@
     "searchPlaceholder": "搜索资产...",
     "rescan": "重新扫描",
     "selectProjectFolder": "选择项目文件夹",
-    "clearSearch": "清除"
+    "clearSearch": "清除",
+    "undoFailed": "无法撤销：{{reason}}",
+    "undoPartial": "本次撤销有一部分被拒绝（{{failed}}/{{total}}）：{{reason}}"
   },
   "sidebar": {
     "assets": "资产",

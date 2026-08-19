@@ -177,17 +177,33 @@ export function fitObjectToView(
   object.position.sub(center.multiplyScalar(scale));
 }
 
-/// Dispose every geometry and material under `root`; the caller still detaches
-/// the object. Separate from `disposeSceneContents` so a viewer that keeps its
-/// scene across files can drop the model without taking the lights and grid.
+/// Dispose a material together with every texture hanging off it. three.js
+/// deliberately leaves textures alone here — one texture can back several
+/// materials — so the renderer holds each WebGLTexture until `Texture.dispose()`
+/// fires its own event. Slots are found by walking the material's own properties
+/// rather than a hand-kept `map` / `normalMap` / … list, which would silently
+/// miss whatever the next loader or three.js version sets.
+function disposeMaterial(material: THREE.Material): void {
+  for (const value of Object.values(material)) {
+    if (value instanceof THREE.Texture) value.dispose();
+  }
+  material.dispose();
+}
+
+/// Dispose every geometry, material and texture under `root`; the caller still
+/// detaches the object. Separate from `disposeSceneContents` so a viewer that
+/// keeps its scene across files can drop the model without taking the lights and
+/// grid. The textures matter because ModelViewer3D now keeps one renderer for the
+/// whole mount: the per-file `forceContextLoss` that used to free them wholesale
+/// is gone, so anything not disposed here stays on the GPU for the session.
 export function disposeObjectTree(root: THREE.Object3D): void {
   root.traverse((object) => {
     if (object instanceof THREE.Mesh) {
       object.geometry?.dispose();
       if (Array.isArray(object.material)) {
-        object.material.forEach((m) => m.dispose());
+        object.material.forEach(disposeMaterial);
       } else if (object.material) {
-        object.material.dispose();
+        disposeMaterial(object.material);
       }
     }
   });

@@ -4,8 +4,8 @@
 
   This file is the master for every platform's icon; regenerate the set with
       pnpm tauri icon app-icon.svg
-  (see docs/development.md). Vector rather than a 1024 PNG so the source can be
-  edited and can't drift out of step with a rendered copy.
+  Vector rather than a 1024 PNG so the source can be edited and can't drift
+  out of step with a rendered copy.
 
   Geometry is the same one src/components/BrandMark.tsx draws in the Header, in
   a 96-unit space: gem N(48,17) E(79,48) S(48,79) W(17,48), centre vertex

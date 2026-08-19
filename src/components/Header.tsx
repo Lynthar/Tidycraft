@@ -18,6 +18,7 @@ import { useTagsStore } from "../stores/tagsStore";
 import { useThemeStore } from "../stores/themeStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { useUiStore } from "../stores/uiStore";
+import { useToastStore } from "../stores/toastStore";
 import { formatShortcut, SHORTCUTS } from "../hooks/useKeyboardShortcuts";
 import { AdvancedFiltersPanel } from "./AdvancedFilters";
 import { SearchHistory } from "./SearchHistory";
@@ -109,12 +110,36 @@ export function Header({ searchInputRef }: HeaderProps) {
 
   const handleUndo = async () => {
     const result = await undoLastOperation();
-    if (result && result.success) {
+    // `null` means the command itself failed; the store has already said so.
+    if (!result) return;
+
+    if (result.reverted_count > 0) {
       // Undo carried tag bindings back to the original paths on the backend;
       // re-sync the tags store so they reappear without waiting for the watcher's
-      // scanResult refresh, which refreshes the scan list on its own.
+      // scanResult refresh, which refreshes the scan list on its own. Keyed on
+      // what was actually reverted, not on overall success: a partial undo moves
+      // the bindings of the files it did revert.
       await useTagsStore.getState().loadTags();
     }
+    if (result.success) return;
+
+    // A refused undo reports per-item reasons — a sidecar that would be
+    // overwritten, an original path since re-occupied — that nothing else on this
+    // side renders, so without this the button read as inert while the entry
+    // stayed in the history. `success` is `failed_count == 0`, so a partly
+    // reverted batch lands here too and must not be reported as "nothing changed".
+    const reason = result.errors[0] ?? "";
+    useToastStore.getState().push({
+      kind: "error",
+      message:
+        result.reverted_count > 0
+          ? t("header.undoPartial", {
+              failed: result.failed_count,
+              total: result.reverted_count + result.failed_count,
+              reason,
+            })
+          : t("header.undoFailed", { reason }),
+    });
   };
 
   return (

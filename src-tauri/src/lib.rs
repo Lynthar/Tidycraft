@@ -140,8 +140,17 @@ async fn scan_project_incremental(
     stop.store(true, Ordering::SeqCst);
     let _ = progress_handle.join();
 
+    // Clear the in-flight guard only if it is still OURS. Registering this id
+    // against a different path rebuilds the whole state, and a scan started for
+    // that new root owns the guard by then — clearing it blindly would strip a
+    // live scan of its cancel handle and let a third one start beside it.
     let _ = project::with_mut(&project_id, |s| {
-        s.scan_state = None;
+        if s.scan_state
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(current, &state))
+        {
+            s.scan_state = None;
+        }
         Ok(())
     });
 
@@ -149,9 +158,16 @@ async fn scan_project_incremental(
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())?;
 
+    // Same reason, for the result itself: cancellation is advisory and the walk's
+    // last check sits before the cache/sort/tree tail, so a cancelled scan of the
+    // old root still returns a complete `Ok`. Installing it under a rebuilt state
+    // would leave analysis, exports and the dependency graph describing a folder
+    // this project no longer points at.
     project::with_mut(&project_id, |s| {
-        s.cached_scan = Some(scan_result.clone());
-        s.respect_gitignore = respect_gitignore;
+        if s.root_path == path {
+            s.cached_scan = Some(scan_result.clone());
+            s.respect_gitignore = respect_gitignore;
+        }
         Ok(())
     })?;
 

@@ -339,7 +339,6 @@ tidycraft/
 │       └── lib.rs          # Tauri commands
 ├── docs/                   # Auxiliary docs
 │   ├── analyzer-rules.md   # Per-rule defaults and tuning advice
-│   ├── development.md      # Developer guide (architecture, contributing)
 │   └── screenshots/        # README image assets
 ├── examples/               # Starter `tidycraft.example.toml`
 └── README.md               # User-facing docs (this file)
