@@ -191,15 +191,21 @@ impl UndoManager {
         id
     }
 
-    /// Undo the most recent batch that has not been undone.
-    pub fn undo_last(&mut self) -> Option<UndoResult> {
+    /// Undo the most recent batch that has not been undone. Sidecar carry
+    /// failures go out through `sidecar_failures` rather than into `UndoResult`:
+    /// the undo itself succeeded — the asset is back where it belongs — so they
+    /// must not count as failed items, but the command layer has to see them.
+    pub fn undo_last(
+        &mut self,
+        sidecar_failures: &mut crate::warning::SampledFailures,
+    ) -> Option<UndoResult> {
         let index = self.history.iter().rposition(|op| !op.undone)?;
 
         let batch = &self.history[index];
         let description = batch.description.clone();
 
         let had_operations = !batch.operations.is_empty();
-        let result = execute_batch_undo(&batch.operations);
+        let result = execute_batch_undo(&batch.operations, sidecar_failures);
 
         // A batch where nothing reverted stays retryable: the cause is usually
         // transient. Partial success still consumes it — a re-run would
@@ -277,7 +283,10 @@ pub(crate) fn paths_are_same_file(a: &Path, b: &Path) -> bool {
 }
 
 /// Revert a batch, most recent operation first.
-fn execute_batch_undo(operations: &[FileOperation]) -> UndoResult {
+fn execute_batch_undo(
+    operations: &[FileOperation],
+    sidecar_failures: &mut crate::warning::SampledFailures,
+) -> UndoResult {
     let mut reverted_count = 0;
     let mut failed_count = 0;
     let mut errors = Vec::new();
@@ -286,7 +295,7 @@ fn execute_batch_undo(operations: &[FileOperation]) -> UndoResult {
     let mut reverted_pairs: Vec<(String, String)> = Vec::new();
 
     for op in operations.iter().rev() {
-        match execute_single_undo(op) {
+        match execute_single_undo(op, sidecar_failures) {
             Ok(()) => {
                 reverted_count += 1;
                 if let Some(np) = &op.new_path {
@@ -311,7 +320,10 @@ fn execute_batch_undo(operations: &[FileOperation]) -> UndoResult {
 }
 
 /// Revert one file operation.
-fn execute_single_undo(operation: &FileOperation) -> Result<(), String> {
+fn execute_single_undo(
+    operation: &FileOperation,
+    sidecar_failures: &mut crate::warning::SampledFailures,
+) -> Result<(), String> {
     match operation.operation_type {
         OperationType::Rename => {
             let new_path = operation
@@ -357,6 +369,7 @@ fn execute_single_undo(operation: &FileOperation) -> Result<(), String> {
                     "[undo] engine sidecar not carried back for {}: {}",
                     new_path, e
                 );
+                sidecar_failures.record(Some(&operation.original_path), &e);
             }
             Ok(())
         }
@@ -407,6 +420,7 @@ fn execute_single_undo(operation: &FileOperation) -> Result<(), String> {
                     "[undo] engine sidecar not carried back for {}: {}",
                     new_path, e
                 );
+                sidecar_failures.record(Some(&operation.original_path), &e);
             }
             Ok(())
         }
@@ -543,7 +557,9 @@ mod tests {
             ],
         );
 
-        let result = manager.undo_last().expect("a batch was recorded");
+        let result = manager
+            .undo_last(&mut Default::default())
+            .expect("a batch was recorded");
         assert_eq!(result.reverted_count, 0);
         assert_eq!(result.failed_count, 2);
         assert!(!result.success);
@@ -552,7 +568,10 @@ mod tests {
             manager.can_undo(),
             "a batch that reverted nothing must remain undoable"
         );
-        assert!(manager.undo_last().is_some(), "retry must find it again");
+        assert!(
+            manager.undo_last(&mut Default::default()).is_some(),
+            "retry must find it again"
+        );
     }
 
     /// Partial success still consumes the entry: a re-run would re-attempt the
@@ -586,7 +605,9 @@ mod tests {
             ],
         );
 
-        let result = manager.undo_last().expect("a batch was recorded");
+        let result = manager
+            .undo_last(&mut Default::default())
+            .expect("a batch was recorded");
         assert_eq!(result.reverted_count, 1);
         assert_eq!(result.failed_count, 1);
         assert!(!manager.can_undo());
@@ -692,7 +713,7 @@ mod tests {
 
         manager.record_batch("Rename file".to_string(), ops);
 
-        let result = manager.undo_last().unwrap();
+        let result = manager.undo_last(&mut Default::default()).unwrap();
 
         assert!(result.success);
         assert_eq!(result.reverted_count, 1);
@@ -730,7 +751,7 @@ mod tests {
                 }],
             );
 
-            let result = manager.undo_last().unwrap();
+            let result = manager.undo_last(&mut Default::default()).unwrap();
             assert!(result.success, "{suffix}");
             // Both the asset and its sidecar are back at the original name.
             assert!(original.exists(), "{suffix}");
@@ -755,7 +776,7 @@ mod tests {
 
         manager.history[0].undone = true;
 
-        assert!(manager.undo_last().is_none());
+        assert!(manager.undo_last(&mut Default::default()).is_none());
         assert!(!manager.can_undo());
     }
 
@@ -866,7 +887,7 @@ mod tests {
             }],
         );
 
-        let result = manager.undo_last().unwrap();
+        let result = manager.undo_last(&mut Default::default()).unwrap();
         assert!(
             result.success,
             "the file itself must not count as a conflicting occupant: {:?}",
@@ -896,7 +917,7 @@ mod tests {
             }],
         );
 
-        let result = manager.undo_last().unwrap();
+        let result = manager.undo_last(&mut Default::default()).unwrap();
         assert!(
             result.success,
             "the file itself must not count as a conflicting occupant: {:?}",
@@ -925,7 +946,7 @@ mod tests {
             }],
         );
 
-        let result = manager.undo_last().unwrap();
+        let result = manager.undo_last(&mut Default::default()).unwrap();
         assert!(result.success);
         // The successfully reverted pair is reported so the command layer can
         // carry its tags back to the restored path.
@@ -953,7 +974,7 @@ mod tests {
                 timestamp: current_timestamp(),
             }],
         );
-        let result2 = manager2.undo_last().unwrap();
+        let result2 = manager2.undo_last(&mut Default::default()).unwrap();
         assert!(!result2.success);
         assert!(result2.reverted_pairs.is_empty());
     }

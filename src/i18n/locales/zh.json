@@ -304,6 +304,10 @@
     "tags_not_saved": {
       "title": "标签未保存",
       "body": "标签已在内存中更新，但写入磁盘失败：{{detail}}"
+    },
+    "sidecar_not_carried": {
+      "title": "引擎伴生文件未跟随",
+      "body": "{{affected}} 个资产移动后，其 .meta / .import / .uid 未跟随。引擎下次导入会把它们当作新资产，现有的引用将断开：{{detail}}"
     }
   },
   "scanPhase": {

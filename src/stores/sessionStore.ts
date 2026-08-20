@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { useProjectStore, checkPaths, toUnavailable } from "./projectStore";
+import { useProjectStore, checkPaths } from "./projectStore";
 import { useRecentsStore } from "./recentsStore";
 
 /// Cross-session snapshot of which projects were open and which was active.
@@ -80,14 +80,28 @@ export async function restoreSession(): Promise<void> {
 
   // One batch for everything the switcher can show: last session's projects plus
   // the recents list. Stubs are never scanned, so without this a project whose
-  // folder is gone looks healthy. Runs ahead of the early return below.
+  // folder is gone looks healthy.
+  //
+  // Started here but deliberately NOT awaited: the check stats every path, and a
+  // single unreachable network mount holds that for tens of seconds — long enough
+  // that awaiting it means the window sits empty until an unrelated NAS answers.
+  // The marks it produces only grey out rows in the switcher, so they can land
+  // after the interface is up; anything the user actually opens is path-checked
+  // by openProject on its own way in.
   const recentPaths = useRecentsStore.getState().recents.map((r) => r.path);
-  const health = await checkPaths([
+  const healthPromise = checkPaths([
     ...new Set([...openProjectPaths, ...recentPaths]),
   ]);
-  useRecentsStore.getState().markHealth(health);
+  const applyHealth = () =>
+    void healthPromise.then((health) => {
+      useRecentsStore.getState().markHealth(health);
+      useProjectStore.getState().markProjectHealth(health);
+    });
 
-  if (openProjectPaths.length === 0) return;
+  if (openProjectPaths.length === 0) {
+    applyHealth();
+    return;
+  }
 
   const store = useProjectStore.getState();
 
@@ -96,14 +110,12 @@ export async function restoreSession(): Promise<void> {
   const stubPaths = openProjectPaths.filter((p) => p !== activeProjectPath);
   await Promise.all(
     stubPaths.map((path) =>
-      store
-        .registerProjectStub(path, toUnavailable(health.get(path)))
-        .catch((err) => {
-          console.warn(
-            `[sessionStore] stub registration failed for ${path}:`,
-            err
-          );
-        })
+      store.registerProjectStub(path).catch((err) => {
+        console.warn(
+          `[sessionStore] stub registration failed for ${path}:`,
+          err
+        );
+      })
     )
   );
 
@@ -122,4 +134,6 @@ export async function restoreSession(): Promise<void> {
       console.warn(`[sessionStore] failed to hydrate active ${target}:`, err);
     }
   }
+
+  applyHealth();
 }

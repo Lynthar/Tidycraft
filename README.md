@@ -237,7 +237,7 @@ pnpm tauri build
 2. **Browse Assets** — Navigate the directory tree, switch list ↔ grid view, search, and filter
 3. **Preview Assets** — Click any asset to view details, thumbnail, or 3D viewer
 4. **Tag Assets** — Right-click to tag manually, or open the **AI Tag panel** for grouped suggestions (AI-derived rules if you've run Learning, heuristic fallback otherwise; Run / Re-learn / Review controls in the panel header)
-5. **Run Analysis** — `⌘⇧R` / `Ctrl+Shift+R`; tweak rules via **Settings → Analysis Rules → Edit**
+5. **Run Analysis** — click **Run Analysis** in the sidebar; tweak rules via **Settings → Analysis Rules → Edit**
 6. **Review Issues** — Switch to Issues tab; group by rule, filter by severity, jump to file
 7. **External Editors** — Map extensions to Photoshop / Blender / etc. in **Settings → External Editors**, then the `⤴` button opens directly
 

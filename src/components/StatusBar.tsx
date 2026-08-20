@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { X, AlertCircle, AlertTriangle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
+import { isBlockingOverlayOpen } from "../stores/uiStore";
 import { formatFileSize } from "../lib/utils";
 import { basename } from "../lib/pathUtils";
 import type { ScanWarning, ProjectWarning } from "../types/asset";
@@ -302,10 +303,14 @@ function WarningPopover({
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        onClose();
-      }
+      if (e.key !== "Escape") return;
+      // A dialog opened over this popover owns the key. Both listeners sit on
+      // `window` in the capture phase, and stopPropagation does not stop other
+      // listeners on the same target — so without this, one Escape would close
+      // the popover AND the dialog on top of it.
+      if (isBlockingOverlayOpen()) return;
+      e.stopPropagation();
+      onClose();
     };
     // mousedown, not click: the toggle button's own mousedown lands inside
     // .tc-warn-wrap and is excluded via closest(), so clicking the badge

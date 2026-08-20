@@ -71,8 +71,6 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: 'Tidycraft ${{ github.ref_name }}'
           releaseBody: |
-            See the changelog for details.
-
             ## Downloads
             - **Windows**: `.msi` installer or `-setup.exe` installer (both install; there is no portable build)
             - **macOS (Apple Silicon)**: `_aarch64.dmg`

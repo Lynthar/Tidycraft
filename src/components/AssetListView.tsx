@@ -70,7 +70,9 @@ function sortableHeaderProps(activate: () => void) {
     tabIndex: 0,
     onClick: activate,
     onKeyDown: (e: React.KeyboardEvent) => {
-      if (e.key === "Enter") {
+      // Space as well as Enter: a native button takes both, and the preventDefault
+      // is what stops Space scrolling the list out from under the header.
+      if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
         activate();
       }

@@ -304,6 +304,10 @@
     "tags_not_saved": {
       "title": "Tags not saved",
       "body": "Tag bindings were updated in memory but could not be written to disk: {{detail}}"
+    },
+    "sidecar_not_carried": {
+      "title": "Engine files left behind",
+      "body": "{{affected}} assets moved without their .meta / .import / .uid file. The engine will treat them as new assets on its next import, and existing references to them will break: {{detail}}"
     }
   },
   "scanPhase": {

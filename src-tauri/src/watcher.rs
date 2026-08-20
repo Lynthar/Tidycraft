@@ -422,9 +422,23 @@ fn upsert_asset(
     updated.push(info.clone());
 }
 
+/// Reject a batch whose project has been re-registered against a different root
+/// since the events were collected. Both sides go through `path_to_string` rather
+/// than comparing raw: a separator mismatch would fail every batch, silently, and
+/// this function is what stands between the old root's events and the new root's
+/// scan and tags file.
+fn batch_still_owns_project(state: &project::ProjectState, root_key: &str) -> Result<(), String> {
+    if scanner::path_to_string(Path::new(&state.root_path)) == root_key {
+        Ok(())
+    } else {
+        Err("project root changed under this batch".to_string())
+    }
+}
+
 /// Apply a batch of stitched rename pairs plus single-path candidates to the
 /// project's cached scan result. Returns an `FsChangeEvent` describing the net
-/// change, or `Err` when nothing changed or the project has no cached scan.
+/// change, or `Err` when nothing changed, the project has no cached scan, or the
+/// project has moved to a different root since these events were collected.
 fn apply_changes(
     project_id: &str,
     pairs: &[(PathBuf, PathBuf)],
@@ -435,12 +449,18 @@ fn apply_changes(
     // directly and have no Tauri app. The thread loop owns the emit.
     warnings_out: &mut Vec<crate::warning::ProjectWarning>,
 ) -> Result<FsChangeEvent, String> {
+    // The root these events were collected under. Re-checked at every lock below,
+    // not just here: phase 1 parses outside the lock for as long as the batch is
+    // large, which is room enough for a relocation to land between the phases.
+    let root_key = scanner::path_to_string(root);
+
     // ---- Phase 0: snapshot what the probe needs (brief lock) -------------
     let from_keys: HashSet<String> = pairs
         .iter()
         .map(|(f, _)| scanner::path_to_string(f))
         .collect();
     let (project_type, old_infos) = project::with_ref(project_id, |state| {
+        batch_still_owns_project(state, &root_key)?;
         let scan = state
             .cached_scan
             .as_ref()
@@ -548,6 +568,7 @@ fn apply_changes(
 
     // ---- Phase 2: patch the scan (project lock) --------------------------
     let (event, reap, tier2_pairs) = project::with_mut(project_id, |state| {
+        batch_still_owns_project(state, &root_key)?;
         let scan_result = state
             .cached_scan
             .as_mut()
@@ -768,6 +789,10 @@ fn apply_changes(
     // ---- Phase 3: tag bookkeeping (migrate first, then reap) -------------
     if !tag_migrations.is_empty() || !reap.is_empty() {
         let _ = project::with_mut(project_id, |state| {
+            // Last and most important of the three: this phase writes the tags
+            // file, so an old root's migrations and reaps landing on a relocated
+            // project's tags is a data loss, not just a stale row.
+            batch_still_owns_project(state, &root_key)?;
             if !tag_migrations.is_empty() {
                 // Migrations are data preservation — load the tags file even if it
                 // was untouched this session. The reap-only branch stays lazy: an
@@ -1080,6 +1105,38 @@ mod tests {
     }
 
     // ---- apply_changes integration (real files, synthetic pairs) ----------
+
+    /// A batch collected under the old root must not reach a project that has
+    /// been re-registered elsewhere since. The new root has a scan of its own by
+    /// then, so without the fence the old root's entries patch it and the old
+    /// root's migrations rewrite a tags file belonging to a different folder.
+    #[test]
+    fn a_batch_from_the_old_root_is_refused_after_the_project_moves() {
+        let old = tempdir().unwrap();
+        let new = tempdir().unwrap();
+        let id = "watcher_test_relocated_batch";
+
+        let paths = setup_project(id, old.path(), &["hero.png"]);
+        tag_asset(id, &paths[0]);
+
+        let from = old.path().join("hero.png");
+        let to = old.path().join("knight.png");
+        fs::rename(&from, &to).unwrap();
+
+        // The project is pointed at a different folder, which rebuilds its state,
+        // and a scan of that folder lands before the old batch is applied.
+        let new_paths = setup_project(id, new.path(), &["hero.png"]);
+
+        let err = apply_changes(id, &[(from, to)], &[], old.path(), None, &mut Vec::new())
+            .expect_err("a batch from the old root must be refused");
+        assert!(err.contains("root changed"), "unexpected error: {err}");
+
+        // The new root's scan is untouched: no old-root path was patched in, and
+        // its own asset is still there.
+        assert_eq!(scan_paths(id), new_paths);
+
+        project::unregister(id);
+    }
 
     #[test]
     fn stitched_rename_rekeys_scan_and_migrates_tags() {

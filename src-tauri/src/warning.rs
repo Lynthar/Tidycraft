@@ -21,8 +21,11 @@ pub enum ScanWarning {
         sample: Vec<String>,
         detail: String,
     },
-    /// Files discovered but whose metadata could not be read. The incremental
-    /// scan drops them; the full scan keeps them with zeroed size/mtime.
+    /// Files discovered but whose metadata could not be read. Neither scan drops
+    /// the file: the full scan keeps it with zeroed size/mtime, and the
+    /// incremental one leaves the cache entry from before the change standing, so
+    /// what is shown for it is stale rather than absent. Both are what the
+    /// `asset_unreadable` copy means by "missing or unreliable".
     AssetUnreadable {
         affected: usize,
         sample: Vec<String>,
@@ -47,6 +50,21 @@ pub enum ProjectWarning {
     /// Tag bindings were migrated in memory but could not be written to disk.
     /// Surfaced as a toast rather than in the warning list.
     TagsNotSaved { detail: String },
+    /// Engine sidecars (`.meta`, `.import`, `.uid`) that did not follow their
+    /// asset through a rename, move or undo. The asset moved and the file
+    /// carrying its identity did not, so the engine treats it as a new asset on
+    /// its next import: Unity mints a fresh GUID and every existing reference to
+    /// it breaks. The rename is not rolled back — the asset is where the user
+    /// asked for it — so saying so is the only way this becomes visible.
+    ///
+    /// `sample` holds asset paths, not sidecar paths: the asset is what the user
+    /// named. Deletion is deliberately not reported through this — see the
+    /// `carry_on_delete` call in `delete_assets`.
+    SidecarNotCarried {
+        affected: usize,
+        sample: Vec<String>,
+        detail: String,
+    },
 }
 
 /// Emit `w` on this project's warning channel. Failures to emit are ignored:
@@ -135,6 +153,86 @@ mod tests {
         })
         .unwrap();
         assert_eq!(tags["kind"], "tags_not_saved");
+
+        let sidecar = serde_json::to_value(ProjectWarning::SidecarNotCarried {
+            affected: 2,
+            sample: vec!["Assets/hero.png".into()],
+            detail: "failed to move sidecar".into(),
+        })
+        .unwrap();
+        assert_eq!(sidecar["kind"], "sidecar_not_carried");
+        assert_eq!(sidecar["affected"], 2);
+        assert_eq!(sidecar["sample"][0], "Assets/hero.png");
+        assert_eq!(sidecar["detail"], "failed to move sidecar");
+    }
+
+    /// The status bar renders one entry per `kind`, so a `ProjectWarning` sharing
+    /// a `kind` with a `ScanWarning` would collide on the React key and show one
+    /// where two are meant. Nothing else checks this.
+    #[test]
+    fn project_and_scan_warning_kinds_do_not_overlap() {
+        fn kind(v: serde_json::Value) -> String {
+            v["kind"].as_str().expect("tagged enum").to_string()
+        }
+        let scan_kinds: Vec<String> = vec![
+            kind(
+                serde_json::to_value(ScanWarning::TreeWalkFailed {
+                    skipped: 0,
+                    sample: vec![],
+                    detail: String::new(),
+                })
+                .unwrap(),
+            ),
+            kind(
+                serde_json::to_value(ScanWarning::AssetUnreadable {
+                    affected: 0,
+                    sample: vec![],
+                    detail: String::new(),
+                })
+                .unwrap(),
+            ),
+            kind(
+                serde_json::to_value(ScanWarning::IgnoreRulesUnusable {
+                    detail: String::new(),
+                })
+                .unwrap(),
+            ),
+            kind(
+                serde_json::to_value(ScanWarning::CacheNotSaved {
+                    detail: String::new(),
+                })
+                .unwrap(),
+            ),
+        ];
+        let project_kinds: Vec<String> = vec![
+            kind(
+                serde_json::to_value(ProjectWarning::WatcherEventsDropped {
+                    batches: 0,
+                    detail: String::new(),
+                })
+                .unwrap(),
+            ),
+            kind(
+                serde_json::to_value(ProjectWarning::TagsNotSaved {
+                    detail: String::new(),
+                })
+                .unwrap(),
+            ),
+            kind(
+                serde_json::to_value(ProjectWarning::SidecarNotCarried {
+                    affected: 0,
+                    sample: vec![],
+                    detail: String::new(),
+                })
+                .unwrap(),
+            ),
+        ];
+        for p in &project_kinds {
+            assert!(
+                !scan_kinds.contains(p),
+                "`{p}` is used by both enums; the status bar keys entries by kind"
+            );
+        }
     }
 
     #[test]

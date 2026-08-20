@@ -52,7 +52,7 @@ export async function checkPaths(
 
 /// `ok` and "no answer" both mean "nothing to show" — see the ProjectData
 /// field comment.
-export function toUnavailable(
+function toUnavailable(
   status: ProjectPathStatus | undefined
 ): UnavailableStatus | null {
   return !status || status.kind === "ok" ? null : status;
@@ -359,8 +359,13 @@ interface ProjectState {
   openProject: (path: string, options?: { force?: boolean }) => Promise<void>;
   /// Register a project with the backend and add a stub `ProjectData` without
   /// scanning, so session-restored projects appear in the sidebar instantly and
-  /// hydrate lazily. Idempotent for a path already in the Map.
-  registerProjectStub: (rawPath: string, unavailable?: UnavailableStatus | null) => Promise<void>;
+  /// hydrate lazily. Idempotent for a path already in the Map. Path health is
+  /// stamped separately by `markProjectHealth`, off the startup critical path.
+  registerProjectStub: (rawPath: string) => Promise<void>;
+  /// Stamp a batch path-health result onto projects that have nothing better to
+  /// go on. Startup runs the check off the critical path, so this lands after the
+  /// interface is already up.
+  markProjectHealth: (health: Map<string, ProjectPathStatus>) => void;
   /// Point an existing project at a different folder. The projectId is kept, so
   /// this is "this project moved", not "close one and open another" — deleting a
   /// project is a separate action.
@@ -535,6 +540,19 @@ function recordProjectWarning(projectId: string, w: ProjectWarning) {
       message: i18n.t("warnings.tags_not_saved.body", { detail: w.detail }),
     });
     return;
+  }
+  if (w.kind === "sidecar_not_carried") {
+    // The one warning that is both: a toast, because it belongs to the rename the
+    // user just performed and they should hear about broken references now — and
+    // a list entry, because its sample of affected assets is what tells them
+    // which files to fix, and a toast is gone before they can read five paths.
+    useToastStore.getState().push({
+      kind: "error",
+      message: i18n.t("warnings.sidecar_not_carried.body", {
+        affected: w.affected,
+        detail: w.detail,
+      }),
+    });
   }
   const state = useProjectStore.getState();
   const target = state.projects.get(projectId);
@@ -1100,7 +1118,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     get().refreshGitInfo(projectId);
   },
 
-  registerProjectStub: async (rawPath: string, unavailable: UnavailableStatus | null = null) => {
+  registerProjectStub: async (rawPath: string) => {
     const path = rawPath.replace(/\\/g, "/");
     const { projects } = get();
 
@@ -1130,10 +1148,42 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       return;
     }
 
-    const stub = { ...createDefaultProjectData(projectId, path), unavailable };
+    const stub = createDefaultProjectData(projectId, path);
     const newMap = new Map(get().projects);
     newMap.set(projectId, stub);
     set({ projects: newMap });
+  },
+
+  markProjectHealth: (health: Map<string, ProjectPathStatus>) => {
+    const { projects, activeProjectId } = get();
+    const next = new Map(projects);
+    let changed = false;
+    for (const [id, project] of projects) {
+      const status = health.get(project.projectPath);
+      if (!status) continue;
+      // Fills a blank, never overwrites a verdict. Anything that has scanned, is
+      // scanning, failed, or already carries a verdict learned it from its own
+      // openProject — which checked the path later than this batch did, so
+      // stamping this result over it would replace fresh knowledge with stale.
+      if (
+        project.unavailable ||
+        project.scanResult ||
+        project.isScanning ||
+        project.error
+      ) {
+        continue;
+      }
+      const unavailable = toUnavailable(status);
+      if (!unavailable) continue;
+      next.set(id, { ...project, unavailable });
+      changed = true;
+    }
+    if (!changed) return;
+    const active = activeProjectId ? next.get(activeProjectId) : undefined;
+    set({
+      projects: next,
+      ...(active ? syncFromActiveProject(active) : {}),
+    });
   },
 
   relocateProject: async (projectId: string, rawPath: string) => {

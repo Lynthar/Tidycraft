@@ -193,14 +193,17 @@ export function AssetPreview() {
 
   // Unity structure (component list + GUID reference count) for prefab and scene
   // files, parsed on demand. Same stale-response guard as the thumbnail effect;
-  // `modified` re-parses after external edits.
+  // `modified` re-parses after external edits. Keyed on the settled asset like
+  // the rest of the heavy area: the backend reads and parses the whole scene
+  // file, so following the live selection meant one full parse of a multi-megabyte
+  // scene per row the arrow keys passed through.
   const [unityFileInfo, setUnityFileInfo] = useState<UnityFileInfo | null>(null);
   const isUnityStructureFile =
     scanResult?.project_type === "unity" &&
-    !!selectedAsset &&
-    ["prefab", "unity"].includes(selectedAsset.extension.toLowerCase());
+    !!settledAsset &&
+    ["prefab", "unity"].includes(settledAsset.extension.toLowerCase());
   useEffect(() => {
-    if (!isUnityStructureFile || !selectedAsset) {
+    if (!isUnityStructureFile || !settledAsset) {
       setUnityFileInfo(null);
       return;
     }
@@ -211,7 +214,7 @@ export function AssetPreview() {
     (async () => {
       try {
         const info = await invoke<UnityFileInfo | null>("get_unity_file_info", {
-          path: selectedAsset.path,
+          path: settledAsset.path,
         });
         if (!cancelled) setUnityFileInfo(info);
       } catch {
@@ -222,7 +225,7 @@ export function AssetPreview() {
     return () => {
       cancelled = true;
     };
-  }, [isUnityStructureFile, selectedAsset?.path, selectedAsset?.modified]);
+  }, [isUnityStructureFile, settledAsset?.path, settledAsset?.modified]);
 
   // Goes through the clipboard plugin, like AssetList's context menu. Not a
   // portability nicety: WebKit gates `navigator.clipboard.writeText` on transient

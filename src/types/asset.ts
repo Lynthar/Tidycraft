@@ -89,12 +89,13 @@ export type ScanWarning =
   | { kind: "ignore_rules_unusable"; detail: string }
   | { kind: "cache_not_saved"; detail: string };
 
-/// Session-lifetime warnings. The first two mirror `warning::ProjectWarning`;
+/// Session-lifetime warnings. All but the last mirror `warning::ProjectWarning`;
 /// `watcher_start_failed` is born on this side of the IPC — the failed
 /// `start_watching` invoke IS the signal, so the backend never sends it.
 export type ProjectWarning =
   | { kind: "watcher_events_dropped"; batches: number; detail: string }
   | { kind: "tags_not_saved"; detail: string }
+  | { kind: "sidecar_not_carried"; affected: number; sample: string[]; detail: string }
   | { kind: "watcher_start_failed"; detail: string };
 
 /// Mirrors `project_path::ProjectPathStatus` — serde-tagged by `kind`, pinned

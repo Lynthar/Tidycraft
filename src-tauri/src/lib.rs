@@ -1569,8 +1569,12 @@ fn warning_banner_html(warnings: &[warning::ScanWarning]) -> String {
     }
     let mut parts: Vec<String> = Vec::new();
     if unread > 0 {
+        // Deliberately not "not reflected below": what an unreadable entry leaves
+        // behind differs by scan. A full scan keeps the row with zeroed size and
+        // mtime; an incremental one keeps whatever the cache last knew, which is
+        // by definition out of date. Only a failed directory walk leaves nothing.
         parts.push(format!(
-            "{unread} entries could not be read and are not reflected below"
+            "{unread} entries could not be read, and are missing or out of date below"
         ));
     }
     if ignore_broken {
@@ -2101,11 +2105,34 @@ fn execute_batch_rename(
     result
 }
 
+/// Turn accumulated sidecar-carry failures into one warning, if there were any.
+/// Every caller collects across a whole operation first: a batch of a hundred
+/// renames on a locked project would otherwise emit a hundred warnings for what
+/// is one problem.
+fn push_sidecar_warning(
+    failures: &mut warning::SampledFailures,
+    warnings: &mut Vec<warning::ProjectWarning>,
+) {
+    if failures.is_empty() {
+        return;
+    }
+    warnings.push(warning::ProjectWarning::SidecarNotCarried {
+        affected: failures.count,
+        sample: std::mem::take(&mut failures.sample),
+        detail: failures.detail.take().unwrap_or_default(),
+    });
+    failures.count = 0;
+}
+
 /// Rename a heterogeneous batch — each file to its own new *file name* within its
 /// current directory. Returns the successes as `(old_path, normalized new path)`.
 /// Free of project-state side effects; `commit_renames` layers undo and tags on.
 fn rename_batch_on_disk(
     planned: Vec<(String, String)>,
+    // Out-param for the same reason `commit_renames` takes one: this half stays
+    // free of project state and of the AppHandle, but a sidecar that failed to
+    // follow its asset has to reach the command boundary that owns the emit.
+    sidecar_failures: &mut warning::SampledFailures,
 ) -> (Vec<(String, String)>, BatchRenameResult) {
     let mut success_count = 0;
     let mut error_count = 0;
@@ -2157,13 +2184,18 @@ fn rename_batch_on_disk(
         match std::fs::rename(&path, &new_path) {
             Ok(_) => {
                 // Carry engine sidecars so renamed assets keep their identity
-                // (Unity GUID, Godot UID) and their import settings.
-                // Best-effort: no-op without a sidecar, logs on failure.
+                // (Unity GUID, Godot UID) and their import settings. Best-effort:
+                // no-op without a sidecar. The rename already happened and is not
+                // rolled back, so a failure is reported rather than raised — the
+                // pre-flight above catches an occupied destination, which leaves
+                // a source that turned unmovable in between (an editor holding
+                // the .meta) as what still gets here.
                 if let Err(e) = sidecar::carry_on_rename(path_obj, &new_path) {
                     eprintln!(
                         "[batch_rename] engine sidecar not carried for {}: {}",
                         path, e
                     );
+                    sidecar_failures.record(Some(&path), &e);
                 }
                 success_count += 1;
                 // Normalize to forward slashes so the undo record and the tag
@@ -2212,9 +2244,13 @@ fn commit_renames(
         errors: Vec::new(),
     };
 
+    // Accumulated across chunks so a batch reports one warning, not one per
+    // hundred files.
+    let mut sidecar_failures = warning::SampledFailures::default();
+
     for chunk in planned.chunks(RENAME_LOCK_CHUNK) {
         let outcome = project::with_mut(project_id, |state| {
-            let (done, part) = rename_batch_on_disk(chunk.to_vec());
+            let (done, part) = rename_batch_on_disk(chunk.to_vec(), &mut sidecar_failures);
 
             // Tags follow the file across renames — same as move_assets /
             // rename_file. Paths are already normalized (scanner::path_to_string)
@@ -2250,10 +2286,13 @@ fn commit_renames(
                 let untouched = total - result.success_count - result.error_count;
                 result.error_count += untouched;
                 result.errors.push(format!("Renames aborted: {}", e));
+                push_sidecar_warning(&mut sidecar_failures, warnings);
                 return result;
             }
         }
     }
+
+    push_sidecar_warning(&mut sidecar_failures, warnings);
 
     if !all_done.is_empty() {
         let ts = unix_timestamp();
@@ -2641,6 +2680,9 @@ fn commit_moves(
         return FileOpResult { successes, errors };
     }
 
+    // Accumulated across chunks, like commit_renames: one warning per operation.
+    let mut sidecar_failures = warning::SampledFailures::default();
+
     // Chunked, and the moves happen INSIDE the project lock: a file that has left
     // its old path while its tag binding has not is exactly what the watcher's
     // orphan cleanup reaps. See `RENAME_LOCK_CHUNK`.
@@ -2702,6 +2744,7 @@ fn commit_moves(
                                 "[move_assets] engine sidecar not carried for {}: {}",
                                 path, e
                             );
+                            sidecar_failures.record(Some(path), &e);
                         }
                         moved.push(FileOpSuccess {
                             original_path: path.clone(),
@@ -2748,10 +2791,13 @@ fn commit_moves(
                         message: format!("Move aborted: {}", e),
                     });
                 }
+                push_sidecar_warning(&mut sidecar_failures, warnings);
                 return FileOpResult { successes, errors };
             }
         }
     }
+
+    push_sidecar_warning(&mut sidecar_failures, warnings);
 
     if !successes.is_empty() {
         let ts = unix_timestamp();
@@ -2912,6 +2958,15 @@ fn delete_assets(paths: Vec<String>) -> DeleteResult {
                 // Also trash the engine sidecars so deleting an asset doesn't
                 // strand them. Best-effort: no-op without a sidecar, logs on
                 // failure.
+                //
+                // Deliberately NOT reported as `SidecarNotCarried`, unlike the
+                // rename and move sites: what stays behind here is a sidecar
+                // whose asset is gone, which both Unity and Godot clean up on
+                // their next import — no identity is lost and no reference
+                // breaks, because there is no longer an asset to reference. It
+                // is also the half worth keeping if the user restores the file
+                // from the trash. Reporting it would need this command to take
+                // an `app` and a `project_id` it otherwise has no use for.
                 if let Err(e) = sidecar::carry_on_delete(Path::new(&path)) {
                     eprintln!(
                         "[delete_assets] engine sidecar not carried for {}: {}",
@@ -2998,12 +3053,16 @@ fn commit_single_rename(
     std::fs::rename(old_path_ref, &new_path).map_err(|e| e.to_string())?;
 
     // Carry engine sidecars so the renamed asset keeps its identity and its
-    // references. Best-effort: a missing sidecar is a no-op, a carry failure logs.
+    // references. Best-effort: a missing sidecar is a no-op. The file is already
+    // renamed and stays that way, so a failure is reported rather than raised.
     if let Err(e) = sidecar::carry_on_rename(old_path_ref, &new_path) {
         eprintln!(
             "[rename_file] engine sidecar not carried for {}: {}",
             old_path, e
         );
+        let mut failures = warning::SampledFailures::default();
+        failures.record(Some(&old_path), &e);
+        push_sidecar_warning(&mut failures, warnings);
     }
 
     let _ = project::with_mut(project_id, |state| {
@@ -3078,10 +3137,12 @@ fn get_undo_history(project_id: String) -> Vec<undo::HistoryEntry> {
 #[tauri::command]
 fn undo_last_operation(app: AppHandle, project_id: String) -> Result<undo::UndoResult, String> {
     let mut tags_warning: Option<warning::ProjectWarning> = None;
+    let mut warnings: Vec<warning::ProjectWarning> = Vec::new();
+    let mut sidecar_failures = warning::SampledFailures::default();
     let result = project::with_mut(&project_id, |state| {
         let result = state
             .undo_manager
-            .undo_last()
+            .undo_last(&mut sidecar_failures)
             .ok_or_else(|| "No operation to undo".to_string())?;
         // Carry tag bindings back for the files the undo actually reverted
         // (undo.rs has no access to TagsData). `reverted_pairs` excludes any
@@ -3090,6 +3151,13 @@ fn undo_last_operation(app: AppHandle, project_id: String) -> Result<undo::UndoR
         Ok(result)
     });
 
+    // An undo that put files back but left their sidecars behind breaks the same
+    // references a forward rename would have. Emitted even when the undo itself
+    // returned `Err`: the failures recorded before that point already happened.
+    push_sidecar_warning(&mut sidecar_failures, &mut warnings);
+    for w in &warnings {
+        warning::emit_project_warning(&app, &project_id, w);
+    }
     if let Some(w) = &tags_warning {
         warning::emit_project_warning(&app, &project_id, w);
     }
@@ -3342,6 +3410,47 @@ mod tests {
     use super::*;
 
     use crate::scanner::AssetType;
+
+    /// One warning per operation, not per file — and the accumulator has to come
+    /// back empty, or the next chunk of the same batch reports the same failures
+    /// again on top of its own.
+    #[test]
+    fn sidecar_failures_roll_up_into_one_warning_and_reset() {
+        let mut failures = warning::SampledFailures::default();
+        let mut warnings: Vec<warning::ProjectWarning> = Vec::new();
+
+        // Nothing recorded: nothing said.
+        push_sidecar_warning(&mut failures, &mut warnings);
+        assert!(warnings.is_empty(), "a clean run must not warn");
+
+        for i in 0..7 {
+            failures.record(Some(&format!("Assets/tex_{i}.png")), "sidecar is locked");
+        }
+        push_sidecar_warning(&mut failures, &mut warnings);
+
+        assert_eq!(warnings.len(), 1, "seven failures, one warning");
+        match &warnings[0] {
+            warning::ProjectWarning::SidecarNotCarried {
+                affected,
+                sample,
+                detail,
+            } => {
+                assert_eq!(*affected, 7, "the count is the whole batch");
+                assert_eq!(
+                    sample.len(),
+                    warning::SAMPLE_CAP,
+                    "the sample is capped, the count is not"
+                );
+                assert_eq!(sample[0], "Assets/tex_0.png");
+                assert_eq!(detail, "sidecar is locked");
+            }
+            other => panic!("wrong warning: {other:?}"),
+        }
+
+        // Drained: a second flush of the same accumulator says nothing.
+        push_sidecar_warning(&mut failures, &mut warnings);
+        assert_eq!(warnings.len(), 1, "the accumulator must not report twice");
+    }
 
     /// A report that says "1,234 assets" over a scan that skipped a subtree is
     /// lying. A healthy scan gets no banner element at all, and cache trouble
@@ -3639,7 +3748,7 @@ mod tests {
             (a.to_string_lossy().to_string(), "my_file.png".to_string()),
             (b.to_string_lossy().to_string(), "SM_rock.fbx".to_string()),
         ];
-        let (done, result) = rename_batch_on_disk(planned);
+        let (done, result) = rename_batch_on_disk(planned, &mut Default::default());
 
         assert_eq!(result.success_count, 2);
         assert_eq!(result.error_count, 0);
@@ -3671,7 +3780,7 @@ mod tests {
                 "sub/evil.png".to_string(),
             ),
         ];
-        let (done, result) = rename_batch_on_disk(planned);
+        let (done, result) = rename_batch_on_disk(planned, &mut Default::default());
 
         assert_eq!(result.success_count, 0);
         assert_eq!(result.error_count, 1); // only the bad name counts
@@ -3695,7 +3804,7 @@ mod tests {
             (a.to_string_lossy().to_string(), "a_b.png".to_string()),
             (b.to_string_lossy().to_string(), "a_b.png".to_string()),
         ];
-        let (done, result) = rename_batch_on_disk(planned);
+        let (done, result) = rename_batch_on_disk(planned, &mut Default::default());
 
         assert_eq!(result.success_count, 1);
         assert_eq!(result.error_count, 1);

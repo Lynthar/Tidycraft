@@ -237,7 +237,7 @@ pnpm tauri build
 2. **浏览资源** — 导航目录树、列表 / 网格视图切换、搜索、筛选
 3. **预览资源** — 点击任意资源查看详情、缩略图或 3D 视图
 4. **标记资源** — 右键添加标签,或打开 **AI 标签面板** 查看分组建议(若已运行学习,跑 AI 派生的本地规则;否则启发式 fallback。面板顶部含 Run / Re-learn / Review 控件)
-5. **运行分析** — `⌘⇧R` / `Ctrl+Shift+R`；通过 **Settings → Analysis Rules → Edit** 调整规则
+5. **运行分析** — 点击侧栏的 **Run Analysis**；通过 **Settings → Analysis Rules → Edit** 调整规则
 6. **查看问题** — 切换到问题选项卡，按规则分组、按严重度筛选、跳转到文件
 7. **外部编辑器** — 在 **Settings → External Editors** 把扩展名映射到 Photoshop / Blender 等，预览面板的 `⤴` 直接打开
 

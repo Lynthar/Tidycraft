@@ -22,7 +22,7 @@ export function ProjectUnavailable() {
   const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const relocateProject = useProjectStore((s) => s.relocateProject);
   const removeProject = useProjectStore((s) => s.removeProject);
-  const rescan = useProjectStore((s) => s.rescan);
+  const openProject = useProjectStore((s) => s.openProject);
 
   const [check, setCheck] = useState<CheckState | null>(null);
 
@@ -41,10 +41,15 @@ export function ProjectUnavailable() {
     check?.projectId === activeProjectId && check.phase === "checked" ? check.at : null;
 
   const handleCheckAgain = async () => {
-    if (!activeProjectId || checking) return;
+    if (!activeProjectId || !projectPath || checking) return;
     setCheck({ projectId: activeProjectId, phase: "checking" });
     try {
-      await rescan();
+      // Deliberately not `rescan()`: that clears the on-disk scan cache first,
+      // which makes the recovery scan re-read every file, and throws the cache
+      // away again on each hopeful click while the folder is still missing. This
+      // question is "is the folder back?", and openProject answers it by checking
+      // the path before it scans anything.
+      await openProject(projectPath, { force: true });
     } finally {
       // A folder that came back unmounts this panel, so the only state worth
       // writing here is the one nobody sees unless it is still gone.
