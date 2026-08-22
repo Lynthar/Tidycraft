@@ -782,8 +782,10 @@ fn parse_icc_desc_text(body: &[u8]) -> Option<String> {
             let off = u32::from_be_bytes(body.get(24..28)?.try_into().ok()?) as usize;
             let raw = body.get(off..off.checked_add(len)?)?;
             let units: Vec<u16> = raw
-                .chunks_exact(2)
-                .map(|c| u16::from_be_bytes([c[0], c[1]]))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|c| u16::from_be_bytes(*c))
                 .collect();
             Some(String::from_utf16_lossy(&units))
         }
@@ -2996,6 +2998,39 @@ mod tests {
         body.extend_from_slice(&((2.4f32 * 65536.0) as i32).to_be_bytes());
         let profile = build_icc(&[(b"rTRC", body)]);
         assert_eq!(classify_icc_profile(&profile).as_deref(), Some("sRGB"));
+    }
+
+    /// v4 `desc` body carrying an `mluc` record (UTF-16BE, one `enUS` entry).
+    fn mluc_body(text: &str) -> Vec<u8> {
+        let utf16: Vec<u8> = text.encode_utf16().flat_map(|u| u.to_be_bytes()).collect();
+        let mut body = b"mluc".to_vec();
+        body.extend_from_slice(&[0u8; 4]);
+        body.extend_from_slice(&1u32.to_be_bytes());
+        body.extend_from_slice(&12u32.to_be_bytes());
+        body.extend_from_slice(b"enUS");
+        body.extend_from_slice(&(utf16.len() as u32).to_be_bytes());
+        body.extend_from_slice(&28u32.to_be_bytes());
+        body.extend_from_slice(&utf16);
+        body
+    }
+
+    #[test]
+    fn icc_v4_mluc_description_reads_utf16() {
+        let linear = build_icc(&[(b"desc", mluc_body("Linear Rec.709"))]);
+        assert_eq!(classify_icc_profile(&linear).as_deref(), Some("Linear"));
+        let srgb = build_icc(&[(b"desc", mluc_body("sRGB IEC61966-2.1"))]);
+        assert_eq!(classify_icc_profile(&srgb).as_deref(), Some("sRGB"));
+    }
+
+    #[test]
+    fn icc_mluc_odd_record_length_drops_the_stray_byte() {
+        // A record length that is not a whole number of UTF-16 units must not
+        // panic or invent a character. Pins the remainder semantics the reader
+        // depends on, which is what a chunking change would silently alter.
+        let mut body = mluc_body("sRGB");
+        body.push(0x00);
+        body[20..24].copy_from_slice(&(("sRGB".len() * 2 + 1) as u32).to_be_bytes());
+        assert_eq!(parse_icc_desc_text(&body).as_deref(), Some("sRGB"));
     }
 
     #[test]
