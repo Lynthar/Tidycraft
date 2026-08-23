@@ -542,10 +542,9 @@ function recordProjectWarning(projectId: string, w: ProjectWarning) {
     return;
   }
   if (w.kind === "sidecar_not_carried") {
-    // The one warning that is both: a toast, because it belongs to the rename the
-    // user just performed and they should hear about broken references now — and
-    // a list entry, because its sample of affected assets is what tells them
-    // which files to fix, and a toast is gone before they can read five paths.
+    // The one warning that is both: a toast because it belongs to the rename just
+    // performed, and a list entry because its sample of affected assets is what says
+    // which files to fix — a toast is gone before five paths can be read.
     useToastStore.getState().push({
       kind: "error",
       message: i18n.t("warnings.sidecar_not_carried.body", {
@@ -768,13 +767,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
           return;
         }
       }
-      // The mirror image: the entry was CLOSED while the health check ran — or
-      // RELOCATED, which keeps the id and changes the path. Writing the pre-await
-      // snapshot back would resurrect a project the user just removed (its backend
-      // registration already gone), or drag a just-relocated project back to the
-      // folder it left. The check is slow enough to make both reachable: it stats
-      // every path, and a dead network mount can hold that for tens of seconds
-      // while this panel — and its Locate button — stay on screen.
+      // The entry was CLOSED while the health check ran, or RELOCATED (same id, new
+      // path). Writing the pre-await snapshot back would resurrect a project just
+      // removed, or drag a relocated one back to the folder it left.
       const stillOurs = existingProject
         ? get().projects.get(existingProject.id)
         : undefined;
@@ -802,14 +797,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       return;
     }
 
-    // A project coming back from `unavailable` may still hold a watcher that no
-    // longer reports anything: the OS watch does not reliably survive its root
-    // being deleted or renamed (notify documents this as platform-dependent), and
-    // the install below is skipped whenever `fsWatchers` already has an entry. So
-    // without this teardown a recovered project runs watcher-less, and the only
-    // symptom is that live updates quietly never arrive again. relocateProject
-    // does the same before its own rebuild; a plain force-rescan, whose watcher is
-    // healthy, deliberately keeps it.
+    // A project back from `unavailable` may hold a watcher that no longer reports (the
+    // OS watch does not reliably survive its root moving), and the install below is
+    // skipped when fsWatchers has an entry — so live updates would silently stop.
     if (current?.unavailable && fsWatchers.has(projectId)) {
       await stopFsWatch(projectId);
     }
@@ -843,10 +833,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         return;
       }
     } else if (get().projects.get(projectId)?.projectPath !== path) {
-      // Closed or relocated during register_project itself. That registration has
-      // already rebuilt the backend against `path`, and a relocation's own
-      // openProject re-registers the new root behind us — so what is left to
-      // prevent is writing this call's snapshot into the store on top of it.
+      // Closed or relocated during register_project itself: the backend is already
+      // rebuilt against `path`, and a relocation's own openProject re-registers the
+      // new root behind us — what is left to prevent is overwriting that in the store.
       return;
     }
 
@@ -919,10 +908,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         console.warn("Failed to probe tidycraft.toml:", err);
       }
 
-      // Apply scan result to the project that owns it (not necessarily active),
-      // and only while it still points at the folder this scan walked — a
-      // relocation keeps the id and changes the path, so the id alone would let a
-      // scan of the old root install itself as the new one's result.
+      // Apply the scan result to the project that owns it (not necessarily the active one)
+      // and only while it still points at the folder this scan walked: a relocation keeps
+      // the id, so id alone lets an old root's scan install as the new one's result.
       const state = get();
       const target = state.projects.get(projectId);
       if (target && target.projectPath === path) {
@@ -1161,10 +1149,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     for (const [id, project] of projects) {
       const status = health.get(project.projectPath);
       if (!status) continue;
-      // Fills a blank, never overwrites a verdict. Anything that has scanned, is
-      // scanning, failed, or already carries a verdict learned it from its own
-      // openProject — which checked the path later than this batch did, so
-      // stamping this result over it would replace fresh knowledge with stale.
+      // Fills a blank, never overwrites a verdict: anything that scanned, is scanning,
+      // failed or already carries one learned it from its own openProject, which checked
+      // later than this batch — stamping over it replaces fresh knowledge with stale.
       if (
         project.unavailable ||
         project.scanResult ||

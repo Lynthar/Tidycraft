@@ -4,12 +4,9 @@
    设计稿 (design_handoff_tidycraft_redesign/app/styles.css) 的
    .tc-* 组件样式，按组件分段迁移过来。每段对应一个 React 组件。
 
-   原则（来自 REDESIGN.md Phase 1）：
-   - 简单原子样式（padding / flex / margin）继续用 Tailwind utility
-   - 复杂复合样式（OKLCH color-mix / 多层 shadow / 状态叠加 / 动画）
-     落在这里
-   - 颜色字面量是红线 —— 所有颜色必须 var(--xxx) 引用 token，
-     不能写 hex / oklch 字面量
+   简单原子样式走 Tailwind utility，复杂复合样式（OKLCH color-mix / 多层 shadow /
+   状态叠加 / 动画）落这里。**颜色字面量是红线**：一律 var(--token)，不写 hex / oklch
+   字面量——写了就脱离主题切换，且 check-palette 的审计对它一无所知。
 
    迁移进度跟踪在 REDESIGN.md Phase 1 章节。
    ============================================================ */
@@ -158,11 +155,9 @@
   flex-shrink: 0;
 }
 
-/* The message is the only part of the bar allowed to shrink. A backend error
-   can be a whole failing path plus an OS message, and the bar is 28px tall
-   with no room to wrap: without `min-width: 0` a flex item refuses to go below
-   its content width, so the text pushed Retry and Dismiss off the edge. The
-   full string stays reachable through the element's title. */
+/* The message is the only part of the bar allowed to shrink; the full string stays
+   reachable through `title`. Without `min-width: 0` a flex item will not go below
+   its content width, and a long backend error pushes Retry and Dismiss off the bar. */
 .tc-status-err-msg {
   font-size: 11.5px;
   font-weight: 500;
@@ -440,10 +435,8 @@
   filter: none;
 }
 
-/* =========================
-   Sidebar (frame: tabs + run button + section heads;
-   tree row & tag chip styling not migrated yet — DirectoryTree
-   and TagFilterPanel keep their existing styling for now)
+/* Sidebar frame only: tabs, run button, section heads. DirectoryTree and
+   TagFilterPanel still carry their pre-redesign styling.
    ========================= */
 
 .tc-sidebar {
@@ -554,12 +547,9 @@
   filter: none;
 }
 
-/* Outlined secondary button stacked under tc-run-btn — opens the AI
-   Tag suggestion panel. Visual hierarchy: tc-run-btn is the filled
-   primary CTA (a batch operation), tc-aitag-btn is an outlined entry
-   point to a view. Sparkles icon picks up the primary tint to hint
-   "this is the AI/intelligent action" without competing for attention
-   with the filled button above. */
+/* Outlined secondary under tc-run-btn — an entry point to a view, deliberately
+   not a second filled CTA: the filled one is the batch operation. Keep the
+   outline, or the two buttons compete and the destructive one stops standing out. */
 .tc-aitag-btn {
   width: 100%;
   margin-top: 6px;
@@ -616,11 +606,8 @@
 /* =========================
    Main pane (asset list view)
 
-   Note on layout: design uses display:grid with a fixed
-   grid-template-columns. This codebase uses pixel-based per-column
-   widths driven by columnStore so users can drag-resize columns,
-   so .tc-row / .tc-list-header use display:flex instead. The visual
-   styling (height, colors, selection indicator) ports over directly.
+   `.tc-row` / `.tc-list-header` are flex, not the mock's grid: column widths come
+   from columnStore so they can be drag-resized, which a fixed template cannot do.
    ========================= */
 
 .tc-main {
@@ -655,28 +642,20 @@
   position: relative;
 }
 
-/* The list keeps DOM focus on a container rather than on individual rows:
-   rows unmount as they scroll out under virtualization, which would drop
-   focus to <body> mid-navigation. The active row is named by
-   `aria-activedescendant` instead, and shown by its own `data-selected`.
+/* DOM focus stays on a container, never on a row — rows unmount as they scroll
+   under virtualization and focus would drop to <body> mid-navigation. The active
+   row is named by `aria-activedescendant` and shown by its own `data-selected`.
 
-   Focus lives on the rows container rather than the scrolling box, because a
-   screen reader decides whether to hand the arrow keys to the page or to the
-   widget from the role of whatever holds focus, and only the list itself
-   carries that role. The container is as tall as the whole virtual list, so
-   its own outline would be drawn around thousands of pixels — the ring goes
-   on the viewport box instead. */
+   Focus sits on the rows container, not the scrolling box: a screen reader decides
+   who gets the arrow keys from the role of whatever holds focus, and only the list
+   carries that role. Its own outline would ring thousands of pixels, hence above. */
 .tc-list-scroll > [role="listbox"]:focus-visible {
   outline: none;
 }
 
-/* The ring is drawn by the frame, above the scrolling box, rather than as an
-   outline on the box itself. Two things inside that box paint over its own
-   outline and took an edge each: the sticky header, which is opaque and sits
-   at z-index 5, hid the top edge, and the 8px custom scrollbar hid the right
-   one — leaving a ring with two sides, which is how it was reported.
-   Moving the outline outward instead is not an option: `.tc-main` clips at
-   its bounds and would take all four.
+/* The ring is drawn by the frame, above the scrolling box, never as an outline on
+   the box: the sticky header and the custom scrollbar each paint over one edge of
+   it, and moving it outward instead loses all four to `.tc-main`'s clip.
 
    Anchored to the frame, which does not scroll, so it stays on the viewport
    box while the rows move under it. */
@@ -742,11 +721,9 @@
   background: color-mix(in oklch, var(--primary) 7%, transparent);
 }
 
-/* Batch-select checkbox lane: the 32px lane is always reserved, but the box
-   only appears on row hover, when the row is checked, or while a batch
-   selection is active (data-force) — so multi-select is discoverable without
-   permanent clutter or a layout shift. There is no focus state here: the box
-   is out of the tab order, and the keyboard toggles it through the list. */
+/* Batch-select lane: the 32px lane is always reserved — revealing the box without
+   it shifts the whole row. The box shows on hover / checked / data-force only.
+   No focus state: the box is out of the tab order, the keyboard goes via the list. */
 .tc-row-check {
   opacity: 0;
   transition: opacity 120ms ease;
@@ -757,19 +734,15 @@
   opacity: 1;
 }
 
-/* Vertical column dividers in the list header. Only the header gets these
-   so data rows stay clean (the design mock doesn't have grid lines between
-   data cells). The rule scopes to direct-child cells so nested elements
-   inside a column don't accidentally pick it up. */
+/* Column dividers, header only — data rows stay clean by design. Scoped to
+   direct-child cells so nested elements inside a column don't pick one up. */
 .tc-list-header > div + div {
   border-left: 1px solid var(--line-soft);
 }
 
-/* Column resize handle.
-   - 7px wide hit area pinned to the right edge of each header cell
-   - Visible on hover/drag as a 2px primary-colored stripe
-   - The actual width change still goes through ColumnResizeHandle's
-     mousemove handler in JS; this is the visual layer. */
+/* Column resize handle: 7px hit area on each header cell's right edge, shown on
+   hover/drag as a 2px stripe. **Visual layer only** — the width change itself goes
+   through ColumnResizeHandle's mousemove handler in JS. */
 .tc-col-resize {
   position: absolute;
   top: 0;
@@ -1281,10 +1254,9 @@
   font-weight: 500;
 }
 
-/* Action cell: keeps the row a clean 3-column grid (icon | body | actions).
-   Both the Fix and Locate buttons live inside this one cell — placing them as
-   separate grid children spilled the second into a starved implicit column,
-   clipping its label. */
+/* Action cell keeps the row a 3-column grid (icon | body | actions). Both Fix and
+   Locate live in this one cell — as separate grid children the second spills into
+   a starved implicit column and its label is clipped. */
 .tc-issue-actions {
   display: flex;
   align-items: center;
@@ -1805,10 +1777,9 @@
   width: 100%;
   text-align: left;
 }
-/* Hover and the keyboard cursor paint the same highlight, so only one of them
-   may be active at a time. `data-hover-off` is set by CommandPalette while the
-   keyboard is driving: without it a pointer resting over the list kept its row
-   lit, and two identical highlights gave no clue which one Enter would run. */
+/* Hover and the keyboard cursor paint the same highlight, so only one may be live:
+   CommandPalette sets `data-hover-off` while the keyboard drives. Without it a
+   resting pointer lights a second row and nothing says which one Enter will run. */
 .tc-cmdk-list:not([data-hover-off]) .tc-cmdk-item:hover,
 .tc-cmdk-item[data-active="true"] {
   background: var(--primary-tint);
@@ -1878,12 +1849,8 @@
   gap: 4px;
 }
 
-/* =========================
-   Phase 4 — Main toolbar + view toggle
-   Ported from design_handoff_tidycraft_redesign/app/styles.css:664-719.
-   `.tc-pill` (type-filter pills) added in Phase 7 alongside the toolbar
-   pill row.
-   ========================= */
+/* Phase 4 — Main toolbar + view toggle. Ported; do not re-derive.
+   `.tc-pill` (type-filter pills) was added later, alongside the toolbar pill row. */
 .tc-main-toolbar .tc-pill {
   display: inline-flex;
   align-items: center;
@@ -2061,19 +2028,9 @@
   box-shadow: 0 1px 2px oklch(0% 0 0 / 0.05);
 }
 
-/* =========================
-   Phase 4 — Gallery view (cards)
-   Ported from design_handoff_tidycraft_redesign/app/styles.css:892-1076.
-   Mock-only `.tc-card-tagdot[data-tag=...]` rules were dropped — real tag
-   colors come from `Tag.color` and are applied inline.
-   ========================= */
-/* `.tc-gallery` is the scroll container (visual + overflow only). The card
-   grid layout itself moved to `.tc-gallery-row` so we can plug a virtualizer
-   in between — virtualizer needs absolute-positioned rows inside a
-   fixed-height spacer, which conflicts with the design's flowing auto-fill
-   grid. The original `display: grid; grid-template-columns: repeat(auto-fill,
-   minmax(168px, 1fr)); grid-auto-rows: max-content; gap: 12px` from
-   design_handoff/styles.css:895 was split this way. */
+/* Phase 4 — Gallery view (cards). Ported from the design handoff; do not re-derive.
+   `.tc-gallery` is the scroll container only: the card grid moved to `.tc-gallery-row`
+   so a virtualizer can sit between. Putting the grid back here breaks virtualization. */
 .tc-gallery {
   flex: 1;
   min-height: 0;
@@ -2195,10 +2152,9 @@
   top: 8px;
   right: 8px;
 }
-/* Batch-select checkbox — top-left, revealed on hover, when the card is
-   checked, while a batch selection is active (data-selecting), or on keyboard
-   focus. It swaps in for the type chip (hidden in the same states) so the
-   corner never holds both at once. */
+/* Batch-select checkbox — top-left, revealed on hover / checked / data-selecting /
+   keyboard focus. It swaps in for the type chip, which hides in exactly those
+   states: the two share the corner and must never both be visible. */
 .tc-card-check {
   position: absolute;
   top: 7px;
@@ -2277,13 +2233,9 @@
   margin-left: 2px;
 }
 
-/* =========================
-   Phase 5 — AI Tag Suggest panel (sidebar overlay)
-   Ported from design_handoff_tidycraft_redesign/app/styles.css:2002-2181.
-   Anchor uses fixed positioning relative to viewport (vs design's `.tc-body
-   { position: relative }`) because our App shell doesn't have a single
-   wrapping body class — fixed coords reach the same visual placement.
-   ========================= */
+/* Phase 5 — AI Tag Suggest panel (sidebar overlay). Ported; do not re-derive.
+   Anchored `fixed` to the viewport: the App shell has no single wrapping body class
+   to position against, so a `relative` parent cannot be assumed here. */
 .tc-aitag-anchor {
   position: fixed;
   top: 70px;
@@ -2490,12 +2442,9 @@
   cursor: default;
 }
 
-/* =========================
-   Phase 6 — StatusBar Connected dot + watcher pulse
-   Ported from design_handoff_tidycraft_redesign/app/styles.css:1235-1244,
-   1619-1633. The shared `pulse` keyframe drives both the persistent
-   "Connected" indicator and the transient watcher "syncing" badge.
-   ========================= */
+/* Phase 6 — StatusBar Connected dot + watcher pulse. Ported; do not re-derive.
+   One shared `pulse` keyframe drives both the persistent "Connected" indicator
+   and the transient watcher "syncing" badge — retune it and both move. */
 .tc-status-pulse {
   width: 6px;
   height: 6px;
@@ -2641,11 +2590,9 @@
   border: 1px solid color-mix(in oklch, var(--warn) 30%, transparent);
 }
 
-/* Custom title bar for macOS only — paired with `titleBarStyle: Overlay`
-   in tauri.conf.json. The window's native traffic lights stay clickable
-   in the top-left; our content lives in the same row, padded right of
-   them. On Windows/Linux the platform gate (`.tc-platform-macos` body
-   class) keeps this hidden so the native title bar handles things. */
+/* macOS-only custom title bar, paired with `titleBarStyle: Overlay` in
+   tauri.conf.json: content sits in the same row as the native traffic lights,
+   padded right of them. The `.tc-platform-macos` gate hides it elsewhere. */
 .tc-titlebar {
   display: none;
 }
@@ -2672,10 +2619,9 @@
 
 /* ============ DCC source badge / mini chips ============ */
 
-/* Names the authoring tool on source files (.blend / .psd / ...) — rendered
-   inline after the file name in list rows and in the gallery card's
-   bottom-left meta slot (via .tc-card-dcc). Accent-tinted to read as
-   "pipeline input", distinct from the muted measurement chips. */
+/* Names the authoring tool on source files (.blend / .psd / …), inline after the
+   file name and in the gallery card's bottom-left slot. Accent-tinted to read as
+   "pipeline input" — the muted tint is what measurement chips use. */
 .tc-dcc-badge {
   display: inline-flex;
   align-items: center;
@@ -2691,10 +2637,9 @@
   border: 1px solid color-mix(in oklch, var(--accent) 25%, transparent);
   white-space: nowrap;
 }
-/* Gallery-card variant: occupies the bottom-left slot that dimensions use
-   on runtime textures (DCC sources never have parsed dimensions, so the
-   two can't collide). Backdrop matches .tc-card-meta-tl for legibility
-   over thumbnails. */
+/* Gallery-card variant: takes the bottom-left slot that dimensions use on runtime
+   textures — safe because DCC sources never have parsed dimensions. Backdrop
+   matches .tc-card-meta-tl so it stays legible over a thumbnail. */
 .tc-card-dcc {
   position: absolute;
   bottom: 8px;

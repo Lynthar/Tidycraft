@@ -44,11 +44,9 @@ export function ProjectUnavailable() {
     if (!activeProjectId || !projectPath || checking) return;
     setCheck({ projectId: activeProjectId, phase: "checking" });
     try {
-      // Deliberately not `rescan()`: that clears the on-disk scan cache first,
-      // which makes the recovery scan re-read every file, and throws the cache
-      // away again on each hopeful click while the folder is still missing. This
-      // question is "is the folder back?", and openProject answers it by checking
-      // the path before it scans anything.
+      // **Deliberately not `rescan()`** — that clears the on-disk cache first, so every
+      // hopeful click while the folder is still missing throws the cache away again.
+      // The question here is "is the folder back?", which openProject checks first.
       await openProject(projectPath, { force: true });
     } finally {
       // A folder that came back unmounts this panel, so the only state worth

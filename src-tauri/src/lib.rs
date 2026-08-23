@@ -140,10 +140,9 @@ async fn scan_project_incremental(
     stop.store(true, Ordering::SeqCst);
     let _ = progress_handle.join();
 
-    // Clear the in-flight guard only if it is still OURS. Registering this id
-    // against a different path rebuilds the whole state, and a scan started for
-    // that new root owns the guard by then — clearing it blindly would strip a
-    // live scan of its cancel handle and let a third one start beside it.
+    // Clear the in-flight guard only if it is still OURS: re-registering this id
+    // against a different path rebuilds the state, and a scan of that new root owns
+    // the guard by then — clearing blindly strips a live scan of its cancel handle.
     let _ = project::with_mut(&project_id, |s| {
         if s.scan_state
             .as_ref()
@@ -158,11 +157,9 @@ async fn scan_project_incremental(
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())?;
 
-    // Same reason, for the result itself: cancellation is advisory and the walk's
-    // last check sits before the cache/sort/tree tail, so a cancelled scan of the
-    // old root still returns a complete `Ok`. Installing it under a rebuilt state
-    // would leave analysis, exports and the dependency graph describing a folder
-    // this project no longer points at.
+    // Same reason, for the result itself: cancellation is advisory and the walk's last
+    // check sits before the cache/sort/tree tail, so a cancelled scan of the old root
+    // still returns a complete `Ok` — installing it would describe the wrong folder.
     project::with_mut(&project_id, |s| {
         if s.root_path == path {
             s.cached_scan = Some(scan_result.clone());
@@ -701,13 +698,17 @@ fn read_ai_rules(project_id: String) -> Result<Option<llm::rule_store::AiRulesDo
 fn save_ai_rules(project_id: String, rules: Vec<llm::learning::LearnedRule>) -> Result<(), String> {
     project::with_mut(&project_id, |state| {
         let root = Path::new(&state.root_path);
-        let pending = state.pending_ai_rules.take();
+        let pending = state.pending_ai_rules.clone();
         let on_disk = if pending.is_none() {
             llm::rule_store::AiRulesDoc::load(root)?
         } else {
             None
         };
-        llm::rule_store::AiRulesDoc::for_save(pending, on_disk, rules).save(root)
+        llm::rule_store::AiRulesDoc::for_save(pending, on_disk, rules).save(root)?;
+        // Cleared only once the write landed: a failed save keeps the staged
+        // run, so a retry still carries its provenance.
+        state.pending_ai_rules = None;
+        Ok(())
     })
 }
 
@@ -1569,10 +1570,9 @@ fn warning_banner_html(warnings: &[warning::ScanWarning]) -> String {
     }
     let mut parts: Vec<String> = Vec::new();
     if unread > 0 {
-        // Deliberately not "not reflected below": what an unreadable entry leaves
-        // behind differs by scan. A full scan keeps the row with zeroed size and
-        // mtime; an incremental one keeps whatever the cache last knew, which is
-        // by definition out of date. Only a failed directory walk leaves nothing.
+        // Deliberately not "not reflected below": what an unreadable entry leaves behind
+        // differs by scan — a full one keeps a zeroed row, an incremental one keeps stale
+        // cache values, and only a failed directory walk leaves nothing at all.
         parts.push(format!(
             "{unread} entries could not be read, and are missing or out of date below"
         ));
@@ -1593,16 +1593,9 @@ fn warning_banner_html(warnings: &[warning::ScanWarning]) -> String {
 /// read it directly (`every_asset_type_has_a_report_badge_rule`). Lifting it
 /// out also drops the doubled braces the template otherwise needs.
 const REPORT_STYLE: &str = r#"    <style>
-        /* Palette lifted from src/styles/redesign-tokens-v2.css — the app's
-           OKLCH tokens converted to hex, because a standalone report cannot
-           read the app's stylesheet. It replaces a second, unrelated palette
-           (indigo accent, Tailwind-default type colours) that shared nothing
-           with the interface the report came out of.
-
-           Light is the default: a report gets printed, attached and forwarded,
-           and whoever opens it is often not whoever exported it. Dark follows
-           the reader's system, and print forces light back — `prefers-color-
-           scheme: dark` still matches while printing. */
+        /* Palette lifted from redesign-tokens-v2.css (OKLCH converted to hex): a standalone
+           report cannot read the app's stylesheet, and a palette of its own is how it drifts.
+           Print forces light — `prefers-color-scheme: dark` still matches while printing. */
         :root {
             --bg: #fcf9f7; --panel: #ffffff; --line: #e5e0dc;
             --text: #201914; --text-2: #59514b;
@@ -2183,13 +2176,9 @@ fn rename_batch_on_disk(
 
         match std::fs::rename(&path, &new_path) {
             Ok(_) => {
-                // Carry engine sidecars so renamed assets keep their identity
-                // (Unity GUID, Godot UID) and their import settings. Best-effort:
-                // no-op without a sidecar. The rename already happened and is not
-                // rolled back, so a failure is reported rather than raised — the
-                // pre-flight above catches an occupied destination, which leaves
-                // a source that turned unmovable in between (an editor holding
-                // the .meta) as what still gets here.
+                // Carry engine sidecars so renamed assets keep their identity (Unity GUID, Godot
+                // UID) and import settings. The rename already happened and is not rolled back, so a
+                // carry failure is reported, never raised — raising says a rename on disk did not happen.
                 if let Err(e) = sidecar::carry_on_rename(path_obj, &new_path) {
                     eprintln!(
                         "[batch_rename] engine sidecar not carried for {}: {}",
@@ -2955,18 +2944,9 @@ fn delete_assets(paths: Vec<String>) -> DeleteResult {
     for path in paths {
         match trash::delete(&path) {
             Ok(_) => {
-                // Also trash the engine sidecars so deleting an asset doesn't
-                // strand them. Best-effort: no-op without a sidecar, logs on
-                // failure.
-                //
-                // Deliberately NOT reported as `SidecarNotCarried`, unlike the
-                // rename and move sites: what stays behind here is a sidecar
-                // whose asset is gone, which both Unity and Godot clean up on
-                // their next import — no identity is lost and no reference
-                // breaks, because there is no longer an asset to reference. It
-                // is also the half worth keeping if the user restores the file
-                // from the trash. Reporting it would need this command to take
-                // an `app` and a `project_id` it otherwise has no use for.
+                // Trash the engine sidecars too, so a delete doesn't strand them.
+                // **Deliberately not reported as `SidecarNotCarried`** (the rename and move sites
+                // do): a sidecar whose asset is gone breaks no reference, and it is the half worth keeping.
                 if let Err(e) = sidecar::carry_on_delete(Path::new(&path)) {
                     eprintln!(
                         "[delete_assets] engine sidecar not carried for {}: {}",
@@ -3187,9 +3167,7 @@ fn get_all_tags(project_id: String) -> Result<Vec<tags::Tag>, String> {
 #[tauri::command]
 fn create_tag(project_id: String, name: String, color: String) -> Result<tags::Tag, String> {
     project::with_mut(&project_id, |state| {
-        let tag = state.ensure_tags().create_tag(name, color);
-        state.save_tags()?;
-        Ok(tag)
+        state.mutate_tags_persisted(|tags| tags.create_tag(name, color))
     })
 }
 
@@ -3204,28 +3182,23 @@ fn update_tag(
     description: Option<Option<String>>,
 ) -> Result<tags::Tag, String> {
     project::with_mut(&project_id, |state| {
-        let tag = state
-            .ensure_tags()
-            .update_tag(&tag_id, name, color, description)
-            .ok_or("Tag not found")?;
-        state.save_tags()?;
-        Ok(tag)
+        state
+            .mutate_tags_persisted(|tags| tags.update_tag(&tag_id, name, color, description))?
+            .ok_or_else(|| "Tag not found".to_string())
     })
 }
 
 #[tauri::command]
 fn delete_tag(project_id: String, tag_id: String) -> Result<(), String> {
     project::with_mut(&project_id, |state| {
-        state.ensure_tags().delete_tag(&tag_id);
-        state.save_tags()
+        state.mutate_tags_persisted(|tags| tags.delete_tag(&tag_id))
     })
 }
 
 #[tauri::command]
 fn add_tag_to_asset(project_id: String, asset_path: String, tag_id: String) -> Result<(), String> {
     project::with_mut(&project_id, |state| {
-        state.ensure_tags().add_tag_to_asset(&asset_path, &tag_id);
-        state.save_tags()
+        state.mutate_tags_persisted(|tags| tags.add_tag_to_asset(&asset_path, &tag_id))
     })
 }
 
@@ -3236,10 +3209,7 @@ fn remove_tag_from_asset(
     tag_id: String,
 ) -> Result<(), String> {
     project::with_mut(&project_id, |state| {
-        state
-            .ensure_tags()
-            .remove_tag_from_asset(&asset_path, &tag_id);
-        state.save_tags()
+        state.mutate_tags_persisted(|tags| tags.remove_tag_from_asset(&asset_path, &tag_id))
     })
 }
 
@@ -3250,11 +3220,11 @@ fn add_tag_to_assets(
     tag_id: String,
 ) -> Result<(), String> {
     project::with_mut(&project_id, |state| {
-        let tags = state.ensure_tags();
-        for path in asset_paths {
-            tags.add_tag_to_asset(&path, &tag_id);
-        }
-        state.save_tags()
+        state.mutate_tags_persisted(|tags| {
+            for path in asset_paths {
+                tags.add_tag_to_asset(&path, &tag_id);
+            }
+        })
     })
 }
 
@@ -3410,6 +3380,90 @@ mod tests {
     use super::*;
 
     use crate::scanner::AssetType;
+
+    /// A tag mutation whose save fails must not stay in memory: the frontend
+    /// mirror shows nothing, so a later unrelated save would persist a phantom,
+    /// and a retry of create_tag would mint a same-named duplicate.
+    #[test]
+    fn tag_crud_save_failure_does_not_leave_memory_ahead_of_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("appears_later");
+        let id = "tag_rollback_test".to_string();
+        project::register(id.clone(), root.to_string_lossy().replace('\\', "/"));
+
+        // Root missing → the atomic write fails.
+        assert!(create_tag(id.clone(), "Hero".into(), "#ff0000".into()).is_err());
+        project::with_mut(&id, |st| {
+            assert!(
+                st.ensure_tags().tags.is_empty(),
+                "failed save must not leave a phantom tag in memory"
+            );
+            Ok(())
+        })
+        .unwrap();
+
+        // The folder comes back; the retry must produce exactly one tag.
+        std::fs::create_dir_all(&root).unwrap();
+        create_tag(id.clone(), "Hero".into(), "#ff0000".into()).unwrap();
+        project::with_mut(&id, |st| {
+            assert_eq!(
+                st.ensure_tags().tags.len(),
+                1,
+                "a retry after a failed save must not duplicate the tag"
+            );
+            Ok(())
+        })
+        .unwrap();
+        project::unregister(&id);
+    }
+
+    /// The staged learning run must survive a failed save: it carries the run's
+    /// provenance (provider/model/depth), which a retry would otherwise lose.
+    #[test]
+    fn save_ai_rules_keeps_the_staged_run_until_the_write_lands() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("appears_later");
+        let id = "ai_rules_pending_test".to_string();
+        project::register(id.clone(), root.to_string_lossy().replace('\\', "/"));
+
+        let staged = llm::rule_store::AiRulesDoc {
+            last_learned: "2026-08-23T00:00:00Z".into(),
+            prompt_version: 1,
+            sampling_depth: 5,
+            provider_used: "claude".into(),
+            model_used: "claude-sonnet-5".into(),
+            rules: Vec::new(),
+        };
+        project::with_mut(&id, |st| {
+            st.pending_ai_rules = Some(staged);
+            Ok(())
+        })
+        .unwrap();
+
+        assert!(save_ai_rules(id.clone(), Vec::new()).is_err());
+        project::with_ref(&id, |st| {
+            assert!(
+                st.pending_ai_rules.is_some(),
+                "a failed save must keep the staged run for the retry"
+            );
+            Ok(())
+        })
+        .unwrap();
+
+        std::fs::create_dir_all(&root).unwrap();
+        save_ai_rules(id.clone(), Vec::new()).unwrap();
+        let saved = llm::rule_store::AiRulesDoc::load(&root).unwrap().unwrap();
+        assert_eq!(
+            saved.provider_used, "claude",
+            "the retried save still carries the staged run's provenance"
+        );
+        project::with_ref(&id, |st| {
+            assert!(st.pending_ai_rules.is_none(), "consumed only on success");
+            Ok(())
+        })
+        .unwrap();
+        project::unregister(&id);
+    }
 
     /// One warning per operation, not per file — and the accumulator has to come
     /// back empty, or the next chunk of the same batch reports the same failures

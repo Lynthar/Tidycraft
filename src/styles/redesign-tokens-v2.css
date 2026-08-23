@@ -1,16 +1,11 @@
 /* ============================================================
    Tidycraft Redesign — 设计 token（Forge, OKLCH）
 
-   现行 token 系统，在 main.tsx 里于 globals.css 之后 import。
-   定义 Forge 配色：5 级递进背景、4 级文字、琥珀 --primary +
-   青蓝 --accent、11 种资产类型色、git / 语义状态色，按
-   [data-theme="dark"|"light"] 分组（useThemeStore 写在 <html>
-   上的属性）。
+   现行 token 系统，main.tsx 里在 globals.css 之后 import。Forge 配色按
+   [data-theme="dark"|"light"] 分组，属性由 useThemeStore 写在 <html> 上。
 
-   本文件是唯一的取色事实源：曾经桥接 globals.css --color-* 的
-   legacy bridge 已随双样式迁移（#28）退场，滚动条 token 也住在
-   这里。深色块带 :root 联合选择器——data-theme 属性由 themeStore
-   在 JS 里写上，首帧前的一瞬没有属性，深色即默认。
+   **本文件是唯一的取色事实源。** 深色块带 :root 联合选择器：data-theme 由 JS 写上，
+   首帧前的一瞬没有属性，那一刻必须已经是深色，否则会闪一帧亮底。
    ============================================================ */
 
 :root,
@@ -74,10 +69,9 @@
      在浅色主题是暗红，所以前景必须随主题翻转 —— 固定的白字在深色下只有
      2.6:1。本对实测 6.70:1（深）/ 4.97:1（浅）。 */
   --on-err: oklch(14% 0.04 25);
-  /* Tints for status surfaces. Solid, not alpha: Tailwind 3 cannot apply an
-     opacity modifier to a `var()` colour — `bg-err/10` compiles to nothing at
-     all — and the system already answers "how do I tint" with --primary-soft /
-     --accent-soft. Tuned against --panel-2, which is what carries them. */
+  /* Status surface tints. **Solid, not alpha** — Tailwind 3 cannot apply an opacity
+     modifier to a `var()`, so `bg-err/10` compiles to nothing at all and the element
+     silently inherits its backdrop. Tuned against --panel-2, which carries them. */
   --ok-soft:   oklch(30% 0.06 150);
   --warn-soft: oklch(30% 0.06 95);
   --err-soft:  oklch(30% 0.07 25);

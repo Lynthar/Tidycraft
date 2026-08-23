@@ -114,20 +114,16 @@ export function Header({ searchInputRef }: HeaderProps) {
     if (!result) return;
 
     if (result.reverted_count > 0) {
-      // Undo carried tag bindings back to the original paths on the backend;
-      // re-sync the tags store so they reappear without waiting for the watcher's
-      // scanResult refresh, which refreshes the scan list on its own. Keyed on
-      // what was actually reverted, not on overall success: a partial undo moves
-      // the bindings of the files it did revert.
+      // Re-sync the tags store so carried-back bindings reappear without waiting on
+      // the watcher. **Keyed on what was actually reverted, not on overall success** —
+      // a partial undo still moves the bindings of the files it did revert.
       await useTagsStore.getState().loadTags();
     }
     if (result.success) return;
 
-    // A refused undo reports per-item reasons — a sidecar that would be
-    // overwritten, an original path since re-occupied — that nothing else on this
-    // side renders, so without this the button read as inert while the entry
-    // stayed in the history. `success` is `failed_count == 0`, so a partly
-    // reverted batch lands here too and must not be reported as "nothing changed".
+    // A refused undo reports per-item reasons nothing else here renders — without this
+    // the button reads as inert while the entry stays in the history. `success` is
+    // `failed_count == 0`, so a partly reverted batch lands here too.
     const reason = result.errors[0] ?? "";
     useToastStore.getState().push({
       kind: "error",

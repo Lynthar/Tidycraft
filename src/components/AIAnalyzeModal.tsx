@@ -40,6 +40,8 @@ export function AIAnalyzeModal() {
 
   const [cost, setCost] = useState<CostEstimate | null>(null);
   const [loadingCost, setLoadingCost] = useState(false);
+  const [costError, setCostError] = useState(false);
+  const [estimateAttempt, setEstimateAttempt] = useState(0);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // `consentLocal` is the unticked-this-call state. Once Continue runs
@@ -59,11 +61,15 @@ export function AIAnalyzeModal() {
   // filenames and paths were agreed to by configuring a cloud provider at all.
   const needsConsentGate =
     provider !== null && provider !== "ollama" && uploadThumbnails;
+  // Cloud is fail-closed on the estimate: the README promises a cost preview
+  // before every cloud call, so an estimate that failed (cost still null) keeps
+  // Continue disabled. Ollama is local and free and does not wait for it.
   const canContinue =
     !!provider &&
     !!config &&
     !running &&
     !loadingCost &&
+    (provider === "ollama" || cost !== null) &&
     (!needsConsentGate || consented || consentLocal);
 
   // Reset transient state when the modal closes or reopens. Without it a previous
@@ -72,6 +78,7 @@ export function AIAnalyzeModal() {
   useEffect(() => {
     if (!aiAnalyzeOpen) {
       setCost(null);
+      setCostError(false);
       setError(null);
       setConsentLocal(false);
       setRunning(false);
@@ -86,6 +93,10 @@ export function AIAnalyzeModal() {
     if (!aiAnalyzeOpen || !provider || !config || paths.length === 0) return;
     let cancelled = false;
     setLoadingCost(true);
+    // Cleared up front so a failure never leaves a stale estimate from the
+    // previous parameters looking current — Continue would price the wrong call.
+    setCost(null);
+    setCostError(false);
     invoke<CostEstimate>("llm_estimate_cost", {
       projectId: activeProjectId ?? "",
       provider,
@@ -102,6 +113,7 @@ export function AIAnalyzeModal() {
       .catch((err) => {
         if (cancelled) return;
         console.error("[AIAnalyzeModal] estimate failed:", err);
+        setCostError(true);
       })
       .finally(() => {
         if (!cancelled) setLoadingCost(false);
@@ -109,7 +121,7 @@ export function AIAnalyzeModal() {
     return () => {
       cancelled = true;
     };
-  }, [aiAnalyzeOpen, provider, config?.model, paths.length, uploadThumbnails, activeProjectId]);
+  }, [aiAnalyzeOpen, provider, config?.model, paths.length, uploadThumbnails, activeProjectId, estimateAttempt]);
 
   const handleContinue = async () => {
     if (!provider || !config || running) return;
@@ -283,6 +295,19 @@ export function AIAnalyzeModal() {
                         ? t("aiAnalyze.continueLocal")
                         : `≈ $${dollarsString}`}
                     </div>
+                  </div>
+                ) : costError && provider !== "ollama" ? (
+                  <div className="text-sm flex items-center justify-between gap-2">
+                    <span style={{ color: "var(--err)" }}>
+                      {t("aiAnalyze.estimateFailed")}
+                    </span>
+                    <button
+                      onClick={() => setEstimateAttempt((n) => n + 1)}
+                      className="text-xs underline shrink-0"
+                      style={{ color: "var(--text-2)" }}
+                    >
+                      {t("aiAnalyze.estimateRetry")}
+                    </button>
                   </div>
                 ) : null}
               </div>

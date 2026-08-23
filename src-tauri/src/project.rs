@@ -75,6 +75,21 @@ impl ProjectState {
         Ok(())
     }
 
+    /// Runs a tag mutation on a clone and swaps it in only after a successful
+    /// save, so a failed save leaves memory matching disk and a retry cannot
+    /// double-apply. File-op migrations stay mutate-then-save: the files already
+    /// moved, so there memory ahead of a failed save IS the truth.
+    pub fn mutate_tags_persisted<T>(
+        &mut self,
+        mutate: impl FnOnce(&mut TagsData) -> T,
+    ) -> Result<T, String> {
+        let mut tags = self.ensure_tags().clone();
+        let out = mutate(&mut tags);
+        tags.save(Path::new(&self.root_path))?;
+        self.tags_data = Some(tags);
+        Ok(out)
+    }
+
     pub fn require_scan(&self) -> Result<&ScanResult, String> {
         self.cached_scan
             .as_ref()

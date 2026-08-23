@@ -139,14 +139,9 @@ export function AssetPreview() {
   const settledIs3DModel =
     settledAsset && MODEL_3D_EXTENSIONS.includes(settledAsset.extension.toLowerCase());
 
-  // Close a lightbox whose host condition just went away. Both are rendered
-  // conditionally at the bottom of this component, and the only thing that lowers
-  // their `open` flag is the onClose of the very component the condition unmounts
-  // — so a file deleted under an open lightbox (or a settled asset that stops
-  // being a model) leaves the flag raised. That flag feeds uiStore's
-  // blocking-overlay gate, so it would keep every global shortcut disabled over an
-  // overlay nobody can see, and re-raise the lightbox on the next model picked.
-  // The conditions here mirror those render conditions; keep the two in step.
+  // Close a lightbox whose host condition just went away: only the unmounted
+  // component's own onClose lowers the flag, so it stays raised over nothing, blocking
+  // every global shortcut. **Mirrors the render conditions below; keep both in step.**
   useEffect(() => {
     if (!settledAsset || !thumbnail) setLightboxOpen(false);
     if (!settledAsset || !settledIs3DModel) setModelLightboxOpen(false);
@@ -191,12 +186,9 @@ export function AssetPreview() {
     // regenerated image rather than the stale one.
   }, [settledAsset?.path, settledAsset?.modified]);
 
-  // Unity structure (component list + GUID reference count) for prefab and scene
-  // files, parsed on demand. Same stale-response guard as the thumbnail effect;
-  // `modified` re-parses after external edits. Keyed on the settled asset like
-  // the rest of the heavy area: the backend reads and parses the whole scene
-  // file, so following the live selection meant one full parse of a multi-megabyte
-  // scene per row the arrow keys passed through.
+  // Unity structure for prefabs and scenes, parsed on demand, with the thumbnail
+  // effect's stale-response guard. **Keyed on the settled asset**: the backend parses
+  // the whole file, so the live selection means one parse per row arrowed past.
   const [unityFileInfo, setUnityFileInfo] = useState<UnityFileInfo | null>(null);
   const isUnityStructureFile =
     scanResult?.project_type === "unity" &&

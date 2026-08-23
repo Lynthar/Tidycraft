@@ -42,6 +42,8 @@ export function LearnSetupModal() {
   const [depth, setDepth] = useState(5);
   const [cost, setCost] = useState<CostEstimate | null>(null);
   const [loadingCost, setLoadingCost] = useState(false);
+  const [costError, setCostError] = useState(false);
+  const [estimateAttempt, setEstimateAttempt] = useState(0);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,6 +54,7 @@ export function LearnSetupModal() {
   useEffect(() => {
     if (!open) {
       setError(null);
+      setCostError(false);
       setRunning(false);
       return;
     }
@@ -68,6 +71,10 @@ export function LearnSetupModal() {
     if (!open || !provider || !config || !activeProjectId) return;
     let cancelled = false;
     setLoadingCost(true);
+    // Cleared up front so a failure never leaves a stale estimate from the
+    // previous parameters looking current.
+    setCost(null);
+    setCostError(false);
     invoke<CostEstimate>("estimate_learning_cost", {
       projectId: activeProjectId,
       provider,
@@ -78,7 +85,9 @@ export function LearnSetupModal() {
         if (!cancelled) setCost(c);
       })
       .catch((e) => {
-        if (!cancelled) console.warn("[LearnSetup] estimate failed:", e);
+        if (cancelled) return;
+        console.warn("[LearnSetup] estimate failed:", e);
+        setCostError(true);
       })
       .finally(() => {
         if (!cancelled) setLoadingCost(false);
@@ -86,7 +95,7 @@ export function LearnSetupModal() {
     return () => {
       cancelled = true;
     };
-  }, [open, provider, config?.model, depth, activeProjectId]);
+  }, [open, provider, config?.model, depth, activeProjectId, estimateAttempt]);
 
   const handleContinue = async () => {
     if (!provider || !config || !activeProjectId || running) return;
@@ -298,6 +307,19 @@ export function LearnSetupModal() {
                       ? t("aiAnalyze.costFree")
                       : `≈ $${dollarsString}`}
                   </div>
+                ) : costError && provider !== "ollama" ? (
+                  <div className="text-sm flex items-center justify-between gap-2">
+                    <span style={{ color: "var(--err)" }}>
+                      {t("aiAnalyze.estimateFailed")}
+                    </span>
+                    <button
+                      onClick={() => setEstimateAttempt((n) => n + 1)}
+                      className="text-xs underline shrink-0"
+                      style={{ color: "var(--text-2)" }}
+                    >
+                      {t("aiAnalyze.estimateRetry")}
+                    </button>
+                  </div>
                 ) : null}
                 <p
                   className="text-xs mt-1"
@@ -351,9 +373,15 @@ export function LearnSetupModal() {
             >
               {t("aiAnalyze.cancel")}
             </button>
+            {/* Same fail-closed gate as AIAnalyzeModal: a cloud run needs a
+                successful cost estimate first; Ollama is local and free. */}
             <button
               onClick={handleContinue}
-              disabled={running || !activeProjectId}
+              disabled={
+                running ||
+                !activeProjectId ||
+                (provider !== "ollama" && cost === null)
+              }
               className="px-3 py-1.5 text-sm rounded disabled:opacity-50"
               style={{
                 background: "var(--primary)",

@@ -860,6 +860,8 @@
     "assetsCount_one": "已选 {{count}} 个资产",
     "assetsCount_other": "已选 {{count}} 个资产",
     "estimatedCost": "预估成本",
+    "estimateFailed": "费用估算失败——云端调用前需要估算成功",
+    "estimateRetry": "重试",
     "tokensInput": "{{count}} 输入 tokens",
     "tokensOutput": "~{{count}} 输出 tokens",
     "consentLabel": "我同意将这些资产的缩略图和文件名上传至 {{provider}}",

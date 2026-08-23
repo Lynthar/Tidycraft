@@ -78,16 +78,9 @@ export async function restoreSession(): Promise<void> {
 
   const { openProjectPaths, activeProjectPath } = session;
 
-  // One batch for everything the switcher can show: last session's projects plus
-  // the recents list. Stubs are never scanned, so without this a project whose
-  // folder is gone looks healthy.
-  //
-  // Started here but deliberately NOT awaited: the check stats every path, and a
-  // single unreachable network mount holds that for tens of seconds — long enough
-  // that awaiting it means the window sits empty until an unrelated NAS answers.
-  // The marks it produces only grey out rows in the switcher, so they can land
-  // after the interface is up; anything the user actually opens is path-checked
-  // by openProject on its own way in.
+  // One batch for everything the switcher can show; stubs are never scanned, so without
+  // it a project whose folder is gone looks healthy. **Started, deliberately not awaited**
+  // — one unreachable mount holds a stat long enough to leave the window empty.
   const recentPaths = useRecentsStore.getState().recents.map((r) => r.path);
   const healthPromise = checkPaths([
     ...new Set([...openProjectPaths, ...recentPaths]),

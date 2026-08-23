@@ -734,6 +734,8 @@
     "assetsCount_one": "{{count}} asset selected",
     "assetsCount_other": "{{count}} assets selected",
     "estimatedCost": "Estimated cost",
+    "estimateFailed": "Cost estimate failed — a cloud run needs one first",
+    "estimateRetry": "Retry",
     "tokensInput": "{{count}} input tokens",
     "tokensOutput": "~{{count}} output tokens",
     "consentLabel": "I consent to uploading these assets' thumbnails and filenames to {{provider}}",

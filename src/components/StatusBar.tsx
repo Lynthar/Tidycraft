@@ -304,10 +304,9 @@ function WarningPopover({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      // A dialog opened over this popover owns the key. Both listeners sit on
-      // `window` in the capture phase, and stopPropagation does not stop other
-      // listeners on the same target — so without this, one Escape would close
-      // the popover AND the dialog on top of it.
+      // A dialog opened over this popover owns the key. Both listeners sit on `window`
+      // in the capture phase, and stopPropagation does not stop other listeners on the
+      // same target — without this one Escape closes the popover and the dialog both.
       if (isBlockingOverlayOpen()) return;
       e.stopPropagation();
       onClose();

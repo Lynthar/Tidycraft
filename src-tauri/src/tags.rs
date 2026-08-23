@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
@@ -17,15 +17,49 @@ pub struct Tag {
     pub description: Option<String>,
 }
 
-/// Tags storage - persisted to a JSON file in the project root
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+/// Tags storage - persisted to a JSON file in the project root. In memory the
+/// keys are the scanner's absolute forward-slash paths; only the file on disk
+/// uses project-relative keys (see [`TagsFile`]).
+#[derive(Debug, Clone, Default)]
 pub struct TagsData {
     pub tags: Vec<Tag>,
     /// Mapping from asset path to list of tag IDs
-    pub asset_tags: HashMap<String, Vec<String>>,
+    pub asset_tags: BTreeMap<String, Vec<String>>,
 }
 
 const TAGS_FILE: &str = ".tidycraft-tags.json";
+
+/// On-disk shape (version 2): keys are project-relative with `/` separators so
+/// the file keeps working when the folder moves or is cloned. An absolute key
+/// is v1 legacy or another root's binding — preserved verbatim, never guessed at.
+#[derive(Serialize, Deserialize)]
+struct TagsFile {
+    /// `default` loads v1 files written before the field existed.
+    #[serde(default)]
+    version: u32,
+    tags: Vec<Tag>,
+    asset_tags: BTreeMap<String, Vec<String>>,
+}
+
+/// Forward-slash form of the project root. Both sides of the relative↔absolute
+/// conversion must use this — mixed separators would fail every prefix match
+/// and silently orphan all bindings.
+fn root_key(project_path: &Path) -> String {
+    let root = crate::scanner::path_to_string(project_path);
+    root.trim_end_matches('/').to_string()
+}
+
+/// `/`-rooted, drive-letter or UNC. Deliberately platform-independent string
+/// rules: a file written on Windows must classify the same way on macOS.
+fn is_absolute_key(key: &str) -> bool {
+    let b = key.as_bytes();
+    key.starts_with('/')
+        || key.starts_with("\\\\")
+        || (b.len() >= 3
+            && b[0].is_ascii_alphabetic()
+            && b[1] == b':'
+            && (b[2] == b'/' || b[2] == b'\\'))
+}
 
 impl TagsData {
     /// Load tags from the project directory. A missing file is the normal "no
@@ -35,8 +69,8 @@ impl TagsData {
         let tags_file = project_path.join(TAGS_FILE);
         if tags_file.exists() {
             match fs::read_to_string(&tags_file) {
-                Ok(content) => match serde_json::from_str(&content) {
-                    Ok(data) => return data,
+                Ok(content) => match serde_json::from_str::<TagsFile>(&content) {
+                    Ok(file) => return Self::from_file(file, project_path),
                     Err(e) => {
                         // Keep the first backup — the likeliest complete one.
                         let backup = project_path.join(format!("{}.corrupt", TAGS_FILE));
@@ -56,12 +90,51 @@ impl TagsData {
         Self::default()
     }
 
+    /// Rejoin relative keys to this root. The (rare) collision between a joined
+    /// key and a preserved absolute one merges instead of dropping a side.
+    fn from_file(file: TagsFile, project_path: &Path) -> Self {
+        let root = root_key(project_path);
+        let mut asset_tags: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for (key, ids) in file.asset_tags {
+            let abs = if is_absolute_key(&key) {
+                key
+            } else {
+                format!("{root}/{key}")
+            };
+            let entry = asset_tags.entry(abs).or_default();
+            for id in ids {
+                if !entry.contains(&id) {
+                    entry.push(id);
+                }
+            }
+        }
+        Self {
+            tags: file.tags,
+            asset_tags,
+        }
+    }
+
     /// Save tags to the project directory. Atomic (temp + rename), so a crash
     /// mid-write can never truncate the file. The temp sibling keeps the dotfile
     /// prefix, so the scanner and watcher skip it.
     pub fn save(&self, project_path: &Path) -> Result<(), String> {
         let tags_file = project_path.join(TAGS_FILE);
-        let content = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
+        let prefix = format!("{}/", root_key(project_path));
+        let file = TagsFile {
+            version: 2,
+            tags: self.tags.clone(),
+            asset_tags: self
+                .asset_tags
+                .iter()
+                .map(|(k, ids)| {
+                    (
+                        k.strip_prefix(&prefix).unwrap_or(k).to_string(),
+                        ids.clone(),
+                    )
+                })
+                .collect(),
+        };
+        let content = serde_json::to_string_pretty(&file).map_err(|e| e.to_string())?;
         crate::fs_atomic::write_atomic(&tags_file, content.as_bytes()).map_err(|e| e.to_string())
     }
 
@@ -211,6 +284,115 @@ impl TagsData {
 mod tests {
     use super::*;
 
+    /// The in-memory key shape production uses: the scanner's forward-slash
+    /// absolute path under the project root.
+    fn abs_key(root: &Path, rel: &str) -> String {
+        format!("{}/{}", crate::scanner::path_to_string(root), rel)
+    }
+
+    #[test]
+    fn save_writes_version_2_with_project_relative_sorted_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut data = TagsData::default();
+        let tag = data.create_tag("Hero".to_string(), "#ff0000".to_string());
+        data.add_tag_to_asset(&abs_key(dir.path(), "z/last.png"), &tag.id);
+        data.add_tag_to_asset(&abs_key(dir.path(), "a/first.png"), &tag.id);
+        data.save(dir.path()).unwrap();
+
+        let raw = std::fs::read_to_string(dir.path().join(TAGS_FILE)).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(json["version"], 2);
+        // Keys are project-relative — the machine-specific root must not be in
+        // the file — and sorted, so repeated saves diff cleanly.
+        assert!(
+            !raw.contains(&crate::scanner::path_to_string(dir.path())),
+            "absolute root leaked into the file:\n{raw}"
+        );
+        assert!(json["asset_tags"]["a/first.png"].is_array());
+        assert!(json["asset_tags"]["z/last.png"].is_array());
+        assert!(raw.find("a/first.png").unwrap() < raw.find("z/last.png").unwrap());
+    }
+
+    #[test]
+    fn tags_file_travels_with_the_folder() {
+        let old_root = tempfile::tempdir().unwrap();
+        let new_root = tempfile::tempdir().unwrap();
+        let mut data = TagsData::default();
+        let tag = data.create_tag("Hero".to_string(), "#ff0000".to_string());
+        data.add_tag_to_asset(&abs_key(old_root.path(), "Assets/stone.png"), &tag.id);
+        data.save(old_root.path()).unwrap();
+
+        // Simulate the folder moving: the file arrives at the new root untouched.
+        std::fs::copy(
+            old_root.path().join(TAGS_FILE),
+            new_root.path().join(TAGS_FILE),
+        )
+        .unwrap();
+
+        let moved = TagsData::load(new_root.path());
+        assert_eq!(
+            moved
+                .get_asset_tags(&abs_key(new_root.path(), "Assets/stone.png"))
+                .len(),
+            1,
+            "bindings must follow the folder to its new location"
+        );
+    }
+
+    #[test]
+    fn v1_absolute_keys_under_the_root_still_load_and_upgrade_on_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = abs_key(dir.path(), "a/x.png");
+        let v1 = format!(
+            r##"{{"tags":[{{"id":"t1","name":"Hero","color":"#f00"}}],"asset_tags":{{"{key}":["t1"]}}}}"##
+        );
+        std::fs::write(dir.path().join(TAGS_FILE), v1).unwrap();
+
+        let data = TagsData::load(dir.path());
+        assert_eq!(data.get_asset_tags(&key).len(), 1, "v1 binding resolves");
+
+        data.save(dir.path()).unwrap();
+        let raw = std::fs::read_to_string(dir.path().join(TAGS_FILE)).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(json["version"], 2);
+        assert!(
+            !raw.contains(&crate::scanner::path_to_string(dir.path())),
+            "v1 keys under the root must relativize on the next save"
+        );
+    }
+
+    #[test]
+    fn keys_outside_the_root_are_preserved_verbatim() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut data = TagsData::default();
+        let tag = data.create_tag("Hero".to_string(), "#ff0000".to_string());
+        // Bindings from another machine or root: never rewritten (guessing could
+        // mis-attach them), never dropped (they are someone's data).
+        data.add_tag_to_asset("C:/other/proj/x.png", &tag.id);
+        data.add_tag_to_asset("/somewhere/else/y.png", &tag.id);
+        data.save(dir.path()).unwrap();
+
+        let reloaded = TagsData::load(dir.path());
+        assert_eq!(reloaded.get_asset_tags("C:/other/proj/x.png").len(), 1);
+        assert_eq!(reloaded.get_asset_tags("/somewhere/else/y.png").len(), 1);
+    }
+
+    #[test]
+    fn saving_the_same_data_twice_is_byte_identical() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut data = TagsData::default();
+        let tag = data.create_tag("Hero".to_string(), "#ff0000".to_string());
+        for name in ["m/mid.png", "z/last.png", "a/first.png"] {
+            data.add_tag_to_asset(&abs_key(dir.path(), name), &tag.id);
+        }
+        data.save(dir.path()).unwrap();
+        let first = std::fs::read(dir.path().join(TAGS_FILE)).unwrap();
+
+        TagsData::load(dir.path()).save(dir.path()).unwrap();
+        let second = std::fs::read(dir.path().join(TAGS_FILE)).unwrap();
+        assert_eq!(first, second, "same data must serialize to the same bytes");
+    }
+
     #[test]
     fn test_create_tag() {
         let mut data = TagsData::default();
@@ -326,12 +508,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut data = TagsData::default();
         let tag = data.create_tag("Hero".to_string(), "#ff0000".to_string());
-        data.add_tag_to_asset("a/x.png", &tag.id);
+        let key = abs_key(dir.path(), "a/x.png");
+        data.add_tag_to_asset(&key, &tag.id);
         data.save(dir.path()).unwrap();
 
         let loaded = TagsData::load(dir.path());
         assert_eq!(loaded.tags.len(), 1);
-        assert_eq!(loaded.get_asset_tags("a/x.png").len(), 1);
+        assert_eq!(loaded.get_asset_tags(&key).len(), 1);
         // The atomic-write temp sibling must not survive a successful save.
         assert!(!dir.path().join(format!("{}.tmp", TAGS_FILE)).exists());
     }
