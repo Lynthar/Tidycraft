@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = ["crates/tidycraft-core", "src-tauri"]
+
+[workspace.package]
+version = "0.8.5"
+authors = ["Tidycraft Team"]
+edition = "2021"
+# Floor imposed by the dependency graph, not by our own code: tauri 2.11
+# needs 1.77.2 and `time` 0.3.47 (via cookie/reqwest and tauri-codegen) needs
+# 1.88. Cargo enforces each dependency's own `rust-version`, so anything lower
+# here is a claim the build cannot honor. CI pins `stable`, which is why the
+# stale 1.75 never failed anything — recheck with
+# `cargo metadata --format-version 1` after a dependency bump.
+rust-version = "1.88"
+license = "Apache-2.0"
+homepage = "https://github.com/Lynthar/Tidycraft"
+repository = "https://github.com/Lynthar/Tidycraft"
+
+[profile.dev]
+incremental = true
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

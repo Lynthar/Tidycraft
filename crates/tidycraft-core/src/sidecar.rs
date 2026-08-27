@@ -35,7 +35,7 @@ pub fn carry_on_rename(from: &Path, to: &Path) -> Result<(), String> {
         let dst = sidecar_path(to, suffix);
         // A destination resolving to the source sidecar itself (case-only
         // rename, NFC/NFD variant) is not a clobber.
-        if dst.exists() && !crate::undo::paths_are_same_file(&src, &dst) {
+        if dst.exists() && !crate::fs_atomic::paths_are_same_file(&src, &dst) {
             errors.push(format!(
                 "destination sidecar already exists, not overwriting: {}",
                 dst.display()
@@ -65,7 +65,7 @@ pub fn rename_conflicts(from: &Path, to: &Path) -> Vec<String> {
             continue;
         }
         let dst = sidecar_path(to, suffix);
-        if dst.exists() && !crate::undo::paths_are_same_file(&src, &dst) {
+        if dst.exists() && !crate::fs_atomic::paths_are_same_file(&src, &dst) {
             conflicts.push(format!("sidecar target already exists: {}", dst.display()));
         }
     }

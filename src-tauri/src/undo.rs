@@ -275,13 +275,6 @@ impl Default for UndoManager {
     }
 }
 
-/// Whether two paths name the **same file** by filesystem identity (Unix
-/// dev+inode, Windows volume serial + file index). False when either path is
-/// missing or unreadable, so callers reject conservatively.
-pub(crate) fn paths_are_same_file(a: &Path, b: &Path) -> bool {
-    same_file::is_same_file(a, b).unwrap_or(false)
-}
-
 /// Revert a batch, most recent operation first.
 fn execute_batch_undo(
     operations: &[FileOperation],
@@ -343,7 +336,7 @@ fn execute_single_undo(
 
             // `dst.exists()` may resolve to `src` itself (case-only undo, NFC/NFD
             // variant); only a genuinely different file blocks the undo.
-            if dst.exists() && !paths_are_same_file(src, dst) {
+            if dst.exists() && !crate::fs_atomic::paths_are_same_file(src, dst) {
                 return Err(format!(
                     "Target path already exists: {}",
                     operation.original_path
@@ -387,7 +380,7 @@ fn execute_single_undo(
             }
 
             // Same identity check as the Rename branch above.
-            if dst.exists() && !paths_are_same_file(src, dst) {
+            if dst.exists() && !crate::fs_atomic::paths_are_same_file(src, dst) {
                 return Err(format!(
                     "Target path already exists: {}",
                     operation.original_path
@@ -840,28 +833,6 @@ mod tests {
         let b = generate_operation_id();
         assert_ne!(a, b);
         assert!(a.starts_with("op_") && b.starts_with("op_"));
-    }
-
-    #[test]
-    fn paths_are_same_file_matches_identity_not_names() {
-        let dir = tempdir().unwrap();
-        let a = create_test_file(dir.path(), "a.txt");
-        let b = create_test_file(dir.path(), "b.txt");
-
-        // Same path twice → trivially the same file.
-        assert!(paths_are_same_file(Path::new(&a), Path::new(&a)));
-        // Two distinct files in the same directory → not the same.
-        assert!(!paths_are_same_file(Path::new(&a), Path::new(&b)));
-        // A hard link is the same file under a different name — only an
-        // identity check can know that; any name-based guess says "different".
-        let link = dir.path().join("a_link.txt");
-        std::fs::hard_link(&a, &link).unwrap();
-        assert!(paths_are_same_file(Path::new(&a), &link));
-        // Nonexistent path → conservatively "not the same file".
-        assert!(!paths_are_same_file(
-            Path::new(&a),
-            &dir.path().join("missing.txt")
-        ));
     }
 
     // POSIX rename() over an existing entry of the *same* file is a documented

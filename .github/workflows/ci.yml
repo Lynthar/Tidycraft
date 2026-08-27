@@ -56,13 +56,12 @@ jobs:
 
       # Cheap and compile-free, so it runs before anything expensive.
       - name: Rust format check
-        working-directory: src-tauri
-        run: cargo fmt --check
+        run: cargo fmt --all --check
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: 'src-tauri -> target'
+          workspaces: '. -> target'
 
       # Tauri's Linux dependencies. Required even for `cargo test --lib`
       # because the test binary links against tauri / webkit / gtk system
@@ -89,9 +88,12 @@ jobs:
       # rather than once: `cfg`-gated code is only ever seen by its own target,
       # so a Windows-only branch is unlinted anywhere else.
       - name: Rust lint (clippy)
-        working-directory: src-tauri
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # The feature-gated build a headless consumer gets: core must compile
+      # with `llm` and `git` off, or the gating has regressed.
+      - name: Core without default features
+        run: cargo check -p tidycraft-core --no-default-features
 
       - name: Backend tests
-        working-directory: src-tauri
-        run: cargo test --lib --no-fail-fast
+        run: cargo test --workspace --lib --no-fail-fast

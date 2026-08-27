@@ -5433,8 +5433,36 @@ dependencies = [
 name = "tidycraft"
 version = "0.8.5"
 dependencies = [
- "async-trait",
  "base64 0.22.1",
+ "chrono",
+ "dirs 5.0.1",
+ "image",
+ "notify",
+ "notify-debouncer-full",
+ "parking_lot",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-clipboard-manager",
+ "tauri-plugin-dialog",
+ "tauri-plugin-opener",
+ "tauri-plugin-window-state",
+ "tempfile",
+ "thiserror 2.0.17",
+ "tidycraft-core",
+ "tokio",
+ "trash",
+ "uuid",
+]
+
+[[package]]
+name = "tidycraft-core"
+version = "0.8.5"
+dependencies = [
+ "async-trait",
  "chrono",
  "dirs 5.0.1",
  "fbxcel-dom",
@@ -5448,8 +5476,6 @@ dependencies = [
  "matroska-demuxer",
  "miniz_oxide",
  "mp4",
- "notify",
- "notify-debouncer-full",
  "parking_lot",
  "rayon",
  "regex",
@@ -5459,12 +5485,6 @@ dependencies = [
  "serde_json",
  "sha2",
  "symphonia",
- "tauri",
- "tauri-build",
- "tauri-plugin-clipboard-manager",
- "tauri-plugin-dialog",
- "tauri-plugin-opener",
- "tauri-plugin-window-state",
  "tempfile",
  "thiserror 2.0.17",
  "tobj",

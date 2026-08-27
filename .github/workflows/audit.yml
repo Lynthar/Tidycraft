@@ -15,7 +15,9 @@ on:
   push:
     branches: [main]
     paths:
-      - 'src-tauri/Cargo.lock'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - 'crates/**/Cargo.toml'
       - 'src-tauri/Cargo.toml'
       - '.github/workflows/audit.yml'
   workflow_dispatch:
@@ -37,5 +39,4 @@ jobs:
           tool: cargo-audit
 
       - name: Audit Cargo.lock
-        working-directory: src-tauri
         run: cargo audit

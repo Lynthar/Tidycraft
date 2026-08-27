@@ -1,3 +1,5 @@
+pub mod pipeline;
+#[cfg(feature = "llm")]
 pub mod rule_suggest;
 pub mod rules;
 pub mod tag_suggest;
@@ -817,7 +819,7 @@ mod tests {
         // and which ones the translations reference. A typo renders as a literal
         // `{{witdh}}`, since neither end substitutes unknown names.
         let path =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/i18n/locales/zh.json");
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../src/i18n/locales/zh.json");
         let raw = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
         let doc: serde_json::Value = serde_json::from_str(&raw).expect("zh.json parses");
@@ -859,7 +861,7 @@ mod tests {
         // declared rule id → JSON and skips what is missing, so a key the JSON has
         // and no rule claims is invisible to it.
         let path =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/i18n/locales/zh.json");
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../src/i18n/locales/zh.json");
         let raw = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
         let doc: serde_json::Value = serde_json::from_str(&raw).expect("zh.json parses");

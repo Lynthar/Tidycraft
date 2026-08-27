@@ -201,7 +201,7 @@ impl Default for ScanState {
 /// Convert a `Path` to a string using forward slashes. Every path sent to the
 /// frontend goes through this, so path filtering and `convertFileSrc` behave the
 /// same on Windows as elsewhere. Windows filenames cannot contain `\`.
-pub(crate) fn path_to_string(path: &Path) -> String {
+pub fn path_to_string(path: &Path) -> String {
     let s = path.to_string_lossy().to_string();
     if cfg!(windows) {
         s.replace('\\', "/")
@@ -1154,7 +1154,7 @@ fn precompute_dir_stats(assets: &[AssetInfo]) -> HashMap<String, DirStats> {
 /// Build the directory tree for the project. One O(N) pass groups assets by
 /// parent directory so the recursive build costs O(1) per node. `ignore` prunes
 /// gitignored directories from the `fs::read_dir` recursion (`None` = off).
-pub(crate) fn build_directory_tree(
+pub fn build_directory_tree(
     root: &Path,
     assets: &[AssetInfo],
     ignore: Option<&IgnoreMatcher>,
@@ -1641,7 +1641,7 @@ pub fn parse_asset_file(path: &Path, project_type: &Option<ProjectType>) -> Opti
 /// Re-key a cached [`AssetInfo`] onto a renamed path without re-reading the
 /// file. `unity_guid` is re-derived from whatever `.meta` sits beside the new
 /// path. Only valid when the extension is unchanged (case aside).
-pub(crate) fn rekey_asset_info(
+pub fn rekey_asset_info(
     old: &AssetInfo,
     new_path: &Path,
     project_type: &Option<ProjectType>,

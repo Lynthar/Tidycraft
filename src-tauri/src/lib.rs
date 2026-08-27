@@ -1,26 +1,11 @@
-mod analyzer;
-mod cache;
-mod fs_atomic;
-mod git;
-mod godot;
-mod llm;
 mod project;
 mod project_path;
-mod scanner;
-mod sidecar;
 mod tags;
 mod thumbnail;
 mod undo;
-mod unity;
-mod unreal;
 mod warning;
 mod watcher;
 
-use analyzer::rules::RuleConfig;
-use analyzer::{AnalysisResult, Analyzer};
-use cache::ScanCache;
-use git::{GitInfo, GitManager};
-use scanner::{IncrementalStats, ScanResult, ScanState};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::Path;
@@ -29,6 +14,13 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
+use tidycraft_core::analyzer::pipeline::{build_ignore_set, load_rule_config, run_full_analysis};
+use tidycraft_core::analyzer::rules::RuleConfig;
+use tidycraft_core::analyzer::{self, AnalysisResult};
+use tidycraft_core::cache::ScanCache;
+use tidycraft_core::git::{self, GitInfo, GitManager};
+use tidycraft_core::scanner::{self, IncrementalStats, ScanResult, ScanState};
+use tidycraft_core::{fs_atomic, godot, llm, sidecar, unity, unreal};
 
 // ============ Project Lifecycle ============
 
@@ -795,92 +787,6 @@ async fn llm_ollama_models(endpoint: String) -> Result<Vec<String>, String> {
 }
 
 // ============ Analysis Commands ============
-
-/// Load the project's `RuleConfig` from `<root>/tidycraft.toml` for the report
-/// exporters. Absent file → defaults; present but unreadable or unparseable →
-/// `Err`, matching how the Issues view fails via `analyze_assets`.
-fn load_rule_config(root_path: &str) -> Result<RuleConfig, String> {
-    let toml_path = Path::new(root_path).join("tidycraft.toml");
-    match std::fs::read_to_string(&toml_path) {
-        Ok(content) => {
-            RuleConfig::from_toml(&content).map_err(|e| format!("Invalid config: {}", e))
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(RuleConfig::default()),
-        Err(e) => Err(format!("Failed to read tidycraft.toml: {}", e)),
-    }
-}
-
-/// Build a `GlobSet` from `[ignore].patterns`, or `None` when the list is
-/// empty. A malformed pattern surfaces as an `Err`; callers build this
-/// before taking the project lock so the error short-circuits early.
-fn build_ignore_set(config: &RuleConfig) -> Result<Option<globset::GlobSet>, String> {
-    if config.ignore.patterns.is_empty() {
-        return Ok(None);
-    }
-    let mut builder = globset::GlobSetBuilder::new();
-    for pattern in &config.ignore.patterns {
-        let glob = globset::Glob::new(pattern)
-            .map_err(|e| format!("Invalid ignore pattern '{}': {}", pattern, e))?;
-        builder.add(glob);
-    }
-    builder
-        .build()
-        .map(Some)
-        .map_err(|e| format!("Failed to build ignore set: {}", e))
-}
-
-/// The single source of truth for the analysis pipeline: apply the
-/// `[ignore].patterns` filter, then run every analyzer phase. `analyze_assets`
-/// and both report exporters route through this for one issue set per config.
-fn run_full_analysis(
-    scan_result: &ScanResult,
-    root_path: &str,
-    config: &RuleConfig,
-    ignore_set: Option<&globset::GlobSet>,
-    package_index: &unity::PackageGuidIndex,
-) -> AnalysisResult {
-    // Only clone the scan when there are patterns to apply; most projects
-    // have none and analyze the cached scan reference in place.
-    let owned_filtered: Option<ScanResult> = ignore_set.map(|set| {
-        let root = Path::new(root_path);
-        let kept: Vec<scanner::AssetInfo> = scan_result
-            .assets
-            .iter()
-            .filter(|a| {
-                let path = Path::new(&a.path);
-                let rel = path.strip_prefix(root).unwrap_or(path);
-                !set.is_match(rel)
-            })
-            .cloned()
-            .collect();
-        ScanResult {
-            root_path: scan_result.root_path.clone(),
-            directory_tree: scan_result.directory_tree.clone(),
-            assets: kept,
-            total_count: scan_result.total_count,
-            total_size: scan_result.total_size,
-            type_counts: scan_result.type_counts.clone(),
-            project_type: scan_result.project_type.clone(),
-            warnings: scan_result.warnings.clone(),
-        }
-    });
-    let scan_to_analyze: &ScanResult = owned_filtered.as_ref().unwrap_or(scan_result);
-
-    let analyzer = Analyzer::with_config(config);
-    let mut result = analyzer.analyze(scan_to_analyze);
-    let duplicates = analyzer.find_duplicates(scan_to_analyze);
-    result.merge(duplicates);
-    // Existence comes from the UNFILTERED scan: `[ignore]` limits what is
-    // reported, not what the project contains. The other three cross-asset rules
-    // keep the filtered view — see docs/analyzer-rules.md.
-    let missing = analyzer.find_missing_references(scan_to_analyze, scan_result, package_index);
-    result.merge(missing);
-    let pbr = analyzer.find_pbr_set_issues(scan_to_analyze, &config.pbr_set);
-    result.merge(pbr);
-    let dcc = analyzer.find_dcc_source_issues(scan_to_analyze, &config.dcc_source);
-    result.merge(dcc);
-    result
-}
 
 /// Clone what an analysis or report export needs out of the project state,
 /// holding the project lock only for the clone. The heavy work — duplicate
@@ -2158,7 +2064,7 @@ fn rename_batch_on_disk(
         // The target may `exists()`-resolve to the source file itself — a case-only
         // change or an NFC/NFD variant — so only a genuinely different occupant is
         // rejected. Identity is dev+inode (undo.rs), never the name.
-        if new_path.exists() && !undo::paths_are_same_file(path_obj, &new_path) {
+        if new_path.exists() && !fs_atomic::paths_are_same_file(path_obj, &new_path) {
             errors.push(format!("Target already exists: {}", new_path.display()));
             error_count += 1;
             continue;
@@ -2694,7 +2600,7 @@ fn commit_moves(
                 };
                 let dst = target.join(&name);
 
-                if src == dst || undo::paths_are_same_file(src, &dst) {
+                if src == dst || fs_atomic::paths_are_same_file(src, &dst) {
                     // No-op: the source is already in the target directory. Checked
                     // by identity, not by string — a case variant, a symlinked
                     // folder or a `..` all name the same directory.
@@ -3013,7 +2919,7 @@ fn commit_single_rename(
     // The target may `exists()`-resolve to the source itself (case-only rename,
     // NFC/NFD variant); only a genuinely different occupant is a conflict, and
     // identity is by dev+inode, not by name.
-    if new_path.exists() && !undo::paths_are_same_file(old_path_ref, &new_path) {
+    if new_path.exists() && !fs_atomic::paths_are_same_file(old_path_ref, &new_path) {
         return Err("A file with this name already exists".to_string());
     }
 

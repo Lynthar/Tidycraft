@@ -1,19 +1,13 @@
 [package]
 name = "tidycraft"
-version = "0.8.5"
 description = "Game asset management tool"
-authors = ["Tidycraft Team"]
-edition = "2021"
-# Floor imposed by the dependency graph, not by our own code: tauri 2.11
-# needs 1.77.2 and `time` 0.3.47 (via cookie/reqwest and tauri-codegen) needs
-# 1.88. Cargo enforces each dependency's own `rust-version`, so anything lower
-# here is a claim the build cannot honor. CI pins `stable`, which is why the
-# stale 1.75 never failed anything — recheck with
-# `cargo metadata --format-version 1` after a dependency bump.
-rust-version = "1.88"
-license = "Apache-2.0"
-homepage = "https://github.com/Lynthar/Tidycraft"
-repository = "https://github.com/Lynthar/Tidycraft"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
 
 [lib]
 name = "tidycraft_lib"
@@ -23,6 +17,7 @@ crate-type = ["lib", "cdylib", "staticlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+tidycraft-core = { path = "../crates/tidycraft-core" }
 # No `devtools` feature: debug builds get the inspector automatically
 # (tauri enables it under `debug_assertions`, and lib.rs's setup hook
 # auto-opens it there); the feature's only effect was compiling the
@@ -36,74 +31,19 @@ tauri-plugin-opener = "2"
 tauri-plugin-window-state = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "tga", "tiff", "webp", "hdr", "exr"] }
 thiserror = "2"
 tokio = { version = "1", features = ["sync", "rt", "macros"] }
-gltf = "1"
-tobj = "4"
-symphonia = { version = "0.5", default-features = false, features = ["mp3", "ogg", "wav", "pcm", "vorbis"] }
-sha2 = "0.10"
-base64 = "0.22"
 parking_lot = "0.12"
-dirs = "5"
-toml = "0.8"
-# Round-trip TOML editing that preserves comments + formatting. Used by
-# `llm::project_meta::write_back` so the LearnSetupModal can persist
-# theme/goal back into tidycraft.toml without clobbering the user's
-# inline comments. The plain `toml` crate above is serde-only and would
-# lose them. cargo itself uses toml_edit for the same reason.
-toml_edit = "0.22"
-git2 = { version = "0.20", features = ["vendored-openssl"] }
-ignore = "0.4"
-globset = "0.4"
-# File-identity comparison (dev+inode / Windows file index) for the rename
-# "target already exists" guards: a case-only rename's target resolves to the
-# source itself on case-insensitive filesystems and must be allowed, while a
-# genuine case-variant *collision* on case-sensitive filesystems must be
-# rejected. Already in the tree transitively via `ignore` → `walkdir`.
-same-file = "1"
-# zlib inflate for the PNG iCCP chunk: the embedded ICC profile is parsed to
-# tell linear from sRGB-encoded textures (scanner::classify_icc_profile)
-# instead of blindly assuming any profile means sRGB. Pure Rust, already in
-# the tree transitively via the `png` decoder.
-miniz_oxide = "0.8"
-# `default-features = false` drops the unicode tables we don't need (asset
-# paths are ASCII-dominant; learned-regex rules don't use \p{...} classes).
-# Saves ~1MB binary and a few seconds compile. `std` feature is required —
-# without it the crate is no_std-only and won't expose Regex::new at all.
-regex = { version = "1", default-features = false, features = ["std", "perf"] }
-chrono = "0.4"
-rayon = "1.10"
 uuid = { version = "1", features = ["v4"] }
+chrono = "0.4"
+sha2 = "0.10"
+dirs = "5"
+base64 = "0.22"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "tga", "tiff", "webp", "hdr", "exr"] }
+trash = "5"
 notify = "6"
 notify-debouncer-full = "0.3"
-trash = "5"
-fbxcel-dom = "0.0"
-mp4 = "0.14"
-matroska-demuxer = "0.7"
-# LLM tagging: HTTP client for Anthropic / OpenAI / Ollama vision APIs.
-# rustls-tls is intentional (avoids dragging in OpenSSL on Windows builds);
-# json feature gives us .json() / Serialize bodies without manual serde wiring.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-async-trait = "0.1"
-hex = "0.4"
-unicode-normalization = "0.1"
 
 [dev-dependencies]
 tempfile = "3"
-# `filetime` lets the dcc_source analyzer's tests precisely control
-# file mtimes, which is otherwise stuck at the OS clock + write-syscall
-# resolution (varies wildly across filesystems and is too coarse for
-# sub-second pairing logic). Cross-platform; production code doesn't
-# touch it.
-filetime = "0.2"
-
-[profile.dev]
-incremental = true
-
-[profile.release]
-codegen-units = 1
-lto = true
-opt-level = "s"
-panic = "abort"
-strip = true

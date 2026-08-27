@@ -1,0 +1,96 @@
+[package]
+name = "tidycraft-core"
+description = "Engine-agnostic scanning and analysis core for Tidycraft"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[features]
+# Defaults keep `cargo test -p tidycraft-core` covering the full surface; a
+# consumer that only needs the check pipeline builds with
+# `default-features = false`.
+default = ["llm", "git"]
+# LLM tagging and rule learning: the providers, their response cache, the
+# learned-rule store, and `analyzer::rule_suggest` (which consumes learned
+# rules).
+llm = [
+    "dep:async-trait",
+    "dep:chrono",
+    "dep:hex",
+    "dep:reqwest",
+    "dep:tokio",
+    "dep:toml_edit",
+    "dep:uuid",
+]
+# Repository status for scanned assets (libgit2).
+git = ["dep:git2"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp", "tga", "tiff", "webp", "hdr", "exr"] }
+gltf = "1"
+tobj = "4"
+symphonia = { version = "0.5", default-features = false, features = ["mp3", "ogg", "wav", "pcm", "vorbis"] }
+fbxcel-dom = "0.0"
+mp4 = "0.14"
+matroska-demuxer = "0.7"
+sha2 = "0.10"
+rayon = "1.10"
+ignore = "0.4"
+globset = "0.4"
+parking_lot = "0.12"
+dirs = "5"
+toml = "0.8"
+trash = "5"
+unicode-normalization = "0.1"
+# File-identity comparison (dev+inode / Windows file index) for the rename
+# "target already exists" guards: a case-only rename's target resolves to the
+# source itself on case-insensitive filesystems and must be allowed, while a
+# genuine case-variant *collision* on case-sensitive filesystems must be
+# rejected. Already in the tree transitively via `ignore` → `walkdir`.
+same-file = "1"
+# zlib inflate for the PNG iCCP chunk: the embedded ICC profile is parsed to
+# tell linear from sRGB-encoded textures (scanner::classify_icc_profile)
+# instead of blindly assuming any profile means sRGB. Pure Rust, already in
+# the tree transitively via the `png` decoder.
+miniz_oxide = "0.8"
+# `default-features = false` drops the unicode tables we don't need (asset
+# paths are ASCII-dominant; learned-regex rules don't use \p{...} classes).
+# Saves ~1MB binary and a few seconds compile. `std` feature is required —
+# without it the crate is no_std-only and won't expose Regex::new at all.
+regex = { version = "1", default-features = false, features = ["std", "perf"] }
+
+# ---- `llm` feature ----
+# LLM tagging: HTTP client for Anthropic / OpenAI / Ollama vision APIs.
+# rustls-tls is intentional (avoids dragging in OpenSSL on Windows builds);
+# json feature gives us .json() / Serialize bodies without manual serde wiring.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
+async-trait = { version = "0.1", optional = true }
+tokio = { version = "1", features = ["sync", "rt", "macros"], optional = true }
+# Round-trip TOML editing that preserves comments + formatting. Used by
+# `llm::project_meta::write_back` so the LearnSetupModal can persist
+# theme/goal back into tidycraft.toml without clobbering the user's
+# inline comments. The plain `toml` crate above is serde-only and would
+# lose them. cargo itself uses toml_edit for the same reason.
+toml_edit = { version = "0.22", optional = true }
+hex = { version = "0.4", optional = true }
+uuid = { version = "1", features = ["v4"], optional = true }
+chrono = { version = "0.4", optional = true }
+
+# ---- `git` feature ----
+git2 = { version = "0.20", features = ["vendored-openssl"], optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+# `filetime` lets the dcc_source analyzer's tests precisely control
+# file mtimes, which is otherwise stuck at the OS clock + write-syscall
+# resolution (varies wildly across filesystems and is too coarse for
+# sub-second pairing logic). Cross-platform; production code doesn't
+# touch it.
+filetime = "0.2"

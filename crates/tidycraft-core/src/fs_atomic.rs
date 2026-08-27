@@ -1,6 +1,6 @@
-//! Crash-safe file writes shared by every module that persists state (tags,
-//! undo history, AI rule docs, LLM response cache, thumbnails): write to a
-//! unique sibling temp file, then `rename(2)` over the destination.
+//! Filesystem primitives shared across modules: crash-safe writes (unique
+//! sibling temp file, then `rename(2)` over the destination) and file-identity
+//! comparison for the rename/undo clobber guards.
 
 use std::fs;
 use std::io;
@@ -30,6 +30,13 @@ pub fn write_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
         // Don't leave the temp file behind when the rename fails.
         let _ = fs::remove_file(&tmp_path);
     })
+}
+
+/// Whether two paths name the **same file** by filesystem identity (Unix
+/// dev+inode, Windows volume serial + file index). False when either path is
+/// missing or unreadable, so callers reject conservatively.
+pub fn paths_are_same_file(a: &Path, b: &Path) -> bool {
+    same_file::is_same_file(a, b).unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -74,5 +81,26 @@ mod tests {
     #[test]
     fn rejects_bare_root() {
         assert!(write_atomic(Path::new("/"), b"x").is_err());
+    }
+
+    #[test]
+    fn paths_are_same_file_matches_identity_not_names() {
+        let dir = tempdir().unwrap();
+        let a = dir.path().join("a.txt");
+        let b = dir.path().join("b.txt");
+        fs::write(&a, b"x").unwrap();
+        fs::write(&b, b"x").unwrap();
+
+        // Same path twice → trivially the same file.
+        assert!(paths_are_same_file(&a, &a));
+        // Two distinct files in the same directory → not the same.
+        assert!(!paths_are_same_file(&a, &b));
+        // A hard link is the same file under a different name — only an
+        // identity check can know that; any name-based guess says "different".
+        let link = dir.path().join("a_link.txt");
+        fs::hard_link(&a, &link).unwrap();
+        assert!(paths_are_same_file(&a, &link));
+        // Nonexistent path → conservatively "not the same file".
+        assert!(!paths_are_same_file(&a, &dir.path().join("missing.txt")));
     }
 }

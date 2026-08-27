@@ -1,6 +1,6 @@
-// Single-source the app version: `package.json > version` is the source of truth,
-// propagated into src-tauri/Cargo.toml and tauri.conf.json. `--check` verifies
-// only and exits 1 on drift. Rationale and usage: docs/design-notes.md.
+// Single-source the app version: `package.json > version` is the source of
+// truth, propagated into the workspace Cargo.toml (which every crate inherits)
+// and tauri.conf.json. `--check` verifies only and exits 1 on drift.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -10,7 +10,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const checkOnly = process.argv.includes("--check");
 
 const pkgPath = join(root, "package.json");
-const cargoPath = join(root, "src-tauri", "Cargo.toml");
+const cargoPath = join(root, "Cargo.toml");
 const confPath = join(root, "src-tauri", "tauri.conf.json");
 
 const version = JSON.parse(readFileSync(pkgPath, "utf8")).version;
@@ -30,8 +30,8 @@ const targets = [
     label: "Cargo.toml",
     path: cargoPath,
     // `\n[ \t]*version` pins the match to a line-leading `version` key inside
-    // the [package] table — never `rust-version` or a dependency's version.
-    re: /(\[package\][\s\S]*?\n[ \t]*version[ \t]*=[ \t]*")([^"]*)(")/,
+    // the [workspace.package] table — never `rust-version` or a dependency's.
+    re: /(\[workspace\.package\][\s\S]*?\n[ \t]*version[ \t]*=[ \t]*")([^"]*)(")/,
   },
   {
     label: "tauri.conf.json",
