@@ -41,6 +41,7 @@
 - 支持 Unity / Unreal / Godot 与通用项目，针对 Unity GUID 图、`.uproject`、`project.godot` 各有专门解析器。
 - 多项目可同时打开，自由切换，工作区跨会话恢复。
 - 默认规则极简，把噪音控制在最低。扫描器默认遵守 `.gitignore` 跳过生成产物，文件系统 watcher 自动同步外部改动（无需手动重扫），规则可在 `Settings → Analysis Rules → Edit` 直接编辑。
+- **也能在 CI 里跑** — 同一套规则的无头 `tidycraft check` 命令，配 baseline，让已有项目从绿色起步、只有新违规才让构建变红。见 [命令行与 CI](#命令行与-ci)。
 - 本地优先,所有状态都在你硬盘上;无遥测。唯一的离机流量是你自行配置的 opt-in 云 AI 标签(学习模式或单资产模式)。
 
 > **状态:Alpha — 持续开发中。** 核心功能(扫描、分析、标签、3D 预览、Git、Watcher)已稳定。**基于 LLM 的 AI 标签**已 ship,提供两种模式:**学习模式**(推荐 — 一次 LLM 调用采样项目、推断本地启发式规则,复用你已有的标签系统;之后免费)和**高级单资产模式**(opt-in — 把缩略图发给 Claude / OpenAI / Ollama 直接打标)。两种模式都默认关闭,需要先在 Settings → AI Tagging 里配置 provider。详见下方 [功能特性 → AI 标签](#-ai-标签)。
@@ -96,7 +97,7 @@
 
 ### AI 标签
 
-多 provider LLM 标签:**Claude**(Sonnet 4.6 / Haiku 4.5 / Opus 4.7)、**OpenAI**(GPT-5.4-mini / 4o-mini / 5.4 / 5.4-nano)、**Ollama**(本地 — qwen2.5-VL / Llama 3.2-Vision / LLaVA 等;已安装模型实时列出)。
+多 provider LLM 标签:**Claude**(Sonnet 5 / Haiku 4.5 / Opus 5)、**OpenAI**(GPT-5.4-mini / 4o-mini / 5.4 / 5.4-nano)、**Ollama**(本地 — qwen2.5-VL / Llama 3.2-Vision / LLaVA 等;已安装模型实时列出)。
 
 **学习模式(推荐,默认路径)。** 一次 LLM 调用采样你项目的文件名 + 路径 + 已有标签系统,推断命名 / 目录约定,生成**本地启发式规则**(filename-token / path-prefix / path-segment 匹配)供你审查 —— 在审查面板点 Save 才会持久化到 `tidycraft.ai.toml`,直接关闭则完全丢弃本次运行。侧边栏的 "Suggest Tags" 面板之后跑已保存的规则在本地匹配 — 自此每条资产 LLM 成本为零。模型认为你词汇里缺失的标签会在同一面板中提议(预勾选、可取消),Save 时才创建。云 provider 每次学习运行约 ~$0.05;Ollama 免费。
 
@@ -177,7 +178,7 @@
 
 ### 从 release 下载(推荐)
 
-从 [Releases 页面](https://github.com/Lynthar/Tidycraft/releases) 下载对应平台的二进制,按下面的首次启动步骤操作。
+从 [Releases 页面](https://github.com/Lynthar/Tidycraft/releases) 下载对应平台的二进制,按下面的首次启动步骤操作。同一批发布里还带着供[命令行使用](#命令行与-ci)的 `tidycraft-cli-*` 二进制，它们不需要任何安装步骤。
 
 **Linux**
 
@@ -315,32 +316,93 @@ patterns = [
 
 ---
 
+## 命令行与 CI
+
+应用里跑的那套扫描与规则，同时也是一个命令，所以项目的资产规范可以和代码规范落在同一个地方把关——在引入违规的那个 PR 上，而不是等下一个人打开应用的时候。它不需要装引擎、不启动编辑器：直接解析 `.meta` 与 `project.godot` 是秒级的，而 batch-mode 编辑器导入要几分钟。
+
+从 [Releases 页面](https://github.com/Lynthar/Tidycraft/releases) 下载二进制（`tidycraft-cli-*`），或从源码装：
+
+```bash
+cargo install --git https://github.com/Lynthar/Tidycraft tidycraft-cli
+```
+
+两种方式都给你一个 `tidycraft` 命令：
+
+```bash
+tidycraft check .                       # 扫描当前项目并报告
+tidycraft check . --fail-on warning     # 警告也算失败
+tidycraft rules                         # 全部规则 id + 本项目的生效配置
+tidycraft explain naming.prefix         # 某条规则查什么、怎么调
+tidycraft scan . --types texture,model  # 资产清单，JSON 输出
+```
+
+`check` 读的就是应用读的那份 `tidycraft.toml`，所以桌面端与构建机不可能对「什么算问题」产生分歧。**四个动词全部只读**——不改名、不移动、不写盘——因此可以放心把整个 `tidycraft` 前缀加进 CI 沙箱或 AI agent 的工具清单。修复是应用的活。
+
+**退出码是契约**：`0` 干净 · `1` 发现达到 `--fail-on` 阈值 · `2` 用法或配置错误 · `3` 运行时错误。阈值默认只算错误，也可以按项目定而不是按 workflow 定：
+
+```toml
+[check]
+fail_on = "warning"
+```
+
+### 已经有一堆问题的项目怎么起步
+
+给一个积累了多年资产的项目开检查，会一次报出全部问题，那等于什么都没报。把今天的现状记下来，检查就是绿的；此后只有改动引入的新问题才会让它变红：
+
+```bash
+tidycraft check . --update-baseline     # 写出 tidycraft.baseline.json，提交进版本库
+```
+
+接受了一组重复文件，不等于接受下一份副本：记录跟的是文件内容而不是文件名，所以改名或删掉一份副本不会吵，新增一份会。
+
+### 在 GitHub Actions 里
+
+```yaml
+- uses: Lynthar/Tidycraft@main
+  with:
+    fail-on: warning
+```
+
+发现会以 annotation 的形式标在出问题的文件上。`--format sarif` 可用于 GitHub code scanning，但私有仓库要启用 GitHub Code Security 才能接受 SARIF 上传——annotation 则什么都不需要。其他场景用 `--format json`。
+
+**信任一次绿色构建之前，有一个坑值得知道。** 读不到尺寸的贴图是被跳过而不是被报告的，所以一个没拉取大文件的 checkout 可能在几乎什么都没检查的情况下通过。扫描读不到的东西现在会在每一种输出格式里明说，未拉取的 Git LFS 占位文件也会被计数并列出。加 `--strict` 就能让「没看全」变成失败而不是通过。
+
+---
+
 ## 项目结构
 
 ```
 tidycraft/
-├── src/                    # React 前端
-│   ├── components/         # UI 组件
-│   ├── stores/             # Zustand 状态
-│   ├── styles/             # 全局 CSS + Forge 设计 token
-│   ├── types/              # TypeScript 类型
-│   ├── hooks/              # React hooks
-│   ├── i18n/locales/       # en.json + zh.json
-│   └── lib/                # 工具函数（pathUtils、平台检测等）
-├── src-tauri/              # Rust 后端
+├── src/                        # React 前端
+│   ├── components/             # UI 组件
+│   ├── stores/                 # Zustand 状态
+│   ├── styles/                 # 全局 CSS + Forge 设计 token
+│   ├── types/                  # TypeScript 类型
+│   ├── hooks/                  # React hooks
+│   ├── i18n/locales/           # en.json + zh.json
+│   └── lib/                    # 工具函数（pathUtils、平台检测等）
+├── crates/
+│   ├── tidycraft-core/         # 引擎核心，应用与 CLI 共用
+│   │   └── src/
+│   │       ├── scanner.rs      # 资源扫描（gitignore-aware walker）
+│   │       ├── analyzer/       # 规则引擎（naming / texture / model / audio / duplicate / missing_reference / pbr_set / dcc_source）+ 标签推荐
+│   │       ├── llm/            # 多 provider AI 标签（Claude / OpenAI / Ollama）+ 学习模式
+│   │       ├── sidecar.rs      # 引擎 sidecar（.meta / .import / .uid）随资产一起走
+│   │       └── unity.rs / unreal.rs / godot.rs
+│   └── tidycraft-cli/          # 无头 `tidycraft` 命令
+├── src-tauri/                  # 桌面应用：Tauri 命令 + 会话状态
 │   └── src/
-│       ├── scanner.rs      # 资源扫描（gitignore-aware walker）
-│       ├── watcher.rs      # 文件系统 watcher → fs-change 事件
-│       ├── analyzer/       # 规则引擎（naming / texture / model / audio / duplicate / missing_reference / pbr_set / dcc_source）+ 标签推荐
-│       ├── llm/            # 多 provider AI 标签（Claude / OpenAI / Ollama）+ 学习模式
-│       ├── thumbnail.rs    # 缩略图生成
-│       ├── tags.rs         # 标签管理
-│       └── lib.rs          # Tauri 命令
-├── docs/                   # 辅助文档
-│   ├── analyzer-rules.md   # 各规则默认值与调优说明
-│   └── screenshots/        # README 截图
-├── examples/               # `tidycraft.example.toml` 起始模板
-└── README.md               # 用户文档（本文件）
+│       ├── watcher.rs          # 文件系统 watcher → fs-change 事件
+│       ├── thumbnail.rs        # 缩略图生成
+│       ├── tags.rs             # 标签管理
+│       ├── undo.rs             # 撤销历史
+│       └── lib.rs              # Tauri 命令
+├── docs/                       # 辅助文档
+│   ├── analyzer-rules.md       # 各规则默认值与调优说明
+│   └── screenshots/            # README 截图
+├── examples/                   # `tidycraft.example.toml` 起始模板
+├── action.yml                  # 包装 `tidycraft check` 的 GitHub Action
+└── README.md                   # 用户文档（本文件）
 ```
 
 ---
@@ -380,11 +442,14 @@ Tidycraft **本地优先**:
 - [x] DCC 源文件关联（`.blend` / `.psd` / `.spp` / `.ma` / `.ztl` / `.max` / `.lxo` / `.hip` / `.c4d` / `.zprj` / `.sbs` / `.psb` → "源比导出新"警告，opt-in）
 - [x] AI 标签 —— 学习模式（项目采样 → 本地规则持久化到 `tidycraft.ai.toml`;之后单资产 LLM 成本为零）+ 高级单资产模式（多 provider LLM,带成本预览 + per-provider 同意流程;opt-in）
 - [x] 扫描器默认遵守 `.gitignore` / `.ignore`（通过 `ignore::WalkBuilder`;可在 Settings → Scanning 切换）
+- [x] 一键命名修复（自动修禁用字符 / 缺前缀 / 大小写；单条或全项目批量，可编辑，走撤销）
+- [x] 面向 CI 的无头 `tidycraft` 命令 —— 同一套规则、退出码契约、入库 baseline、SARIF / GitHub annotation，以及现成的 Action
 
 待办：
 
 - [ ] VRAM 预算估算（每张纹理、按目录聚合）
 - [ ] 跨引擎反向引用图（把 Unity GUID 图扩到 UE / Godot）
+- [ ] Unreal `.uasset` 引用解析（目前 UE 有命名 / 结构 / 尺寸 / 重复检查，引用图仍是 Unity 独有）
 
 ---
 

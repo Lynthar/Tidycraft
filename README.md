@@ -41,6 +41,7 @@
 - Multi-engine: Unity, Unreal, Godot, or generic projects, with dedicated parsers for Unity GUID graphs, `.uproject`, and `project.godot`.
 - Multiple projects can stay open at once; switch between them freely, and the workspace is restored across sessions.
 - Default rules are kept minimal to keep noise down. The scanner respects `.gitignore` (so generated artefacts stay out of view), the filesystem watcher syncs external changes automatically, and rules are editable from `Settings → Analysis Rules → Edit`.
+- **Runs in CI too** — the same rules as a headless `tidycraft check` command, with a baseline so an existing project starts green and only new violations fail the build. See [Command line & CI](#command-line--ci).
 - Local-first: all state lives on your disk, with no telemetry. The only off-machine traffic is the opt-in cloud AI tagging you configure yourself (Learning or per-asset mode).
 
 > **Status: Alpha — actively developed.** Core features (scanning, analysis, tags, 3D preview, Git, watcher) are stable. **LLM-backed AI tagging** ships in two modes: a **Learning mode** (recommended — one-time LLM call samples the project, derives local heuristic rules, reuses your existing tag system; free thereafter) and an **advanced per-asset mode** (opt-in — sends thumbnails to Claude / OpenAI / Ollama for direct tagging). Both are off until you configure a provider. See [Features → AI Tagging](#-ai-tagging) below.
@@ -96,7 +97,7 @@ Some 3D model formats (FBX, OBJ, DAE) embed texture paths internally. When these
 
 ### AI Tagging
 
-Multi-provider LLM tagging via **Claude** (Sonnet 4.6 / Haiku 4.5 / Opus 4.7), **OpenAI** (GPT-5.4-mini / 4o-mini / 5.4 / 5.4-nano), and **Ollama** (local — qwen2.5-VL / Llama 3.2-Vision / LLaVA / etc.; installed models listed live).
+Multi-provider LLM tagging via **Claude** (Sonnet 5 / Haiku 4.5 / Opus 5), **OpenAI** (GPT-5.4-mini / 4o-mini / 5.4 / 5.4-nano), and **Ollama** (local — qwen2.5-VL / Llama 3.2-Vision / LLaVA / etc.; installed models listed live).
 
 **Learning mode (default, recommended).** One-time LLM call samples your project's filenames + paths + existing tag system, infers naming/directory conventions, and emits **local heuristic rules** (filename-token / path-prefix / path-segment matching) for you to review — saving from the review panel persists them to `tidycraft.ai.toml`; closing without saving discards the run entirely. The Sidebar's "Suggest Tags" panel then runs the saved rules locally — zero per-asset LLM cost from then on. Tags the model thinks your vocabulary is missing are proposed in the same panel (pre-selected, opt-out) and created on Save. ~$0.05 per learning run on cloud providers; free on Ollama.
 
@@ -177,7 +178,7 @@ See [`docs/analyzer-rules.md`](docs/analyzer-rules.md) for per-rule defaults and
 
 ### From a release (recommended)
 
-Grab the latest binary from [Releases](https://github.com/Lynthar/Tidycraft/releases) and follow your platform's first-launch step.
+Grab the latest binary from [Releases](https://github.com/Lynthar/Tidycraft/releases) and follow your platform's first-launch step. The same releases carry the `tidycraft-cli-*` binaries for [command-line use](#command-line--ci), which need no installation step at all.
 
 **Linux**
 
@@ -316,32 +317,93 @@ Any field can be omitted — missing fields fall back to defaults.
 
 ---
 
+## Command line & CI
+
+The same scan and the same rules the app runs are also a command, so a project's asset conventions can be enforced where its code conventions already are — on the pull request that introduces a violation, rather than whenever somebody next opens the app. It needs no engine installed and no editor launched: parsing `.meta` and `project.godot` directly takes seconds where a batch-mode editor import takes minutes.
+
+Grab a binary from the [Releases page](https://github.com/Lynthar/Tidycraft/releases) (`tidycraft-cli-*`), or build it from source:
+
+```bash
+cargo install --git https://github.com/Lynthar/Tidycraft tidycraft-cli
+```
+
+Both give you a `tidycraft` command:
+
+```bash
+tidycraft check .                       # scan the project here and report
+tidycraft check . --fail-on warning     # treat warnings as failures too
+tidycraft rules                         # every rule id + this project's effective config
+tidycraft explain naming.prefix         # what one rule checks and how to tune it
+tidycraft scan . --types texture,model  # the asset inventory, as JSON
+```
+
+`check` reads the same `tidycraft.toml` the app does, so the desktop and the build agent cannot disagree about what counts as a problem. **Every verb is read-only** — nothing is renamed, moved or written — which makes the whole `tidycraft` prefix safe to allow in a CI sandbox or an AI agent's tool list. Fixing is the app's job.
+
+**Exit codes** are the contract: `0` clean · `1` findings reached `--fail-on` · `2` usage or config error · `3` runtime error. The threshold defaults to errors only, and can be set per project instead of per workflow:
+
+```toml
+[check]
+fail_on = "warning"
+```
+
+### Starting on a project that already has findings
+
+Turning a check on for a project with years of assets behind it reports everything at once, which is the same as reporting nothing. Record what is there today and the check passes; it then fails only on what a change introduces:
+
+```bash
+tidycraft check . --update-baseline     # writes tidycraft.baseline.json — commit it
+```
+
+Accepting a set of duplicates does not accept the next copy of them: the record follows the files' content rather than their names, so renaming or removing a copy stays quiet while adding one speaks up.
+
+### In GitHub Actions
+
+```yaml
+- uses: Lynthar/Tidycraft@main
+  with:
+    fail-on: warning
+```
+
+Findings land as annotations on the offending files. `--format sarif` is available for GitHub code scanning, though private repositories need GitHub Code Security enabled to accept a SARIF upload — annotations need nothing. `--format json` is there for everything else.
+
+**One caveat worth knowing before you trust a green build.** A texture whose dimensions cannot be read is skipped rather than reported, so a checkout where large files were never fetched can pass without much having been examined. Anything the scan could not read is stated in every output format, and unfetched Git LFS placeholders are counted and named. Add `--strict` to turn an incomplete look into a failure rather than a pass.
+
+---
+
 ## Project Structure
 
 ```
 tidycraft/
-├── src/                    # React frontend
-│   ├── components/         # UI components
-│   ├── stores/             # Zustand state
-│   ├── styles/             # Global CSS + Forge design tokens
-│   ├── types/              # TypeScript types
-│   ├── hooks/              # React hooks
-│   ├── i18n/locales/       # en.json + zh.json
-│   └── lib/                # Utilities (pathUtils, platform detect, …)
-├── src-tauri/              # Rust backend
+├── src/                        # React frontend
+│   ├── components/             # UI components
+│   ├── stores/                 # Zustand state
+│   ├── styles/                 # Global CSS + Forge design tokens
+│   ├── types/                  # TypeScript types
+│   ├── hooks/                  # React hooks
+│   ├── i18n/locales/           # en.json + zh.json
+│   └── lib/                    # Utilities (pathUtils, platform detect, …)
+├── crates/
+│   ├── tidycraft-core/         # Engine core, shared by the app and the CLI
+│   │   └── src/
+│   │       ├── scanner.rs      # Asset scanning (gitignore-aware walker)
+│   │       ├── analyzer/       # Rule engine (naming / texture / model / audio / duplicate / missing_reference / pbr_set / dcc_source) + tag suggesters
+│   │       ├── llm/            # Multi-provider AI tagging (Claude / OpenAI / Ollama) + Learning mode
+│   │       ├── sidecar.rs      # Engine sidecars (.meta / .import / .uid) travel with their asset
+│   │       └── unity.rs / unreal.rs / godot.rs
+│   └── tidycraft-cli/          # The headless `tidycraft` command
+├── src-tauri/                  # Desktop app: Tauri commands + session state
 │   └── src/
-│       ├── scanner.rs      # Asset scanning (gitignore-aware walker)
-│       ├── watcher.rs      # FS watcher → fs-change events
-│       ├── analyzer/       # Rule engine (naming / texture / model / audio / duplicate / missing_reference / pbr_set / dcc_source) + tag suggesters
-│       ├── llm/            # Multi-provider AI tagging (Claude / OpenAI / Ollama) + Learning mode
-│       ├── thumbnail.rs    # Thumbnail generation
-│       ├── tags.rs         # Tag management
-│       └── lib.rs          # Tauri commands
-├── docs/                   # Auxiliary docs
-│   ├── analyzer-rules.md   # Per-rule defaults and tuning advice
-│   └── screenshots/        # README image assets
-├── examples/               # Starter `tidycraft.example.toml`
-└── README.md               # User-facing docs (this file)
+│       ├── watcher.rs          # FS watcher → fs-change events
+│       ├── thumbnail.rs        # Thumbnail generation
+│       ├── tags.rs             # Tag management
+│       ├── undo.rs             # Undo history
+│       └── lib.rs              # Tauri commands
+├── docs/                       # Auxiliary docs
+│   ├── analyzer-rules.md       # Per-rule defaults and tuning advice
+│   └── screenshots/            # README image assets
+├── examples/                   # Starter `tidycraft.example.toml`
+├── action.yml                  # GitHub Action wrapping `tidycraft check`
+└── README.md                   # User-facing docs (this file)
 ```
 
 ---
@@ -382,11 +444,13 @@ Shipped:
 - [x] AI Tagging — Learning mode (project sampling → local rules persisted to `tidycraft.ai.toml`; zero per-asset LLM cost after the one-time run) + advanced per-asset mode (multi-provider LLM with cost preview + per-provider consent; opt-in)
 - [x] Scanner respects `.gitignore` / `.ignore` by default via `ignore::WalkBuilder` (toggleable in Settings → Scanning)
 - [x] One-click naming fixes (auto-fix forbidden characters / missing prefix / case; per-issue or whole-project batch, editable, undo-backed)
+- [x] Headless `tidycraft` command for CI — same rules, exit-code contract, committed baseline, SARIF / GitHub annotations, and a ready-made Action
 
 Backlog:
 
 - [ ] VRAM budget estimates (per texture, per directory)
 - [ ] Cross-engine reverse-reference graph (extend Unity GUID graph to UE / Godot)
+- [ ] Unreal `.uasset` reference parsing (today UE gets naming / structure / size / duplicate checks; the reference graph is Unity-only)
 
 ---
 

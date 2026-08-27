@@ -5539,7 +5539,7 @@ dependencies = [
 
 [[package]]
 name = "tidycraft"
-version = "0.8.5"
+version = "0.9.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -5568,7 +5568,7 @@ dependencies = [
 
 [[package]]
 name = "tidycraft-cli"
-version = "0.8.5"
+version = "0.9.0"
 dependencies = [
  "clap",
  "serde",
@@ -5579,7 +5579,7 @@ dependencies = [
 
 [[package]]
 name = "tidycraft-core"
-version = "0.8.5"
+version = "0.9.0"
 dependencies = [
  "async-trait",
  "chrono",
