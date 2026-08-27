@@ -268,6 +268,24 @@ mod tests {
     use crate::scanner::{AssetMetadata, AssetType};
     use std::collections::{BTreeMap, BTreeSet};
 
+    /// The frontend's `zh.json`, or `None` when this crate is a published or
+    /// vendored copy with no repository around it — the two locale gates are
+    /// repo-only and must skip there rather than fail a consumer's `cargo test`.
+    ///
+    /// Presence is decided by the repo root's `package.json`, not by the locale
+    /// file itself: inside the repo a missing locale file is a real failure, and
+    /// keying the skip on that file would turn it into a silent pass.
+    fn zh_locale_doc() -> Option<serde_json::Value> {
+        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        if !repo_root.join("package.json").exists() {
+            return None;
+        }
+        let path = repo_root.join("src/i18n/locales/zh.json");
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        Some(serde_json::from_str(&raw).expect("zh.json parses"))
+    }
+
     /// Run every rule against a fixture built to trigger it, and collect the
     /// arg keys each one actually emitted. The completeness check that every
     /// rule is represented lands last.
@@ -825,11 +843,9 @@ mod tests {
         // The only place that can see both halves: which placeholders a rule fills
         // and which ones the translations reference. A typo renders as a literal
         // `{{witdh}}`, since neither end substitutes unknown names.
-        let path =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../src/i18n/locales/zh.json");
-        let raw = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-        let doc: serde_json::Value = serde_json::from_str(&raw).expect("zh.json parses");
+        let Some(doc) = zh_locale_doc() else {
+            return;
+        };
         let declared: BTreeMap<&str, BTreeSet<&str>> = RULE_ARGS
             .iter()
             .map(|(id, args)| (*id, args.iter().copied().collect()))
@@ -867,11 +883,9 @@ mod tests {
         // The other direction of `zh_templates_only_use_placeholders_…`, which walks
         // declared rule id → JSON and skips what is missing, so a key the JSON has
         // and no rule claims is invisible to it.
-        let path =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../src/i18n/locales/zh.json");
-        let raw = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-        let doc: serde_json::Value = serde_json::from_str(&raw).expect("zh.json parses");
+        let Some(doc) = zh_locale_doc() else {
+            return;
+        };
         let declared: BTreeSet<&str> = RULE_ARGS.iter().map(|(id, _)| *id).collect();
 
         for segments in leaf_paths(&doc["issues"]["rules"]) {

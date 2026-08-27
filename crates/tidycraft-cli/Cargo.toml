@@ -14,9 +14,11 @@ name = "tidycraft"
 path = "src/main.rs"
 
 [dependencies]
+# `version` alongside `path` because crates.io rejects a bare path dependency:
+# the published copy resolves by version, local builds still use the path.
 # `default-features = false` keeps the LLM providers (reqwest) and libgit2 out
 # of the binary — the check pipeline needs neither.
-tidycraft-core = { path = "../tidycraft-core", default-features = false }
+tidycraft-core = { path = "../tidycraft-core", version = "0.9.0", default-features = false }
 clap = { version = "4.5", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
