@@ -95,5 +95,7 @@ jobs:
       - name: Core without default features
         run: cargo check -p tidycraft-core --no-default-features
 
+      # `--bins` because tidycraft-cli is a bin crate: its unit tests live in
+      # the bin target and `--lib` alone would silently skip them.
       - name: Backend tests
-        run: cargo test --workspace --lib --no-fail-fast
+        run: cargo test --workspace --lib --bins --no-fail-fast

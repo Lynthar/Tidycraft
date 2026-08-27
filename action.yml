@@ -1,0 +1,58 @@
+name: 'Tidycraft Check'
+description: 'Cross-engine asset lint: scan a game project and fail the job on findings'
+branding:
+  icon: 'check-square'
+  color: 'purple'
+
+inputs:
+  root:
+    description: 'Project root to check, relative to the workspace'
+    default: '.'
+  fail-on:
+    description: 'Lowest severity that fails the run: error, warning or info (empty = the project config, else error)'
+    default: ''
+  strict:
+    description: 'Fail when the scan is incomplete (scan warnings or unpulled git-lfs pointers)'
+    default: 'false'
+  format:
+    description: 'Output format: github (annotations), human, json or sarif'
+    default: 'github'
+  extra-args:
+    description: 'Extra arguments passed to `tidycraft check` verbatim'
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Rust stable
+      uses: dtolnay/rust-toolchain@stable
+
+    # The binary builds from this action's own checkout — nothing to fetch or
+    # trust beyond the action ref itself. The cache makes every run after the
+    # first one cheap.
+    - name: Cache the tidycraft build
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: '${{ github.action_path }} -> target'
+
+    # Inputs reach the script only through `env:` — a `${{ }}` expanded inside
+    # `run:` would let a caller-forwarded untrusted value (a PR title, a branch
+    # name) inject shell into the caller's job.
+    - name: Run tidycraft check
+      shell: bash
+      env:
+        TC_ROOT: ${{ inputs.root }}
+        TC_FORMAT: ${{ inputs.format }}
+        TC_FAIL_ON: ${{ inputs.fail-on }}
+        TC_STRICT: ${{ inputs.strict }}
+        TC_EXTRA: ${{ inputs.extra-args }}
+        TC_MANIFEST: ${{ github.action_path }}/Cargo.toml
+      run: |
+        ARGS=(check "$TC_ROOT" --format "$TC_FORMAT" --no-progress)
+        if [ -n "$TC_FAIL_ON" ]; then ARGS+=(--fail-on "$TC_FAIL_ON"); fi
+        if [ "$TC_STRICT" = "true" ]; then ARGS+=(--strict); fi
+        # Whitespace-split, never shell-parsed: extra-args cannot smuggle
+        # substitutions or redirections.
+        read -r -a EXTRA <<< "$TC_EXTRA" || true
+        cargo run --release --quiet -p tidycraft-cli \
+          --manifest-path "$TC_MANIFEST" -- "${ARGS[@]}" "${EXTRA[@]}"

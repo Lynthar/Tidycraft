@@ -1321,9 +1321,8 @@ fn walk_error_path(err: &ignore::Error) -> Option<String> {
 }
 
 /// Scan a directory with optional state for progress and cancellation.
-/// `respect_gitignore=true` honors the user's ignore files. The shipped path is
-/// `scan_directory_incremental`; this variant is the tests' harness (no cache).
-#[cfg_attr(not(test), allow(dead_code))]
+/// `respect_gitignore=true` honors the user's ignore files. Cache-free — the
+/// app ships `scan_directory_incremental`; tests and the CLI use this one.
 pub fn scan_directory_with_state(
     path: &str,
     state: Option<Arc<ScanState>>,

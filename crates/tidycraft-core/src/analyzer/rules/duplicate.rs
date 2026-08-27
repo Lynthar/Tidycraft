@@ -33,16 +33,16 @@ fn calculate_file_hash(path: &Path, limit: Option<u64>) -> Option<String> {
     Some(format!("{:x}", hash))
 }
 
-/// Group by a hash, dropping every group that ends up with a single member —
-/// nothing that stands alone at any stage can be a duplicate.
-fn group_by_hash(assets: Vec<&AssetInfo>, limit: Option<u64>) -> Vec<Vec<&AssetInfo>> {
+/// Group by a hash, keeping it, and dropping every group that ends up with a
+/// single member — nothing that stands alone at any stage can be a duplicate.
+fn group_by_hash(assets: Vec<&AssetInfo>, limit: Option<u64>) -> Vec<(String, Vec<&AssetInfo>)> {
     let mut by_hash: HashMap<String, Vec<&AssetInfo>> = HashMap::new();
     for asset in assets {
         if let Some(hash) = calculate_file_hash(Path::new(&asset.path), limit) {
             by_hash.entry(hash).or_default().push(asset);
         }
     }
-    by_hash.into_values().filter(|g| g.len() > 1).collect()
+    by_hash.into_iter().filter(|(_, g)| g.len() > 1).collect()
 }
 
 /// Root-relative form of `path` for user-facing text. Both sides come from
@@ -75,14 +75,15 @@ pub fn find_duplicates(assets: &[AssetInfo], root: &str) -> AnalysisResult {
             continue;
         }
 
-        let candidates: Vec<Vec<&AssetInfo>> = group_by_hash(same_size_assets, Some(PREFIX_BYTES))
-            .into_iter()
-            .flat_map(|group| group_by_hash(group, None))
-            .collect();
+        let candidates: Vec<(String, Vec<&AssetInfo>)> =
+            group_by_hash(same_size_assets, Some(PREFIX_BYTES))
+                .into_iter()
+                .flat_map(|(_, group)| group_by_hash(group, None))
+                .collect();
 
         // Report duplicates (ordering fixed after the loops — the grouping
         // map iterates in random order)
-        for duplicates in candidates {
+        for (hash, duplicates) in candidates {
             // ONE issue per content group, carrying the full member list with the
             // original first (the group arrives path-sorted from the scan). One
             // issue per copy with the list cloned onto each is quadratic.
@@ -114,11 +115,14 @@ pub fn find_duplicates(assets: &[AssetInfo], root: &str) -> AnalysisResult {
                 // `file_count` not `count` — i18next reads `count` as a plural
                 // selector. The suggestion interpolates two values the message does
                 // not, so both must ship for a locale to reproduce the English.
+                // `hash` is the group's content identity — baselines key on it so
+                // renaming a copy does not resurrect an accepted finding.
                 args: issue_args([
                     ("file_count", duplicates.len().to_string()),
                     ("original", original.name.clone()),
                     ("original_path", rel(&original.path, root).to_string()),
                     ("other_count", (duplicates.len() - 1).to_string()),
+                    ("hash", hash),
                 ]),
             });
         }

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/tidycraft-core", "src-tauri"]
+members = ["crates/tidycraft-cli", "crates/tidycraft-core", "src-tauri"]
 
 [workspace.package]
 version = "0.8.5"

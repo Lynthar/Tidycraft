@@ -1,4 +1,5 @@
 pub mod pipeline;
+pub mod rule_docs;
 #[cfg(feature = "llm")]
 pub mod rule_suggest;
 pub mod rules;
@@ -217,49 +218,55 @@ impl Default for Analyzer {
     }
 }
 
+/// Which placeholders each rule promises to fill — doubling as the runtime
+/// inventory of every rule id. Read by the locale template gates and the CLI's
+/// `rules` verb; pinned to observed behavior by the arg-harvest tests below.
+pub const RULE_ARGS: &[(&str, &[&str])] = &[
+    ("texture.file_size", &["size", "max"]),
+    (
+        "texture.pot",
+        &["width", "height", "pot_width", "pot_height"],
+    ),
+    ("texture.max_size", &["width", "height", "max"]),
+    ("texture.min_size", &["width", "height", "min"]),
+    ("texture.non_square", &["width", "height"]),
+    ("texture.no_mipmaps", &["width", "height"]),
+    ("naming.length", &["char_count", "max"]),
+    ("naming.forbidden_char", &["char"]),
+    ("naming.chinese", &[]),
+    ("naming.prefix", &["prefix", "name"]),
+    ("naming.case", &["style"]),
+    ("model.vertices", &["vertex_count", "max"]),
+    ("model.faces", &["face_count", "max"]),
+    ("model.materials", &["material_count", "max"]),
+    ("audio.sample_rate", &["rate", "allowed", "preferred"]),
+    ("audio.sfx_duration", &["duration", "max"]),
+    ("audio.stereo_sfx", &[]),
+    ("audio.file_size", &["size", "max"]),
+    ("texture.color_space", &["suffix"]),
+    (
+        "duplicate",
+        &[
+            "file_count",
+            "original",
+            "original_path",
+            "other_count",
+            "hash",
+        ],
+    ),
+    ("missing_reference", &["guid"]),
+    ("pbr_set.incomplete", &["set", "channels"]),
+    (
+        "dcc_source.outdated_export",
+        &["source", "export", "dcc", "age_value", "age_unit"],
+    ),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::scanner::{AssetMetadata, AssetType};
     use std::collections::{BTreeMap, BTreeSet};
-
-    /// Which placeholders each rule promises to fill. Read by the locale template
-    /// gates, which cannot look at the rules themselves, and pinned to observed
-    /// behavior by `declared_rule_args_match_what_the_rules_actually_emit`.
-    const RULE_ARGS: &[(&str, &[&str])] = &[
-        ("texture.file_size", &["size", "max"]),
-        (
-            "texture.pot",
-            &["width", "height", "pot_width", "pot_height"],
-        ),
-        ("texture.max_size", &["width", "height", "max"]),
-        ("texture.min_size", &["width", "height", "min"]),
-        ("texture.non_square", &["width", "height"]),
-        ("texture.no_mipmaps", &["width", "height"]),
-        ("naming.length", &["char_count", "max"]),
-        ("naming.forbidden_char", &["char"]),
-        ("naming.chinese", &[]),
-        ("naming.prefix", &["prefix", "name"]),
-        ("naming.case", &["style"]),
-        ("model.vertices", &["vertex_count", "max"]),
-        ("model.faces", &["face_count", "max"]),
-        ("model.materials", &["material_count", "max"]),
-        ("audio.sample_rate", &["rate", "allowed", "preferred"]),
-        ("audio.sfx_duration", &["duration", "max"]),
-        ("audio.stereo_sfx", &[]),
-        ("audio.file_size", &["size", "max"]),
-        ("texture.color_space", &["suffix"]),
-        (
-            "duplicate",
-            &["file_count", "original", "original_path", "other_count"],
-        ),
-        ("missing_reference", &["guid"]),
-        ("pbr_set.incomplete", &["set", "channels"]),
-        (
-            "dcc_source.outdated_export",
-            &["source", "export", "dcc", "age_value", "age_unit"],
-        ),
-    ];
 
     /// Run every rule against a fixture built to trigger it, and collect the
     /// arg keys each one actually emitted. The completeness check that every
