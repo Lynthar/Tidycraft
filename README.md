@@ -5,7 +5,7 @@
 [![Tauri](https://img.shields.io/badge/Tauri-2.0-blue?logo=tauri)](https://tauri.app/)
 [![Rust](https://img.shields.io/badge/Rust-1.88+-orange?logo=rust)](https://www.rust-lang.org/)
 [![React](https://img.shields.io/badge/React-18-61dafb?logo=react)](https://react.dev/)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue)](LICENSE)
+[![License](https://img.shields.io/badge/License-AGPL_3.0-blue)](LICENSE)
 [![CI](https://github.com/Lynthar/Tidycraft/actions/workflows/ci.yml/badge.svg)](https://github.com/Lynthar/Tidycraft/actions/workflows/ci.yml)
 
 [English](README.md) | [简体中文](README.zh-CN.md)
@@ -392,4 +392,10 @@ Backlog:
 
 ## License
 
-[Apache 2.0](LICENSE)
+[GNU AGPL v3.0](LICENSE) (`AGPL-3.0-only`).
+
+Using Tidycraft — including running it in your own CI — places no obligation on you or on your project's assets. The copyleft applies to Tidycraft's own source: distribute a modified version, or offer one to users over a network, and that version's source has to be available to them under the same terms.
+
+Releases up to and including v0.8.5 were published under Apache 2.0 and remain available under it.
+
+Contributions are accepted under Apache 2.0 — see [CONTRIBUTING.md](CONTRIBUTING.md).

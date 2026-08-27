@@ -5,7 +5,7 @@
 [![Tauri](https://img.shields.io/badge/Tauri-2.0-blue?logo=tauri)](https://tauri.app/)
 [![Rust](https://img.shields.io/badge/Rust-1.88+-orange?logo=rust)](https://www.rust-lang.org/)
 [![React](https://img.shields.io/badge/React-18-61dafb?logo=react)](https://react.dev/)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue)](LICENSE)
+[![License](https://img.shields.io/badge/License-AGPL_3.0-blue)](LICENSE)
 [![CI](https://github.com/Lynthar/Tidycraft/actions/workflows/ci.yml/badge.svg)](https://github.com/Lynthar/Tidycraft/actions/workflows/ci.yml)
 
 [English](README.md) | [简体中文](README.zh-CN.md)
@@ -390,4 +390,10 @@ Tidycraft **本地优先**:
 
 ## 许可证
 
-[Apache 2.0](LICENSE)
+[GNU AGPL v3.0](LICENSE)（`AGPL-3.0-only`）。
+
+使用 Tidycraft——包括在自己的 CI 里跑它——不会给你或你项目的资产带来任何义务。copyleft 约束的是 Tidycraft 自身的源码：分发修改过的版本，或通过网络把修改过的版本提供给用户，都要以相同条款向他们提供该版本的源码。
+
+v0.8.5 及之前的发布以 Apache 2.0 发出，并继续以该许可证提供。
+
+贡献以 Apache 2.0 接收——见 [CONTRIBUTING.md](CONTRIBUTING.md)。
