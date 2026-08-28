@@ -63,10 +63,14 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install
 
+      # `beforeBuildCommand` stages the CLI as a sidecar, and the bundler looks
+      # it up by the triple it is building FOR — which is not the host when both
+      # macOS artifacts come off one arm64 runner.
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TIDYCRAFT_SIDECAR_TARGET: ${{ matrix.target }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Tidycraft ${{ github.ref_name }}'
@@ -80,23 +84,22 @@ jobs:
           prerelease: false
           args: ${{ matrix.args }}
 
-      # The headless CLI rides the same release: built here and attached to the
-      # draft the tauri-action step just created for this tag.
-      - name: Build and upload the CLI binary
+      # The standalone CLI download is the same file the app bundles: taken from
+      # what the build above already staged, not rebuilt, so the two can never
+      # be different builds of the same version.
+      - name: Upload the standalone CLI binary
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
-          cargo build --release -p tidycraft-cli ${{ matrix.args }}
           case "${{ matrix.platform }}+${{ matrix.target }}" in
-            macos-latest+aarch64-apple-darwin)
-              src=target/aarch64-apple-darwin/release/tidycraft; out=tidycraft-cli-macos-aarch64 ;;
-            macos-latest+x86_64-apple-darwin)
-              src=target/x86_64-apple-darwin/release/tidycraft; out=tidycraft-cli-macos-x86_64 ;;
-            ubuntu-22.04+)
-              src=target/release/tidycraft; out=tidycraft-cli-linux-x86_64 ;;
-            windows-latest+)
-              src=target/release/tidycraft.exe; out=tidycraft-cli-windows-x86_64.exe ;;
+            macos-latest+aarch64-apple-darwin) triple=aarch64-apple-darwin; out=tidycraft-cli-macos-aarch64 ;;
+            macos-latest+x86_64-apple-darwin)  triple=x86_64-apple-darwin;  out=tidycraft-cli-macos-x86_64 ;;
+            ubuntu-22.04+)                     triple=x86_64-unknown-linux-gnu; out=tidycraft-cli-linux-x86_64 ;;
+            windows-latest+)                   triple=x86_64-pc-windows-msvc; out=tidycraft-cli-windows-x86_64.exe ;;
           esac
+          src="src-tauri/binaries/tidycraft-$triple"
+          [ "${{ matrix.platform }}" = "windows-latest" ] && src="$src.exe"
+          test -f "$src" || { echo "sidecar missing: $src"; ls -la src-tauri/binaries/ || true; exit 1; }
           cp "$src" "$out"
           gh release upload "${{ github.ref_name }}" "$out" --clobber

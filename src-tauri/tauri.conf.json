@@ -4,9 +4,9 @@
   "version": "0.9.0",
   "identifier": "com.tidycraft",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "pnpm sidecar && pnpm dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "pnpm sidecar:release && pnpm build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -56,7 +56,35 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "externalBin": [
+      "binaries/tidycraft"
+    ],
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/bin/tidycraft": "binaries/tidycraft-x86_64-unknown-linux-gnu"
+        }
+      },
+      "rpm": {
+        "files": {
+          "/usr/bin/tidycraft": "binaries/tidycraft-x86_64-unknown-linux-gnu"
+        }
+      }
+    },
+    "windows": {
+      "wix": {
+        "fragmentPaths": [
+          "wix/path.wxs"
+        ],
+        "componentRefs": [
+          "TidycraftCliPathEntry"
+        ]
+      },
+      "nsis": {
+        "installerHooks": "nsis/hooks.nsh"
+      }
+    }
   },
   "plugins": {}
 }

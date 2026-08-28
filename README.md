@@ -321,13 +321,15 @@ Any field can be omitted — missing fields fall back to defaults.
 
 The same scan and the same rules the app runs are also a command, so a project's asset conventions can be enforced where its code conventions already are — on the pull request that introduces a violation, rather than whenever somebody next opens the app. It needs no engine installed and no editor launched: parsing `.meta` and `project.godot` directly takes seconds where a batch-mode editor import takes minutes.
 
-Grab a binary from the [Releases page](https://github.com/Lynthar/Tidycraft/releases) (`tidycraft-cli-*`), or build it from source:
+**Installing the desktop app gives you the command too.** The Windows installers put it on your PATH, and the Linux `.deb` / `.rpm` install it as `/usr/bin/tidycraft`; nothing needs to be running for it to work. On macOS, and from the AppImage, take the standalone binary below instead.
+
+Otherwise, grab a binary from the [Releases page](https://github.com/Lynthar/Tidycraft/releases) (`tidycraft-cli-*` — the same build the app bundles), or build it from source:
 
 ```bash
 cargo install --git https://github.com/Lynthar/Tidycraft tidycraft-cli
 ```
 
-Both give you a `tidycraft` command:
+All of them give you a `tidycraft` command:
 
 ```bash
 tidycraft check .                       # scan the project here and report

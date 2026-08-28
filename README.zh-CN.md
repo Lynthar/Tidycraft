@@ -320,13 +320,15 @@ patterns = [
 
 应用里跑的那套扫描与规则，同时也是一个命令，所以项目的资产规范可以和代码规范落在同一个地方把关——在引入违规的那个 PR 上，而不是等下一个人打开应用的时候。它不需要装引擎、不启动编辑器：直接解析 `.meta` 与 `project.godot` 是秒级的，而 batch-mode 编辑器导入要几分钟。
 
-从 [Releases 页面](https://github.com/Lynthar/Tidycraft/releases) 下载二进制（`tidycraft-cli-*`），或从源码装：
+**装了桌面应用就自带这个命令。** Windows 安装器会把它加进 PATH，Linux 的 `.deb` / `.rpm` 直接装成 `/usr/bin/tidycraft`；用它的时候不需要应用在运行。macOS 与 AppImage 请改用下面的独立二进制。
+
+此外也可以从 [Releases 页面](https://github.com/Lynthar/Tidycraft/releases) 下载二进制（`tidycraft-cli-*`，与应用内嵌的是同一份构建），或从源码装：
 
 ```bash
 cargo install --git https://github.com/Lynthar/Tidycraft tidycraft-cli
 ```
 
-两种方式都给你一个 `tidycraft` 命令：
+以上任一方式都给你一个 `tidycraft` 命令：
 
 ```bash
 tidycraft check .                       # 扫描当前项目并报告

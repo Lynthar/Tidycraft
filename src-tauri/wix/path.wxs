@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Puts the install directory on PATH so the bundled `tidycraft` CLI can be run
+  from a terminal, a CI step or a local agent without opening the desktop app.
+
+  Windows Installer's Environment table is what makes this safe: it appends and
+  removes the entry itself, so an upgrade cannot double it up and an uninstall
+  cannot leave it behind. Hand-editing the registry instead is how installers
+  truncate a long PATH.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <Component Id="TidycraftCliPathEntry"
+               Guid="F53EEC5F-0AE2-4D21-83DE-A7614F5630D8"
+               Directory="INSTALLDIR">
+      <!-- An Environment element cannot be a KeyPath; the directory is. -->
+      <CreateFolder />
+      <Environment Id="TidycraftCliPath"
+                   Name="PATH"
+                   Value="[INSTALLDIR]"
+                   Part="last"
+                   Action="set"
+                   Permanent="no"
+                   System="yes" />
+    </Component>
+  </Fragment>
+</Wix>
