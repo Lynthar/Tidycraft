@@ -20,10 +20,14 @@
   FileWrite $9 "$$key=[Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment',$$true)$\r$\n"
   FileWrite $9 "if($$null -eq $$key){exit 0}$\r$\n"
   FileWrite $9 "$$raw=[string]$$key.GetValue('Path','',[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)$\r$\n"
+  ; Write back as whatever it already was. PATH is REG_SZ on plenty of
+  ; machines, and an installer that quietly promotes it to REG_EXPAND_SZ has
+  ; changed something it was never asked to change — and would not change back.
+  FileWrite $9 "$$kind=if($$key.GetValueNames() -contains 'Path'){$$key.GetValueKind('Path')}else{[Microsoft.Win32.RegistryValueKind]::ExpandString}$\r$\n"
   FileWrite $9 "$$kept=@($$raw -split ';' | Where-Object { $$_ -ne '' -and $$_.TrimEnd('\') -ne $$Dir.TrimEnd('\') })$\r$\n"
   FileWrite $9 "if(-not $$Remove){$$kept+=$$Dir}$\r$\n"
   FileWrite $9 "$$new=($$kept -join ';')$\r$\n"
-  FileWrite $9 "if($$new -ne $$raw){$$key.SetValue('Path',$$new,[Microsoft.Win32.RegistryValueKind]::ExpandString)}$\r$\n"
+  FileWrite $9 "if($$new -ne $$raw){$$key.SetValue('Path',$$new,$$kind)}$\r$\n"
   FileWrite $9 "$$key.Close()$\r$\n"
   FileClose $9
 !macroend
