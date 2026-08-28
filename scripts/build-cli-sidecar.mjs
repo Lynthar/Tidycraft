@@ -41,7 +41,7 @@ const triple =
   host;
 const ext = triple.includes("windows") ? ".exe" : "";
 
-const args = ["build", "-p", "tidycraft-cli"];
+const args = ["build", "-p", "tidycraft"];
 if (release) args.push("--release");
 // Cargo drops cross-compiled output under target/<triple>/, host builds don't.
 const crossing = triple !== host;

@@ -42,7 +42,7 @@ The frontend has no test runner, linter or formatter; `pnpm build` runs `tsc` an
 
 ## Notes on the codebase
 
-- The Rust side is a cargo workspace: `crates/tidycraft-core` (scanning, analysis, engine parsers — no Tauri types), `crates/tidycraft-cli` (the headless `tidycraft` command), and `src-tauri` (the Tauri command layer and session state). Run cargo from the repository root.
+- The Rust side is a cargo workspace: `crates/tidycraft-core` (scanning, analysis, engine parsers — no Tauri types), `crates/tidycraft` (the headless `tidycraft` command), and `src-tauri` (the Tauri command layer and session state). Run cargo from the repository root.
 - The desktop app and the CLI share one analysis pipeline. A rule change lands in `tidycraft-core` and both get it; nothing in either front end should re-implement analysis.
 - Every CLI verb is read-only, and that is a contract rather than a coincidence: it lets people allow the whole `tidycraft` command prefix in an agent or CI sandbox. A verb that writes has to be a new verb, never a flag on an existing one.
 - `docs/analyzer-rules.md` documents each rule's defaults and how to tune it. A new rule needs an entry there.

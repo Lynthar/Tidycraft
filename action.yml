@@ -54,5 +54,5 @@ runs:
         # Whitespace-split, never shell-parsed: extra-args cannot smuggle
         # substitutions or redirections.
         read -r -a EXTRA <<< "$TC_EXTRA" || true
-        cargo run --release --quiet -p tidycraft-cli \
+        cargo run --release --quiet -p tidycraft \
           --manifest-path "$TC_MANIFEST" -- "${ARGS[@]}" "${EXTRA[@]}"

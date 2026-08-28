@@ -326,7 +326,7 @@ The same scan and the same rules the app runs are also a command, so a project's
 Otherwise, grab a binary from the [Releases page](https://github.com/Lynthar/Tidycraft/releases) (`tidycraft-cli-*` — the same build the app bundles), or build it from source:
 
 ```bash
-cargo install --git https://github.com/Lynthar/Tidycraft tidycraft-cli
+cargo install --git https://github.com/Lynthar/Tidycraft tidycraft
 ```
 
 All of them give you a `tidycraft` command:
@@ -392,7 +392,7 @@ tidycraft/
 │   │       ├── llm/            # Multi-provider AI tagging (Claude / OpenAI / Ollama) + Learning mode
 │   │       ├── sidecar.rs      # Engine sidecars (.meta / .import / .uid) travel with their asset
 │   │       └── unity.rs / unreal.rs / godot.rs
-│   └── tidycraft-cli/          # The headless `tidycraft` command
+│   └── tidycraft/              # The headless `tidycraft` command
 ├── src-tauri/                  # Desktop app: Tauri commands + session state
 │   └── src/
 │       ├── watcher.rs          # FS watcher → fs-change events

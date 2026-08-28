@@ -1,5 +1,5 @@
 [package]
-name = "tidycraft-cli"
+name = "tidycraft"
 description = "Headless asset lint for game projects — the Tidycraft check pipeline in CI"
 version.workspace = true
 authors.workspace = true
@@ -8,10 +8,6 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-
-[[bin]]
-name = "tidycraft"
-path = "src/main.rs"
 
 [dependencies]
 # `version` alongside `path` because crates.io rejects a bare path dependency:

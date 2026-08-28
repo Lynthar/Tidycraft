@@ -325,7 +325,7 @@ patterns = [
 此外也可以从 [Releases 页面](https://github.com/Lynthar/Tidycraft/releases) 下载二进制（`tidycraft-cli-*`，与应用内嵌的是同一份构建），或从源码装：
 
 ```bash
-cargo install --git https://github.com/Lynthar/Tidycraft tidycraft-cli
+cargo install --git https://github.com/Lynthar/Tidycraft tidycraft
 ```
 
 以上任一方式都给你一个 `tidycraft` 命令：
@@ -391,7 +391,7 @@ tidycraft/
 │   │       ├── llm/            # 多 provider AI 标签（Claude / OpenAI / Ollama）+ 学习模式
 │   │       ├── sidecar.rs      # 引擎 sidecar（.meta / .import / .uid）随资产一起走
 │   │       └── unity.rs / unreal.rs / godot.rs
-│   └── tidycraft-cli/          # 无头 `tidycraft` 命令
+│   └── tidycraft/              # 无头 `tidycraft` 命令
 ├── src-tauri/                  # 桌面应用：Tauri 命令 + 会话状态
 │   └── src/
 │       ├── watcher.rs          # 文件系统 watcher → fs-change 事件

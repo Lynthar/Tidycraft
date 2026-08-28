@@ -12,7 +12,7 @@ const checkOnly = process.argv.includes("--check");
 const pkgPath = join(root, "package.json");
 const cargoPath = join(root, "Cargo.toml");
 const confPath = join(root, "src-tauri", "tauri.conf.json");
-const cliCargoPath = join(root, "crates", "tidycraft-cli", "Cargo.toml");
+const cliCargoPath = join(root, "crates", "tidycraft", "Cargo.toml");
 
 const version = JSON.parse(readFileSync(pkgPath, "utf8")).version;
 // Fully anchored: a prerelease or build suffix (`0.7.0-beta.1`) would propagate
@@ -41,10 +41,10 @@ const targets = [
   },
   {
     // The one dependency version that cannot inherit from the workspace:
-    // crates.io rejects a bare path dependency, so tidycraft-cli spells out
+    // crates.io rejects a bare path dependency, so the cli crate spells out
     // tidycraft-core's version. Left out of this list it silently ages, and
     // the first symptom is a published cli pulling a stale core.
-    label: "tidycraft-cli/Cargo.toml (tidycraft-core dep)",
+    label: "tidycraft/Cargo.toml (tidycraft-core dep)",
     path: cliCargoPath,
     re: /(tidycraft-core[ \t]*=[ \t]*\{[^}]*?version[ \t]*=[ \t]*")([^"]*)(")/,
   },
