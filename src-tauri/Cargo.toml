@@ -1,5 +1,12 @@
+# Not `tidycraft`, on two counts. That name belongs to the CLI's binary, and
+# two bin targets writing one path in the shared workspace target directory
+# overwrite each other — the winner decided by build order, and a hard failure
+# while the desktop app is running and holding its own exe open. Tauri then
+# adds a second: it refuses a sidecar named after the package, and the CLI
+# ships as a sidecar so the installers can put it on PATH. Renaming the bin
+# target alone satisfies the first and not the second.
 [package]
-name = "tidycraft"
+name = "tidycraft-desktop"
 description = "Game asset management tool"
 version.workspace = true
 authors.workspace = true
@@ -12,16 +19,6 @@ repository.workspace = true
 [lib]
 name = "tidycraft_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
-
-# Not `tidycraft`: that name belongs to the CLI's binary, and two bin targets
-# writing one path in the shared workspace target directory overwrite each
-# other — the winner decided by build order, and a hard failure while the
-# desktop app is running and holding its own exe open. Tauri takes whatever
-# cargo emits, so naming it here is the whole fix; `mainBinaryName` is not
-# involved (it only applies to `tauri build`, and is unreliable for .deb).
-[[bin]]
-name = "tidycraft-desktop"
-path = "src/main.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

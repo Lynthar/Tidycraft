@@ -5538,35 +5538,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tidycraft"
-version = "0.9.0"
-dependencies = [
- "base64 0.22.1",
- "chrono",
- "dirs 5.0.1",
- "image",
- "notify",
- "notify-debouncer-full",
- "parking_lot",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2",
- "tauri",
- "tauri-build",
- "tauri-plugin-clipboard-manager",
- "tauri-plugin-dialog",
- "tauri-plugin-opener",
- "tauri-plugin-window-state",
- "tempfile",
- "thiserror 2.0.17",
- "tidycraft-core",
- "tokio",
- "trash",
- "uuid",
-]
-
-[[package]]
 name = "tidycraft-cli"
 version = "0.9.0"
 dependencies = [
@@ -5612,6 +5583,35 @@ dependencies = [
  "toml_edit 0.22.27",
  "trash",
  "unicode-normalization",
+ "uuid",
+]
+
+[[package]]
+name = "tidycraft-desktop"
+version = "0.9.0"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "dirs 5.0.1",
+ "image",
+ "notify",
+ "notify-debouncer-full",
+ "parking_lot",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-clipboard-manager",
+ "tauri-plugin-dialog",
+ "tauri-plugin-opener",
+ "tauri-plugin-window-state",
+ "tempfile",
+ "thiserror 2.0.17",
+ "tidycraft-core",
+ "tokio",
+ "trash",
  "uuid",
 ]
 

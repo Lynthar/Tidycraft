@@ -84,6 +84,14 @@ jobs:
       - name: Frontend build (tsc + vite)
         run: pnpm build
 
+      # Not just for the bundle: `tauri-build` validates `externalBin` while it
+      # runs as src-tauri's build script, so a missing sidecar fails every cargo
+      # command below — clippy and test included, long before anything is
+      # packaged. `tauri dev` / `tauri build` stage it through their before-
+      # commands; a bare cargo invocation has to be told.
+      - name: Stage the CLI sidecar
+        run: pnpm sidecar
+
       # `--all-targets` so test code is linted too, and on the full OS matrix
       # rather than once: `cfg`-gated code is only ever seen by its own target,
       # so a Windows-only branch is unlinted anywhere else.
