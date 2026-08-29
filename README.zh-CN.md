@@ -1,466 +1,127 @@
 <div align="center">
 
-<img src="docs/brand/hero.png" alt="Tidycraft — 游戏资源管理与分析工具" width="100%">
+<img src="docs/brand/hero.png" alt="Tidycraft — 游戏资产管理与分析" width="100%">
 
-[![Tauri](https://img.shields.io/badge/Tauri-2.0-blue?logo=tauri)](https://tauri.app/)
-[![Rust](https://img.shields.io/badge/Rust-1.88+-orange?logo=rust)](https://www.rust-lang.org/)
-[![React](https://img.shields.io/badge/React-18-61dafb?logo=react)](https://react.dev/)
-[![License](https://img.shields.io/badge/License-AGPL_3.0-blue)](LICENSE)
-[![CI](https://github.com/Lynthar/Tidycraft/actions/workflows/ci.yml/badge.svg)](https://github.com/Lynthar/Tidycraft/actions/workflows/ci.yml)
-
-[English](README.md) | [简体中文](README.zh-CN.md)
-
-*一款跨平台桌面应用，用于扫描、浏览和分析游戏项目资源。*
+[![license](https://img.shields.io/github/license/Lynthar/Tidycraft)](LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/Lynthar/Tidycraft/ci.yml?branch=main&label=CI)](https://github.com/Lynthar/Tidycraft/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/Lynthar/Tidycraft)](https://github.com/Lynthar/Tidycraft/releases)
+[![crates.io](https://img.shields.io/crates/v/tidycraft)](https://crates.io/crates/tidycraft)
 
 </div>
 
----
+跨引擎的游戏资产 lint：扫描 Unity / Unreal / Godot 项目，桌面应用与 CI 共用同一套规则
 
-## 截图
+[English](README.md) | 简体中文
 
-<div align="center">
+给它一个游戏工程的目录，它会遍历资产树，识别出这是哪个引擎的项目，读出每个贴图、
+模型、音频和视频文件的元数据，再按你配置的规则逐条检查。相当于资产版的 ESLint，
+管的是那些不参与编译的文件。
 
-**网格视图** — 虚拟化卡片 + 按需缩略图，右侧 3D 预览面板，自动分组的标签建议已应用到匹配资产上。
+一套引擎，两个前端：桌面应用用来浏览、打标签、批量改名和修问题，无头的 `tidycraft`
+命令用在 CI 里。两边读同一份 `tidycraft.toml`，给出一样的结果——我想要的就是同一套
+检查在这两处都能跑。
 
-<img src="docs/screenshots/grid-view.png" alt="Tidycraft 网格视图" width="85%">
+<img src="docs/screenshots/list-view.png" alt="Tidycraft 列表视图，右侧 3D 预览打开了一个模型" width="100%">
 
-<br><br>
+<sub>列表视图，扫的是一个资产包目录——84,974 个资产、895.9 MB。带类型筛选、标签，
+以及选中模型的顶点数、面数与材质数。</sub>
 
-**列表视图** — 类型筛选 pill、排序 pill、可拖动调整的列宽 + 顶点数微型条形图，sticky 表头。
+<img src="docs/screenshots/grid-view.png" alt="Tidycraft 网格视图，浅色主题" width="100%">
 
-<img src="docs/screenshots/list-view.png" alt="Tidycraft 列表视图" width="85%">
-
-</div>
-
----
-
-## 为什么用 Tidycraft?
-
-- **扫描快** — 万级资产秒级完成,基于并行遍历 + 增量缓存。
-- **out-of-box 抓真 bug** — 重复文件(SHA256)、Unity GUID 缺失引用、被错标 sRGB 的数据贴图。Stylistic 约定(PoT、前缀、多边形预算)、PBR 材质组完整性、DCC 源 ↔ 导出关联都通过 `tidycraft.toml` 按需开启。
-- 支持 Unity / Unreal / Godot 与通用项目，针对 Unity GUID 图、`.uproject`、`project.godot` 各有专门解析器。
-- 多项目可同时打开，自由切换，工作区跨会话恢复。
-- 默认规则极简，把噪音控制在最低。扫描器默认遵守 `.gitignore` 跳过生成产物，文件系统 watcher 自动同步外部改动（无需手动重扫），规则可在 `Settings → Analysis Rules → Edit` 直接编辑。
-- **也能在 CI 里跑** — 同一套规则的无头 `tidycraft check` 命令，配 baseline，让已有项目从绿色起步、只有新违规才让构建变红。见 [命令行与 CI](#命令行与-ci)。
-- 本地优先,所有状态都在你硬盘上;无遥测。唯一的离机流量是你自行配置的 opt-in 云 AI 标签(学习模式或单资产模式)。
-
-> **状态:Alpha — 持续开发中。** 核心功能(扫描、分析、标签、3D 预览、Git、Watcher)已稳定。**基于 LLM 的 AI 标签**已 ship,提供两种模式:**学习模式**(推荐 — 一次 LLM 调用采样项目、推断本地启发式规则,复用你已有的标签系统;之后免费)和**高级单资产模式**(opt-in — 把缩略图发给 Claude / OpenAI / Ollama 直接打标)。两种模式都默认关闭,需要先在 Settings → AI Tagging 里配置 provider。详见下方 [功能特性 → AI 标签](#-ai-标签)。
-
----
-
-## ⚠️ 路径与命名最佳实践
-
-> **重要提示：** 为确保 3D 模型预览和资源加载的兼容性，请遵循以下指南。
-
-### ✅ 推荐做法
-
-- 文件和文件夹名称使用 **ASCII 字符**
-- 使用 **连字符** `-` 或 **下划线** `_` 代替空格
-- 保持路径 **简短**
-- 将纹理文件放在与模型文件 **相同的目录** 中
-
-**正确示例：**
-```
-/Projects/my-game/models/character_model.fbx
-/Projects/my-game/textures/diffuse_map.png
-```
-
-### ❌ 应避免
-
-| 问题 | 示例 | 影响 |
-|------|------|------|
-| 名称包含空格 | `floor color.png` | 可能加载失败 |
-| 特殊字符 | `model[v2].fbx` | 路径解析错误 |
-| 非 ASCII 路径 | `模型/character.fbx` | 编码问题 |
-| 路径过长 | `>200 字符` | 系统限制 |
-
-### 为什么有这些限制？
-
-某些 3D 模型格式（FBX、OBJ、DAE）会在内部嵌入纹理路径。当这些路径包含特殊字符时，Tauri 资源协议可能无法正确解析。这是平台的已知限制。
-
----
-
-## ✨ 功能特性
-
-### 资源扫描
-- **快速异步扫描**，支持实时进度显示和取消
-- **项目类型检测** — Unity、Unreal、Godot 或通用项目
-- **目录树可视化**，显示文件数量和大小统计
-- **Unity .meta 文件解析** — 提取 GUID 用于资源追踪
-
-### 标签系统
-- 创建自定义 **彩色标签**,可选填描述(用作 AI 标签上下文)
-- 支持单个或批量添加标签
-- **按标签筛选资源**（单选或多选）
-- 标签数据跨会话持久保存；重命名 / 移动会自动同步绑定，删除文件后自动清理孤儿
-- **启发式标签推荐** — 按文件名 token / 尺寸+PBR 通道 / 路径段自动分组
-
-### AI 标签
-
-多 provider LLM 标签:**Claude**(Sonnet 5 / Haiku 4.5 / Opus 5)、**OpenAI**(GPT-5.4-mini / 4o-mini / 5.4 / 5.4-nano)、**Ollama**(本地 — qwen2.5-VL / Llama 3.2-Vision / LLaVA 等;已安装模型实时列出)。
-
-**学习模式(推荐,默认路径)。** 一次 LLM 调用采样你项目的文件名 + 路径 + 已有标签系统,推断命名 / 目录约定,生成**本地启发式规则**(filename-token / path-prefix / path-segment 匹配)供你审查 —— 在审查面板点 Save 才会持久化到 `tidycraft.ai.toml`,直接关闭则完全丢弃本次运行。侧边栏的 "Suggest Tags" 面板之后跑已保存的规则在本地匹配 — 自此每条资产 LLM 成本为零。模型认为你词汇里缺失的标签会在同一面板中提议(预勾选、可取消),Save 时才创建。云 provider 每次学习运行约 ~$0.05;Ollama 免费。
-
-**高级单资产模式**(通过 Settings → AI Tagging → "启用单资产 AI 标签" opt-in)。把单个资产元数据(文件名 + 路径;缩略图可选且默认关闭)发给 LLM 直接打标。会在多选工具栏加按钮 + 右键菜单加入口。比学习模式贵约 50× — 适合需要图像级分析、学习规则覆盖不到的场景。
-
-两种模式共有:
-- **每次云调用前预览成本**(verified pricing 算式;显示单资产美分数)。
-- **每 provider 的缩略图上传同意流程** — 首次带缩略图调用时弹复选框;可在 Settings 撤回。
-- **项目感知 prompt** — 从你项目 `tidycraft.toml` 的 `[project]` 表拉 `theme` / `goal` + 你已有标签系统(含描述 + 样例路径),让模型**优先复用你已有的标签**而不是发明同义词。
-- **单资产磁盘缓存**,键为 `(缩略图字节, 文件名, 路径, provider, model, prompt 版本, 标签系统上下文)` — **只要标签系统没变**,对同一批资产重复运行就是免费的。刻意设计的另一面:应用建议会创建/改动标签,上下文随之变化 —— 所以 Apply **之后**再建议会重新计算(并重新计费),而不是返回不认识你新标签的陈旧答案。
-- **本地 + 私密** — Ollama 路径不上传任何东西离机;云路径上传文件名 + 项目内相对路径 + 标签上下文(opt-in 时才上传缩略图)。
-
-### 元数据提取
-
-| 资源类型 | 提取信息 |
-|----------|----------|
-| **图片** | 分辨率、Alpha 通道、格式 |
-| **3D 模型** | 顶点数、面数、材质数 |
-| **音频** | 时长、采样率、声道数、位深度 |
-
-### 资源浏览器
-- **列表 + 网格双视图** + 虚拟滚动 — 流畅处理 10,000+ 文件
-- **缩略图预览**，支持磁盘缓存
-- **命令面板**（⌘K / Ctrl+K）快速导航、筛选与执行操作
-- 按文件名或路径 **搜索**
-- 按资源类型 **筛选**
-- **3D 模型预览**，支持轨道控制（glTF / GLB / FBX / OBJ / DAE / 3DS / VOX）
-- **外部编辑器映射** — 把扩展名映射到 Photoshop / Blender / Audacity 等
-
-### 规则分析
-
-| 类别 | 检查项 |
-|------|--------|
-| **命名** | 禁用字符、中文字符、前缀、大小写风格 |
-| **纹理** | 2 的幂次方、尺寸限制、文件大小、mipmap (DDS) |
-| **纹理色彩空间** | 被标为 sRGB 的数据贴图（normal / roughness / metallic …）|
-| **模型** | 顶点 / 面 / 材质数量限制 |
-| **音频** | 采样率、时长、SFX 单声道、文件大小 |
-| **重复文件** | 基于 SHA256 的内容比对 |
-| **缺失引用**（Unity） | 在 `.meta` 文件中查找 GUID |
-| **PBR Set 完整性** | 按目录分组的纹理集是否齐全（BaseColor / Normal / Roughness …）|
-| **DCC 源文件关联** | 作者源文件（`.blend` / `.psd` / `.spp` 等）比同名导出新 → "需重新导出"提示 |
-| **忽略规则** | 基于 glob 的路径排除（外部资源 / 生成产物）|
-
-详见 [`docs/analyzer-rules.md`](docs/analyzer-rules.md)（每条规则的默认值与调参建议）。
-
----
-
-## 支持的格式
-
-| 类别 | 格式 |
-|------|------|
-| **纹理** | PNG, JPG/JPEG, TGA, BMP, GIF, TIFF, WebP, HDR, EXR(解码);PSD / DDS / SVG(识别,无缩略图)|
-| **3D 模型** | glTF, GLB, FBX, OBJ (+MTL), DAE, 3DS, **VOX**(MagicaVoxel),`.blend`（识别但不能直接渲染，请先在 Blender 中导出 GLB）|
-| **音频** | WAV, MP3, OGG |
-| **其他** | 脚本、材质、预制体、场景 |
-
----
-
-## 技术栈
-
-| 层级 | 技术 |
-|------|------|
-| **框架** | Tauri 2.0 |
-| **后端** | Rust |
-| **前端** | React 18 + TypeScript |
-| **样式** | Tailwind CSS |
-| **状态管理** | Zustand |
-| **3D 渲染** | Three.js |
-| **虚拟化** | @tanstack/react-virtual |
-
-### Rust 依赖
-`image` · `gltf` · `tobj` · `fbxcel-dom` · `symphonia` · `mp4` · `matroska-demuxer` · `sha2` · `ignore`(gitignore-aware walker)· `rayon` · `toml` + `toml_edit` · `globset` · `regex` · `git2` · `notify` · `trash` · `reqwest` + `async-trait`(LLM HTTP)· `tauri-plugin-opener`
-
----
+<sub>同一个库的网格视图，浅色主题。</sub>
 
 ## 安装
 
-### 从 release 下载(推荐)
+**桌面应用**——从 [Releases](https://github.com/Lynthar/Tidycraft/releases) 取：
 
-从 [Releases 页面](https://github.com/Lynthar/Tidycraft/releases) 下载对应平台的二进制,按下面的首次启动步骤操作。同一批发布里还带着供[命令行使用](#命令行与-ci)的 `tidycraft-cli-*` 二进制，它们不需要任何安装步骤。
+| 平台 | 安装包 |
+|---|---|
+| Windows | `Tidycraft_0.9.0_x64_en-US.msi`，或 `_x64-setup.exe` NSIS 安装器 |
+| macOS | `Tidycraft_0.9.0_aarch64.dmg`（Apple Silicon），`_x64.dmg`（Intel） |
+| Linux | `Tidycraft_0.9.0_amd64.deb`、`Tidycraft-0.9.0-1.x86_64.rpm`、`Tidycraft_0.9.0_amd64.AppImage` |
 
-**Linux**
-
-- `.deb`：`sudo dpkg -i tidycraft_*.deb`
-- `.rpm`：`sudo rpm -i tidycraft-*.rpm`
-- `.AppImage`：`chmod +x tidycraft_*.AppImage && ./tidycraft_*.AppImage`
-
-无需额外操作,可直接运行。
-
-**Windows**
-
-1. 运行 `.msi` 安装器。
-2. 首次启动时,Windows SmartScreen 可能提示"未识别的应用" —— 因为二进制尚未做代码签名(规划中)。点击 **更多信息** → **仍要运行**。
-
-**macOS**
-
-1. 挂载对应的 `.dmg`:
-   - Apple Silicon(M1 / M2 / M3 / M4):`Tidycraft_*_aarch64.dmg`
-   - Intel:`Tidycraft_*_x64.dmg`
-2. 把 `Tidycraft.app` 拖到 `/Applications`。
-3. 因为 App 尚未公证,Gatekeeper 会在首次启动时阻止。打开 **终端** 运行:
-   ```bash
-   xattr -d com.apple.quarantine /Applications/Tidycraft.app
-   ```
-   然后正常打开 App。(其他方式:右键 App → **打开** → 在弹出框点击确认;或者 系统设置 → **隐私与安全性** → **仍要打开**。)
-
-这些首次启动的额外步骤等代码签名落地后会自动消失(post-alpha 计划)。
-
-### 从源码构建(开发用)
-
-环境要求:
-
-- [Node.js](https://nodejs.org/) 18+（CI 用 20）
-- [pnpm](https://pnpm.io/) 8+（CI 用 9）
-- [Rust](https://rustup.rs/) 1.88+
+macOS 的包没有签名也没有公证，Gatekeeper 第一次会拦：
 
 ```bash
-# 克隆仓库
-git clone https://github.com/Lynthar/Tidycraft.git
-cd Tidycraft
-
-# 安装依赖
-pnpm install
-
-# 开发模式运行
-pnpm tauri dev
-
-# 构建生产版本
-pnpm tauri build
+xattr -d com.apple.quarantine /Applications/Tidycraft.app
 ```
 
----
-
-## 使用方法
-
-1. **打开项目** — 点击"打开项目"（或 `⌘O` / `Ctrl+O`）并选择游戏项目文件夹
-2. **浏览资源** — 导航目录树、列表 / 网格视图切换、搜索、筛选
-3. **预览资源** — 点击任意资源查看详情、缩略图或 3D 视图
-4. **标记资源** — 右键添加标签,或打开 **AI 标签面板** 查看分组建议(若已运行学习,跑 AI 派生的本地规则;否则启发式 fallback。面板顶部含 Run / Re-learn / Review 控件)
-5. **运行分析** — 点击侧栏的 **Run Analysis**；通过 **Settings → Analysis Rules → Edit** 调整规则
-6. **查看问题** — 切换到问题选项卡，按规则分组、按严重度筛选、跳转到文件
-7. **外部编辑器** — 在 **Settings → External Editors** 把扩展名映射到 Photoshop / Blender 等，预览面板的 `⤴` 直接打开
-
----
-
-## 配置说明
-
-把 `tidycraft.toml` 放到项目根目录，下次 Run Analysis 会自动加载。侧边栏的 **运行分析** 按钮上会出现一个小圆点提示当前使用了自定义规则。
-
-**Out-of-box 默认规则非常宽松**：仅 `naming.forbidden_chars`（shell-unsafe / Windows 非法字符）、`[texture.color_space]`、`duplicate`、`missing_reference`（Unity）默认开启。更严格的检查 —— `[texture]` 尺寸 / PoT、`[model]` 预算、`[audio]` 采样率、`[pbr_set]`、`[dcc_source]` —— 都是**按需启用**：把对应段的 `enabled = true` 即可。
-
-可用的样例文件：[`examples/tidycraft.example.toml`](examples/tidycraft.example.toml) —— 复制到你的项目根目录、改名为 `tidycraft.toml`，按需调整即可。每条规则的含义和调参建议见 [`docs/analyzer-rules.md`](docs/analyzer-rules.md)。字段速查（下方值是实际内置默认）：
-
-```toml
-[naming]
-enabled = true
-forbidden_chars = [' ', '!', '#', '$', '%', '^', '&', '*', '(', ')', '+', '=', '<', '>', ':', '"', '|', '?']
-# `@` 不在默认表里（`@2x` 图标、Unity 的 `model@anim.fbx` 都是正常惯例）；pipeline 禁用它就在这里加回。
-forbid_chinese = false
-max_length = 512                       # 宽松；严格 pipeline 可调到 64-96
-# texture_prefix = "T_"                # 取消注释强制纹理用此前缀
-# model_prefix = "SM_"
-# audio_prefix = "A_"
-case_style = "any"                     # any | snake_case | kebab-case | PascalCase | camelCase
-
-[texture]                              # 默认 disabled —— 需要严格图像规则时再开
-enabled = false
-require_pot = true
-max_size = 4096
-min_size = 4
-warn_non_square = false
-max_file_size = 10_485_760
-
-[texture.color_space]                  # 默认 enabled；捕获 sRGB-标记数据贴图陷阱
-enabled = true
-
-[model]                                # 默认 disabled
-enabled = false
-max_vertices = 100_000
-max_faces = 100_000
-max_materials = 10
-
-[audio]                                # 默认 disabled
-enabled = false
-allowed_sample_rates = [44_100, 48_000]
-max_sfx_duration = 30.0
-max_file_size = 20_971_520
-prefer_mono_for_sfx = false
-
-[pbr_set]                              # 默认 disabled；按目录的 PBR 完整性
-enabled = false
-trigger = "basecolor"
-required = ["basecolor", "normal"]
-
-[dcc_source]                           # 默认 disabled;DCC 源文件 ↔ 导出 mtime 配对
-enabled = false
-mtime_tolerance_secs = 60              # 吸收 git checkout 的 mtime 同步
-# 默认 mappings 覆盖 Blender / Maya / Max / ZBrush / Modo / Houdini /
-# Cinema 4D / Marvelous / Substance Painter+Designer / Photoshop。
-# 完整 mapping 列表和 lookup 选项见 docs/analyzer-rules.md 或
-# examples/tidycraft.example.toml。
-
-# 注:扫描器默认已经遵守 .gitignore(Settings → Scanning),所以 Library/
-# Intermediate/ 等通常在扫描阶段就跳过了。下面这些 [ignore].patterns
-# 在分析阶段生效 — 用于静音那些**被扫到的**第三方/外部内容上的规则输出。
-[ignore]
-patterns = [
-    # "ThirdParty/**",
-    # "Plugins/**",
-    # "**/_legacy/**",
-]
-```
-
-任何字段都可省略，缺失的字段会回退到默认值。
-
----
-
-## 命令行与 CI
-
-应用里跑的那套扫描与规则，同时也是一个命令，所以项目的资产规范可以和代码规范落在同一个地方把关——在引入违规的那个 PR 上，而不是等下一个人打开应用的时候。它不需要装引擎、不启动编辑器：直接解析 `.meta` 与 `project.godot` 是秒级的，而 batch-mode 编辑器导入要几分钟。
-
-**装了桌面应用就自带这个命令。** Windows 安装器会把它加进 PATH，Linux 的 `.deb` / `.rpm` 直接装成 `/usr/bin/tidycraft`；用它的时候不需要应用在运行。macOS 与 AppImage 请改用下面的独立二进制。
-
-此外也可以从 [Releases 页面](https://github.com/Lynthar/Tidycraft/releases) 下载二进制（`tidycraft-cli-*`，与应用内嵌的是同一份构建），或从源码装：
+**命令行**——从 crates.io 装，或者直接拿独立二进制：
 
 ```bash
-cargo install --git https://github.com/Lynthar/Tidycraft tidycraft
+cargo install tidycraft
 ```
 
-以上任一方式都给你一个 `tidycraft` 命令：
+```bash
+curl -L -o tidycraft https://github.com/Lynthar/Tidycraft/releases/latest/download/tidycraft-cli-linux-x86_64
+chmod +x tidycraft
+```
+
+Windows 安装器和 Linux 的 `.deb` / `.rpm` 也会把 `tidycraft` 放进 PATH，`.dmg` 与
+AppImage 不会，那两种情况下用上面的独立二进制。
+
+从源码构建需要 Rust 1.88、Node 18+ 和 pnpm。
+
+## 用法
 
 ```bash
-tidycraft check .                       # 扫描当前项目并报告
-tidycraft check . --fail-on warning     # 警告也算失败
-tidycraft rules                         # 全部规则 id + 本项目的生效配置
+tidycraft check .
+```
+
+```bash
+tidycraft check . --fail-on warning     # error | warning | info
+tidycraft check . --update-baseline     # 把今天的结果记成基线，把文件提交进去
+tidycraft rules                         # 所有规则 id，以及本项目实际设成了什么
 tidycraft explain naming.prefix         # 某条规则查什么、怎么调
-tidycraft scan . --types texture,model  # 资产清单，JSON 输出
+tidycraft scan . --types texture,model  # 资产清单，JSON
 ```
 
-`check` 读的就是应用读的那份 `tidycraft.toml`，所以桌面端与构建机不可能对「什么算问题」产生分歧。**四个动词全部只读**——不改名、不移动、不写盘——因此可以放心把整个 `tidycraft` 前缀加进 CI 沙箱或 AI agent 的工具清单。修复是应用的活。
+`check` 还接 `--format human|json|sarif|github`、`--config`、`--baseline`、`--strict`、
+`--max-issues`、`--summary-only`、`--group-by`。仓库根目录有一个 composite GitHub
+Action，不想自己配 workflow 可以直接用它。
 
-**退出码是契约**：`0` 干净 · `1` 发现达到 `--fail-on` 阈值 · `2` 用法或配置错误 · `3` 运行时错误。阈值默认只算错误，也可以按项目定而不是按 workflow 定：
+## 配置
 
-```toml
-[check]
-fail_on = "warning"
-```
+规则写在工程根目录的 `tidycraft.toml` 里。`tidycraft rules` 会打印当前实际生效的配置，
+`examples/tidycraft.example.toml` 是一份带注释的示例，可以照着改。
 
-### 已经有一堆问题的项目怎么起步
+规则分几族：贴图（文件大小、二次幂、尺寸上下限、非正方形、mipmap、色彩空间）、命名
+（长度、禁用字符、中文、前缀、大小写）、模型（顶点/面/材质）、音频（采样率、音效时长、
+立体声音效、文件大小）、SHA256 精确查重、引用缺失、PBR 贴图组、DCC 源文件。配置段是
+严格解析的——键名拼错会报错，不会被悄悄忽略。
 
-给一个积累了多年资产的项目开检查，会一次报出全部问题，那等于什么都没报。把今天的现状记下来，检查就是绿的；此后只有改动引入的新问题才会让它变红：
+工程目录里还会多出三个文件：`tidycraft.baseline.json`（你已接受的问题）、
+`.tidycraft-tags.json`（你打的标签）、以及用了学习模式才有的 `tidycraft.ai.toml`。
 
-```bash
-tidycraft check . --update-baseline     # 写出 tidycraft.baseline.json，提交进版本库
-```
+## 能力边界
 
-接受了一组重复文件，不等于接受下一份副本：记录跟的是文件内容而不是文件名，所以改名或删掉一份副本不会吵，新增一份会。
+- **三个引擎的支持深度不一样，Unity 最深。** 引用缺失检测依赖 Unity GUID；Unreal 只有
+  `.uproject` 识别和按扩展名分类，**没有 `.uasset` 依赖图**；Godot 的 `uid://` 引用是
+  **有意不匹配**的。
+- **命令行只有一个旗标会写盘。** `check`、`rules`、`explain`、`scan` 都不写文件，只有
+  `check --update-baseline` 会写基线文件。所以可以放心把整个 `tidycraft` 前缀加进
+  AI agent 的允许清单。
+- **全绿不等于所有规则都检查过。** 读不到贴图尺寸时相关规则会静默跳过，所以一个 git-lfs
+  指针没拉下来的检出会全绿。想让「读不到」也算失败，加 `--strict`。
+- **它不做版本控制和团队协作。** git 集成只读取并展示状态，没有文件锁，也没有实时同步。
+- **不生成 3D 缩略图。**「用外部编辑器打开」是交给系统默认程序处理，没有跟具体软件做集成。
 
-### 在 GitHub Actions 里
+## 文档
 
-```yaml
-- uses: Lynthar/Tidycraft@main
-  with:
-    fail-on: warning
-```
+- [规则参考](docs/analyzer-rules.md) —— 每条规则查什么、什么时候触发、该设成多少。
+- [贡献指南](CONTRIBUTING.md) —— 包括贡献以什么许可证接收。
 
-发现会以 annotation 的形式标在出问题的文件上。`--format sarif` 可用于 GitHub code scanning，但私有仓库要启用 GitHub Code Security 才能接受 SARIF 上传——annotation 则什么都不需要。其他场景用 `--format json`。
+## 安全
 
-**信任一次绿色构建之前，有一个坑值得知道。** 读不到尺寸的贴图是被跳过而不是被报告的，所以一个没拉取大文件的 checkout 可能在几乎什么都没检查的情况下通过。扫描读不到的东西现在会在每一种输出格式里明说，未拉取的 Git LFS 占位文件也会被计数并列出。加 `--strict` 就能让「没看全」变成失败而不是通过。
+AI 打标是可选功能，默认关闭。打开之后，**你的 API key 以明文存放在 WebView 的
+localStorage 里**：没有加密，也不走系统钥匙串。除 AI 打标之外，分析全部在本地进行；
+只有开启这个功能时，才会有数据发往外部。
 
----
-
-## 项目结构
-
-```
-tidycraft/
-├── src/                        # React 前端
-│   ├── components/             # UI 组件
-│   ├── stores/                 # Zustand 状态
-│   ├── styles/                 # 全局 CSS + Forge 设计 token
-│   ├── types/                  # TypeScript 类型
-│   ├── hooks/                  # React hooks
-│   ├── i18n/locales/           # en.json + zh.json
-│   └── lib/                    # 工具函数（pathUtils、平台检测等）
-├── crates/
-│   ├── tidycraft-core/         # 引擎核心，应用与 CLI 共用
-│   │   └── src/
-│   │       ├── scanner.rs      # 资源扫描（gitignore-aware walker）
-│   │       ├── analyzer/       # 规则引擎（naming / texture / model / audio / duplicate / missing_reference / pbr_set / dcc_source）+ 标签推荐
-│   │       ├── llm/            # 多 provider AI 标签（Claude / OpenAI / Ollama）+ 学习模式
-│   │       ├── sidecar.rs      # 引擎 sidecar（.meta / .import / .uid）随资产一起走
-│   │       └── unity.rs / unreal.rs / godot.rs
-│   └── tidycraft/              # 无头 `tidycraft` 命令
-├── src-tauri/                  # 桌面应用：Tauri 命令 + 会话状态
-│   └── src/
-│       ├── watcher.rs          # 文件系统 watcher → fs-change 事件
-│       ├── thumbnail.rs        # 缩略图生成
-│       ├── tags.rs             # 标签管理
-│       ├── undo.rs             # 撤销历史
-│       └── lib.rs              # Tauri 命令
-├── docs/                       # 辅助文档
-│   ├── analyzer-rules.md       # 各规则默认值与调优说明
-│   └── screenshots/            # README 截图
-├── examples/                   # `tidycraft.example.toml` 起始模板
-├── action.yml                  # 包装 `tidycraft check` 的 GitHub Action
-└── README.md                   # 用户文档（本文件）
-```
-
----
-
-## 隐私与数据
-
-Tidycraft **本地优先**:
-
-- **无遥测、无 analytics。** 唯一的网络调用是你自行配置的 opt-in 云 AI 标签(见下文);默认情况下没有任何网络调用(v0.x)。
-- **所有状态在你的磁盘上**:扫描缓存(`~/.cache/tidycraft/` 或平台等价目录)、标签绑定(每项目 `.tidycraft-tags.json`)、撤销历史、缩略图缓存、设置。
-- **无账户、无登录**,打开就用。
-- **AI 标签建议器**(已 ship)**完全 opt-in** —— 在你于 Settings → AI Tagging 配置 provider 之前没有任何调用。配置云 provider(Claude / OpenAI)本身即表示同意向其发送文本上下文 —— 文件名、项目内相对路径、你的标签系统 —— 用于你分析的资产。缩略图默认不上传,除非你勾选 per-provider 同意框(默认关闭;首次启用缩略图的云调用会要求勾选)。本地 provider(Ollama)不上传任何东西离机。
-- **API 密钥以明文存储**在 App 的本地设置里(你机器上 WebView 的 `localStorage`)。密钥只会发送给你配置的那个 provider,但任何能读取你系统用户目录的程序都能读到它 —— 请像对待其他本地凭据一样对待它,并优先使用受限/低额度的 key。
-
----
-
-## 路线图
-
-已发布：
-
-- [x] 依赖分析与引用追踪（Unity GUID 图、未引用资源检测）
-- [x] 统计仪表板与报告
-- [x] Git 集成（分支信息、单文件变更状态）
-- [x] 增量扫描（基于 mtime/size 缓存）
-- [x] 批量重命名操作（持久化撤销）
-- [x] 导出报告（JSON、CSV、HTML）
-- [x] 文件系统实时 watcher（外部修改自动刷新）
-- [x] 多项目工作区 + 跨会话恢复
-- [x] 标签系统（支持多选筛选 + 启发式 AI 建议）
-- [x] 安全删除 / 移动 / 复制 / 副本（系统回收站，自动同步标签）
-- [x] Forge Dark 视觉重设计（全部完成）
-- [x] 命令面板（⌘K）、列表 / 网格双视图
-- [x] Settings → Analysis Rules 编辑器 + per-project `tidycraft.toml`
-- [x] PBR set 完整性分析（按目录的纹理集检查）
-- [x] 外部编辑器映射（Settings → External Editors，按扩展名配置）
-- [x] 跨平台细节打磨（macOS ⌘ 字符、Windows 文件管理器 reveal 修复、path utils）
-- [x] DCC 源文件关联（`.blend` / `.psd` / `.spp` / `.ma` / `.ztl` / `.max` / `.lxo` / `.hip` / `.c4d` / `.zprj` / `.sbs` / `.psb` → "源比导出新"警告，opt-in）
-- [x] AI 标签 —— 学习模式（项目采样 → 本地规则持久化到 `tidycraft.ai.toml`;之后单资产 LLM 成本为零）+ 高级单资产模式（多 provider LLM,带成本预览 + per-provider 同意流程;opt-in）
-- [x] 扫描器默认遵守 `.gitignore` / `.ignore`（通过 `ignore::WalkBuilder`;可在 Settings → Scanning 切换）
-- [x] 一键命名修复（自动修禁用字符 / 缺前缀 / 大小写；单条或全项目批量，可编辑，走撤销）
-- [x] 面向 CI 的无头 `tidycraft` 命令 —— 同一套规则、退出码契约、入库 baseline、SARIF / GitHub annotation，以及现成的 Action
-
-待办：
-
-- [ ] VRAM 预算估算（每张纹理、按目录聚合）
-- [ ] 跨引擎反向引用图（把 Unity GUID 图扩到 UE / Godot）
-- [ ] Unreal `.uasset` 引用解析（目前 UE 有命名 / 结构 / 尺寸 / 重复检查，引用图仍是 Unity 独有）
-
----
+桌面端产物未做代码签名与公证。
 
 ## 许可证
 
-[GNU AGPL v3.0](LICENSE)（`AGPL-3.0-only`）。
+GNU Affero 通用公共许可证 v3.0 only —— 见 [LICENSE](LICENSE)。Copyright (c) 2026 Lynthar。
 
-使用 Tidycraft——包括在自己的 CI 里跑它——不会给你或你项目的资产带来任何义务。copyleft 约束的是 Tidycraft 自身的源码：分发修改过的版本，或通过网络把修改过的版本提供给用户，都要以相同条款向他们提供该版本的源码。
-
-v0.8.5 及之前的发布以 Apache 2.0 发出，并继续以该许可证提供。
-
-贡献以 Apache 2.0 接收——见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+贡献以 Apache License 2.0 接收，见 [CONTRIBUTING.md](CONTRIBUTING.md)。v0.8.5 及之前的
+发布以 Apache 2.0 发出，并继续以该许可证提供。
