@@ -88,12 +88,9 @@ export function RenameDialog({
       return;
     }
 
-    // Check for invalid characters
-    if (/[<>:"/\\|?*]/.test(trimmedName)) {
-      setError(t("rename.invalidChars", "Name contains invalid characters"));
-      return;
-    }
-
+    // Name validity is the backend's call — the batch dialogs reach the disk
+    // through the same gate. A second copy here drifts from it and still leaves
+    // those paths unguarded, so the error below is the only report.
     setIsRenaming(true);
     setError(null);
 

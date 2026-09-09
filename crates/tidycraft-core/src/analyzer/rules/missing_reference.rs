@@ -9,9 +9,6 @@ use crate::analyzer::{issue_args, AnalysisResult, Issue, Severity};
 use crate::scanner::{AssetInfo, ProjectType};
 use crate::unity;
 
-/// Extensions that Unity stores as YAML with GUID references.
-const REFERENCEABLE_EXTS: &[&str] = &["prefab", "unity", "mat", "controller", "asset"];
-
 /// `sources` are the files walked for references — the analysis scope, i.e.
 /// post-`[ignore]`. `known` is what establishes which GUIDs exist and must be the
 /// FULL scan, ignore patterns included.
@@ -38,11 +35,9 @@ pub fn find_missing_references(
     }
 
     for asset in sources {
-        let ext = asset.extension.to_lowercase();
-        if !REFERENCEABLE_EXTS.iter().any(|&e| e == ext) {
-            continue;
-        }
-
+        // `parse_unity_file` is the only gate on which extensions carry GUID
+        // references: it returns `None` for anything `UnityFileType` calls
+        // Unknown. A second list here drifts and silently drops file types.
         let info = match unity::parse_unity_file(Path::new(&asset.path)) {
             Some(i) => i,
             None => continue,
@@ -121,7 +116,10 @@ pub(crate) mod tests {
         }
     }
 
-    pub(crate) fn prefab_referencing(
+    /// A Unity YAML file called `name` that PPtr-references every GUID in
+    /// `refs`. Extension and asset type are derived from `name`, so the same
+    /// constructor builds a `.prefab`, an `.anim` or any other reference source.
+    pub(crate) fn unity_yaml_referencing(
         dir: &std::path::Path,
         name: &str,
         refs: &[&str],
@@ -135,11 +133,15 @@ pub(crate) mod tests {
         }
         let path = dir.join(name);
         fs::write(&path, content).unwrap();
+        let extension = path
+            .extension()
+            .map(|e| e.to_string_lossy().to_string())
+            .unwrap_or_default();
         AssetInfo {
             path: path.to_string_lossy().to_string(),
             name: name.to_string(),
-            extension: "prefab".to_string(),
-            asset_type: AssetType::Prefab,
+            asset_type: crate::scanner::get_asset_type(&extension),
+            extension,
             size: 0,
             modified: 0,
             metadata: None,
@@ -155,7 +157,7 @@ pub(crate) mod tests {
         let dir = tempdir().unwrap();
         let vendored =
             texture_with_guid(dir.path(), "plugin.png", "33333333333333333333333333333333");
-        let prefab = prefab_referencing(
+        let prefab = unity_yaml_referencing(
             dir.path(),
             "user.prefab",
             &["33333333333333333333333333333333"],
@@ -180,7 +182,7 @@ pub(crate) mod tests {
     #[test]
     fn ignoring_the_referencing_file_still_suppresses_it() {
         let dir = tempdir().unwrap();
-        let broken = prefab_referencing(
+        let broken = unity_yaml_referencing(
             dir.path(),
             "legacy.prefab",
             &["44444444444444444444444444444444"], // genuinely absent
@@ -210,7 +212,7 @@ pub(crate) mod tests {
         let dir = tempdir().unwrap();
         let assets = vec![
             texture_with_guid(dir.path(), "known.png", "11111111111111111111111111111111"),
-            prefab_referencing(
+            unity_yaml_referencing(
                 dir.path(),
                 "scene.prefab",
                 &[
@@ -229,10 +231,44 @@ pub(crate) mod tests {
         assert!(r.issues[0].message.contains("22222222"));
     }
 
+    /// Every extension `UnityFileType::from_extension` accepts must be walked:
+    /// these eleven are the ones a hand-kept five-entry list left out, so the
+    /// dependency graph reported a broken edge while this rule stayed silent.
+    #[test]
+    fn reports_missing_guids_in_every_unity_reference_source() {
+        for name in [
+            "walk.anim",
+            "hero.overrideController",
+            "ui.spriteatlas",
+            "ground.terrainlayer",
+            "cutscene.playable",
+            "editor.guiskin",
+            "lit.shadervariants",
+            "label.fontsettings",
+            "sun.flare",
+            "import.preset",
+            "atlas.spriteatlasv2",
+        ] {
+            let dir = tempdir().unwrap();
+            let assets = vec![
+                texture_with_guid(dir.path(), "known.png", "11111111111111111111111111111111"),
+                unity_yaml_referencing(dir.path(), name, &["22222222222222222222222222222222"]),
+            ];
+            let r = find_missing_references(
+                &assets,
+                &assets,
+                &Some(ProjectType::Unity),
+                &unity::PackageGuidIndex::default(),
+            );
+            assert_eq!(r.issue_count, 1, "{name} should report its dangling GUID");
+            assert!(r.issues[0].message.contains("22222222"));
+        }
+    }
+
     #[test]
     fn deduplicates_same_missing_guid_in_one_source() {
         let dir = tempdir().unwrap();
-        let assets = vec![prefab_referencing(
+        let assets = vec![unity_yaml_referencing(
             dir.path(),
             "broken.prefab",
             &[
@@ -253,7 +289,7 @@ pub(crate) mod tests {
     #[test]
     fn skips_non_unity_projects() {
         let dir = tempdir().unwrap();
-        let assets = vec![prefab_referencing(
+        let assets = vec![unity_yaml_referencing(
             dir.path(),
             "x.prefab",
             &["99999999999999999999999999999999"],
@@ -272,7 +308,7 @@ pub(crate) mod tests {
         let dir = tempdir().unwrap();
         let assets = vec![
             texture_with_guid(dir.path(), "t.png", "11111111111111111111111111111111"),
-            prefab_referencing(
+            unity_yaml_referencing(
                 dir.path(),
                 "p.prefab",
                 &["00000000000000000000000000000000"],
@@ -307,7 +343,7 @@ pub(crate) mod tests {
 
         let assets = vec![
             texture_with_guid(dir.path(), "t.png", "11111111111111111111111111111111"),
-            prefab_referencing(
+            unity_yaml_referencing(
                 dir.path(),
                 "p.prefab",
                 &[
@@ -340,7 +376,7 @@ pub(crate) mod tests {
         let dir = tempdir().unwrap();
         let assets = vec![
             texture_with_guid(dir.path(), "t.png", "11111111111111111111111111111111"),
-            prefab_referencing(
+            unity_yaml_referencing(
                 dir.path(),
                 "p.prefab",
                 &[
@@ -365,7 +401,7 @@ pub(crate) mod tests {
         let dir = tempdir().unwrap();
         let assets = vec![
             texture_with_guid(dir.path(), "t.png", "11111111111111111111111111111111"),
-            prefab_referencing(
+            unity_yaml_referencing(
                 dir.path(),
                 "p.prefab",
                 &[
@@ -392,7 +428,7 @@ pub(crate) mod tests {
         let dir = tempdir().unwrap();
         let assets = vec![
             texture_with_guid(dir.path(), "t.png", "11111111111111111111111111111111"),
-            prefab_referencing(
+            unity_yaml_referencing(
                 dir.path(),
                 "p.prefab",
                 &["22222222222222222222222222222222"],

@@ -420,7 +420,7 @@ mod tests {
             (
                 NamingConfig {
                     enabled: true,
-                    case_style: "PascalCase".to_string(),
+                    case_style: rules::naming::CaseStyle::Pascal,
                     ..NamingConfig::default()
                 },
                 "rock_wall.png".to_string(),
@@ -555,14 +555,14 @@ mod tests {
     }
 
     fn harvest_missing_reference() -> Vec<Issue> {
-        use rules::missing_reference::tests::{prefab_referencing, texture_with_guid};
+        use rules::missing_reference::tests::{texture_with_guid, unity_yaml_referencing};
         let dir = tempfile::tempdir().expect("tempdir");
         // The rule bails out before reporting anything when no GUID is known
         // at all, so the fixture needs one resolvable asset alongside the
         // prefab's dangling reference.
         let assets = vec![
             texture_with_guid(dir.path(), "known.png", "11111111111111111111111111111111"),
-            prefab_referencing(
+            unity_yaml_referencing(
                 dir.path(),
                 "scene.prefab",
                 &["22222222222222222222222222222222"],

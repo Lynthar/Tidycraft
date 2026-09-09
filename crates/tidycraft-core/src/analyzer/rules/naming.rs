@@ -36,26 +36,64 @@ pub struct NamingConfig {
     #[serde(default)]
     pub audio_prefix: Option<String>,
 
-    /// Naming case style: "PascalCase", "snake_case", "camelCase", or "any"
+    /// Naming case style
     #[serde(default = "default_case_style")]
-    pub case_style: String,
+    pub case_style: CaseStyle,
+}
+
+/// The convention `naming.case` enforces; an unrecognised value is a parse error,
+/// never a silent `Any`. The serialized names are the `tidycraft.toml` values and
+/// reach the frontend as the issue's `style` argument, so they may not be renamed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CaseStyle {
+    #[serde(rename = "PascalCase")]
+    Pascal,
+    #[serde(rename = "snake_case")]
+    Snake,
+    #[serde(rename = "camelCase")]
+    Camel,
+    #[serde(rename = "kebab-case")]
+    Kebab,
+    #[serde(rename = "any")]
+    Any,
+}
+
+impl CaseStyle {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CaseStyle::Pascal => "PascalCase",
+            CaseStyle::Snake => "snake_case",
+            CaseStyle::Camel => "camelCase",
+            CaseStyle::Kebab => "kebab-case",
+            CaseStyle::Any => "any",
+        }
+    }
+}
+
+impl std::fmt::Display for CaseStyle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 fn default_enabled() -> bool {
     true
 }
 
+/// Characters Win32 refuses in a file name: a name minted elsewhere with one of
+/// them cannot be checked out on Windows, so this rule's defaults and the rename
+/// gate reject them on every platform. `/` and `\` cannot occur in a component.
+pub const WINDOWS_ILLEGAL_CHARS: &[char] = &['<', '>', ':', '"', '|', '?', '*'];
+
 fn default_forbidden_chars() -> Vec<char> {
-    vec![
-        // Awkward in shells, build scripts and asset paths. `@` is not here:
-        // `@2x` retina suffixes and Unity's `model@anim.fbx` make it a convention
-        // character. Strict pipelines can add it back in tidycraft.toml.
-        ' ', '!', '#', '$', '%', '^', '&', '*', '(', ')', '+', '=',
-        // Illegal in Windows filenames. These are what make the rule a portability
-        // check rather than a style preference. `/` and `\` cannot occur in a
-        // single path component, so they are omitted.
-        '<', '>', ':', '"', '|', '?',
-    ]
+    // Awkward in shells, build scripts and asset paths. `@` is not here:
+    // `@2x` retina suffixes and Unity's `model@anim.fbx` make it a convention
+    // character. Strict pipelines can add it back in tidycraft.toml.
+    let mut chars = vec![' ', '!', '#', '$', '%', '^', '&', '(', ')', '+', '='];
+    // The Windows-illegal set is what makes the rule a portability check rather
+    // than a style preference.
+    chars.extend_from_slice(WINDOWS_ILLEGAL_CHARS);
+    chars
 }
 
 fn default_forbid_chinese() -> bool {
@@ -72,8 +110,8 @@ fn default_max_length() -> usize {
     512
 }
 
-fn default_case_style() -> String {
-    "any".to_string()
+fn default_case_style() -> CaseStyle {
+    CaseStyle::Any
 }
 
 impl Default for NamingConfig {
@@ -89,7 +127,7 @@ impl Default for NamingConfig {
             texture_prefix: None, // strict pipelines re-enable e.g. "T_"
             model_prefix: None,
             audio_prefix: None,
-            case_style: "any".to_string(),
+            case_style: CaseStyle::Any,
         }
     }
 }
@@ -156,12 +194,12 @@ impl NamingRule {
     }
 
     fn check_case_style(&self, name: &str) -> bool {
-        match self.config.case_style.as_str() {
-            "PascalCase" => is_pascal_case(name),
-            "snake_case" => is_snake_case(name),
-            "camelCase" => is_camel_case(name),
-            "kebab-case" => is_kebab_case(name),
-            _ => true, // "any" or unknown
+        match self.config.case_style {
+            CaseStyle::Pascal => is_pascal_case(name),
+            CaseStyle::Snake => is_snake_case(name),
+            CaseStyle::Camel => is_camel_case(name),
+            CaseStyle::Kebab => is_kebab_case(name),
+            CaseStyle::Any => true,
         }
     }
 
@@ -223,7 +261,7 @@ impl NamingRule {
             let fixed_stem = format!(
                 "{}{}",
                 case_prefix,
-                to_case_style(case_target, &self.config.case_style)?
+                to_case_style(case_target, self.config.case_style)?
             );
             let candidate = reattach_ext(&fixed_stem, ext);
             // Re-check through the same split `check` will apply next pass, so
@@ -384,7 +422,7 @@ impl Rule for NamingRule {
                 suggestion: Some(format!("Use {} for file names", self.config.case_style)),
                 auto_fixable: true,
                 related_paths: None,
-                args: issue_args([("style", self.config.case_style.clone())]),
+                args: issue_args([("style", self.config.case_style.to_string())]),
             });
         }
 
@@ -485,24 +523,24 @@ fn capitalize(word: &str) -> String {
 /// Rebuild `stem` in the requested case style. `None` for `any` / unknown styles
 /// or when the stem tokenizes to nothing. The result is only a proposal — the
 /// caller re-checks it against the rule's own case predicate.
-fn to_case_style(stem: &str, style: &str) -> Option<String> {
+fn to_case_style(stem: &str, style: CaseStyle) -> Option<String> {
     let words = tokenize_words(stem);
     if words.is_empty() {
         return None;
     }
     let out = match style {
-        "snake_case" => words
+        CaseStyle::Snake => words
             .iter()
             .map(|w| w.to_lowercase())
             .collect::<Vec<_>>()
             .join("_"),
-        "kebab-case" => words
+        CaseStyle::Kebab => words
             .iter()
             .map(|w| w.to_lowercase())
             .collect::<Vec<_>>()
             .join("-"),
-        "PascalCase" => words.iter().map(|w| capitalize(w)).collect::<String>(),
-        "camelCase" => words
+        CaseStyle::Pascal => words.iter().map(|w| capitalize(w)).collect::<String>(),
+        CaseStyle::Camel => words
             .iter()
             .enumerate()
             .map(|(i, w)| {
@@ -513,7 +551,7 @@ fn to_case_style(stem: &str, style: &str) -> Option<String> {
                 }
             })
             .collect::<String>(),
-        _ => return None, // "any" or unknown — no canonical form
+        CaseStyle::Any => return None, // no canonical form
     };
     (!out.is_empty()).then_some(out)
 }
@@ -585,15 +623,19 @@ mod tests {
         // The UE-style pipeline: `T_` prefix AND snake_case. Every case style
         // rejects `T_` on its own terms, so checking the full stem made every
         // compliant asset report naming.case.
-        for style in ["snake_case", "PascalCase", "camelCase", "kebab-case"] {
+        for style in [
+            CaseStyle::Snake,
+            CaseStyle::Pascal,
+            CaseStyle::Camel,
+            CaseStyle::Kebab,
+        ] {
             let rule = NamingRule::new(NamingConfig {
                 texture_prefix: Some("T_".to_string()),
-                case_style: style.to_string(),
+                case_style: style,
                 ..Default::default()
             });
             let compliant = match style {
-                "PascalCase" => "T_Rock.png",
-                "camelCase" => "T_rock.png",
+                CaseStyle::Pascal => "T_Rock.png",
                 _ => "T_rock.png",
             };
             assert!(
@@ -613,7 +655,7 @@ mod tests {
         // the suggestion repeatedly has to reach a fixed point.
         let rule = NamingRule::new(NamingConfig {
             texture_prefix: Some("T_".to_string()),
-            case_style: "snake_case".to_string(),
+            case_style: CaseStyle::Snake,
             ..Default::default()
         });
 
@@ -643,7 +685,7 @@ mod tests {
     /// "fixed" `HUD` into `Hud`.
     #[test]
     fn pascal_case_accepts_all_caps_acronyms() {
-        let rule = cased_rule("PascalCase");
+        let rule = cased_rule(CaseStyle::Pascal);
         for name in ["HUD.png", "UI.png", "A.png"] {
             assert!(
                 rule.check(&asset(name, "png", AssetType::Texture, None))
@@ -718,9 +760,9 @@ mod tests {
         NamingRule::new(NamingConfig::default())
     }
 
-    fn cased_rule(style: &str) -> NamingRule {
+    fn cased_rule(style: CaseStyle) -> NamingRule {
         NamingRule::new(NamingConfig {
-            case_style: style.to_string(),
+            case_style: style,
             ..Default::default()
         })
     }
@@ -843,7 +885,7 @@ mod tests {
     #[test]
     fn fix_case_converts_to_each_style() {
         assert_eq!(
-            cased_rule("snake_case").suggest_compliant_name(&asset(
+            cased_rule(CaseStyle::Snake).suggest_compliant_name(&asset(
                 "MyTexture.png",
                 "png",
                 AssetType::Texture,
@@ -852,7 +894,7 @@ mod tests {
             Some("my_texture.png".to_string())
         );
         assert_eq!(
-            cased_rule("PascalCase").suggest_compliant_name(&asset(
+            cased_rule(CaseStyle::Pascal).suggest_compliant_name(&asset(
                 "my_texture.png",
                 "png",
                 AssetType::Texture,
@@ -861,7 +903,7 @@ mod tests {
             Some("MyTexture.png".to_string())
         );
         assert_eq!(
-            cased_rule("camelCase").suggest_compliant_name(&asset(
+            cased_rule(CaseStyle::Camel).suggest_compliant_name(&asset(
                 "My_Texture.png",
                 "png",
                 AssetType::Texture,
@@ -870,7 +912,7 @@ mod tests {
             Some("myTexture.png".to_string())
         );
         assert_eq!(
-            cased_rule("kebab-case").suggest_compliant_name(&asset(
+            cased_rule(CaseStyle::Kebab).suggest_compliant_name(&asset(
                 "MyTexture.png",
                 "png",
                 AssetType::Texture,
@@ -885,7 +927,7 @@ mod tests {
         // '~' survives lowercasing and no case style accepts it: proposing a
         // rename that still fails the case check would loop forever.
         assert_eq!(
-            cased_rule("snake_case").suggest_compliant_name(&asset(
+            cased_rule(CaseStyle::Snake).suggest_compliant_name(&asset(
                 "foo~bar.png",
                 "png",
                 AssetType::Texture,
@@ -901,7 +943,7 @@ mod tests {
         // forbidden first, so the fix addresses only that and the leftover case
         // issue re-surfaces on the next scan.
         let rule = NamingRule::new(NamingConfig {
-            case_style: "snake_case".to_string(),
+            case_style: CaseStyle::Snake,
             ..Default::default()
         });
         assert_eq!(
@@ -938,7 +980,7 @@ mod tests {
         // Case conversion grows "MyFiles.png" (11) to "my_files.png" (12) —
         // over an 11-char limit the fix must abstain, not overflow.
         let tight_case = NamingRule::new(NamingConfig {
-            case_style: "snake_case".to_string(),
+            case_style: CaseStyle::Snake,
             max_length: 11,
             ..Default::default()
         });
@@ -952,7 +994,7 @@ mod tests {
             None
         );
         assert_eq!(
-            cased_rule("snake_case").suggest_compliant_name(&asset(
+            cased_rule(CaseStyle::Snake).suggest_compliant_name(&asset(
                 "MyFiles.png",
                 "png",
                 AssetType::Texture,

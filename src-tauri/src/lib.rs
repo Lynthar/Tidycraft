@@ -15,7 +15,7 @@ use std::thread;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use tidycraft_core::analyzer::pipeline::{build_ignore_set, load_rule_config, run_full_analysis};
-use tidycraft_core::analyzer::rules::RuleConfig;
+use tidycraft_core::analyzer::rules::{naming, RuleConfig};
 use tidycraft_core::analyzer::{self, AnalysisResult};
 use tidycraft_core::cache::ScanCache;
 use tidycraft_core::git::{self, GitInfo, GitManager};
@@ -1922,15 +1922,27 @@ const WINDOWS_RESERVED_STEMS: &[&str] = &[
     "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
 ];
 
-/// The last gate before a rename touches the disk. The two Windows rules below
-/// are enforced on every platform: a name minted on macOS lands in the repository
-/// a Windows teammate checks out.
+/// The last gate before a rename touches the disk, and the only one the batch
+/// dialogs go through. The Windows rules below are enforced on every platform: a
+/// name minted on macOS lands in the repository a Windows teammate checks out.
 fn validate_new_name(new_name: &str) -> Result<(), String> {
     if new_name.is_empty() || new_name == "." || new_name == ".." {
         return Err("Invalid file name".to_string());
     }
     if new_name.contains('/') || new_name.contains('\\') {
         return Err("File name cannot contain path separators".to_string());
+    }
+    // Same set the `naming.forbidden_chars` rule defaults to, and for the same
+    // reason — but reporting it after the file is already committed is too late,
+    // so the rename refuses it outright.
+    if let Some(c) = new_name
+        .chars()
+        .find(|c| naming::WINDOWS_ILLEGAL_CHARS.contains(c))
+    {
+        return Err(format!(
+            "File name cannot contain {} — it is illegal in Windows file names",
+            c
+        ));
     }
     // Win32 strips these on create, so the file would land under a name that
     // is not the one we record in the undo stack and the tag bindings — three
@@ -1997,7 +2009,7 @@ fn execute_batch_rename(
         .collect();
 
     let mut warnings = Vec::new();
-    let result = commit_renames(&project_id, planned, "Batch rename", &mut warnings);
+    let (_, result) = commit_renames(&project_id, planned, "Batch rename", &mut warnings);
     for w in &warnings {
         warning::emit_project_warning(&app, &project_id, w);
     }
@@ -2122,6 +2134,10 @@ const RENAME_LOCK_CHUNK: usize = 100;
 /// Rename a heterogeneous batch on disk, migrating tag bindings as it goes, and —
 /// if anything moved — record ONE undo batch. `label` names the undo entry; the
 /// rename runs inside the project lock in `RENAME_LOCK_CHUNK` slices.
+///
+/// Returns the successes as `(old_path, normalized new path)` alongside the
+/// counts, so a caller that renames one file can answer with its new path
+/// instead of deriving it a second way.
 fn commit_renames(
     project_id: &str,
     planned: Vec<(String, String)>,
@@ -2130,7 +2146,7 @@ fn commit_renames(
     // call this directly and have no Tauri app to hand it. The command
     // boundary owns the emit.
     warnings: &mut Vec<warning::ProjectWarning>,
-) -> BatchRenameResult {
+) -> (Vec<(String, String)>, BatchRenameResult) {
     let total = planned.len();
     let mut all_done: Vec<(String, String)> = Vec::new();
     let mut result = BatchRenameResult {
@@ -2182,7 +2198,7 @@ fn commit_renames(
                 result.error_count += untouched;
                 result.errors.push(format!("Renames aborted: {}", e));
                 push_sidecar_warning(&mut sidecar_failures, warnings);
-                return result;
+                return (all_done, result);
             }
         }
     }
@@ -2209,7 +2225,7 @@ fn commit_renames(
         });
     }
 
-    result
+    (all_done, result)
 }
 
 // ============ Fix-it (auto-fixable naming) Commands ============
@@ -2308,7 +2324,7 @@ fn apply_naming_fixes(
 ) -> BatchRenameResult {
     let planned: Vec<(String, String)> = fixes.into_iter().map(|f| (f.path, f.new_name)).collect();
     let mut warnings = Vec::new();
-    let result = commit_renames(&project_id, planned, "Fix naming", &mut warnings);
+    let (_, result) = commit_renames(&project_id, planned, "Fix naming", &mut warnings);
     for w in &warnings {
         warning::emit_project_warning(&app, &project_id, w);
     }
@@ -2874,6 +2890,13 @@ fn delete_assets(paths: Vec<String>) -> DeleteResult {
     }
 }
 
+/// Rename one file through the same engine as Batch Rename and Fix-it, so the
+/// disk rename and its tag migration share one lock window.
+///
+/// # Errors
+///
+/// The new name is invalid or already taken, the rename failed on disk, or the
+/// project is not registered — in which case nothing is renamed at all.
 #[tauri::command]
 fn rename_file(
     app: AppHandle,
@@ -2882,107 +2905,25 @@ fn rename_file(
     new_name: String,
 ) -> Result<String, String> {
     let mut warnings = Vec::new();
-    let result = commit_single_rename(&project_id, old_path, new_name, &mut warnings);
+    let (done, mut result) = commit_renames(
+        &project_id,
+        vec![(old_path.clone(), new_name)],
+        "Rename",
+        &mut warnings,
+    );
     for w in &warnings {
         warning::emit_project_warning(&app, &project_id, w);
     }
-    result
-}
 
-/// The body of `rename_file`, minus the emit — same split as
-/// `commit_renames`: tests call this directly and have no Tauri app to hand
-/// an `AppHandle`.
-fn commit_single_rename(
-    project_id: &str,
-    old_path: String,
-    new_name: String,
-    warnings: &mut Vec<warning::ProjectWarning>,
-) -> Result<String, String> {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    validate_new_name(&new_name)?;
-
-    let old_path_ref = Path::new(&old_path);
-    if !old_path_ref.exists() {
-        return Err("File does not exist".to_string());
+    if let Some((_, new_path)) = done.into_iter().next() {
+        return Ok(new_path);
     }
-
-    let parent = old_path_ref.parent().ok_or("Cannot get parent directory")?;
-    let new_path = parent.join(&new_name);
-
-    let old_name = old_path_ref
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("")
-        .to_string();
-
-    // The target may `exists()`-resolve to the source itself (case-only rename,
-    // NFC/NFD variant); only a genuinely different occupant is a conflict, and
-    // identity is by dev+inode, not by name.
-    if new_path.exists() && !fs_atomic::paths_are_same_file(old_path_ref, &new_path) {
-        return Err("A file with this name already exists".to_string());
+    if !result.errors.is_empty() {
+        return Err(result.errors.remove(0));
     }
-
-    // Engine sidecars get the same pre-flight as the file itself: refuse the
-    // rename outright rather than move the asset away from a .meta/.uid a
-    // stray destination sidecar would block (see sidecar::rename_conflicts).
-    let sidecar_conflicts = sidecar::rename_conflicts(old_path_ref, &new_path);
-    if !sidecar_conflicts.is_empty() {
-        return Err(sidecar_conflicts.join("; "));
-    }
-
-    // Normalize to forward slashes so the returned path, the undo record, and
-    // the tag binding all match what the scanner produces — `to_string_lossy`
-    // would keep Windows backslashes (e.g. `C:/dir\new.png`).
-    let new_path_str = scanner::path_to_string(&new_path);
-
-    std::fs::rename(old_path_ref, &new_path).map_err(|e| e.to_string())?;
-
-    // Carry engine sidecars so the renamed asset keeps its identity and its
-    // references. Best-effort: a missing sidecar is a no-op. The file is already
-    // renamed and stays that way, so a failure is reported rather than raised.
-    if let Err(e) = sidecar::carry_on_rename(old_path_ref, &new_path) {
-        eprintln!(
-            "[rename_file] engine sidecar not carried for {}: {}",
-            old_path, e
-        );
-        let mut failures = warning::SampledFailures::default();
-        failures.record(Some(&old_path), &e);
-        push_sidecar_warning(&mut failures, warnings);
-    }
-
-    let _ = project::with_mut(project_id, |state| {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-
-        let operation = undo::FileOperation {
-            operation_type: undo::OperationType::Rename,
-            original_path: old_path.clone(),
-            new_path: Some(new_path_str.clone()),
-            timestamp,
-        };
-
-        state.undo_manager.record_batch(
-            format!("Rename {} to {}", old_name, new_name),
-            vec![operation],
-        );
-
-        // Carry tags from the old path to the new one. Best-effort — this must
-        // never fail a rename that already landed on disk — but logged, so a
-        // persistently unwritable tags file stays diagnosable.
-        state.ensure_tags().rename_path(&old_path, &new_path_str);
-        if let Err(e) = state.save_tags() {
-            eprintln!("[rename_file] failed to save tags after rename: {}", e);
-            warnings.push(warning::ProjectWarning::TagsNotSaved {
-                detail: e.to_string(),
-            });
-        }
-        Ok(())
-    });
-
-    Ok(new_path_str)
+    // Nothing renamed and nothing wrong: the new name equalled the old one, which
+    // the batch engine skips. The file is already where the caller asked for it.
+    Ok(scanner::path_to_string(Path::new(&old_path)))
 }
 
 // ============ Undo Commands ============
@@ -3565,6 +3506,32 @@ mod tests {
         }
     }
 
+    /// The third Windows landmine: these characters are legal on macOS and
+    /// Linux, so a batch rename minted there landed a file no Windows teammate
+    /// could check out. The backend is the only gate the batch dialogs pass.
+    #[test]
+    fn rename_targets_reject_windows_illegal_characters() {
+        for c in naming::WINDOWS_ILLEGAL_CHARS {
+            let name = format!("we{}ird.png", c);
+            let err =
+                validate_new_name(&name).expect_err("a Windows-illegal character must be rejected");
+            assert!(
+                err.contains(*c),
+                "the error has to name the offending character: {}",
+                err
+            );
+        }
+        // The analyzer rule that reports the same characters after the fact and
+        // this gate must not drift apart again.
+        for c in naming::WINDOWS_ILLEGAL_CHARS {
+            assert!(
+                naming::NamingConfig::default().forbidden_chars.contains(c),
+                "{:?} is rejected by the rename gate but not by naming.forbidden_chars",
+                c
+            );
+        }
+    }
+
     /// Build a one-directory scan result so engine commands can run against a
     /// hand-made asset set without going through a real scan.
     #[cfg(test)]
@@ -3856,7 +3823,7 @@ mod tests {
         }
 
         drop(held);
-        let result = worker.join().unwrap();
+        let (_, result) = worker.join().unwrap();
         assert_eq!(result.success_count, planned.len());
         assert_eq!(result.error_count, 0);
 
@@ -4036,13 +4003,14 @@ mod tests {
         })
         .unwrap();
 
-        let new_key = commit_single_rename(
+        let (done, result) = commit_renames(
             project_id,
-            old_key.clone(),
-            "new.png".to_string(),
+            vec![(old_key.clone(), "new.png".to_string())],
+            "Rename",
             &mut Vec::new(),
-        )
-        .unwrap();
+        );
+        assert_eq!(result.errors, Vec::<String>::new());
+        let new_key = done[0].1.clone();
 
         let reloaded = tags::TagsData::load(dir.path());
         assert!(
@@ -4060,6 +4028,36 @@ mod tests {
         );
 
         project::unregister(project_id);
+    }
+
+    /// Renaming with no undo record and no tag migration is worse than refusing,
+    /// so an unregistered project has to leave the disk untouched. The single-file
+    /// path used to rename anyway and report success.
+    #[test]
+    fn a_rename_on_an_unregistered_project_leaves_the_disk_alone() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("old.png");
+        std::fs::write(&src, "x").unwrap();
+        let old_key = scanner::path_to_string(&src);
+
+        let (done, result) = commit_renames(
+            "test_rename_never_registered",
+            vec![(old_key, "new.png".to_string())],
+            "Rename",
+            &mut Vec::new(),
+        );
+
+        assert!(done.is_empty());
+        assert_eq!(result.error_count, 1);
+        assert!(
+            result.errors[0].contains("Renames aborted"),
+            "the caller has to hear about it: {:?}",
+            result.errors
+        );
+        assert!(src.exists(), "the file was renamed without an undo record");
+        assert!(!dir.path().join("new.png").exists());
     }
 
     /// A CSV cell whose text starts with `=`, `+`, `-` or `@` is a formula to

@@ -554,7 +554,6 @@
     "newName": "New name",
     "enterName": "Enter new name...",
     "emptyName": "Name cannot be empty",
-    "invalidChars": "Name contains invalid characters",
     "noProject": "No active project",
     "godotRefWarning": "{{count}} file(s) reference this path — renaming will break them:",
     "godotRefMore": "and {{count}} more"

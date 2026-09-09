@@ -211,7 +211,7 @@ pub fn path_to_string(path: &Path) -> String {
 }
 
 /// Get asset type from file extension
-fn get_asset_type(extension: &str) -> AssetType {
+pub(crate) fn get_asset_type(extension: &str) -> AssetType {
     match extension.to_lowercase().as_str() {
         // Textures and texture-source DCC formats: `.psb` is Photoshop's
         // big-document variant, `.spp` a Substance Painter project, `.sbs` a

@@ -86,6 +86,26 @@ mod tests {
         );
     }
 
+    /// The same policy one level down: a misspelled *value* used to fall through
+    /// `case_style`'s catch-all arm and turn the check off while the user
+    /// believed it was on. Only an enumerated set parses.
+    #[test]
+    fn a_misspelled_case_style_is_reported_rather_than_silently_ignored() {
+        let err = RuleConfig::from_toml("[naming]\ncase_style = \"snake-case\"\n")
+            .expect_err("a misspelled case style must not parse");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("snake-case"),
+            "the error has to name the offending value: {}",
+            msg
+        );
+
+        for style in ["PascalCase", "snake_case", "camelCase", "kebab-case", "any"] {
+            RuleConfig::from_toml(&format!("[naming]\ncase_style = \"{style}\"\n"))
+                .unwrap_or_else(|e| panic!("{style} must stay accepted: {e}"));
+        }
+    }
+
     /// `[project]` is not part of `RuleConfig` — it carries the AI-tagging
     /// metadata that `ProjectMeta` reads out of the same file. The top level
     /// therefore has to stay permissive; only the rule sections are strict.

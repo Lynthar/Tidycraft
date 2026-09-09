@@ -682,7 +682,6 @@
     "newName": "新名称",
     "enterName": "输入新名称...",
     "emptyName": "名称不能为空",
-    "invalidChars": "名称包含无效字符",
     "noProject": "没有活跃的项目",
     "godotRefWarning": "有 {{count}} 个文件引用此路径，重命名会破坏这些引用：",
     "godotRefMore": "还有 {{count}} 个"

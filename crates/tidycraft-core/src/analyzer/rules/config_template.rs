@@ -37,7 +37,7 @@ enabled = true
 # `\` can't occur inside a single filename, so they aren't listed.)
 # `@` is deliberately absent (`@2x` icons, Unity's `model@anim.fbx` animation
 # convention); add it to the list if your pipeline forbids it.
-# forbidden_chars = [' ', '!', '#', '$', '%', '^', '&', '*', '(', ')', '+', '=', '<', '>', ':', '"', '|', '?']
+# forbidden_chars = [' ', '!', '#', '$', '%', '^', '&', '(', ')', '+', '=', '<', '>', ':', '"', '|', '?', '*']
 # Set true to forbid CJK characters in filenames. Default false (many teams
 # legitimately ship localized content).
 forbid_chinese = false
