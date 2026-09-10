@@ -3876,7 +3876,7 @@ mod tests {
 
         std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
         let mut warnings = Vec::new();
-        let result = commit_renames(
+        let (_, result) = commit_renames(
             project_id,
             vec![(src_key, "b.png".to_string())],
             "Race",
