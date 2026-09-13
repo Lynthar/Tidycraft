@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// The store's imports read localStorage at module init (i18n language, settings);
-// Node has none, so stand one in before those imports run.
+// The store's imports read localStorage and navigator at module init (i18n language,
+// settings); Node 20 has neither, so stand both in before those imports run.
 vi.hoisted(() => {
   const data = new Map<string, string>();
   Object.defineProperty(globalThis, "localStorage", {
@@ -11,6 +11,11 @@ vi.hoisted(() => {
       removeItem: (key: string) => void data.delete(key),
     },
   });
+  if (typeof navigator === "undefined") {
+    Object.defineProperty(globalThis, "navigator", {
+      value: { language: "en-US", languages: ["en-US"], userAgent: "node" },
+    });
+  }
 });
 
 import { MIRROR_FIELDS, mirrorOf, useProjectStore, type ProjectData } from "./projectStore";
