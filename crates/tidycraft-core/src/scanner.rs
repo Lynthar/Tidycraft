@@ -56,6 +56,42 @@ pub enum AssetType {
     Other,
 }
 
+impl AssetType {
+    /// Every variant, in the order the interface presents them. `ASSET_TYPES` in
+    /// `src/types/asset.ts` is the frontend's copy, and a test reads that file.
+    pub const ALL: [AssetType; 11] = [
+        AssetType::Texture,
+        AssetType::Model,
+        AssetType::Audio,
+        AssetType::Video,
+        AssetType::Animation,
+        AssetType::Material,
+        AssetType::Prefab,
+        AssetType::Scene,
+        AssetType::Script,
+        AssetType::Data,
+        AssetType::Other,
+    ];
+
+    /// The wire key, equal to the serde name (`key_is_the_serde_name` pins it):
+    /// `type_counts` buckets, the CLI's `--types` and the report badges all use it.
+    pub fn key(&self) -> &'static str {
+        match self {
+            AssetType::Texture => "texture",
+            AssetType::Model => "model",
+            AssetType::Audio => "audio",
+            AssetType::Video => "video",
+            AssetType::Animation => "animation",
+            AssetType::Material => "material",
+            AssetType::Prefab => "prefab",
+            AssetType::Scene => "scene",
+            AssetType::Script => "script",
+            AssetType::Data => "data",
+            AssetType::Other => "other",
+        }
+    }
+}
+
 /// Every field is optional and serializes as ABSENT (not `null`) when unset —
 /// the frontend's `metadata.field !== undefined` guards rely on this, and
 /// `types/asset.ts` declares the mirror fields as `field?: T`.
@@ -1501,20 +1537,9 @@ pub fn scan_directory_with_state(
     // Calculate type counts from the results
     let mut type_counts: HashMap<String, usize> = HashMap::new();
     for asset in &assets {
-        let type_key = match asset.asset_type {
-            AssetType::Texture => "texture",
-            AssetType::Model => "model",
-            AssetType::Audio => "audio",
-            AssetType::Video => "video",
-            AssetType::Animation => "animation",
-            AssetType::Material => "material",
-            AssetType::Prefab => "prefab",
-            AssetType::Scene => "scene",
-            AssetType::Script => "script",
-            AssetType::Data => "data",
-            AssetType::Other => "other",
-        };
-        *type_counts.entry(type_key.to_string()).or_insert(0) += 1;
+        *type_counts
+            .entry(asset.asset_type.key().to_string())
+            .or_insert(0) += 1;
     }
 
     // Convert to mutable for sorting
@@ -1860,20 +1885,9 @@ pub fn scan_directory_incremental(
     // Calculate type counts
     let mut type_counts: HashMap<String, usize> = HashMap::new();
     for asset in &assets {
-        let type_key = match asset.asset_type {
-            AssetType::Texture => "texture",
-            AssetType::Model => "model",
-            AssetType::Audio => "audio",
-            AssetType::Video => "video",
-            AssetType::Animation => "animation",
-            AssetType::Material => "material",
-            AssetType::Prefab => "prefab",
-            AssetType::Scene => "scene",
-            AssetType::Script => "script",
-            AssetType::Data => "data",
-            AssetType::Other => "other",
-        };
-        *type_counts.entry(type_key.to_string()).or_insert(0) += 1;
+        *type_counts
+            .entry(asset.asset_type.key().to_string())
+            .or_insert(0) += 1;
     }
 
     // Phase 3: Build directory tree
@@ -1970,6 +1984,34 @@ mod tests {
             metadata: None,
             unity_guid: Some("stale-guid".to_string()),
         }
+    }
+
+    #[test]
+    fn key_is_the_serde_name() {
+        for t in AssetType::ALL {
+            assert_eq!(serde_json::to_value(&t).unwrap(), t.key(), "{t:?}");
+        }
+    }
+
+    /// Repo-only, like the locale gates: a published copy of this crate has no
+    /// `src/types/asset.ts` beside it and must skip rather than fail.
+    #[test]
+    fn the_frontends_asset_types_mirror_all_in_order() {
+        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        if !repo_root.join("package.json").exists() {
+            return;
+        }
+        let path = repo_root.join("src/types/asset.ts");
+        let src =
+            fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let literal = src
+            .split("ASSET_TYPES = [")
+            .nth(1)
+            .and_then(|rest| rest.split("] as const").next())
+            .expect("asset.ts declares `ASSET_TYPES = [...] as const`");
+        let frontend: Vec<&str> = literal.split('"').skip(1).step_by(2).collect();
+        let backend: Vec<&str> = AssetType::ALL.iter().map(AssetType::key).collect();
+        assert_eq!(frontend, backend);
     }
 
     #[test]

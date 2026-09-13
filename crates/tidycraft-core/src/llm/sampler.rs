@@ -37,7 +37,7 @@ pub fn sample_directories(scan: &ScanResult, depth: usize, seed: u64) -> Vec<Dir
             .map(|a| SampleFile {
                 filename: a.name.clone(),
                 extension: a.extension.clone(),
-                asset_type: type_to_str(&a.asset_type).to_string(),
+                asset_type: a.asset_type.key().to_string(),
             })
             .collect();
         samples.push(DirectorySample {
@@ -70,11 +70,10 @@ fn pick_per_type<'a>(files: &[&'a AssetInfo], depth: usize, seed: u64) -> Vec<&'
     for bucket in by_type.values_mut() {
         bucket.sort_by_key(|a| (rank(seed, &a.path), a.path.clone()));
     }
-    // Sort types themselves so iteration order is stable across runs.
-    // We use the lowercase string repr from `type_to_str` because
-    // `AssetType` doesn't impl `Ord`.
+    // Sort types by key so iteration order is stable across runs — `AssetType`
+    // has no `Ord`.
     let mut types: Vec<&AssetType> = by_type.keys().copied().collect();
-    types.sort_by_key(|t| type_to_str(t));
+    types.sort_by_key(|t| t.key());
 
     // Round-robin allocation: walk types repeatedly, give one slot per
     // pass to any type that still has files left. Stops when `depth`
@@ -137,22 +136,6 @@ fn relative_path(root: &str, abs_dir: &str) -> String {
     }
     let prefix = format!("{root}/");
     abs_dir.strip_prefix(&prefix).unwrap_or(abs_dir).to_string()
-}
-
-fn type_to_str(t: &AssetType) -> &'static str {
-    match t {
-        AssetType::Texture => "texture",
-        AssetType::Model => "model",
-        AssetType::Audio => "audio",
-        AssetType::Video => "video",
-        AssetType::Animation => "animation",
-        AssetType::Material => "material",
-        AssetType::Prefab => "prefab",
-        AssetType::Scene => "scene",
-        AssetType::Script => "script",
-        AssetType::Data => "data",
-        AssetType::Other => "other",
-    }
 }
 
 #[cfg(test)]

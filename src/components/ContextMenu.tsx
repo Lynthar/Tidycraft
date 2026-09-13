@@ -13,7 +13,7 @@ import {
   Settings as SettingsIcon,
   Sparkles,
 } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../lib/commands";
 import { useTranslation } from "react-i18next";
 import { useTagsStore } from "../stores/tagsStore";
 import { useSettingsStore } from "../stores/settingsStore";
@@ -188,7 +188,7 @@ export function ContextMenu({
             label: t("contextMenu.openInEditor", { name: editorName }),
             onClick: async () => {
               try {
-                await invoke("open_in_editor", {
+                await call("open_in_editor", {
                   path: assetPath,
                   editor: editorPath,
                 });

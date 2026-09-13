@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { X, GitBranch, Palette, Wrench, Trash2, Image as ImageIcon, FileCode, ExternalLink, Sparkles, AlertTriangle, Filter, FileDown } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../lib/commands";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
 import { ModalShell } from "./ModalShell";
@@ -332,7 +332,7 @@ function AiTaggingSection() {
     let cancelled = false;
     setLoadingOllamaModels(true);
     setOllamaError(null);
-    invoke<string[]>("llm_ollama_models", { endpoint: ollamaEndpoint })
+    call<string[]>("llm_ollama_models", { endpoint: ollamaEndpoint })
       .then((list) => {
         if (cancelled) return;
         setOllamaModels(list);
@@ -638,11 +638,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     let cancelled = false;
     (async () => {
       const [thumb, llm] = await Promise.all([
-        invoke<number>("get_thumbnail_cache_size").catch((err) => {
+        call<number>("get_thumbnail_cache_size").catch((err) => {
           console.error("Failed to read thumb cache size:", err);
           return null;
         }),
-        invoke<number>("llm_cache_size").catch((err) => {
+        call<number>("llm_cache_size").catch((err) => {
           console.error("Failed to read LLM cache size:", err);
           return null;
         }),
@@ -665,7 +665,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const handleClearThumbCache = async () => {
     setClearingCache(true);
     try {
-      await invoke<number>("clear_thumbnail_cache");
+      await call<number>("clear_thumbnail_cache");
       setThumbCacheBytes(0);
     } catch (err) {
       pushToast({ kind: "error", message: t("settings.clearFailed", { reason: String(err) }) });
@@ -677,7 +677,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const handleClearLlmCache = async () => {
     setClearingLlmCache(true);
     try {
-      await invoke<number>("llm_clear_cache");
+      await call<number>("llm_clear_cache");
       setLlmCacheBytes(0);
     } catch (err) {
       pushToast({ kind: "error", message: t("settings.clearFailed", { reason: String(err) }) });
@@ -706,11 +706,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     setEditingRules(true);
     setRulesError(null);
     try {
-      const path = await invoke<string>("ensure_project_config", {
+      const path = await call<string>("ensure_project_config", {
         projectId: activeProjectId,
       });
       setHasCustomConfig(true);
-      await invoke("open_with_default_app", { path });
+      await call("open_with_default_app", { path });
     } catch (err) {
       console.error("Failed to open rules editor:", err);
       setRulesError(String(err));

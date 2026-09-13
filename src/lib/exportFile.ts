@@ -1,5 +1,5 @@
 import { save } from "@tauri-apps/plugin-dialog";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "./commands";
 import { useToastStore } from "../stores/toastStore";
 import i18n from "../i18n";
 import { basename } from "./pathUtils";
@@ -27,14 +27,14 @@ export async function exportTextFile(opts: {
     if (!path) return; // user cancelled the dialog
 
     const contents = await fetchContents();
-    await invoke("save_text_file", { path, contents });
+    await call("save_text_file", { path, contents });
 
     push({
       kind: "success",
       message: i18n.t("exportToast.saved", { name: basename(path) }),
       actionLabel: i18n.t("exportToast.showInFolder"),
       onAction: () => {
-        invoke("show_in_file_manager", { path }).catch((err) =>
+        call("show_in_file_manager", { path }).catch((err) =>
           console.error("Failed to reveal exported file:", err)
         );
       },

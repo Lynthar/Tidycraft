@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../lib/commands";
 import { useTranslation } from "react-i18next";
 import { ModalShell } from "./ModalShell";
 import { X, RefreshCw, Check, AlertCircle, AlertTriangle } from "lucide-react";
@@ -71,7 +71,7 @@ export function BatchRenameDialog({
     let cancelled = false;
     (async () => {
       try {
-        const map = await invoke<Record<string, string[]>>(
+        const map = await call<Record<string, string[]>>(
           "godot_asset_references",
           { projectId: activeProjectId, paths: selectedPaths }
         );
@@ -114,7 +114,7 @@ export function BatchRenameDialog({
     const debounceTimer = setTimeout(async () => {
       try {
         const operation = buildOperation();
-        const result = await invoke<RenamePreview[]>("preview_batch_rename", {
+        const result = await call<RenamePreview[]>("preview_batch_rename", {
           paths: selectedPaths,
           operation,
         });
@@ -139,7 +139,7 @@ export function BatchRenameDialog({
 
     try {
       const operation = buildOperation();
-      const result = await invoke<BatchRenameResult>("execute_batch_rename", {
+      const result = await call<BatchRenameResult>("execute_batch_rename", {
         projectId: activeProjectId,
         paths: selectedPaths,
         operation,

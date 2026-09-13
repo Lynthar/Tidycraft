@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Sparkles, X, RotateCw, Eye, Play, AlertTriangle } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../lib/commands";
 import { useTranslation } from "react-i18next";
 import { useUiStore, type AiRulesDoc, type AiLearningResult } from "../stores/uiStore";
 import { useProjectStore } from "../stores/projectStore";
@@ -74,7 +74,7 @@ export function AITagPanel() {
       return;
     }
     let cancelled = false;
-    invoke<AiRulesDoc | null>("read_ai_rules", { projectId: activeProjectId })
+    call<AiRulesDoc | null>("read_ai_rules", { projectId: activeProjectId })
       .then((d) => {
         if (!cancelled) setRulesDoc(d);
       })
@@ -132,7 +132,7 @@ export function AITagPanel() {
     setError(null);
     (async () => {
       try {
-        const result = await invoke<TagSuggestions>("suggest_tags", {
+        const result = await call<TagSuggestions>("suggest_tags", {
           projectId: activeProjectId,
         });
         if (cancelled) return;

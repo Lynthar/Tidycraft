@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../lib/commands";
 import { useTranslation } from "react-i18next";
 import { ModalShell } from "./ModalShell";
 import { X } from "lucide-react";
@@ -131,7 +131,7 @@ export function DependencyGraphModal() {
     setLoading(true);
     setError(null);
     setGraph(null);
-    invoke<DependencyGraph>(cmd, { projectId: activeProjectId })
+    call<DependencyGraph>(cmd, { projectId: activeProjectId })
       .then((g) => { if (!cancelled) setGraph(g); })
       .catch((e) => { if (!cancelled) setError(String(e)); })
       .finally(() => { if (!cancelled) setLoading(false); });

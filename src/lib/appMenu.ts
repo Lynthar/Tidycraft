@@ -1,5 +1,5 @@
 import { Menu, MenuItem, PredefinedMenuItem, Submenu } from "@tauri-apps/api/menu";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "./commands";
 import i18n from "../i18n";
 import { isMacOS } from "./platform";
 import { menuActions } from "./menuActions";
@@ -14,7 +14,7 @@ const GITHUB_URL = "https://github.com/Lynthar/Tidycraft";
 const ISSUES_URL = "https://github.com/Lynthar/Tidycraft/issues";
 
 function openUrl(url: string): void {
-  invoke("open_url", { url }).catch((e) => console.error("open_url failed", e));
+  call("open_url", { url }).catch((e) => console.error("open_url failed", e));
 }
 
 async function buildMenu(): Promise<Menu> {

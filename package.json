@@ -13,6 +13,7 @@
   "scripts": {
     "dev": "vite",
     "build": "node scripts/sync-version.mjs && tsc -b && vite build",
+    "test": "vitest run",
     "preview": "vite preview",
     "tauri": "tauri",
     "sidecar": "node scripts/build-cli-sidecar.mjs",
@@ -51,7 +52,8 @@
     "postcss": "^8.5.25",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2",
-    "vite": "^6.4.3"
+    "vite": "^6.4.3",
+    "vitest": "^4.1.11"
   },
   "pnpm": {
     "overrides": {

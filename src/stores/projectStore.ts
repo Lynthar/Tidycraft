@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../lib/commands";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { basename, dirname } from "../lib/pathUtils";
 import type { ScanResult, AssetInfo, ScanProgress, AssetType, ProjectType, AnalysisResult, UndoResult, HistoryEntry, GitInfo, GitStatusMap, GitFileStatus, FsChangeEvent, RenamedPair, DirectoryNode, ProjectWarning, ProjectPathStatus, ProjectPathReport, UnavailableStatus } from "../types/asset";
@@ -26,7 +26,7 @@ async function stopFsWatch(projectId: string) {
     warningWatchers.delete(projectId);
   }
   try {
-    await invoke("stop_watching", { projectId });
+    await call("stop_watching", { projectId });
   } catch (err) {
     console.error("Failed to stop watcher:", err);
   }
@@ -40,7 +40,7 @@ export async function checkPaths(
 ): Promise<Map<string, ProjectPathStatus>> {
   if (paths.length === 0) return new Map();
   try {
-    const reports = await invoke<ProjectPathReport[]>("check_project_paths", {
+    const reports = await call<ProjectPathReport[]>("check_project_paths", {
       paths,
     });
     return new Map(reports.map((r) => [r.path, r.status]));
@@ -225,6 +225,48 @@ function resetProjectData(
   };
 }
 
+/// The per-project fields the store also exposes flat for the active project.
+/// Typed against ProjectData so a field added there must be listed here too.
+const MIRRORED: Record<Exclude<keyof ProjectData, "id">, true> = {
+  projectPath: true,
+  scanResult: true,
+  isScanning: true,
+  error: true,
+  scanProgress: true,
+  analysisResult: true,
+  analysisStale: true,
+  isAnalyzing: true,
+  viewMode: true,
+  selectedDirectory: true,
+  selectedAsset: true,
+  searchQuery: true,
+  typeFilter: true,
+  sortField: true,
+  sortDirection: true,
+  advancedFilters: true,
+  gitInfo: true,
+  gitStatuses: true,
+  hasCustomConfig: true,
+  projectWarnings: true,
+  unavailable: true,
+};
+type MirrorField = keyof typeof MIRRORED;
+export const MIRROR_FIELDS = Object.keys(MIRRORED) as MirrorField[];
+
+/// The flat view of the active project; `projectPath` is null when none is open.
+export type ActiveMirror = Omit<ProjectData, "id" | "projectPath"> & {
+  projectPath: string | null;
+};
+
+/// The mirror of `project`, or the defaults with no path when there is none.
+export function mirrorOf(project: ProjectData | undefined): ActiveMirror {
+  const source: ActiveMirror = project ?? {
+    ...createDefaultProjectData("", ""),
+    projectPath: null,
+  };
+  return Object.fromEntries(MIRROR_FIELDS.map((k) => [k, source[k]])) as ActiveMirror;
+}
+
 const generateProjectId = (): string => {
   return `project_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 };
@@ -305,7 +347,7 @@ const needsHydration = (project: ProjectData): boolean =>
 const normalizeDirectory = (path: string | null, projectPath: string | null): string | null =>
   path && path === projectPath ? null : path;
 
-interface ProjectState {
+interface ProjectState extends ActiveMirror {
   // Multi-project state
   projects: Map<string, ProjectData>;
   activeProjectId: string | null;
@@ -328,32 +370,6 @@ interface ProjectState {
   /// dropped because its file was removed — never for any other reason a
   /// selection can go away.
   selectionRemovedPulse: number;
-
-  // Convenience getters for active project
-  projectPath: string | null;
-  scanResult: ScanResult | null;
-  isScanning: boolean;
-  error: string | null;
-  scanProgress: ScanProgress | null;
-  analysisResult: AnalysisResult | null;
-  analysisStale: boolean;
-  isAnalyzing: boolean;
-  viewMode: ViewMode;
-  selectedDirectory: string | null;
-  selectedAsset: AssetInfo | null;
-  searchQuery: string;
-  /// Asset-type filter as a UNION of selected types; `null` is the one
-  /// canonical "no filter" state (an empty array normalizes to it in the
-  /// setters — same discipline as `selectedDirectory`'s null).
-  typeFilter: AssetType[] | null;
-  sortField: SortField;
-  sortDirection: SortDirection;
-  advancedFilters: AdvancedFilters;
-  gitInfo: GitInfo | null;
-  gitStatuses: GitStatusMap;
-  hasCustomConfig: boolean;
-  projectWarnings: ProjectWarning[];
-  unavailable: UnavailableStatus | null;
 
   // Multi-project actions
   openProject: (path: string, options?: { force?: boolean }) => Promise<void>;
@@ -439,87 +455,7 @@ const updateActiveProject = (
   const updatedProject = { ...project, ...updates };
   const newProjects = new Map(projects);
   newProjects.set(activeProjectId, updatedProject);
-
-  // Return both the updated projects map and the convenience fields
-  const result: Partial<ProjectState> = { projects: newProjects };
-
-  // Update convenience fields
-  if ('projectPath' in updates) result.projectPath = updates.projectPath ?? null;
-  if ('scanResult' in updates) result.scanResult = updates.scanResult ?? null;
-  if ('isScanning' in updates) result.isScanning = updates.isScanning ?? false;
-  if ('error' in updates) result.error = updates.error ?? null;
-  if ('scanProgress' in updates) result.scanProgress = updates.scanProgress ?? null;
-  if ('analysisResult' in updates) result.analysisResult = updates.analysisResult ?? null;
-  if ('analysisStale' in updates) result.analysisStale = updates.analysisStale ?? false;
-  if ('isAnalyzing' in updates) result.isAnalyzing = updates.isAnalyzing ?? false;
-  if ('viewMode' in updates) result.viewMode = updates.viewMode ?? "assets";
-  if ('selectedDirectory' in updates) result.selectedDirectory = updates.selectedDirectory ?? null;
-  if ('selectedAsset' in updates) result.selectedAsset = updates.selectedAsset ?? null;
-  if ('searchQuery' in updates) result.searchQuery = updates.searchQuery ?? "";
-  if ('typeFilter' in updates) result.typeFilter = updates.typeFilter ?? null;
-  if ('sortField' in updates) result.sortField = updates.sortField ?? "name";
-  if ('sortDirection' in updates) result.sortDirection = updates.sortDirection ?? "asc";
-  if ('advancedFilters' in updates) result.advancedFilters = updates.advancedFilters ?? state.advancedFilters;
-  if ('gitInfo' in updates) result.gitInfo = updates.gitInfo ?? null;
-  if ('gitStatuses' in updates) result.gitStatuses = updates.gitStatuses ?? {};
-  if ('hasCustomConfig' in updates) result.hasCustomConfig = updates.hasCustomConfig ?? false;
-  if ('projectWarnings' in updates) result.projectWarnings = updates.projectWarnings ?? [];
-  if ('unavailable' in updates) result.unavailable = updates.unavailable ?? null;
-
-  return result;
-};
-
-// Helper to sync convenience fields from active project
-const syncFromActiveProject = (project: ProjectData | undefined): Partial<ProjectState> => {
-  if (!project) {
-    return {
-      projectPath: null,
-      scanResult: null,
-      isScanning: false,
-      error: null,
-      scanProgress: null,
-      analysisResult: null,
-      analysisStale: false,
-      isAnalyzing: false,
-      viewMode: "assets",
-      selectedDirectory: null,
-      selectedAsset: null,
-      searchQuery: "",
-      typeFilter: null,
-      sortField: "name",
-      sortDirection: "asc",
-      advancedFilters: createDefaultAdvancedFilters(),
-      gitInfo: null,
-      gitStatuses: {},
-      hasCustomConfig: false,
-      projectWarnings: [],
-      unavailable: null,
-    };
-  }
-
-  return {
-    projectPath: project.projectPath,
-    scanResult: project.scanResult,
-    isScanning: project.isScanning,
-    error: project.error,
-    scanProgress: project.scanProgress,
-    analysisResult: project.analysisResult,
-    analysisStale: project.analysisStale,
-    isAnalyzing: project.isAnalyzing,
-    viewMode: project.viewMode,
-    selectedDirectory: project.selectedDirectory,
-    selectedAsset: project.selectedAsset,
-    searchQuery: project.searchQuery,
-    typeFilter: project.typeFilter,
-    sortField: project.sortField,
-    sortDirection: project.sortDirection,
-    advancedFilters: project.advancedFilters,
-    gitInfo: project.gitInfo,
-    gitStatuses: project.gitStatuses,
-    hasCustomConfig: project.hasCustomConfig,
-    projectWarnings: project.projectWarnings,
-    unavailable: project.unavailable,
-  };
+  return { projects: newProjects, ...mirrorOf(updatedProject) };
 };
 
 // True when `path` names a directory node anywhere in `tree`. Keeps
@@ -662,7 +598,7 @@ function applyFsChange(projectId: string, event: FsChangeEvent) {
     watcherPulse: Date.now(),
   };
   if (state.activeProjectId === projectId) {
-    Object.assign(patch, syncFromActiveProject(updated));
+    Object.assign(patch, mirrorOf(updated));
     if (selectionRemoved) {
       patch.selectionRemovedPulse = state.selectionRemovedPulse + 1;
     }
@@ -702,28 +638,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   locatePulse: 0,
   selectionRemovedPulse: 0,
 
-  // Initial convenience fields (no active project)
-  projectPath: null,
-  scanResult: null,
-  isScanning: false,
-  error: null,
-  scanProgress: null,
-  analysisResult: null,
-  analysisStale: false,
-  isAnalyzing: false,
-  viewMode: "assets",
-  selectedDirectory: null,
-  selectedAsset: null,
-  searchQuery: "",
-  typeFilter: null,
-  sortField: "name",
-  sortDirection: "asc",
-  advancedFilters: createDefaultAdvancedFilters(),
-  gitInfo: null,
-  gitStatuses: {},
-  hasCustomConfig: false,
-  projectWarnings: [],
-  unavailable: null,
+  // Mirror fields: no active project
+  ...mirrorOf(undefined),
 
   // Multi-project actions
   openProject: async (rawPath: string, options?: { force?: boolean }) => {
@@ -781,7 +697,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const newMap = new Map(get().projects);
       newMap.set(id, data);
       const patch: Partial<ProjectState> = { projects: newMap, activeProjectId: id };
-      set({ ...patch, ...syncFromActiveProject(data) });
+      set({ ...patch, ...mirrorOf(data) });
       return;
     }
 
@@ -808,7 +724,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // that re-load on that change don't race an unregistered project into their
     // invoke calls. Registering an existing id with a different path rebuilds it.
     try {
-      await invoke("register_project", { projectId, path });
+      await call("register_project", { projectId, path });
     } catch (err) {
       // This runs before the project has a Map entry, so there is no
       // per-project error slot for the status bar to render — a console line
@@ -828,7 +744,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         (p) => p.projectPath === path
       );
       if (winner) {
-        void invoke("unregister_project", { projectId }).catch(() => {});
+        void call("unregister_project", { projectId }).catch(() => {});
         get().setActiveProject(winner.id);
         return;
       }
@@ -861,7 +777,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({
       projects: newProjects,
       activeProjectId: projectId,
-      ...syncFromActiveProject(projectData),
+      ...mirrorOf(projectData),
     });
 
     let unlisten: UnlistenFn | null = null;
@@ -890,7 +806,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       const respectGitignore = useSettingsStore.getState().respectGitignore;
 
       // Use incremental scan command
-      const { result } = await invoke<{ result: ScanResult; stats: { cached_files: number; rescanned_files: number } }>(
+      const { result } = await call<{ result: ScanResult; stats: { cached_files: number; rescanned_files: number } }>(
         "scan_project_incremental",
         { projectId, path, respectGitignore }
       );
@@ -900,7 +816,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // failure just means we'll fall back to defaults at analyze time.
       let hasCustomConfig = false;
       try {
-        const cfg = await invoke<string | null>("read_project_config", {
+        const cfg = await call<string | null>("read_project_config", {
           projectId,
         });
         hasCustomConfig = cfg !== null;
@@ -944,7 +860,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         newMap.set(projectId, updated);
         const patch: Partial<ProjectState> = { projects: newMap };
         if (state.activeProjectId === projectId) {
-          Object.assign(patch, syncFromActiveProject(updated));
+          Object.assign(patch, mirrorOf(updated));
         }
         set(patch);
       } else {
@@ -973,7 +889,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
             (event) => recordProjectWarning(projectId, event.payload)
           );
           warningWatchers.set(projectId, warnUnlisten);
-          await invoke("start_watching", { projectId });
+          await call("start_watching", { projectId });
           // A successful start supersedes any earlier failure note.
           clearProjectWarning(projectId, "watcher_start_failed");
         } catch (err) {
@@ -1024,7 +940,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       newMap.set(projectId, updated);
       const patch: Partial<ProjectState> = { projects: newMap };
       if (latest.activeProjectId === projectId) {
-        Object.assign(patch, syncFromActiveProject(updated));
+        Object.assign(patch, mirrorOf(updated));
       }
       set(patch);
     } finally {
@@ -1052,7 +968,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     cancelGitRefresh(idToClose);
 
     // Tell the backend to drop its state for this project (best-effort).
-    invoke("unregister_project", { projectId: idToClose }).catch((err) => {
+    call("unregister_project", { projectId: idToClose }).catch((err) => {
       console.error("Failed to unregister project:", err);
     });
 
@@ -1072,7 +988,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({
       projects: newProjects,
       activeProjectId: newActiveId,
-      ...syncFromActiveProject(activeProject),
+      ...mirrorOf(activeProject),
     });
 
     // Closing the active project promotes the next one directly, bypassing
@@ -1099,7 +1015,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     set({
       activeProjectId: projectId,
-      ...syncFromActiveProject(project),
+      ...mirrorOf(project),
     });
     // The cached gitInfo/gitStatuses for this project may be stale
     // (e.g. user did `git checkout` while it was inactive). Re-fetch.
@@ -1120,7 +1036,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
     const projectId = generateProjectId();
     try {
-      await invoke("register_project", { projectId, path });
+      await call("register_project", { projectId, path });
     } catch (err) {
       console.error("Failed to register project stub:", err);
       return;
@@ -1132,7 +1048,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       (p) => p.projectPath === path
     );
     if (winner) {
-      void invoke("unregister_project", { projectId }).catch(() => {});
+      void call("unregister_project", { projectId }).catch(() => {});
       return;
     }
 
@@ -1169,7 +1085,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const active = activeProjectId ? next.get(activeProjectId) : undefined;
     set({
       projects: next,
-      ...(active ? syncFromActiveProject(active) : {}),
+      ...(active ? mirrorOf(active) : {}),
     });
   },
 
@@ -1207,7 +1123,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     set({
       projects: newMap,
       ...(get().activeProjectId === projectId
-        ? syncFromActiveProject(relocated)
+        ? mirrorOf(relocated)
         : {}),
     });
 
@@ -1250,7 +1166,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const { activeProjectId } = get();
     if (!activeProjectId) return;
     try {
-      await invoke("cancel_scan", { projectId: activeProjectId });
+      await call("cancel_scan", { projectId: activeProjectId });
     } catch (err) {
       console.error("Failed to cancel scan:", err);
     }
@@ -1263,7 +1179,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // then re-open with force. A failed cache clear still proceeds, so the button
     // is never a dead end.
     try {
-      await invoke("clear_scan_cache", { path: projectPath });
+      await call("clear_scan_cache", { path: projectPath });
     } catch (err) {
       console.warn("Failed to clear scan cache:", err);
     }
@@ -1304,7 +1220,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       newMap.set(startedProjectId, updated);
       const patch: Partial<ProjectState> = { projects: newMap };
       if (cur.activeProjectId === startedProjectId) {
-        Object.assign(patch, syncFromActiveProject(updated));
+        Object.assign(patch, mirrorOf(updated));
       }
       set(patch);
     };
@@ -1317,7 +1233,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     let configToml: string | null = null;
     let hasCustomConfig = false;
     try {
-      configToml = await invoke<string | null>("read_project_config", {
+      configToml = await call<string | null>("read_project_config", {
         projectId: startedProjectId,
       });
       hasCustomConfig = configToml !== null;
@@ -1327,7 +1243,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }
 
     try {
-      const result = await invoke<AnalysisResult>("analyze_assets", {
+      const result = await call<AnalysisResult>("analyze_assets", {
         projectId: startedProjectId,
         configToml,
       });
@@ -1496,9 +1412,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const { activeProjectId } = get();
     if (!activeProjectId) return null;
     try {
-      const result = await invoke<UndoResult>("undo_last_operation", { projectId: activeProjectId });
-      const canUndo = await invoke<boolean>("can_undo", { projectId: activeProjectId });
-      const history = await invoke<HistoryEntry[]>("get_undo_history", { projectId: activeProjectId });
+      const result = await call<UndoResult>("undo_last_operation", { projectId: activeProjectId });
+      const canUndo = await call<boolean>("can_undo", { projectId: activeProjectId });
+      const history = await call<HistoryEntry[]>("get_undo_history", { projectId: activeProjectId });
       if (get().activeProjectId === activeProjectId) {
         set({ canUndo, undoHistory: history });
       }
@@ -1522,8 +1438,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       return;
     }
     try {
-      const canUndo = await invoke<boolean>("can_undo", { projectId: activeProjectId });
-      const history = await invoke<HistoryEntry[]>("get_undo_history", { projectId: activeProjectId });
+      const canUndo = await call<boolean>("can_undo", { projectId: activeProjectId });
+      const history = await call<HistoryEntry[]>("get_undo_history", { projectId: activeProjectId });
       if (get().activeProjectId === activeProjectId) {
         set({ canUndo, undoHistory: history });
       }
@@ -1536,7 +1452,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     const { activeProjectId } = get();
     if (!activeProjectId) return;
     try {
-      await invoke("clear_undo_history", { projectId: activeProjectId });
+      await call("clear_undo_history", { projectId: activeProjectId });
       if (get().activeProjectId === activeProjectId) {
         set({ canUndo: false, undoHistory: [] });
       }
@@ -1577,14 +1493,14 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     };
 
     try {
-      const gitInfo = await invoke<GitInfo>("get_git_info", {
+      const gitInfo = await call<GitInfo>("get_git_info", {
         projectId,
         path: projectPath,
       });
       patchProject({ gitInfo });
 
       if (gitInfo.is_repo) {
-        const response = await invoke<{ statuses: GitStatusMap }>("get_git_statuses", {
+        const response = await call<{ statuses: GitStatusMap }>("get_git_statuses", {
           projectId,
         });
         patchProject({ gitStatuses: response.statuses });

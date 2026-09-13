@@ -17,7 +17,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
 use crate::project;
-use crate::scanner::{self, AssetInfo, AssetType, DirectoryNode, ProjectType};
+use crate::scanner::{self, AssetInfo, DirectoryNode, ProjectType};
 
 const DEBOUNCE_WINDOW: Duration = Duration::from_millis(500);
 
@@ -755,8 +755,9 @@ fn apply_changes(
 
         let mut type_counts: HashMap<String, usize> = HashMap::new();
         for asset in &scan_result.assets {
-            let type_key = asset_type_key(&asset.asset_type);
-            *type_counts.entry(type_key).or_insert(0) += 1;
+            *type_counts
+                .entry(asset.asset_type.key().to_string())
+                .or_insert(0) += 1;
         }
         scan_result.type_counts = type_counts.clone();
 
@@ -895,23 +896,6 @@ fn is_gitignored(path: &Path, root: &Path, matcher: Option<&scanner::IgnoreMatch
         return false;
     };
     matcher.is_ignored(rel, path.is_dir())
-}
-
-fn asset_type_key(t: &AssetType) -> String {
-    match t {
-        AssetType::Texture => "texture",
-        AssetType::Model => "model",
-        AssetType::Audio => "audio",
-        AssetType::Video => "video",
-        AssetType::Animation => "animation",
-        AssetType::Material => "material",
-        AssetType::Prefab => "prefab",
-        AssetType::Scene => "scene",
-        AssetType::Script => "script",
-        AssetType::Data => "data",
-        AssetType::Other => "other",
-    }
-    .to_string()
 }
 
 #[cfg(test)]
@@ -1448,13 +1432,6 @@ mod tests {
     fn trackable_rejects_outside_root() {
         let root = Path::new("/proj");
         assert!(!is_trackable_path(Path::new("/other/foo.png"), root));
-    }
-
-    #[test]
-    fn asset_type_key_matches_scanner_buckets() {
-        assert_eq!(asset_type_key(&AssetType::Texture), "texture");
-        assert_eq!(asset_type_key(&AssetType::Model), "model");
-        assert_eq!(asset_type_key(&AssetType::Other), "other");
     }
 
     // macOS coalesces `rm -rf <dir>` into a single event on the extensionless

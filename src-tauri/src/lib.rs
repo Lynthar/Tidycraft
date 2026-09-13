@@ -1061,7 +1061,7 @@ fn get_unity_dependencies(project_id: String) -> Result<DependencyGraph, String>
                 id: guid.clone(),
                 path: asset.path.clone(),
                 name: asset.name.clone(),
-                file_type: format!("{:?}", asset.asset_type).to_lowercase(),
+                file_type: asset.asset_type.key().to_string(),
                 kind: DependencyNodeKind::Asset,
                 detail: None,
             });
@@ -1218,7 +1218,7 @@ fn get_godot_dependencies(project_id: String) -> Result<DependencyGraph, String>
                 id,
                 path: asset.path.clone(),
                 name: asset.name.clone(),
-                file_type: format!("{:?}", asset.asset_type).to_lowercase(),
+                file_type: asset.asset_type.key().to_string(),
                 kind: DependencyNodeKind::Asset,
                 detail: None,
             });
@@ -1338,7 +1338,7 @@ fn get_project_stats(project_id: String) -> Result<ProjectStats, String> {
         let mut all_files: Vec<FileInfo> = Vec::new();
 
         for asset in &scan_result.assets {
-            let type_str = format!("{:?}", asset.asset_type).to_lowercase();
+            let type_str = asset.asset_type.key().to_string();
             *type_distribution.entry(type_str.clone()).or_insert(0) += 1;
 
             *extension_distribution
@@ -1421,6 +1421,8 @@ fn export_to_csv(project_id: String) -> Result<String, String> {
                 .map(|h| h.to_string())
                 .unwrap_or_default();
 
+            // `{:?}` is the capitalised variant name (`Texture`) — the export's
+            // Type column format, deliberately not the lowercase wire `key()`.
             csv.push_str(&format!(
                 "{},{},{:?},{},{},{},{}\n",
                 csv_cell(&asset.name),
@@ -1621,6 +1623,7 @@ fn export_to_html(
         let mut size_by_type: HashMap<String, u64> = HashMap::new();
 
         for asset in &scan_result.assets {
+            // Chart labels keep the capitalised variant name; badges use `key()`.
             let type_str = format!("{:?}", asset.asset_type);
             *type_counts.entry(type_str.clone()).or_insert(0) += 1;
             *size_by_type.entry(type_str).or_insert(0) += asset.size;
@@ -1793,19 +1796,7 @@ fn export_to_html(
                     .iter()
                     .take(asset_cap)
                     .map(|asset| {
-                        let type_class = match asset.asset_type {
-                            scanner::AssetType::Texture => "texture",
-                            scanner::AssetType::Model => "model",
-                            scanner::AssetType::Audio => "audio",
-                            scanner::AssetType::Video => "video",
-                            scanner::AssetType::Animation => "animation",
-                            scanner::AssetType::Material => "material",
-                            scanner::AssetType::Prefab => "prefab",
-                            scanner::AssetType::Scene => "scene",
-                            scanner::AssetType::Script => "script",
-                            scanner::AssetType::Data => "data",
-                            scanner::AssetType::Other => "other",
-                        };
+                        let type_class = asset.asset_type.key();
                         let dimensions = asset
                             .metadata
                             .as_ref()
@@ -3109,6 +3100,106 @@ fn toggle_devtools(window: tauri::WebviewWindow) {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Every `#[tauri::command]`, registered once. `COMMAND_NAMES` is derived from the
+/// same list, and `the_frontends_command_names_match_the_registered_commands`
+/// checks it against the `CommandName` union in `src/lib/commands.ts`.
+macro_rules! commands {
+    ($($command:ident),* $(,)?) => {
+        #[cfg(test)]
+        const COMMAND_NAMES: &[&str] = &[$(stringify!($command)),*];
+
+        fn invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
+            tauri::generate_handler![$($command),*]
+        }
+    };
+}
+
+commands![
+    // Project lifecycle
+    register_project,
+    unregister_project,
+    check_project_paths,
+    // Scan
+    scan_project_incremental,
+    cancel_scan,
+    clear_scan_cache,
+    start_watching,
+    stop_watching,
+    get_thumbnail,
+    get_thumbnail_cache_size,
+    clear_thumbnail_cache,
+    // Analysis
+    analyze_assets,
+    read_project_config,
+    ensure_project_config,
+    suggest_tags,
+    // Git
+    get_git_info,
+    get_git_statuses,
+    // Unity
+    get_unity_dependencies,
+    find_unused_assets,
+    get_godot_dependencies,
+    godot_asset_references,
+    // Stats / export
+    get_project_stats,
+    export_to_json,
+    export_to_csv,
+    export_issues_to_json,
+    export_to_html,
+    save_text_file,
+    // Batch ops
+    preview_batch_rename,
+    execute_batch_rename,
+    // Fix-it (auto-fixable naming)
+    preview_naming_fixes,
+    apply_naming_fixes,
+    // Engine info
+    get_unity_file_info,
+    get_unity_project_info,
+    get_godot_project_info,
+    get_unreal_project_info,
+    // Undo
+    get_undo_history,
+    undo_last_operation,
+    can_undo,
+    clear_undo_history,
+    // File System
+    show_in_file_manager,
+    open_with_default_app,
+    open_url,
+    open_in_editor,
+    rename_file,
+    delete_assets,
+    move_assets,
+    copy_assets,
+    duplicate_assets,
+    resolve_texture_siblings,
+    // Tags
+    get_all_tags,
+    create_tag,
+    update_tag,
+    delete_tag,
+    add_tag_to_asset,
+    remove_tag_from_asset,
+    add_tag_to_assets,
+    get_all_asset_tags,
+    // LLM tagging
+    llm_estimate_cost,
+    estimate_learning_cost,
+    llm_suggest_tags,
+    llm_clear_cache,
+    llm_cache_size,
+    llm_ollama_models,
+    learn_project_conventions,
+    read_ai_rules,
+    save_ai_rules,
+    read_project_meta,
+    write_project_meta,
+    // Developer tools
+    toggle_devtools
+];
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -3133,91 +3224,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            // Project lifecycle
-            register_project,
-            unregister_project,
-            check_project_paths,
-            // Scan
-            scan_project_incremental,
-            cancel_scan,
-            clear_scan_cache,
-            start_watching,
-            stop_watching,
-            get_thumbnail,
-            get_thumbnail_cache_size,
-            clear_thumbnail_cache,
-            // Analysis
-            analyze_assets,
-            read_project_config,
-            ensure_project_config,
-            suggest_tags,
-            // Git
-            get_git_info,
-            get_git_statuses,
-            // Unity
-            get_unity_dependencies,
-            find_unused_assets,
-            get_godot_dependencies,
-            godot_asset_references,
-            // Stats / export
-            get_project_stats,
-            export_to_json,
-            export_to_csv,
-            export_issues_to_json,
-            export_to_html,
-            save_text_file,
-            // Batch ops
-            preview_batch_rename,
-            execute_batch_rename,
-            // Fix-it (auto-fixable naming)
-            preview_naming_fixes,
-            apply_naming_fixes,
-            // Engine info
-            get_unity_file_info,
-            get_unity_project_info,
-            get_godot_project_info,
-            get_unreal_project_info,
-            // Undo
-            get_undo_history,
-            undo_last_operation,
-            can_undo,
-            clear_undo_history,
-            // File System
-            show_in_file_manager,
-            open_with_default_app,
-            open_url,
-            open_in_editor,
-            rename_file,
-            delete_assets,
-            move_assets,
-            copy_assets,
-            duplicate_assets,
-            resolve_texture_siblings,
-            // Tags
-            get_all_tags,
-            create_tag,
-            update_tag,
-            delete_tag,
-            add_tag_to_asset,
-            remove_tag_from_asset,
-            add_tag_to_assets,
-            get_all_asset_tags,
-            // LLM tagging
-            llm_estimate_cost,
-            estimate_learning_cost,
-            llm_suggest_tags,
-            llm_clear_cache,
-            llm_cache_size,
-            llm_ollama_models,
-            learn_project_conventions,
-            read_ai_rules,
-            save_ai_rules,
-            read_project_meta,
-            write_project_meta,
-            // Developer tools
-            toggle_devtools
-        ])
+        .invoke_handler(invoke_handler())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -3227,6 +3234,28 @@ mod tests {
     use super::*;
 
     use crate::scanner::AssetType;
+
+    /// Repo-only, like the locale gates: a published copy of this crate has no
+    /// `src/lib/commands.ts` beside it and must skip rather than fail.
+    #[test]
+    fn the_frontends_command_names_match_the_registered_commands() {
+        let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        if !repo_root.join("package.json").exists() {
+            return;
+        }
+        let path = repo_root.join("src/lib/commands.ts");
+        let src = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let union = src
+            .split("export type CommandName =")
+            .nth(1)
+            .and_then(|rest| rest.split(';').next())
+            .expect("commands.ts declares `export type CommandName = ...;`");
+        let frontend: std::collections::BTreeSet<&str> =
+            union.split('"').skip(1).step_by(2).collect();
+        let backend: std::collections::BTreeSet<&str> = COMMAND_NAMES.iter().copied().collect();
+        assert_eq!(frontend, backend);
+    }
 
     /// A tag mutation whose save fails must not stay in memory: the frontend
     /// mirror shows nothing, so a later unrelated save would persist a phantom,
@@ -3394,44 +3423,10 @@ mod tests {
 
     #[test]
     fn every_asset_type_has_a_report_badge_rule() {
-        // The report derives each badge's class from the variant name at runtime,
-        // so a variant with no matching CSS rule ships as an unstyled badge. The
-        // exhaustive match makes a new variant a compile error here.
-        fn badge_class(t: &AssetType) -> &'static str {
-            match t {
-                AssetType::Texture => "texture",
-                AssetType::Model => "model",
-                AssetType::Audio => "audio",
-                AssetType::Video => "video",
-                AssetType::Animation => "animation",
-                AssetType::Material => "material",
-                AssetType::Prefab => "prefab",
-                AssetType::Scene => "scene",
-                AssetType::Script => "script",
-                AssetType::Data => "data",
-                AssetType::Other => "other",
-            }
-        }
-
-        for t in [
-            AssetType::Texture,
-            AssetType::Model,
-            AssetType::Audio,
-            AssetType::Video,
-            AssetType::Animation,
-            AssetType::Material,
-            AssetType::Prefab,
-            AssetType::Scene,
-            AssetType::Script,
-            AssetType::Data,
-            AssetType::Other,
-        ] {
-            let class = badge_class(&t);
-            assert_eq!(
-                format!("{t:?}").to_lowercase(),
-                class,
-                "the class the report emits for {t:?} is not the one declared here"
-            );
+        // The report emits `.{key}` as each badge's class, so a variant with no
+        // matching CSS rule ships as an unstyled badge.
+        for t in AssetType::ALL {
+            let class = t.key();
             assert!(
                 REPORT_STYLE.contains(&format!(".{class} {{")),
                 "the report stylesheet has no rule for the {class} badge"

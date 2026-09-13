@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, AlertTriangle, ChevronRight, Info, FileWarning, Layers, Download, Trash2, Wand2 } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../lib/commands";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useProjectStore } from "../stores/projectStore";
@@ -473,7 +473,7 @@ export function IssueList({ result, stale, isAnalyzing, onAnalyze, onLocate }: I
       filterName: "JSON",
       extensions: ["json"],
       fetchContents: () =>
-        invoke<string>("export_issues_to_json", { projectId: activeProjectId }),
+        call<string>("export_issues_to_json", { projectId: activeProjectId }),
     });
   };
 

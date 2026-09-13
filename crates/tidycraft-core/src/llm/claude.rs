@@ -146,6 +146,40 @@ fn extract_response(parsed: AnthropicResponse) -> Result<TagResponse, LLMError> 
 
 // ---- HTTP call ----
 
+/// The one Anthropic round trip — client, send, timeout and status mapping,
+/// JSON decode — shared by the tagging and the learning path.
+async fn post(api_key: &str, body: &AnthropicRequest<'_>) -> Result<AnthropicResponse, LLMError> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| LLMError::Network(e.to_string()))?;
+    let resp = client
+        .post(ENDPOINT)
+        .header("x-api-key", api_key)
+        .header("anthropic-version", API_VERSION)
+        .header("content-type", "application/json")
+        .json(body)
+        .send()
+        .await
+        .map_err(super::map_cloud_send_error)?;
+    let status = resp.status();
+    if !status.is_success() {
+        // Best-effort: capture the body for diagnostic value, but don't
+        // surface raw provider errors to the user — map to our enum
+        // categories so the UI can show a localized message.
+        let body_preview = resp.text().await.unwrap_or_default();
+        return Err(super::map_cloud_http_status(
+            "claude",
+            "Anthropic",
+            status.as_u16(),
+            &body_preview,
+        ));
+    }
+    resp.json()
+        .await
+        .map_err(|e| LLMError::ParseError(format!("Anthropic JSON: {e}")))
+}
+
 async fn call_anthropic(
     api_key: &str,
     model: &str,
@@ -165,47 +199,7 @@ async fn call_anthropic(
             ),
         }],
     };
-
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
-        .build()
-        .map_err(|e| LLMError::Network(e.to_string()))?;
-
-    let resp = client
-        .post(ENDPOINT)
-        .header("x-api-key", api_key)
-        .header("anthropic-version", API_VERSION)
-        .header("content-type", "application/json")
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| {
-            if e.is_timeout() {
-                LLMError::Network("request timed out".into())
-            } else {
-                LLMError::Network(e.to_string())
-            }
-        })?;
-
-    let status = resp.status();
-    if !status.is_success() {
-        // Best-effort: capture the body for diagnostic value, but don't
-        // surface raw provider errors to the user — map to our enum
-        // categories so the UI can show a localized message.
-        let body_preview = resp.text().await.unwrap_or_default();
-        return Err(super::map_cloud_http_status(
-            "claude",
-            "Anthropic",
-            status.as_u16(),
-            &body_preview,
-        ));
-    }
-
-    let parsed: AnthropicResponse = resp
-        .json()
-        .await
-        .map_err(|e| LLMError::ParseError(format!("Anthropic JSON: {e}")))?;
-    extract_response(parsed)
+    extract_response(post(api_key, &body).await?)
 }
 
 #[async_trait]
@@ -260,8 +254,7 @@ impl LLMProvider for ClaudeProvider {
     }
 }
 
-/// Text-only chat, used by `learn_project`. Mirrors `call_anthropic`'s
-/// scaffolding (client, headers, error mapping) with a simpler body.
+/// Text-only chat, used by `learn_project`: the same `post`, a text-only body.
 async fn send_text_chat(
     api_key: &str,
     model: &str,
@@ -279,43 +272,10 @@ async fn send_text_chat(
             }],
         }],
     };
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
-        .build()
-        .map_err(|e| LLMError::Network(e.to_string()))?;
-    let resp = client
-        .post(ENDPOINT)
-        .header("x-api-key", api_key)
-        .header("anthropic-version", API_VERSION)
-        .header("content-type", "application/json")
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| {
-            if e.is_timeout() {
-                LLMError::Network("request timed out".into())
-            } else {
-                LLMError::Network(e.to_string())
-            }
-        })?;
-    let status = resp.status();
-    if !status.is_success() {
-        let body_preview = resp.text().await.unwrap_or_default();
-        return Err(super::map_cloud_http_status(
-            "claude",
-            "Anthropic",
-            status.as_u16(),
-            &body_preview,
-        ));
-    }
-    let parsed: AnthropicResponse = resp
-        .json()
-        .await
-        .map_err(|e| LLMError::ParseError(format!("Anthropic JSON: {e}")))?;
     // Shared extractor: also turns a max_tokens cutoff into `Truncated` —
     // learning's single big reply is the likeliest place to hit the cap
     // now that tag batches are chunked.
-    extract_text_response(parsed)
+    extract_text_response(post(api_key, &body).await?)
 }
 
 #[cfg(test)]

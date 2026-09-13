@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../lib/commands";
 import { Sparkles, X, Trash2, Check, AlertTriangle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ModalShell } from "./ModalShell";
@@ -137,7 +137,7 @@ export function LearnReviewPanel() {
         console.warn("[LearnReview] save aborted: project switched mid-run");
         return;
       }
-      await invoke("save_ai_rules", { projectId: activeProjectId, rules });
+      await call("save_ai_rules", { projectId: activeProjectId, rules });
       setSavedNotice(
         createdCount > 0
           ? t("learnReview.savedNoticeWithTags", { count: createdCount })

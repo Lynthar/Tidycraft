@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "./commands";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { basename, dirname } from "./pathUtils";
 
@@ -10,7 +10,7 @@ export async function buildTextureUrlResolver(
 ): Promise<(url: string) => string> {
   let siblings: Record<string, string> = {};
   try {
-    siblings = await invoke<Record<string, string>>("resolve_texture_siblings", {
+    siblings = await call<Record<string, string>>("resolve_texture_siblings", {
       modelPath,
     });
   } catch (err) {

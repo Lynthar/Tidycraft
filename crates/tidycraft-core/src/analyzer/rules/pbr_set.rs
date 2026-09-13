@@ -9,7 +9,7 @@ use crate::analyzer::{issue_args, AnalysisResult, Issue, Severity};
 use crate::scanner::{AssetInfo, AssetType};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PbrSetConfig {
     #[serde(default = "default_enabled")]
@@ -49,27 +49,38 @@ fn default_required() -> Vec<String> {
     vec_str(&["basecolor", "normal"])
 }
 
+/// `(role key, suffix aliases)` — the one table the default config, the shipped
+/// template and tag-suggest's channel detection all read. The first alias is the
+/// canonical spelling and doubles as the display label.
+pub const PBR_CHANNELS: &[(&str, &[&str])] = &[
+    ("basecolor", &["BaseColor", "Albedo", "Diffuse", "Color"]),
+    ("normal", &["Normal", "Norm"]),
+    ("roughness", &["Roughness", "Rough"]),
+    ("metallic", &["Metallic", "Metal"]),
+    ("ao", &["AO", "AmbientOcclusion"]),
+    ("emissive", &["Emissive", "Emission"]),
+    ("height", &["Height", "Disp"]),
+];
+
+/// `(packed suffix, role keys it satisfies)`; the suffix is also its label.
+pub const PBR_PACKED: &[(&str, &[&str])] = &[
+    ("ORM", &["ao", "roughness", "metallic"]),
+    ("MRA", &["metallic", "roughness", "ao"]),
+    ("RMA", &["roughness", "metallic", "ao"]),
+];
+
 fn default_channels() -> HashMap<String, Vec<String>> {
-    let mut m = HashMap::new();
-    m.insert(
-        "basecolor".into(),
-        vec_str(&["BaseColor", "Albedo", "Diffuse", "Color"]),
-    );
-    m.insert("normal".into(), vec_str(&["Normal", "Norm"]));
-    m.insert("roughness".into(), vec_str(&["Roughness", "Rough"]));
-    m.insert("metallic".into(), vec_str(&["Metallic", "Metal"]));
-    m.insert("ao".into(), vec_str(&["AO", "AmbientOcclusion"]));
-    m.insert("emissive".into(), vec_str(&["Emissive", "Emission"]));
-    m.insert("height".into(), vec_str(&["Height", "Disp"]));
-    m
+    PBR_CHANNELS
+        .iter()
+        .map(|(role, aliases)| (role.to_string(), vec_str(aliases)))
+        .collect()
 }
 
 fn default_packed() -> HashMap<String, Vec<String>> {
-    let mut m = HashMap::new();
-    m.insert("ORM".into(), vec_str(&["ao", "roughness", "metallic"]));
-    m.insert("MRA".into(), vec_str(&["metallic", "roughness", "ao"]));
-    m.insert("RMA".into(), vec_str(&["roughness", "metallic", "ao"]));
-    m
+    PBR_PACKED
+        .iter()
+        .map(|(key, roles)| (key.to_string(), vec_str(roles)))
+        .collect()
 }
 
 fn vec_str(s: &[&str]) -> Vec<String> {

@@ -177,6 +177,39 @@ fn extract_response(parsed: OpenAIResponse) -> Result<TagResponse, LLMError> {
 
 // ---- HTTP call ----
 
+/// The one OpenAI round trip — client, send, timeout and status mapping, JSON
+/// decode — shared by the tagging and the learning path.
+async fn post(
+    api_key: &str,
+    endpoint: &str,
+    body: &OpenAIRequest<'_>,
+) -> Result<OpenAIResponse, LLMError> {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| LLMError::Network(e.to_string()))?;
+    let resp = client
+        .post(endpoint)
+        .bearer_auth(api_key)
+        .json(body)
+        .send()
+        .await
+        .map_err(super::map_cloud_send_error)?;
+    let status = resp.status();
+    if !status.is_success() {
+        let body_preview = resp.text().await.unwrap_or_default();
+        return Err(super::map_cloud_http_status(
+            "openai",
+            "OpenAI",
+            status.as_u16(),
+            &body_preview,
+        ));
+    }
+    resp.json()
+        .await
+        .map_err(|e| LLMError::ParseError(format!("OpenAI JSON: {e}")))
+}
+
 async fn call_openai(
     api_key: &str,
     model: &str,
@@ -204,42 +237,7 @@ async fn call_openai(
             kind: "json_object",
         },
     };
-
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
-        .build()
-        .map_err(|e| LLMError::Network(e.to_string()))?;
-
-    let resp = client
-        .post(endpoint)
-        .bearer_auth(api_key)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| {
-            if e.is_timeout() {
-                LLMError::Network("request timed out".into())
-            } else {
-                LLMError::Network(e.to_string())
-            }
-        })?;
-
-    let status = resp.status();
-    if !status.is_success() {
-        let body_preview = resp.text().await.unwrap_or_default();
-        return Err(super::map_cloud_http_status(
-            "openai",
-            "OpenAI",
-            status.as_u16(),
-            &body_preview,
-        ));
-    }
-
-    let parsed: OpenAIResponse = resp
-        .json()
-        .await
-        .map_err(|e| LLMError::ParseError(format!("OpenAI JSON: {e}")))?;
-    extract_response(parsed)
+    extract_response(post(api_key, endpoint, &body).await?)
 }
 
 #[async_trait]
@@ -313,8 +311,7 @@ impl LLMProvider for OpenAIProvider {
     }
 }
 
-/// Text-only chat. Same scaffolding as `call_openai` but the user
-/// message is a plain string instead of a content-block array.
+/// Text-only chat: the same `post`, with the user message as a plain string.
 /// `response_format: json_object` keeps the model's output JSON-clean.
 async fn send_text_chat(
     api_key: &str,
@@ -339,40 +336,9 @@ async fn send_text_chat(
             kind: "json_object",
         },
     };
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
-        .build()
-        .map_err(|e| LLMError::Network(e.to_string()))?;
-    let resp = client
-        .post(endpoint)
-        .bearer_auth(api_key)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| {
-            if e.is_timeout() {
-                LLMError::Network("request timed out".into())
-            } else {
-                LLMError::Network(e.to_string())
-            }
-        })?;
-    let status = resp.status();
-    if !status.is_success() {
-        let body_preview = resp.text().await.unwrap_or_default();
-        return Err(super::map_cloud_http_status(
-            "openai",
-            "OpenAI",
-            status.as_u16(),
-            &body_preview,
-        ));
-    }
-    let parsed: OpenAIResponse = resp
-        .json()
-        .await
-        .map_err(|e| LLMError::ParseError(format!("OpenAI JSON: {e}")))?;
     // Shared extractor: also turns a finish_reason="length" cutoff into
     // `Truncated` for the learning path.
-    extract_text_response(parsed)
+    extract_text_response(post(api_key, endpoint, &body).await?)
 }
 
 #[cfg(test)]

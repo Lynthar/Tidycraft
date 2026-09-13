@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { Image, Edit3, X, List, LayoutGrid, Move, Trash2, Sparkles, FolderOpen } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../lib/commands";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useProjectStore } from "../stores/projectStore";
 import { useShallow } from "zustand/react/shallow";
@@ -271,7 +271,7 @@ export function AssetList() {
   const handleRevealInFileManager = useCallback(async () => {
     if (contextMenu.asset) {
       try {
-        await invoke("show_in_file_manager", { path: contextMenu.asset.path });
+        await call("show_in_file_manager", { path: contextMenu.asset.path });
       } catch (err) {
         console.error("Failed to show in file manager:", err);
       }
@@ -284,7 +284,7 @@ export function AssetList() {
   const openWithDefaultApp = useCallback(
     async (path: string) => {
       try {
-        await invoke("open_with_default_app", { path });
+        await call("open_with_default_app", { path });
       } catch (err) {
         pushToast({
           kind: "error",
@@ -353,7 +353,7 @@ export function AssetList() {
     const targets = targetPathsFromContext();
     if (!targets) return;
     try {
-      const result = await invoke<FileOpResult>("duplicate_assets", {
+      const result = await call<FileOpResult>("duplicate_assets", {
         paths: targets,
       });
       if (result.errors.length > 0) {

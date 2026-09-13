@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { X, AlertCircle, AlertTriangle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ModalShell } from "./ModalShell";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../lib/commands";
 import { useProjectStore } from "../stores/projectStore";
 
 interface RenameDialogProps {
@@ -41,7 +41,7 @@ export function RenameDialog({
     let cancelled = false;
     (async () => {
       try {
-        const map = await invoke<Record<string, string[]>>(
+        const map = await call<Record<string, string[]>>(
           "godot_asset_references",
           { projectId: activeProjectId, paths: [assetPath] }
         );
@@ -101,7 +101,7 @@ export function RenameDialog({
     }
 
     try {
-      await invoke("rename_file", {
+      await call("rename_file", {
         projectId: activeProjectId,
         oldPath: assetPath,
         newName: trimmedName,

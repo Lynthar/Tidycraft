@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../lib/commands";
 import { Sparkles, Loader2, X, AlertTriangle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ModalShell } from "./ModalShell";
@@ -59,7 +59,7 @@ export function LearnSetupModal() {
       return;
     }
     if (!activeProjectId) return;
-    invoke<ProjectMeta>("read_project_meta", { projectId: activeProjectId })
+    call<ProjectMeta>("read_project_meta", { projectId: activeProjectId })
       .then((m) => setMeta(m))
       .catch((e) => console.warn("[LearnSetup] read_project_meta failed:", e));
   }, [open, activeProjectId]);
@@ -75,7 +75,7 @@ export function LearnSetupModal() {
     // previous parameters looking current.
     setCost(null);
     setCostError(false);
-    invoke<CostEstimate>("estimate_learning_cost", {
+    call<CostEstimate>("estimate_learning_cost", {
       projectId: activeProjectId,
       provider,
       model: config.model,
@@ -105,13 +105,13 @@ export function LearnSetupModal() {
       /// Persist theme and goal first so the learning call reads the same
       /// tidycraft.toml the user just edited. Always writes, keeping "Continue =
       /// save + run" one mental model. A failure here aborts the run.
-      await invoke("write_project_meta", {
+      await call("write_project_meta", {
         projectId: activeProjectId,
         theme: meta.theme ?? "",
         goal: meta.goal ?? "",
       });
 
-      const result = await invoke<AiLearningResult>("learn_project_conventions", {
+      const result = await call<AiLearningResult>("learn_project_conventions", {
         projectId: activeProjectId,
         provider,
         model: config.model,

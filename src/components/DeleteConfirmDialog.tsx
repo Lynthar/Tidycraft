@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Trash2, AlertCircle, X } from "lucide-react";
 import { ModalShell } from "./ModalShell";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../lib/commands";
 import { cn } from "../lib/utils";
 import { basename } from "../lib/pathUtils";
 import type { DeleteResult } from "../types/asset";
@@ -57,7 +57,7 @@ export function DeleteConfirmDialog({
   const handleConfirm = async () => {
     setIsDeleting(true);
     try {
-      const result = await invoke<DeleteResult>("delete_assets", { paths });
+      const result = await call<DeleteResult>("delete_assets", { paths });
       if (result.errors.length > 0) {
         // Show errors inline; don't dismiss. User sees what failed and can close.
         setErrors(result.errors);

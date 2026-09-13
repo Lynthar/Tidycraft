@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../lib/commands";
 import { useTranslation } from "react-i18next";
 import { X, RefreshCw, Check, AlertCircle, AlertTriangle, Wand2 } from "lucide-react";
 import { ModalShell } from "./ModalShell";
@@ -61,10 +61,10 @@ export function NamingFixDialog({ isOpen, onClose, scopePaths, onComplete }: Nam
     setExcluded(new Set());
     (async () => {
       try {
-        const config = await invoke<string | null>("read_project_config", {
+        const config = await call<string | null>("read_project_config", {
           projectId: activeProjectId,
         });
-        const all = await invoke<NamingFixPreview[]>("preview_naming_fixes", {
+        const all = await call<NamingFixPreview[]>("preview_naming_fixes", {
           projectId: activeProjectId,
           configToml: config ?? null,
         });
@@ -95,7 +95,7 @@ export function NamingFixDialog({ isOpen, onClose, scopePaths, onComplete }: Nam
     let cancelled = false;
     (async () => {
       try {
-        const map = await invoke<Record<string, string[]>>("godot_asset_references", {
+        const map = await call<Record<string, string[]>>("godot_asset_references", {
           projectId: activeProjectId,
           paths: previews.map((p) => p.path),
         });
@@ -166,7 +166,7 @@ export function NamingFixDialog({ isOpen, onClose, scopePaths, onComplete }: Nam
         path: p.path,
         new_name: effectiveName(p),
       }));
-      const res = await invoke<BatchRenameResult>("apply_naming_fixes", {
+      const res = await call<BatchRenameResult>("apply_naming_fixes", {
         projectId: activeProjectId,
         fixes,
       });

@@ -1,5 +1,5 @@
 import { useEffect, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../lib/commands";
 import { useProjectStore } from "../stores/projectStore";
 import { useSelectionStore } from "../stores/selectionStore";
 import { useUiStore, isBlockingOverlayOpen } from "../stores/uiStore";
@@ -20,7 +20,7 @@ export function useKeyboardShortcuts() {
       // `event.code`, since Option+I on macOS emits the dead-key "ˆ".
       if (key === "F12" || (modKey && altKey && event.code === "KeyI")) {
         event.preventDefault();
-        invoke("toggle_devtools").catch((e) =>
+        call("toggle_devtools").catch((e) =>
           console.error("toggle_devtools failed", e)
         );
         return;

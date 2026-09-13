@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { call } from "../lib/commands";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import {
   Image,
@@ -161,7 +162,7 @@ export function AssetPreview() {
     const loadThumbnail = async () => {
       setLoadingThumbnail(true);
       try {
-        const base64 = await invoke<string>("get_thumbnail", {
+        const base64 = await call<string>("get_thumbnail", {
           path: settledAsset.path,
           size: 256,
         });
@@ -205,7 +206,7 @@ export function AssetPreview() {
     let cancelled = false;
     (async () => {
       try {
-        const info = await invoke<UnityFileInfo | null>("get_unity_file_info", {
+        const info = await call<UnityFileInfo | null>("get_unity_file_info", {
           path: settledAsset.path,
         });
         if (!cancelled) setUnityFileInfo(info);
@@ -245,12 +246,12 @@ export function AssetPreview() {
     if (!selectedAsset) return;
     try {
       if (mappedEditorPath) {
-        await invoke("open_in_editor", {
+        await call("open_in_editor", {
           path: selectedAsset.path,
           editor: mappedEditorPath,
         });
       } else {
-        await invoke("open_with_default_app", { path: selectedAsset.path });
+        await call("open_with_default_app", { path: selectedAsset.path });
       }
     } catch (err) {
       console.error("Failed to open:", err);
@@ -263,7 +264,7 @@ export function AssetPreview() {
   const revealInFileManager = async () => {
     if (!selectedAsset) return;
     try {
-      await invoke("show_in_file_manager", { path: selectedAsset.path });
+      await call("show_in_file_manager", { path: selectedAsset.path });
     } catch (err) {
       console.error("Failed to show in file manager:", err);
       setErrorMsg(

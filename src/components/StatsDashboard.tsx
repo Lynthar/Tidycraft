@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../lib/commands";
 import { useTranslation } from "react-i18next";
 import { useProjectStore } from "../stores/projectStore";
 import { useThemeStore } from "../stores/themeStore";
@@ -160,19 +160,19 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
     (async () => {
       try {
         if (projectType === "unity") {
-          const info = await invoke<UnityProjectInfo | null>(
+          const info = await call<UnityProjectInfo | null>(
             "get_unity_project_info",
             { rootPath }
           );
           if (!cancelled) setEngineInfo(info ? { kind: "unity", info } : null);
         } else if (projectType === "godot") {
-          const info = await invoke<GodotProjectInfo | null>(
+          const info = await call<GodotProjectInfo | null>(
             "get_godot_project_info",
             { rootPath }
           );
           if (!cancelled) setEngineInfo(info ? { kind: "godot", info } : null);
         } else if (projectType === "unreal") {
-          const info = await invoke<UnrealProjectInfo | null>(
+          const info = await call<UnrealProjectInfo | null>(
             "get_unreal_project_info",
             { rootPath }
           );
@@ -196,7 +196,7 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
     setUnusedLoading(true);
     setUnusedError(null);
     try {
-      const result = await invoke<{
+      const result = await call<{
         unused: string[];
         unreadable_sources: number;
       }>("find_unused_assets", { projectId: pid });
@@ -233,7 +233,7 @@ export function StatsDashboard({ issueCount = 0, passCount = 0, onExportJson, on
     const loadStats = async () => {
       try {
         setLoading(true);
-        const result = await invoke<ProjectStats>("get_project_stats", {
+        const result = await call<ProjectStats>("get_project_stats", {
           projectId: activeProjectId,
         });
         if (cancelled) return;

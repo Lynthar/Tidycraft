@@ -144,22 +144,27 @@ fn build_messages(
 
 // ---- Response → TagResponse ----
 
-fn extract_response(parsed: OllamaResponse) -> Result<TagResponse, LLMError> {
+/// Pull the text reply and usage out of a parsed response.
+fn extract_text_response(parsed: OllamaResponse) -> Result<(String, Usage), LLMError> {
     // Checked before parsing, like claude.rs does with `stop_reason`: a cut-off
     // reply is invalid JSON, and parsing first would send the user looking at the
     // model instead of at the request size.
     if parsed.done_reason.as_deref() == Some("length") {
         return Err(LLMError::Truncated);
     }
-    let suggestions = super::parse_suggestions(&parsed.message.content)?;
-    Ok(TagResponse {
-        suggestions,
-        usage: Usage {
-            input_tokens: parsed.prompt_eval_count,
-            output_tokens: parsed.eval_count,
-            cached: false,
-        },
-    })
+    let usage = Usage {
+        input_tokens: parsed.prompt_eval_count,
+        output_tokens: parsed.eval_count,
+        cached: false,
+    };
+    Ok((parsed.message.content, usage))
+}
+
+/// Tagging-path wrapper: text reply → parsed suggestions.
+fn extract_response(parsed: OllamaResponse) -> Result<TagResponse, LLMError> {
+    let (text, usage) = extract_text_response(parsed)?;
+    let suggestions = super::parse_suggestions(&text)?;
+    Ok(TagResponse { suggestions, usage })
 }
 
 // ---- HTTP call ----
@@ -179,17 +184,51 @@ fn map_http_status(status: u16, url: &str, model: &str, body_preview: &str) -> L
     }
 }
 
+/// The one Ollama round trip, shared by the tagging and the learning path.
+/// `endpoint` is the base URL ("http://host:port"): `/api/chat` is always
+/// appended, after trimming a copy the user may already have included.
+async fn post(endpoint: &str, body: &OllamaRequest<'_>) -> Result<OllamaResponse, LLMError> {
+    let base = endpoint.trim_end_matches('/').trim_end_matches("/api/chat");
+    let url = format!("{base}/api/chat");
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| LLMError::Network(e.to_string()))?;
+    let resp = client.post(&url).json(body).send().await.map_err(|e| {
+        if e.is_timeout() {
+            LLMError::Network(format!(
+                "Ollama request timed out after {REQUEST_TIMEOUT_SECS}s"
+            ))
+        } else if e.is_connect() {
+            // Most user-facing failure: Ollama isn't running. Surface
+            // the endpoint we tried so the user can verify with
+            // `ollama serve` or check their reverse proxy.
+            LLMError::Network(format!("Could not reach Ollama at {url} ({e})"))
+        } else {
+            LLMError::Network(e.to_string())
+        }
+    })?;
+    let status = resp.status();
+    if !status.is_success() {
+        let body_preview = resp.text().await.unwrap_or_default();
+        return Err(map_http_status(
+            status.as_u16(),
+            &url,
+            body.model,
+            &body_preview,
+        ));
+    }
+    resp.json()
+        .await
+        .map_err(|e| LLMError::ParseError(format!("Ollama JSON: {e}")))
+}
+
 async fn call_ollama(
     endpoint: &str,
     model: &str,
     request: TagRequest,
 ) -> Result<TagResponse, LLMError> {
-    // Endpoint comes in as base URL ("http://host:port"); we always
-    // append the chat path. If the user already included `/api/chat`
-    // we still trim and re-append to keep the joining unambiguous.
-    let base = endpoint.trim_end_matches('/').trim_end_matches("/api/chat");
-    let url = format!("{base}/api/chat");
-
     let messages = build_messages(
         &request.assets,
         request.project_ctx.as_ref(),
@@ -207,38 +246,7 @@ async fn call_ollama(
             num_ctx: num_ctx_for(prompt_chars, image_count),
         },
     };
-
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
-        .build()
-        .map_err(|e| LLMError::Network(e.to_string()))?;
-
-    let resp = client.post(&url).json(&body).send().await.map_err(|e| {
-        if e.is_timeout() {
-            LLMError::Network(format!(
-                "Ollama request timed out after {REQUEST_TIMEOUT_SECS}s"
-            ))
-        } else if e.is_connect() {
-            // Most user-facing failure: Ollama isn't running. Surface
-            // the endpoint we tried so the user can verify with
-            // `ollama serve` or check their reverse proxy.
-            LLMError::Network(format!("Could not reach Ollama at {url} ({e})"))
-        } else {
-            LLMError::Network(e.to_string())
-        }
-    })?;
-
-    let status = resp.status();
-    if !status.is_success() {
-        let body_preview = resp.text().await.unwrap_or_default();
-        return Err(map_http_status(status.as_u16(), &url, model, &body_preview));
-    }
-
-    let parsed: OllamaResponse = resp
-        .json()
-        .await
-        .map_err(|e| LLMError::ParseError(format!("Ollama JSON: {e}")))?;
-    extract_response(parsed)
+    extract_response(post(endpoint, &body).await?)
 }
 
 #[async_trait]
@@ -293,17 +301,14 @@ impl LLMProvider for OllamaProvider {
     }
 }
 
-/// Text-only chat for learning mode. Same scaffolding as `call_ollama`
-/// but without the `images` array on the user message.
+/// Text-only chat for learning mode: the same `post`, no `images` on the user
+/// message.
 async fn send_text_chat(
     endpoint: &str,
     model: &str,
     system: &str,
     user: &str,
 ) -> Result<(String, Usage), LLMError> {
-    let base = endpoint.trim_end_matches('/').trim_end_matches("/api/chat");
-    let url = format!("{base}/api/chat");
-
     let body = OllamaRequest {
         model,
         options: OllamaOptions {
@@ -325,43 +330,7 @@ async fn send_text_chat(
         stream: false,
         format: "json",
     };
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
-        .build()
-        .map_err(|e| LLMError::Network(e.to_string()))?;
-    let resp = client.post(&url).json(&body).send().await.map_err(|e| {
-        if e.is_timeout() {
-            LLMError::Network(format!(
-                "Ollama request timed out after {REQUEST_TIMEOUT_SECS}s"
-            ))
-        } else if e.is_connect() {
-            LLMError::Network(format!("Could not reach Ollama at {url} ({e})"))
-        } else {
-            LLMError::Network(e.to_string())
-        }
-    })?;
-    let status = resp.status();
-    if !status.is_success() {
-        let body_preview = resp.text().await.unwrap_or_default();
-        return Err(map_http_status(status.as_u16(), &url, model, &body_preview));
-    }
-    let parsed: OllamaResponse = resp
-        .json()
-        .await
-        .map_err(|e| LLMError::ParseError(format!("Ollama JSON: {e}")))?;
-    // Same check as the tagging path — learning's single large reply is the
-    // one most likely to actually hit the limit.
-    if parsed.done_reason.as_deref() == Some("length") {
-        return Err(LLMError::Truncated);
-    }
-    Ok((
-        parsed.message.content,
-        Usage {
-            input_tokens: parsed.prompt_eval_count,
-            output_tokens: parsed.eval_count,
-            cached: false,
-        },
-    ))
+    extract_text_response(post(endpoint, &body).await?)
 }
 
 #[cfg(test)]

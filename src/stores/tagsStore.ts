@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../lib/commands";
 import type { Tag, AssetTagsMap } from "../types/asset";
 import {
   useProjectStore,
@@ -72,8 +72,8 @@ export const useTagsStore = create<TagsState>((set, get) => ({
     set({ isLoading: true });
     try {
       const [tags, assetTags] = await Promise.all([
-        invoke<Tag[]>("get_all_tags", { projectId }),
-        invoke<AssetTagsMap>("get_all_asset_tags", { projectId }),
+        call<Tag[]>("get_all_tags", { projectId }),
+        call<AssetTagsMap>("get_all_asset_tags", { projectId }),
       ]);
       // Drop the result if the user switched projects mid-flight — otherwise a
       // slow response for project A lands after project B's load and overwrites
@@ -102,7 +102,7 @@ export const useTagsStore = create<TagsState>((set, get) => ({
     const projectId = activeProjectId();
     if (!projectId) return null;
     const tag = await tagWrite(() =>
-      invoke<Tag>("create_tag", { projectId, name, color })
+      call<Tag>("create_tag", { projectId, name, color })
     );
     if (!tag) return null;
     // The backend write targeted the snapshot projectId and stays valid, but the
@@ -128,7 +128,7 @@ export const useTagsStore = create<TagsState>((set, get) => ({
     if (description !== undefined) {
       payload.description = description ?? ""; // null → "" so the clear lands
     }
-    if ((await tagWrite(() => invoke<Tag>("update_tag", payload))) === null) return;
+    if ((await tagWrite(() => call<Tag>("update_tag", payload))) === null) return;
     if (activeProjectId() !== projectId) return; // mid-flight project switch — see createTag
     set((state) => ({
       tags: state.tags.map((t) =>
@@ -150,7 +150,7 @@ export const useTagsStore = create<TagsState>((set, get) => ({
   deleteTag: async (tagId: string) => {
     const projectId = activeProjectId();
     if (!projectId) return;
-    if ((await tagWrite(() => invoke("delete_tag", { projectId, tagId }))) === null) return;
+    if ((await tagWrite(() => call("delete_tag", { projectId, tagId }))) === null) return;
     if (activeProjectId() !== projectId) return; // mid-flight project switch — see createTag
     set((state) => {
       // Also prune the id from the active filters — a deleted tag left in an
@@ -175,7 +175,7 @@ export const useTagsStore = create<TagsState>((set, get) => ({
     if (!projectId) return;
     if (
       (await tagWrite(() =>
-        invoke("add_tag_to_asset", { projectId, assetPath, tagId })
+        call("add_tag_to_asset", { projectId, assetPath, tagId })
       )) === null
     )
       return;
@@ -200,7 +200,7 @@ export const useTagsStore = create<TagsState>((set, get) => ({
     if (!projectId) return;
     if (
       (await tagWrite(() =>
-        invoke("remove_tag_from_asset", { projectId, assetPath, tagId })
+        call("remove_tag_from_asset", { projectId, assetPath, tagId })
       )) === null
     )
       return;
@@ -219,7 +219,7 @@ export const useTagsStore = create<TagsState>((set, get) => ({
     if (!projectId) return;
     if (
       (await tagWrite(() =>
-        invoke("add_tag_to_assets", { projectId, assetPaths, tagId })
+        call("add_tag_to_assets", { projectId, assetPaths, tagId })
       )) === null
     )
       return;

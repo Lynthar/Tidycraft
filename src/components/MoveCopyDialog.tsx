@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ModalShell } from "./ModalShell";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../lib/commands";
 import { useProjectStore } from "../stores/projectStore";
 import { cn } from "../lib/utils";
 import { basename, dirname } from "../lib/pathUtils";
@@ -178,12 +178,12 @@ export function MoveCopyDialog({
     try {
       const result =
         mode === "move"
-          ? await invoke<FileOpResult>("move_assets", {
+          ? await call<FileOpResult>("move_assets", {
               projectId: activeProjectId,
               paths,
               targetDir: selectedPath,
             })
-          : await invoke<FileOpResult>("copy_assets", {
+          : await call<FileOpResult>("copy_assets", {
               paths,
               targetDir: selectedPath,
             });

@@ -6,6 +6,7 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+use crate::analyzer::rules::pbr_set::{PBR_CHANNELS, PBR_PACKED};
 use crate::scanner::{AssetType, ScanResult};
 
 #[derive(Debug, Clone, Serialize)]
@@ -111,31 +112,6 @@ const PATH_STOPLIST: &[&str] = &[
     "projects",
     "import",
     "imports",
-];
-
-/// PBR channel-role recognition, as `(canonical_role, alias)` pairs so several
-/// aliases map to one role. Strict suffix match after the LAST `_`. Single-letter
-/// suffixes are omitted — they collide too readily with non-PBR tokens.
-const KNOWN_CHANNEL_SUFFIXES: &[(&str, &str)] = &[
-    ("BaseColor", "BaseColor"),
-    ("BaseColor", "Albedo"),
-    ("BaseColor", "Diffuse"),
-    ("BaseColor", "Color"),
-    ("Normal", "Normal"),
-    ("Normal", "Norm"),
-    ("Roughness", "Roughness"),
-    ("Roughness", "Rough"),
-    ("Metallic", "Metallic"),
-    ("Metallic", "Metal"),
-    ("AO", "AO"),
-    ("AO", "AmbientOcclusion"),
-    ("Emissive", "Emissive"),
-    ("Emissive", "Emission"),
-    ("Height", "Height"),
-    ("Height", "Disp"),
-    ("ORM", "ORM"),
-    ("MRA", "MRA"),
-    ("RMA", "RMA"),
 ];
 
 /// Palette for suggested tag colors. Picked to look good in Forge Dark and
@@ -260,8 +236,8 @@ fn dimension_bucket(w: u32, h: u32) -> Option<u32> {
 }
 
 /// Detect a PBR channel role from a texture's filename stem. Strict `_<suffix>`
-/// match against `KNOWN_CHANNEL_SUFFIXES`, case-insensitive. Returns the canonical
-/// role label, already capitalized for direct display.
+/// match against the default `PBR_CHANNELS` / `PBR_PACKED` aliases, case-insensitive.
+/// Returns the canonical label, already capitalized for direct display.
 fn parse_channel(stem: &str) -> Option<&'static str> {
     let last_underscore = stem.rfind('_')?;
     let suffix = &stem[last_underscore + 1..];
@@ -269,12 +245,12 @@ fn parse_channel(stem: &str) -> Option<&'static str> {
         return None;
     }
     let suffix_lower = suffix.to_lowercase();
-    for (canonical, alias) in KNOWN_CHANNEL_SUFFIXES {
-        if alias.to_lowercase() == suffix_lower {
-            return Some(canonical);
-        }
-    }
-    None
+    let matches = |alias: &str| alias.to_lowercase() == suffix_lower;
+    PBR_CHANNELS
+        .iter()
+        .find(|(_, aliases)| aliases.iter().any(|a| matches(a)))
+        .map(|(_, aliases)| aliases[0])
+        .or_else(|| PBR_PACKED.iter().map(|(key, _)| *key).find(|k| matches(k)))
 }
 
 /// Capitalize the first byte (ASCII-safe; non-ASCII pass through unchanged).

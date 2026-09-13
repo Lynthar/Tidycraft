@@ -2,7 +2,7 @@
 /// in full before resizing, so a fast scroll would otherwise put hundreds of
 /// decodes in flight. A request still queued when its card unmounts is dropped.
 
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "./commands";
 
 /// Roughly three to four batches to fill a typical 20-card viewport, while
 /// leaving cores free for a scan or an analysis running alongside.
@@ -36,7 +36,7 @@ function pump(): void {
 
     next.sent = true;
     inFlight++;
-    invoke<string>("get_thumbnail", { path: next.path, size: next.size })
+    call<string>("get_thumbnail", { path: next.path, size: next.size })
       .then(next.resolve, next.reject)
       .finally(() => {
         inFlight--;

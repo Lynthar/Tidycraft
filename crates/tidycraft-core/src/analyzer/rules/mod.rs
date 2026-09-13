@@ -119,11 +119,12 @@ mod tests {
     }
 
     /// The template written into every new project has to survive the same
-    /// strictness. It is kept in sync with the `default_*` functions by hand, and
-    /// this is the only check of that.
+    /// strictness. Its `[pbr_set]` tables must equal the defaults built from
+    /// `PBR_CHANNELS` / `PBR_PACKED`; the other sections are still synced by hand.
     #[test]
     fn the_shipped_template_parses_under_strict_sections() {
-        RuleConfig::from_toml(config_template::DEFAULT_CONFIG_TEMPLATE)
+        let cfg = RuleConfig::from_toml(config_template::DEFAULT_CONFIG_TEMPLATE)
             .expect("the template we write into user projects must parse");
+        assert_eq!(cfg.pbr_set, pbr_set::PbrSetConfig::default());
     }
 }

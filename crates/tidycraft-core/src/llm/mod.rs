@@ -210,6 +210,16 @@ pub(crate) fn map_cloud_http_status(
     }
 }
 
+/// Map a cloud provider's failed send: a timeout gets one fixed message, anything
+/// else keeps reqwest's own text. Ollama's variant adds the endpoint it tried.
+pub(crate) fn map_cloud_send_error(e: reqwest::Error) -> LLMError {
+    if e.is_timeout() {
+        LLMError::Network("request timed out".into())
+    } else {
+        LLMError::Network(e.to_string())
+    }
+}
+
 // Tauri commands return `Result<T, String>`. The boundary conversion
 // lives here so providers can `?` LLMError up to the command without
 // each command re-mapping it.

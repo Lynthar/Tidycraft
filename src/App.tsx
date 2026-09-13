@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "./lib/commands";
 import { Group, Panel, Separator, useDefaultLayout, type PanelImperativeHandle } from "react-resizable-panels";
 import { Header } from "./components/Header";
 import { Sidebar } from "./components/Sidebar";
@@ -137,7 +137,7 @@ function App() {
       defaultName: "assets.json",
       filterName: "JSON",
       extensions: ["json"],
-      fetchContents: () => invoke<string>("export_to_json", { projectId: activeProjectId }),
+      fetchContents: () => call<string>("export_to_json", { projectId: activeProjectId }),
     });
   };
 
@@ -147,7 +147,7 @@ function App() {
       defaultName: "assets.csv",
       filterName: "CSV",
       extensions: ["csv"],
-      fetchContents: () => invoke<string>("export_to_csv", { projectId: activeProjectId }),
+      fetchContents: () => call<string>("export_to_csv", { projectId: activeProjectId }),
     });
   };
 
@@ -162,7 +162,7 @@ function App() {
       filterName: "HTML",
       extensions: ["html"],
       fetchContents: () =>
-        invoke<string>("export_to_html", {
+        call<string>("export_to_html", {
           projectId: activeProjectId,
           issueLimit: htmlReportIssueLimit,
           assetLimit: htmlReportAssetLimit,

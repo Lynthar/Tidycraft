@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { call } from "../lib/commands";
 import { Sparkles, AlertTriangle, Loader2, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ModalShell } from "./ModalShell";
@@ -97,7 +97,7 @@ export function AIAnalyzeModal() {
     // previous parameters looking current — Continue would price the wrong call.
     setCost(null);
     setCostError(false);
-    invoke<CostEstimate>("llm_estimate_cost", {
+    call<CostEstimate>("llm_estimate_cost", {
       projectId: activeProjectId ?? "",
       provider,
       model: config.model,
@@ -134,7 +134,7 @@ export function AIAnalyzeModal() {
     setRunning(true);
     setError(null);
     try {
-      const response = await invoke<AiTagResponse>("llm_suggest_tags", {
+      const response = await call<AiTagResponse>("llm_suggest_tags", {
         // Pass the active project's id so the backend can load this project's tag
         // system and `[project]` theme/goal as prompt context. An empty string
         // makes the backend fall back to no context.

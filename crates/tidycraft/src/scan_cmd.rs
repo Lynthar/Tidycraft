@@ -22,39 +22,6 @@ pub struct ScanArgs {
     pub max_assets: usize,
 }
 
-/// Keep in lockstep with `asset_type_name` below — the match is exhaustive, so
-/// a new `AssetType` variant fails compilation here rather than silently
-/// missing from `--types` validation.
-const KNOWN_TYPES: &[&str] = &[
-    "texture",
-    "model",
-    "audio",
-    "video",
-    "animation",
-    "material",
-    "prefab",
-    "scene",
-    "script",
-    "data",
-    "other",
-];
-
-fn asset_type_name(t: &AssetType) -> &'static str {
-    match t {
-        AssetType::Texture => "texture",
-        AssetType::Model => "model",
-        AssetType::Audio => "audio",
-        AssetType::Video => "video",
-        AssetType::Animation => "animation",
-        AssetType::Material => "material",
-        AssetType::Prefab => "prefab",
-        AssetType::Scene => "scene",
-        AssetType::Script => "script",
-        AssetType::Data => "data",
-        AssetType::Other => "other",
-    }
-}
-
 #[derive(serde::Serialize)]
 struct AssetOut<'a> {
     path: String,
@@ -105,10 +72,11 @@ pub fn run(args: ScanArgs) -> Result<ExitCode, CliError> {
             .filter(|s| !s.is_empty())
             .collect();
         for t in &set {
-            if !KNOWN_TYPES.contains(&t.as_str()) {
+            if !AssetType::ALL.iter().any(|k| k.key() == t) {
+                let known: Vec<&str> = AssetType::ALL.iter().map(AssetType::key).collect();
                 return Err(CliError::Config(format!(
                     "unknown asset type `{t}` — known: {}",
-                    KNOWN_TYPES.join(", ")
+                    known.join(", ")
                 )));
             }
         }
@@ -124,7 +92,7 @@ pub fn run(args: ScanArgs) -> Result<ExitCode, CliError> {
         .filter(|a| {
             requested
                 .as_ref()
-                .is_none_or(|set| set.contains(asset_type_name(&a.asset_type)))
+                .is_none_or(|set| set.contains(a.asset_type.key()))
         })
         .map(|a| AssetOut {
             path: util::rel_path(&root_str, &a.path),

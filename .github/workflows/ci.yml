@@ -90,6 +90,9 @@ jobs:
       - name: Frontend build (tsc + vite)
         run: pnpm build
 
+      - name: Frontend tests
+        run: pnpm test
+
       # Not just for the bundle: `tauri-build` validates `externalBin` while it
       # runs as src-tauri's build script, so a missing sidecar fails every cargo
       # command below — clippy and test included, long before anything is
