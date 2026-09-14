@@ -9,6 +9,9 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
+[lints]
+workspace = true
+
 [features]
 # Defaults keep `cargo test -p tidycraft-core` covering the full surface; a
 # consumer that only needs the check pipeline builds with

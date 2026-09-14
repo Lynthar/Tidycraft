@@ -2084,7 +2084,7 @@ fn rename_batch_on_disk(
         }
 
         match std::fs::rename(&path, &new_path) {
-            Ok(_) => {
+            Ok(()) => {
                 // Carry engine sidecars so renamed assets keep their identity (Unity GUID, Godot
                 // UID) and import settings. The rename already happened and is not rolled back, so a
                 // carry failure is reported, never raised — raising says a rename on disk did not happen.
@@ -2637,7 +2637,7 @@ fn commit_moves(
                 }
 
                 match std::fs::rename(src, &dst) {
-                    Ok(_) => {
+                    Ok(()) => {
                         // Carry engine sidecars so moved assets keep their identity
                         // (Unity GUID, Godot UID) and their import settings.
                         // Best-effort: no-op without a sidecar, logs on failure.
@@ -2856,7 +2856,7 @@ fn delete_assets(paths: Vec<String>) -> DeleteResult {
 
     for path in paths {
         match trash::delete(&path) {
-            Ok(_) => {
+            Ok(()) => {
                 // Trash the engine sidecars too, so a delete doesn't strand them.
                 // **Deliberately not reported as `SidecarNotCarried`** (the rename and move sites
                 // do): a sidecar whose asset is gone breaks no reference, and it is the half worth keeping.
@@ -3206,7 +3206,7 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_window_state::Builder::default().build())
-        .setup(|_app| {
+        .setup(|app| {
             // Thumbnail keys carry the source file's mtime, so an edited image
             // strands its old thumbnail permanently. Sweep once per launch,
             // off the main thread: it stats every file in the cache directory.
@@ -3214,14 +3214,16 @@ pub fn run() {
 
             // Debug builds auto-open the inspector; `open_devtools` only exists
             // under `debug_assertions` now that the `devtools` cargo feature is
-            // off. `_app` keeps release builds free of unused warnings.
+            // off. Release builds still have to use `app`, or `unused` fires.
             #[cfg(debug_assertions)]
             {
                 use tauri::Manager;
-                if let Some(window) = _app.get_webview_window("main") {
+                if let Some(window) = app.get_webview_window("main") {
                     window.open_devtools();
                 }
             }
+            #[cfg(not(debug_assertions))]
+            let _ = app;
             Ok(())
         })
         .invoke_handler(invoke_handler())

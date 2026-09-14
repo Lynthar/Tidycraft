@@ -225,10 +225,10 @@ fn dimension_bucket(w: u32, h: u32) -> Option<u32> {
     if max == 0 {
         return None;
     }
-    // Largest power of two <= max, via `leading_zeros`. The old
+    // Largest power of two <= max, via `ilog2`. The old
     // `while p.saturating_mul(2) <= max` loop spun forever at u32::MAX, which a
-    // corrupt DDS header can report. `max >= 1` here, so the shift is 0..=31.
-    let p: u32 = 1 << (31 - max.leading_zeros());
+    // corrupt DDS header can report. `max >= 1` here, so `ilog2` cannot panic.
+    let p: u32 = 1 << max.ilog2();
     if p < 256 {
         return None;
     }

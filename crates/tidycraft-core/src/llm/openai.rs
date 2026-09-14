@@ -480,7 +480,7 @@ mod tests {
         let blocks = build_user_content_blocks(&assets, None, &[], true);
         let url = match &blocks[0] {
             ContentBlock::ImageUrl { image_url } => image_url.url.clone(),
-            _ => panic!("expected ImageUrl as first block"),
+            ContentBlock::Text { .. } => panic!("expected ImageUrl as first block"),
         };
         assert!(url.starts_with("data:image/png;base64,"));
         assert!(url.contains("RAW_BYTES"));

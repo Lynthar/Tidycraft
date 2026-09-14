@@ -482,7 +482,9 @@ mod tests {
                 assert_eq!(pattern, "[unbalanced(");
                 assert!(!detail.is_empty(), "the compile error explains the fix");
             }
-            other => panic!("expected InvalidPattern, got {other:?}"),
+            other @ RuleWarning::RulesUnreadable { .. } => {
+                panic!("expected InvalidPattern, got {other:?}")
+            }
         }
     }
 

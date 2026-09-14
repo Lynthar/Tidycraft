@@ -400,7 +400,7 @@ pub(crate) mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        let when = FileTime::from_unix_time((now - secs_ago) as i64, 0);
+        let when = FileTime::from_unix_time(i64::try_from(now - secs_ago).unwrap(), 0);
         set_file_mtime(path, when).unwrap();
     }
 

@@ -588,7 +588,7 @@ fn parse_dds_metadata(path: &Path) -> Option<AssetMetadata> {
                 let mut dxgi = [0u8; 4];
                 std::io::Read::read_exact(&mut file, &mut dxgi)
                     .ok()
-                    .map(|_| {
+                    .map(|()| {
                         matches!(
                             u32::from_le_bytes(dxgi),
                             // block-compressed with alpha: BC2 / BC3 / BC7

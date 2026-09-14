@@ -81,10 +81,6 @@ impl TextureRule {
     pub fn new(config: TextureConfig) -> Self {
         Self { config }
     }
-
-    fn is_power_of_two(n: u32) -> bool {
-        n > 0 && (n & (n - 1)) == 0
-    }
 }
 
 impl Rule for TextureRule {
@@ -158,9 +154,7 @@ impl TextureRule {
     /// historical precedence order.
     fn check_dimensions(&self, asset: &AssetInfo, width: u32, height: u32) -> Option<Issue> {
         // Check POT
-        if self.config.require_pot
-            && (!Self::is_power_of_two(width) || !Self::is_power_of_two(height))
-        {
+        if self.config.require_pot && (!width.is_power_of_two() || !height.is_power_of_two()) {
             return Some(Issue {
                 rule_id: "texture.pot".to_string(),
                 rule_name: "Non-POT Texture".to_string(),

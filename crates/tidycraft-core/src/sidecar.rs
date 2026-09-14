@@ -238,7 +238,11 @@ mod tests {
             .unwrap()
             .filter_map(|e| e.ok())
             .map(|e| e.file_name().to_string_lossy().to_string())
-            .find(|n| n.ends_with(".meta"))
+            .find(|n| {
+                Path::new(n)
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("meta"))
+            })
             .expect("meta still present");
         // The stored spelling must be the new one, not the old.
         assert_eq!(carried, "Hero.png.meta");

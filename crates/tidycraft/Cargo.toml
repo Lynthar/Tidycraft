@@ -9,6 +9,9 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 # `version` alongside `path` because crates.io rejects a bare path dependency:
 # the published copy resolves by version, local builds still use the path.
