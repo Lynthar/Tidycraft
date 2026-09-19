@@ -4057,6 +4057,160 @@ mod tests {
         assert!(!dir.path().join("new.png").exists());
     }
 
+    /// Copy lands beside the target's files and leaves the source in place; a
+    /// same-name occupant is refused with a pointer at Duplicate.
+    #[test]
+    fn copy_assets_copies_into_the_target_and_refuses_an_occupied_name() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("hero.png");
+        std::fs::write(&src, "pixels").unwrap();
+        let dest = dir.path().join("dest");
+        std::fs::create_dir(&dest).unwrap();
+
+        let first = copy_assets(
+            vec![scanner::path_to_string(&src)],
+            scanner::path_to_string(&dest),
+        );
+        assert!(first.errors.is_empty(), "{:?}", first.errors);
+        assert_eq!(first.successes.len(), 1);
+        assert_eq!(
+            first.successes[0].new_path,
+            scanner::path_to_string(&dest.join("hero.png"))
+        );
+        assert_eq!(std::fs::read(dest.join("hero.png")).unwrap(), b"pixels");
+        assert!(src.exists(), "copy must leave the source in place");
+
+        let again = copy_assets(
+            vec![scanner::path_to_string(&src)],
+            scanner::path_to_string(&dest),
+        );
+        assert!(again.successes.is_empty());
+        assert_eq!(again.errors.len(), 1);
+        assert!(
+            again.errors[0].message.contains("use Duplicate"),
+            "{:?}",
+            again.errors
+        );
+    }
+
+    /// A target that is not a directory fails the whole batch with one error
+    /// naming the target, for copy and move alike, and touches nothing.
+    #[test]
+    fn copy_and_move_report_a_missing_target_directory_once() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let a = dir.path().join("a.png");
+        let b = dir.path().join("b.png");
+        std::fs::write(&a, "a").unwrap();
+        std::fs::write(&b, "b").unwrap();
+        let missing = scanner::path_to_string(&dir.path().join("nope"));
+        let paths = vec![scanner::path_to_string(&a), scanner::path_to_string(&b)];
+
+        let copied = copy_assets(paths.clone(), missing.clone());
+        let moved = commit_moves(
+            "test_move_missing_target_never_registered",
+            paths,
+            missing.clone(),
+            &mut Vec::new(),
+        );
+        for result in [copied, moved] {
+            assert!(result.successes.is_empty());
+            assert_eq!(result.errors.len(), 1, "{:?}", result.errors);
+            assert_eq!(result.errors[0].path, missing);
+            assert_eq!(result.errors[0].message, "Target is not a directory");
+        }
+        assert!(a.exists() && b.exists());
+    }
+
+    /// Copy and duplicate leave engine sidecars alone: a copied asset must get a
+    /// fresh identity, so carrying the `.meta` would collide two GUIDs.
+    #[test]
+    fn copy_and_duplicate_do_not_carry_sidecars() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("hero.png");
+        let meta = dir.path().join("hero.png.meta");
+        std::fs::write(&src, "pixels").unwrap();
+        std::fs::write(&meta, "guid: 1").unwrap();
+        let dest = dir.path().join("dest");
+        std::fs::create_dir(&dest).unwrap();
+
+        let copied = copy_assets(
+            vec![scanner::path_to_string(&src)],
+            scanner::path_to_string(&dest),
+        );
+        assert!(copied.errors.is_empty(), "{:?}", copied.errors);
+        assert!(dest.join("hero.png").exists());
+        assert!(
+            !dest.join("hero.png.meta").exists(),
+            "copy carried the sidecar"
+        );
+
+        let duplicated = duplicate_assets(vec![scanner::path_to_string(&src)]);
+        assert!(duplicated.errors.is_empty(), "{:?}", duplicated.errors);
+        assert!(dir.path().join("hero copy.png").exists());
+        assert!(
+            !dir.path().join("hero copy.png.meta").exists(),
+            "duplicate carried the sidecar"
+        );
+        assert!(meta.exists(), "the original sidecar must stay put");
+    }
+
+    /// Duplicate suffixes each copy in the source's own directory and keeps going
+    /// past a directory; two duplicates of one file in a batch get distinct names.
+    #[test]
+    fn duplicate_assets_suffixes_copies_and_keeps_going_past_a_directory() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("rock.fbx");
+        std::fs::write(&src, "mesh").unwrap();
+        let sub = dir.path().join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        let src_key = scanner::path_to_string(&src);
+
+        let result = duplicate_assets(vec![
+            src_key.clone(),
+            scanner::path_to_string(&sub),
+            src_key.clone(),
+        ]);
+
+        let landed: Vec<&str> = result
+            .successes
+            .iter()
+            .map(|s| s.new_path.as_str())
+            .collect();
+        assert_eq!(
+            landed,
+            vec![
+                scanner::path_to_string(&dir.path().join("rock copy.fbx")),
+                scanner::path_to_string(&dir.path().join("rock copy 2.fbx")),
+            ]
+        );
+        for s in &result.successes {
+            assert_eq!(s.original_path, src_key);
+            assert_eq!(std::fs::read(&s.new_path).unwrap(), b"mesh");
+        }
+        assert_eq!(result.errors.len(), 1, "{:?}", result.errors);
+        assert_eq!(result.errors[0].path, scanner::path_to_string(&sub));
+        assert_eq!(result.errors[0].message, "Source is not a regular file");
+        assert!(src.exists());
+    }
+
+    /// A path that is not there is an error, not a silent success, and nothing
+    /// reaches the trash.
+    #[test]
+    fn delete_assets_reports_a_missing_file() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let missing = scanner::path_to_string(&dir.path().join("gone.png"));
+
+        let result = delete_assets(vec![missing.clone()]);
+        assert!(result.success_paths.is_empty());
+        assert_eq!(result.errors.len(), 1);
+        assert_eq!(result.errors[0].path, missing);
+    }
+
     /// A CSV cell whose text starts with `=`, `+`, `-` or `@` is a formula to
     /// Excel, LibreOffice and Sheets, and `=cmd|'/c calc'!A1` is the classic proof
     /// that it reaches the shell. Such file names are legal on disk.
