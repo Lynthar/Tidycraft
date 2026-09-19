@@ -1849,13 +1849,6 @@ pub struct RenamePreview {
     pub will_change: bool,
 }
 
-#[derive(Serialize)]
-pub struct BatchRenameResult {
-    pub success_count: usize,
-    pub error_count: usize,
-    pub errors: Vec<String>,
-}
-
 fn apply_rename_operation(name: &str, operation: &RenameOperation) -> String {
     match operation {
         // An empty `find` is a no-op, not `str::replace("")`, which would insert
@@ -1983,10 +1976,10 @@ fn execute_batch_rename(
     project_id: String,
     paths: Vec<String>,
     operation: RenameOperation,
-) -> BatchRenameResult {
+) -> FileOpResult {
     // Every path gets the SAME operation applied to derive its new file name;
-    // the shared heterogeneous engine below does validation, the rename, .meta
-    // carry, undo, and tag migration.
+    // the shared engine does validation, the rename, .meta carry, undo, and tag
+    // migration.
     let planned: Vec<(String, String)> = paths
         .into_iter()
         .map(|path| {
@@ -2000,7 +1993,7 @@ fn execute_batch_rename(
         .collect();
 
     let mut warnings = Vec::new();
-    let (_, result) = commit_renames(&project_id, planned, "Batch rename", &mut warnings);
+    let result = commit_renames(&project_id, planned, "Batch rename", &mut warnings);
     for w in &warnings {
         warning::emit_project_warning(&app, &project_id, w);
     }
@@ -2026,197 +2019,398 @@ fn push_sidecar_warning(
     failures.count = 0;
 }
 
-/// Rename a heterogeneous batch — each file to its own new *file name* within its
-/// current directory. Returns the successes as `(old_path, normalized new path)`.
-/// Free of project-state side effects; `commit_renames` layers undo and tags on.
-fn rename_batch_on_disk(
-    planned: Vec<(String, String)>,
-    // Out-param for the same reason `commit_renames` takes one: this half stays
-    // free of project state and of the AppHandle, but a sidecar that failed to
-    // follow its asset has to reach the command boundary that owns the emit.
-    sidecar_failures: &mut warning::SampledFailures,
-) -> (Vec<(String, String)>, BatchRenameResult) {
-    let mut success_count = 0;
-    let mut error_count = 0;
-    let mut errors = Vec::new();
-    let mut done: Vec<(String, String)> = Vec::new();
-
-    for (path, new_name) in planned {
-        let path_obj = Path::new(&path);
-        let name = match path_obj.file_name() {
-            Some(n) => n.to_string_lossy().to_string(),
-            None => {
-                errors.push(format!("Invalid path: {}", path));
-                error_count += 1;
-                continue;
-            }
-        };
-
-        if name == new_name {
-            continue; // no-op — nothing to rename
-        }
-
-        if let Err(e) = validate_new_name(&new_name) {
-            errors.push(format!("{}: {}", name, e));
-            error_count += 1;
-            continue;
-        }
-
-        let new_path = path_obj.with_file_name(&new_name);
-
-        // The target may `exists()`-resolve to the source file itself — a case-only
-        // change or an NFC/NFD variant — so only a genuinely different occupant is
-        // rejected. Identity is dev+inode (undo.rs), never the name.
-        if new_path.exists() && !fs_atomic::paths_are_same_file(path_obj, &new_path) {
-            errors.push(format!("Target already exists: {}", new_path.display()));
-            error_count += 1;
-            continue;
-        }
-
-        // Same guard for the engine sidecars, run BEFORE the primary rename: a
-        // stray sidecar squatting on the destination name would otherwise strand
-        // the asset's identity. See sidecar::rename_conflicts.
-        let sidecar_conflicts = sidecar::rename_conflicts(path_obj, &new_path);
-        if !sidecar_conflicts.is_empty() {
-            errors.push(format!("{}: {}", name, sidecar_conflicts.join("; ")));
-            error_count += 1;
-            continue;
-        }
-
-        match std::fs::rename(&path, &new_path) {
-            Ok(()) => {
-                // Carry engine sidecars so renamed assets keep their identity (Unity GUID, Godot
-                // UID) and import settings. The rename already happened and is not rolled back, so a
-                // carry failure is reported, never raised — raising says a rename on disk did not happen.
-                if let Err(e) = sidecar::carry_on_rename(path_obj, &new_path) {
-                    eprintln!(
-                        "[batch_rename] engine sidecar not carried for {}: {}",
-                        path, e
-                    );
-                    sidecar_failures.record(Some(&path), &e);
-                }
-                success_count += 1;
-                // Normalize to forward slashes so the undo record and the tag
-                // binding key off the same string the next scan produces.
-                done.push((path.clone(), scanner::path_to_string(&new_path)));
-            }
-            Err(e) => {
-                errors.push(format!("Failed to rename {}: {}", name, e));
-                error_count += 1;
-            }
-        }
-    }
-
-    (
-        done,
-        BatchRenameResult {
-            success_count,
-            error_count,
-            errors,
-        },
-    )
-}
-
 /// Files renamed per lock window. A file's disk rename and its tag migration must
 /// not be separated by a lock release, and holding the lock across a whole batch
 /// would freeze the project's other commands — so the batch is chunked.
 const RENAME_LOCK_CHUNK: usize = 100;
 
-/// Rename a heterogeneous batch on disk, migrating tag bindings as it goes, and —
-/// if anything moved — record ONE undo batch. `label` names the undo entry; the
-/// rename runs inside the project lock in `RENAME_LOCK_CHUNK` slices.
-///
-/// Returns the successes as `(old_path, normalized new path)` alongside the
-/// counts, so a caller that renames one file can answer with its new path
-/// instead of deriving it a second way.
-fn commit_renames(
-    project_id: &str,
-    planned: Vec<(String, String)>,
-    label: &str,
-    // Out-param rather than an AppHandle: the lock-window regression tests
-    // call this directly and have no Tauri app to hand it. The command
-    // boundary owns the emit.
-    warnings: &mut Vec<warning::ProjectWarning>,
-) -> (Vec<(String, String)>, BatchRenameResult) {
-    let total = planned.len();
-    let mut all_done: Vec<(String, String)> = Vec::new();
-    let mut result = BatchRenameResult {
-        success_count: 0,
-        error_count: 0,
-        errors: Vec::new(),
-    };
+/// Where one item of a batch goes. Existence guards run here, per item and in
+/// order, so two items resolving to one name collide inside the batch.
+enum Plan {
+    /// Nothing to do: neither a success nor a failure.
+    Skip,
+    Reject(String),
+    /// `fs::rename` to the path; engine sidecars are pre-flighted and carried.
+    Rename(std::path::PathBuf),
+    /// `fs::copy` to the path; sidecars stay, the copy must get a fresh identity.
+    Copy(std::path::PathBuf),
+    /// Send to the OS trash, sidecars after it.
+    Trash,
+}
 
-    // Accumulated across chunks so a batch reports one warning, not one per
-    // hundred files.
+/// The project a batch is bound to when it changes where existing assets live:
+/// the disk changes then run under the project lock in `RENAME_LOCK_CHUNK`
+/// slices, tags follow before the lock is released, and one undo batch lands.
+struct Relocation<'a> {
+    project_id: &'a str,
+    kind: undo::OperationType,
+    label: &'a str,
+}
+
+/// One kind of batch file operation. `run_file_ops` owns everything the five
+/// share — guards, sidecars, the lock window, tag migration, undo, reporting —
+/// so an operation only says where an item goes.
+trait FileOp {
+    type Item;
+    fn source(item: &Self::Item) -> &str;
+    fn plan(&self, item: &Self::Item, src: &Path) -> Plan;
+    fn relocation(&self) -> Option<Relocation<'_>>;
+    /// Names the operation in log lines.
+    fn verb(&self) -> &'static str;
+}
+
+/// A file other than `src` itself sits at `dst`. The target may `exists()`-resolve
+/// to the source — a case-only change or an NFC/NFD variant — so identity is
+/// dev+inode (undo.rs), never the name.
+fn occupied_by_another(src: &Path, dst: &Path) -> Option<String> {
+    (dst.exists() && !fs_atomic::paths_are_same_file(src, dst))
+        .then(|| format!("Target already exists: {}", scanner::path_to_string(dst)))
+}
+
+/// Each item is `(path, new file name)`; the file stays in its directory.
+struct RenameOp<'a> {
+    project_id: &'a str,
+    label: &'a str,
+}
+
+impl FileOp for RenameOp<'_> {
+    type Item = (String, String);
+
+    fn source(item: &Self::Item) -> &str {
+        &item.0
+    }
+
+    fn plan(&self, item: &Self::Item, src: &Path) -> Plan {
+        let (_, new_name) = item;
+        let Some(name) = src.file_name() else {
+            return Plan::Reject("Invalid path".to_string());
+        };
+        if name.to_string_lossy() == new_name.as_str() {
+            return Plan::Skip;
+        }
+        if let Err(e) = validate_new_name(new_name) {
+            return Plan::Reject(e);
+        }
+        let dst = src.with_file_name(new_name);
+        match occupied_by_another(src, &dst) {
+            Some(e) => Plan::Reject(e),
+            None => Plan::Rename(dst),
+        }
+    }
+
+    fn relocation(&self) -> Option<Relocation<'_>> {
+        Some(Relocation {
+            project_id: self.project_id,
+            kind: undo::OperationType::Rename,
+            label: self.label,
+        })
+    }
+
+    fn verb(&self) -> &'static str {
+        "rename"
+    }
+}
+
+/// Each item is a path; it keeps its name and lands in `target_dir`.
+struct MoveOp<'a> {
+    project_id: &'a str,
+    target_dir: &'a Path,
+}
+
+impl FileOp for MoveOp<'_> {
+    type Item = String;
+
+    fn source(item: &Self::Item) -> &str {
+        item
+    }
+
+    fn plan(&self, _: &Self::Item, src: &Path) -> Plan {
+        let Some(name) = src.file_name() else {
+            return Plan::Reject("Invalid source path".to_string());
+        };
+        let dst = self.target_dir.join(name);
+        // No-op: already in the target directory. Checked by identity, not by
+        // string — a case variant, a symlinked folder or a `..` all name the
+        // same directory.
+        if src == dst || fs_atomic::paths_are_same_file(src, &dst) {
+            return Plan::Skip;
+        }
+        match occupied_by_another(src, &dst) {
+            Some(e) => Plan::Reject(e),
+            None => Plan::Rename(dst),
+        }
+    }
+
+    fn relocation(&self) -> Option<Relocation<'_>> {
+        Some(Relocation {
+            project_id: self.project_id,
+            kind: undo::OperationType::Move,
+            label: "Move",
+        })
+    }
+
+    fn verb(&self) -> &'static str {
+        "move"
+    }
+}
+
+/// Each item is a path; a same-name copy lands in `target_dir`. No undo — the
+/// copies can be trashed if unwanted.
+struct CopyOp<'a> {
+    target_dir: &'a Path,
+}
+
+impl FileOp for CopyOp<'_> {
+    type Item = String;
+
+    fn source(item: &Self::Item) -> &str {
+        item
+    }
+
+    fn plan(&self, _: &Self::Item, src: &Path) -> Plan {
+        let Some(name) = src.file_name() else {
+            return Plan::Reject("Invalid source path".to_string());
+        };
+        let dst = self.target_dir.join(name);
+        if dst.exists() {
+            return Plan::Reject(format!(
+                "Target already exists: {} (use Duplicate for same-name copies)",
+                scanner::path_to_string(&dst)
+            ));
+        }
+        Plan::Copy(dst)
+    }
+
+    fn relocation(&self) -> Option<Relocation<'_>> {
+        None
+    }
+
+    fn verb(&self) -> &'static str {
+        "copy"
+    }
+}
+
+/// Each item is a path; the copy sits beside it under an auto-suffixed name
+/// (`foo.png` → `foo copy.png`, `foo copy 2.png`, …). No undo.
+struct DuplicateOp;
+
+impl FileOp for DuplicateOp {
+    type Item = String;
+
+    fn source(item: &Self::Item) -> &str {
+        item
+    }
+
+    fn plan(&self, _: &Self::Item, src: &Path) -> Plan {
+        if !src.is_file() {
+            return Plan::Reject("Source is not a regular file".to_string());
+        }
+        match unique_copy_path(src) {
+            Some(dst) => Plan::Copy(dst),
+            None => {
+                Plan::Reject("Cannot derive duplicate name (no parent or bad stem)".to_string())
+            }
+        }
+    }
+
+    fn relocation(&self) -> Option<Relocation<'_>> {
+        None
+    }
+
+    fn verb(&self) -> &'static str {
+        "duplicate"
+    }
+}
+
+/// Each item is a path; it goes to the OS trash. Not undoable, and not bound to
+/// a project: the watcher picks up the remove events and updates the scan.
+struct DeleteOp;
+
+impl FileOp for DeleteOp {
+    type Item = String;
+
+    fn source(item: &Self::Item) -> &str {
+        item
+    }
+
+    fn plan(&self, _: &Self::Item, _: &Path) -> Plan {
+        Plan::Trash
+    }
+
+    fn relocation(&self) -> Option<Relocation<'_>> {
+        None
+    }
+
+    fn verb(&self) -> &'static str {
+        "delete"
+    }
+}
+
+/// One item: plan, guard the sidecars, touch the disk, carry the sidecars, report.
+fn run_file_op<O: FileOp>(
+    op: &O,
+    item: &O::Item,
+    result: &mut FileOpResult,
+    sidecar_failures: &mut warning::SampledFailures,
+) {
+    let path = O::source(item);
+    let src = Path::new(path);
+    let outcome = match op.plan(item, src) {
+        Plan::Skip => return,
+        Plan::Reject(message) => Err(message),
+        Plan::Rename(dst) => {
+            // Pre-flighted BEFORE the primary rename: a stray sidecar squatting on
+            // the destination name would otherwise strand the asset's identity.
+            let conflicts = sidecar::rename_conflicts(src, &dst);
+            if conflicts.is_empty() {
+                std::fs::rename(src, &dst)
+                    .map_err(|e| e.to_string())
+                    .map(|()| {
+                        // The rename already happened and is not rolled back, so a
+                        // carry failure is reported, never raised.
+                        if let Err(e) = sidecar::carry_on_rename(src, &dst) {
+                            eprintln!(
+                                "[{}] engine sidecar not carried for {}: {}",
+                                op.verb(),
+                                path,
+                                e
+                            );
+                            sidecar_failures.record(Some(path), &e);
+                        }
+                        Some(scanner::path_to_string(&dst))
+                    })
+            } else {
+                Err(conflicts.join("; "))
+            }
+        }
+        Plan::Copy(dst) => std::fs::copy(src, &dst)
+            .map_err(|e| e.to_string())
+            .map(|_| Some(scanner::path_to_string(&dst))),
+        Plan::Trash => trash::delete(src).map_err(|e| e.to_string()).map(|()| {
+            // Not reported as `SidecarNotCarried`: a sidecar whose asset is gone
+            // breaks no reference, and it is the half worth keeping.
+            if let Err(e) = sidecar::carry_on_delete(src) {
+                eprintln!(
+                    "[{}] engine sidecar not carried for {}: {}",
+                    op.verb(),
+                    path,
+                    e
+                );
+            }
+            None
+        }),
+    };
+    match outcome {
+        Ok(new_path) => result.successes.push(FileOpSuccess {
+            original_path: path.to_string(),
+            new_path,
+        }),
+        Err(message) => result.errors.push(FileOpError {
+            path: path.to_string(),
+            message,
+        }),
+    }
+}
+
+/// Run a batch. Split from the commands so the lock-window tests can call it
+/// with no Tauri app: the command boundary owns the emit, and warnings travel
+/// as an out-param.
+fn run_file_ops<O: FileOp>(
+    op: &O,
+    items: Vec<O::Item>,
+    warnings: &mut Vec<warning::ProjectWarning>,
+) -> FileOpResult {
+    let mut result = FileOpResult::default();
+    // Accumulated across the batch so it reports one warning, not one per file.
     let mut sidecar_failures = warning::SampledFailures::default();
 
-    for chunk in planned.chunks(RENAME_LOCK_CHUNK) {
-        let outcome = project::with_mut(project_id, |state| {
-            let (done, part) = rename_batch_on_disk(chunk.to_vec(), &mut sidecar_failures);
+    let Some(relocation) = op.relocation() else {
+        for item in &items {
+            run_file_op(op, item, &mut result, &mut sidecar_failures);
+        }
+        push_sidecar_warning(&mut sidecar_failures, warnings);
+        return result;
+    };
 
-            // Tags follow the file across renames — same as move_assets /
-            // rename_file. Paths are already normalized (scanner::path_to_string)
-            // so the new key matches what the next scan produces.
-            if !done.is_empty() {
+    // Chunked, and the disk changes happen INSIDE the project lock: a file that
+    // has left its old path while its tag binding has not is exactly what the
+    // watcher's orphan cleanup reaps. See `RENAME_LOCK_CHUNK`.
+    for (i, chunk) in items.chunks(RENAME_LOCK_CHUNK).enumerate() {
+        let outcome = project::with_mut(relocation.project_id, |state| {
+            let mut part = FileOpResult::default();
+            for item in chunk {
+                run_file_op(op, item, &mut part, &mut sidecar_failures);
+            }
+            if !part.successes.is_empty() {
                 let tags = state.ensure_tags();
-                for (original, new_path) in &done {
-                    tags.rename_path(original, new_path);
+                for s in &part.successes {
+                    if let Some(new_path) = &s.new_path {
+                        tags.rename_path(&s.original_path, new_path);
+                    }
                 }
-                // Logged AND surfaced: the files are already renamed, so this
-                // must not fail the command, but a silent failure here means the
-                // bindings only live in memory (watcher.rs reports the same way).
+                // Logged AND surfaced: the files already moved, so this must not
+                // fail the command, but a silent failure leaves the bindings in
+                // memory only (watcher.rs reports the same way).
                 if let Err(e) = state.save_tags() {
-                    eprintln!("[batch_rename] failed to save tags after rename: {}", e);
+                    eprintln!("[{}] failed to save tags: {}", op.verb(), e);
                     warnings.push(warning::ProjectWarning::TagsNotSaved {
                         detail: e.to_string(),
                     });
                 }
             }
-            Ok((done, part))
+            Ok(part)
         });
-
         match outcome {
-            Ok((done, part)) => {
-                result.success_count += part.success_count;
-                result.error_count += part.error_count;
-                result.errors.extend(part.errors);
-                all_done.extend(done);
-            }
+            Ok(part) => result.extend(part),
             Err(e) => {
-                // Project not registered: renaming with no undo record and no tag
-                // migration is worse than refusing, so report it.
-                let untouched = total - result.success_count - result.error_count;
-                result.error_count += untouched;
-                result.errors.push(format!("Renames aborted: {}", e));
-                push_sidecar_warning(&mut sidecar_failures, warnings);
-                return (all_done, result);
+                // Project not registered: changing the disk with no undo record
+                // and no tag migration is worse than refusing. Every untouched
+                // item is reported, not just this chunk's.
+                for item in &items[i * RENAME_LOCK_CHUNK..] {
+                    result.errors.push(FileOpError {
+                        path: O::source(item).to_string(),
+                        message: format!("{} aborted: {}", relocation.label, e),
+                    });
+                }
+                break;
             }
         }
     }
 
     push_sidecar_warning(&mut sidecar_failures, warnings);
 
-    if !all_done.is_empty() {
+    if !result.successes.is_empty() {
         let ts = unix_timestamp();
-        let file_ops: Vec<undo::FileOperation> = all_done
+        let ops: Vec<undo::FileOperation> = result
+            .successes
             .iter()
-            .map(|(original, new_path)| undo::FileOperation {
-                operation_type: undo::OperationType::Rename,
-                original_path: original.clone(),
-                new_path: Some(new_path.clone()),
+            .map(|s| undo::FileOperation {
+                operation_type: relocation.kind.clone(),
+                original_path: s.original_path.clone(),
+                new_path: s.new_path.clone(),
                 timestamp: ts,
             })
             .collect();
-
-        let _ = project::with_mut(project_id, |state| {
+        let _ = project::with_mut(relocation.project_id, |state| {
             state
                 .undo_manager
-                .record_batch(format!("{}: {} files", label, file_ops.len()), file_ops);
+                .record_batch(format!("{}: {} file(s)", relocation.label, ops.len()), ops);
             Ok(())
         });
     }
 
-    (all_done, result)
+    result
+}
+
+/// Rename a heterogeneous batch — each file to its own new *file name* within its
+/// current directory — through the shared engine; `label` names the undo entry.
+fn commit_renames(
+    project_id: &str,
+    planned: Vec<(String, String)>,
+    label: &str,
+    warnings: &mut Vec<warning::ProjectWarning>,
+) -> FileOpResult {
+    run_file_ops(&RenameOp { project_id, label }, planned, warnings)
 }
 
 // ============ Fix-it (auto-fixable naming) Commands ============
@@ -2308,14 +2502,10 @@ fn mark_naming_fix_collisions(previews: &mut [NamingFixPreview]) {
 /// batch engine, so validation, clobber guards, sidecar carrying, one undo batch
 /// and tag migration all match Batch Rename.
 #[tauri::command(async)]
-fn apply_naming_fixes(
-    app: AppHandle,
-    project_id: String,
-    fixes: Vec<NamingFix>,
-) -> BatchRenameResult {
+fn apply_naming_fixes(app: AppHandle, project_id: String, fixes: Vec<NamingFix>) -> FileOpResult {
     let planned: Vec<(String, String)> = fixes.into_iter().map(|f| (f.path, f.new_name)).collect();
     let mut warnings = Vec::new();
-    let (_, result) = commit_renames(&project_id, planned, "Fix naming", &mut warnings);
+    let result = commit_renames(&project_id, planned, "Fix naming", &mut warnings);
     for w in &warnings {
         warning::emit_project_warning(&app, &project_id, w);
     }
@@ -2504,19 +2694,7 @@ fn resolve_texture_siblings(model_path: String) -> HashMap<String, String> {
     result
 }
 
-#[derive(Serialize)]
-pub struct DeleteError {
-    pub path: String,
-    pub message: String,
-}
-
-#[derive(Serialize)]
-pub struct DeleteResult {
-    pub success_paths: Vec<String>,
-    pub errors: Vec<DeleteError>,
-}
-
-// ============ Move / Copy / Duplicate ============
+// ============ File operation results ============
 
 #[derive(Serialize, Debug)]
 pub struct FileOpError {
@@ -2524,16 +2702,26 @@ pub struct FileOpError {
     pub message: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct FileOpSuccess {
     pub original_path: String,
-    pub new_path: String,
+    /// Where the file is now; `None` once it is in the trash.
+    pub new_path: Option<String>,
 }
 
-#[derive(Serialize)]
+/// The one result shape of every batch file operation — rename, move, copy,
+/// duplicate, delete — mirrored by `FileOpResult` in `src/types/asset.ts`.
+#[derive(Serialize, Debug, Default)]
 pub struct FileOpResult {
     pub successes: Vec<FileOpSuccess>,
     pub errors: Vec<FileOpError>,
+}
+
+impl FileOpResult {
+    fn extend(&mut self, other: FileOpResult) {
+        self.successes.extend(other.successes);
+        self.errors.extend(other.errors);
+    }
 }
 
 fn unix_timestamp() -> u64 {
@@ -2543,9 +2731,23 @@ fn unix_timestamp() -> u64 {
         .unwrap_or(0)
 }
 
-/// Move each path into `target_dir`. Per-file rename; target must not already
-/// exist at the destination. Successful moves are batched into the project's
-/// undo manager so the user can revert.
+/// Move and copy refuse the whole batch, with one error naming the target, when
+/// it is not a directory.
+fn require_target_dir(target_dir: &str) -> Result<&Path, FileOpResult> {
+    let target = Path::new(target_dir);
+    if target.is_dir() {
+        return Ok(target);
+    }
+    Err(FileOpResult {
+        successes: Vec::new(),
+        errors: vec![FileOpError {
+            path: target_dir.to_string(),
+            message: "Target is not a directory".to_string(),
+        }],
+    })
+}
+
+/// Move each path into `target_dir`, tags following and one undo batch landing.
 #[tauri::command]
 fn move_assets(
     app: AppHandle,
@@ -2561,222 +2763,33 @@ fn move_assets(
     result
 }
 
-/// The body of `move_assets`, minus the emit — same split as
-/// `commit_renames`: the lock-window regression tests call this directly
-/// and have no Tauri app to hand an `AppHandle`.
+/// The body of `move_assets`, minus the emit — the lock-window tests call it.
 fn commit_moves(
     project_id: &str,
     paths: Vec<String>,
     target_dir: String,
     warnings: &mut Vec<warning::ProjectWarning>,
 ) -> FileOpResult {
-    let mut successes: Vec<FileOpSuccess> = Vec::new();
-    let mut errors: Vec<FileOpError> = Vec::new();
-
-    let target = Path::new(&target_dir);
-    if !target.is_dir() {
-        errors.push(FileOpError {
-            path: target_dir.clone(),
-            message: "Target is not a directory".to_string(),
-        });
-        return FileOpResult { successes, errors };
+    match require_target_dir(&target_dir) {
+        Ok(target) => run_file_ops(
+            &MoveOp {
+                project_id,
+                target_dir: target,
+            },
+            paths,
+            warnings,
+        ),
+        Err(refused) => refused,
     }
-
-    // Accumulated across chunks, like commit_renames: one warning per operation.
-    let mut sidecar_failures = warning::SampledFailures::default();
-
-    // Chunked, and the moves happen INSIDE the project lock: a file that has left
-    // its old path while its tag binding has not is exactly what the watcher's
-    // orphan cleanup reaps. See `RENAME_LOCK_CHUNK`.
-    for chunk in paths.chunks(RENAME_LOCK_CHUNK) {
-        let outcome = project::with_mut(project_id, |state| {
-            let mut moved: Vec<FileOpSuccess> = Vec::new();
-            let mut failed: Vec<FileOpError> = Vec::new();
-
-            for path in chunk {
-                let src = Path::new(path);
-                let name = match src.file_name() {
-                    Some(n) => n.to_os_string(),
-                    None => {
-                        failed.push(FileOpError {
-                            path: path.clone(),
-                            message: "Invalid source path".to_string(),
-                        });
-                        continue;
-                    }
-                };
-                let dst = target.join(&name);
-
-                if src == dst || fs_atomic::paths_are_same_file(src, &dst) {
-                    // No-op: the source is already in the target directory. Checked
-                    // by identity, not by string — a case variant, a symlinked
-                    // folder or a `..` all name the same directory.
-                    continue;
-                }
-                if dst.exists() {
-                    failed.push(FileOpError {
-                        path: path.clone(),
-                        message: format!(
-                            "Target already exists: {}",
-                            scanner::path_to_string(&dst)
-                        ),
-                    });
-                    continue;
-                }
-
-                // Sidecar pre-flight, same reasoning as rename_batch_on_disk:
-                // refuse the move outright rather than move the asset away
-                // from a .meta/.uid that can't follow it.
-                let sidecar_conflicts = sidecar::rename_conflicts(src, &dst);
-                if !sidecar_conflicts.is_empty() {
-                    failed.push(FileOpError {
-                        path: path.clone(),
-                        message: sidecar_conflicts.join("; "),
-                    });
-                    continue;
-                }
-
-                match std::fs::rename(src, &dst) {
-                    Ok(()) => {
-                        // Carry engine sidecars so moved assets keep their identity
-                        // (Unity GUID, Godot UID) and their import settings.
-                        // Best-effort: no-op without a sidecar, logs on failure.
-                        if let Err(e) = sidecar::carry_on_rename(src, &dst) {
-                            eprintln!(
-                                "[move_assets] engine sidecar not carried for {}: {}",
-                                path, e
-                            );
-                            sidecar_failures.record(Some(path), &e);
-                        }
-                        moved.push(FileOpSuccess {
-                            original_path: path.clone(),
-                            new_path: scanner::path_to_string(&dst),
-                        })
-                    }
-                    Err(e) => failed.push(FileOpError {
-                        path: path.clone(),
-                        message: e.to_string(),
-                    }),
-                }
-            }
-
-            // Tags follow the file across moves, before the lock is released.
-            if !moved.is_empty() {
-                let tags = state.ensure_tags();
-                for s in &moved {
-                    tags.rename_path(&s.original_path, &s.new_path);
-                }
-                // Logged AND surfaced: the move already succeeded so this
-                // can't fail the command, but a silent failure leaves the
-                // bindings in memory only (watcher.rs reports the same way).
-                if let Err(e) = state.save_tags() {
-                    eprintln!("[move_assets] failed to save tags after move: {}", e);
-                    warnings.push(warning::ProjectWarning::TagsNotSaved {
-                        detail: e.to_string(),
-                    });
-                }
-            }
-            Ok((moved, failed))
-        });
-
-        match outcome {
-            Ok((moved, failed)) => {
-                successes.extend(moved);
-                errors.extend(failed);
-            }
-            Err(e) => {
-                // Project not registered: moving with no undo record and no tag
-                // migration is worse than refusing. Report the untouched files.
-                for path in chunk {
-                    errors.push(FileOpError {
-                        path: path.clone(),
-                        message: format!("Move aborted: {}", e),
-                    });
-                }
-                push_sidecar_warning(&mut sidecar_failures, warnings);
-                return FileOpResult { successes, errors };
-            }
-        }
-    }
-
-    push_sidecar_warning(&mut sidecar_failures, warnings);
-
-    if !successes.is_empty() {
-        let ts = unix_timestamp();
-        let ops: Vec<undo::FileOperation> = successes
-            .iter()
-            .map(|s| undo::FileOperation {
-                operation_type: undo::OperationType::Move,
-                original_path: s.original_path.clone(),
-                new_path: Some(s.new_path.clone()),
-                timestamp: ts,
-            })
-            .collect();
-        let _ = project::with_mut(project_id, |state| {
-            state
-                .undo_manager
-                .record_batch(format!("Move {} file(s)", ops.len()), ops);
-            Ok(())
-        });
-    }
-
-    FileOpResult { successes, errors }
 }
 
 /// Copy each path into `target_dir`. Fails on collision (unlike duplicate).
-/// No undo recording — user can just delete the copies if they're unwanted.
 #[tauri::command]
 fn copy_assets(paths: Vec<String>, target_dir: String) -> FileOpResult {
-    let mut successes: Vec<FileOpSuccess> = Vec::new();
-    let mut errors: Vec<FileOpError> = Vec::new();
-
-    let target = Path::new(&target_dir);
-    if !target.is_dir() {
-        errors.push(FileOpError {
-            path: target_dir.clone(),
-            message: "Target is not a directory".to_string(),
-        });
-        return FileOpResult { successes, errors };
+    match require_target_dir(&target_dir) {
+        Ok(target) => run_file_ops(&CopyOp { target_dir: target }, paths, &mut Vec::new()),
+        Err(refused) => refused,
     }
-
-    for path in paths {
-        let src = Path::new(&path);
-        let name = match src.file_name() {
-            Some(n) => n.to_os_string(),
-            None => {
-                errors.push(FileOpError {
-                    path: path.clone(),
-                    message: "Invalid source path".to_string(),
-                });
-                continue;
-            }
-        };
-        let dst = target.join(&name);
-
-        if dst.exists() {
-            errors.push(FileOpError {
-                path: path.clone(),
-                message: format!(
-                    "Target already exists: {} (use Duplicate for same-name copies)",
-                    scanner::path_to_string(&dst)
-                ),
-            });
-            continue;
-        }
-
-        match std::fs::copy(src, &dst) {
-            Ok(_) => successes.push(FileOpSuccess {
-                original_path: path,
-                new_path: scanner::path_to_string(&dst),
-            }),
-            Err(e) => errors.push(FileOpError {
-                path,
-                message: e.to_string(),
-            }),
-        }
-    }
-
-    FileOpResult { successes, errors }
 }
 
 /// Build a sibling path by adding " copy" (and a counter if needed) before the
@@ -2804,81 +2817,17 @@ fn unique_copy_path(src: &Path) -> Option<std::path::PathBuf> {
     Some(parent.join(format!("{} copy {}{}", stem, unix_timestamp(), ext)))
 }
 
-/// Create an in-place copy of each file with an auto-suffixed name (`foo.png`
-/// → `foo copy.png`, `foo copy 2.png`, …). No undo — trash the copies if unwanted.
+/// Create an in-place copy of each file with an auto-suffixed name.
 #[tauri::command]
 fn duplicate_assets(paths: Vec<String>) -> FileOpResult {
-    let mut successes: Vec<FileOpSuccess> = Vec::new();
-    let mut errors: Vec<FileOpError> = Vec::new();
-
-    for path in paths {
-        let src = Path::new(&path);
-        if !src.is_file() {
-            errors.push(FileOpError {
-                path: path.clone(),
-                message: "Source is not a regular file".to_string(),
-            });
-            continue;
-        }
-        let dst = match unique_copy_path(src) {
-            Some(d) => d,
-            None => {
-                errors.push(FileOpError {
-                    path: path.clone(),
-                    message: "Cannot derive duplicate name (no parent or bad stem)".to_string(),
-                });
-                continue;
-            }
-        };
-
-        match std::fs::copy(src, &dst) {
-            Ok(_) => successes.push(FileOpSuccess {
-                original_path: path,
-                new_path: scanner::path_to_string(&dst),
-            }),
-            Err(e) => errors.push(FileOpError {
-                path,
-                message: e.to_string(),
-            }),
-        }
-    }
-
-    FileOpResult { successes, errors }
+    run_file_ops(&DuplicateOp, paths, &mut Vec::new())
 }
 
-/// Send each path to the OS recycle bin. Per-path success and error are reported
-/// separately so the interface can show partial results. No `project_id`: the
-/// watcher picks up the remove events and updates the scan.
+/// Send each path to the OS recycle bin, reporting per path so the interface
+/// can show partial results.
 #[tauri::command(async)]
-fn delete_assets(paths: Vec<String>) -> DeleteResult {
-    let mut success_paths = Vec::new();
-    let mut errors = Vec::new();
-
-    for path in paths {
-        match trash::delete(&path) {
-            Ok(()) => {
-                // Trash the engine sidecars too, so a delete doesn't strand them.
-                // **Deliberately not reported as `SidecarNotCarried`** (the rename and move sites
-                // do): a sidecar whose asset is gone breaks no reference, and it is the half worth keeping.
-                if let Err(e) = sidecar::carry_on_delete(Path::new(&path)) {
-                    eprintln!(
-                        "[delete_assets] engine sidecar not carried for {}: {}",
-                        path, e
-                    );
-                }
-                success_paths.push(path);
-            }
-            Err(e) => errors.push(DeleteError {
-                path,
-                message: e.to_string(),
-            }),
-        }
-    }
-
-    DeleteResult {
-        success_paths,
-        errors,
-    }
+fn delete_assets(paths: Vec<String>) -> FileOpResult {
+    run_file_ops(&DeleteOp, paths, &mut Vec::new())
 }
 
 /// Rename one file through the same engine as Batch Rename and Fix-it, so the
@@ -2896,7 +2845,7 @@ fn rename_file(
     new_name: String,
 ) -> Result<String, String> {
     let mut warnings = Vec::new();
-    let (done, mut result) = commit_renames(
+    let mut result = commit_renames(
         &project_id,
         vec![(old_path.clone(), new_name)],
         "Rename",
@@ -2906,11 +2855,11 @@ fn rename_file(
         warning::emit_project_warning(&app, &project_id, w);
     }
 
-    if let Some((_, new_path)) = done.into_iter().next() {
+    if let Some(new_path) = result.successes.pop().and_then(|s| s.new_path) {
         return Ok(new_path);
     }
-    if !result.errors.is_empty() {
-        return Err(result.errors.remove(0));
+    if let Some(refused) = result.errors.pop() {
+        return Err(refused.message);
     }
     // Nothing renamed and nothing wrong: the new name equalled the old one, which
     // the batch engine skips. The file is already where the caller asked for it.
@@ -3657,6 +3606,18 @@ mod tests {
         assert!(hero.exists(), "the file must still be on disk");
     }
 
+    /// Rename through the real engine against a throwaway project rooted at `root`.
+    fn rename_in_scratch_project(
+        project_id: &str,
+        root: &Path,
+        planned: Vec<(String, String)>,
+    ) -> FileOpResult {
+        project::register(project_id.to_string(), scanner::path_to_string(root));
+        let result = commit_renames(project_id, planned, "Rename", &mut Vec::new());
+        project::unregister(project_id);
+        result
+    }
+
     #[test]
     fn rename_batch_on_disk_renames_heterogeneous_targets() {
         // The Fix-it engine's differentiator vs. execute_batch_rename: each
@@ -3672,18 +3633,20 @@ mod tests {
             (a.to_string_lossy().to_string(), "my_file.png".to_string()),
             (b.to_string_lossy().to_string(), "SM_rock.fbx".to_string()),
         ];
-        let (done, result) = rename_batch_on_disk(planned, &mut Default::default());
+        let result = rename_in_scratch_project("test_rename_heterogeneous", dir.path(), planned);
 
-        assert_eq!(result.success_count, 2);
-        assert_eq!(result.error_count, 0);
-        assert!(result.errors.is_empty());
-        assert_eq!(done.len(), 2);
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert_eq!(result.successes.len(), 2);
         assert!(dir.path().join("my_file.png").exists());
         assert!(dir.path().join("SM_rock.fbx").exists());
         assert!(!a.exists() && !b.exists());
         // Successes report forward-slash-normalized new paths so the undo /
         // tag keys match what the next scan produces.
-        assert!(done.iter().all(|(_, np)| !np.contains('\\')));
+        assert!(result.successes.iter().all(|s| !s
+            .new_path
+            .as_deref()
+            .unwrap_or_default()
+            .contains('\\')));
     }
 
     #[test]
@@ -3704,11 +3667,10 @@ mod tests {
                 "sub/evil.png".to_string(),
             ),
         ];
-        let (done, result) = rename_batch_on_disk(planned, &mut Default::default());
+        let result = rename_in_scratch_project("test_rename_noop_and_bad", dir.path(), planned);
 
-        assert_eq!(result.success_count, 0);
-        assert_eq!(result.error_count, 1); // only the bad name counts
-        assert!(done.is_empty());
+        assert!(result.successes.is_empty());
+        assert_eq!(result.errors.len(), 1); // only the bad name counts
         assert!(bad.exists() && same.exists()); // both untouched on disk
     }
 
@@ -3728,11 +3690,10 @@ mod tests {
             (a.to_string_lossy().to_string(), "a_b.png".to_string()),
             (b.to_string_lossy().to_string(), "a_b.png".to_string()),
         ];
-        let (done, result) = rename_batch_on_disk(planned, &mut Default::default());
+        let result = rename_in_scratch_project("test_rename_collision", dir.path(), planned);
 
-        assert_eq!(result.success_count, 1);
-        assert_eq!(result.error_count, 1);
-        assert_eq!(done.len(), 1);
+        assert_eq!(result.successes.len(), 1);
+        assert_eq!(result.errors.len(), 1);
         assert!(dir.path().join("a_b.png").exists());
         // Exactly one original survives (the one that lost the race).
         assert_eq!(a.exists() as u8 + b.exists() as u8, 1);
@@ -3820,9 +3781,9 @@ mod tests {
         }
 
         drop(held);
-        let (_, result) = worker.join().unwrap();
-        assert_eq!(result.success_count, planned.len());
-        assert_eq!(result.error_count, 0);
+        let result = worker.join().unwrap();
+        assert_eq!(result.successes.len(), planned.len());
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
 
         // Every binding followed its file; none were left on an old path.
         project::with_ref(project_id, |state| {
@@ -3873,7 +3834,7 @@ mod tests {
 
         std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
         let mut warnings = Vec::new();
-        let (_, result) = commit_renames(
+        let result = commit_renames(
             project_id,
             vec![(src_key, "b.png".to_string())],
             "Race",
@@ -3882,7 +3843,7 @@ mod tests {
         std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
         project::unregister(project_id);
 
-        assert_eq!(result.success_count, 1, "the rename itself must land");
+        assert_eq!(result.successes.len(), 1, "the rename itself must land");
         assert!(
             warnings
                 .iter()
@@ -3954,13 +3915,12 @@ mod tests {
         project::with_ref(project_id, |state| {
             let tags = state.tags_data.as_ref().expect("tags were created above");
             for s in &result.successes {
+                let new_path = s.new_path.as_deref().expect("a move lands somewhere");
                 assert!(
-                    tags.get_asset_tags(&s.new_path)
-                        .iter()
-                        .any(|t| t.id == tag_id),
+                    tags.get_asset_tags(new_path).iter().any(|t| t.id == tag_id),
                     "tag did not follow {} → {}",
                     s.original_path,
-                    s.new_path
+                    new_path
                 );
                 assert!(tags.get_asset_tags(&s.original_path).is_empty());
             }
@@ -4000,14 +3960,17 @@ mod tests {
         })
         .unwrap();
 
-        let (done, result) = commit_renames(
+        let result = commit_renames(
             project_id,
             vec![(old_key.clone(), "new.png".to_string())],
             "Rename",
             &mut Vec::new(),
         );
-        assert_eq!(result.errors, Vec::<String>::new());
-        let new_key = done[0].1.clone();
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let new_key = result.successes[0]
+            .new_path
+            .clone()
+            .expect("a rename lands somewhere");
 
         let reloaded = tags::TagsData::load(dir.path());
         assert!(
@@ -4036,24 +3999,32 @@ mod tests {
 
         let dir = tempdir().unwrap();
         let src = dir.path().join("old.png");
+        let other = dir.path().join("other.png");
         std::fs::write(&src, "x").unwrap();
-        let old_key = scanner::path_to_string(&src);
+        std::fs::write(&other, "y").unwrap();
 
-        let (done, result) = commit_renames(
+        let result = commit_renames(
             "test_rename_never_registered",
-            vec![(old_key, "new.png".to_string())],
+            vec![
+                (scanner::path_to_string(&src), "new.png".to_string()),
+                (scanner::path_to_string(&other), "renamed.png".to_string()),
+            ],
             "Rename",
             &mut Vec::new(),
         );
 
-        assert!(done.is_empty());
-        assert_eq!(result.error_count, 1);
+        assert!(result.successes.is_empty());
+        // Every untouched file is reported, not a single summary line.
+        assert_eq!(result.errors.len(), 2, "{:?}", result.errors);
         assert!(
-            result.errors[0].contains("Renames aborted"),
+            result.errors.iter().all(|e| e.message.contains("aborted")),
             "the caller has to hear about it: {:?}",
             result.errors
         );
-        assert!(src.exists(), "the file was renamed without an undo record");
+        assert!(
+            src.exists() && other.exists(),
+            "a file was renamed without an undo record"
+        );
         assert!(!dir.path().join("new.png").exists());
     }
 
@@ -4075,8 +4046,8 @@ mod tests {
         assert!(first.errors.is_empty(), "{:?}", first.errors);
         assert_eq!(first.successes.len(), 1);
         assert_eq!(
-            first.successes[0].new_path,
-            scanner::path_to_string(&dest.join("hero.png"))
+            first.successes[0].new_path.as_deref(),
+            Some(scanner::path_to_string(&dest.join("hero.png")).as_str())
         );
         assert_eq!(std::fs::read(dest.join("hero.png")).unwrap(), b"pixels");
         assert!(src.exists(), "copy must leave the source in place");
@@ -4178,7 +4149,7 @@ mod tests {
         let landed: Vec<&str> = result
             .successes
             .iter()
-            .map(|s| s.new_path.as_str())
+            .map(|s| s.new_path.as_deref().unwrap_or_default())
             .collect();
         assert_eq!(
             landed,
@@ -4189,7 +4160,10 @@ mod tests {
         );
         for s in &result.successes {
             assert_eq!(s.original_path, src_key);
-            assert_eq!(std::fs::read(&s.new_path).unwrap(), b"mesh");
+            assert_eq!(
+                std::fs::read(s.new_path.as_deref().unwrap_or_default()).unwrap(),
+                b"mesh"
+            );
         }
         assert_eq!(result.errors.len(), 1, "{:?}", result.errors);
         assert_eq!(result.errors[0].path, scanner::path_to_string(&sub));
@@ -4206,7 +4180,7 @@ mod tests {
         let missing = scanner::path_to_string(&dir.path().join("gone.png"));
 
         let result = delete_assets(vec![missing.clone()]);
-        assert!(result.success_paths.is_empty());
+        assert!(result.successes.is_empty());
         assert_eq!(result.errors.len(), 1);
         assert_eq!(result.errors[0].path, missing);
     }

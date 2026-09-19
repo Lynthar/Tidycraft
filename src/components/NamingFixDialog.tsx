@@ -4,7 +4,8 @@ import { useTranslation } from "react-i18next";
 import { X, RefreshCw, Check, AlertCircle, AlertTriangle, Wand2 } from "lucide-react";
 import { ModalShell } from "./ModalShell";
 import { useProjectStore } from "../stores/projectStore";
-import type { NamingFixPreview, NamingFix, BatchRenameResult } from "../types/asset";
+import { basename } from "../lib/pathUtils";
+import type { NamingFixPreview, NamingFix, FileOpResult } from "../types/asset";
 
 interface NamingFixDialogProps {
   isOpen: boolean;
@@ -46,7 +47,7 @@ export function NamingFixDialog({ isOpen, onClose, scopePaths, onComplete }: Nam
   const [godotRefs, setGodotRefs] = useState<Record<string, string[]> | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
-  const [result, setResult] = useState<BatchRenameResult | null>(null);
+  const [result, setResult] = useState<FileOpResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Load proposals on open, using the same tidycraft.toml the analysis ran with
@@ -166,15 +167,15 @@ export function NamingFixDialog({ isOpen, onClose, scopePaths, onComplete }: Nam
         path: p.path,
         new_name: effectiveName(p),
       }));
-      const res = await call<BatchRenameResult>("apply_naming_fixes", {
+      const res = await call<FileOpResult>("apply_naming_fixes", {
         projectId: activeProjectId,
         fixes,
       });
       setResult(res);
-      if (res.success_count > 0) onComplete(res.error_count === 0, res.success_count);
+      if (res.successes.length > 0) onComplete(res.errors.length === 0, res.successes.length);
       // Full success: close (the toast confirms). Any failure keeps the dialog
       // open so the result banner + per-file errors actually render.
-      if (res.error_count === 0) onClose();
+      if (res.errors.length === 0) onClose();
     } catch (err) {
       setError(String(err));
     } finally {
@@ -327,16 +328,16 @@ export function NamingFixDialog({ isOpen, onClose, scopePaths, onComplete }: Nam
           {result && (
             <div
               className={`flex items-center gap-2 p-3 rounded text-sm ${
-                result.error_count > 0
+                result.errors.length > 0
                   ? "bg-warn-soft border border-warn text-warn"
                   : "bg-ok-soft border border-ok text-ok"
               }`}
             >
               <Check size={16} />
               <span>
-                {t("namingFix.renamed", { count: result.success_count })}
-                {result.error_count > 0 &&
-                  `, ${t("namingFix.failed", { count: result.error_count })}`}
+                {t("namingFix.renamed", { count: result.successes.length })}
+                {result.errors.length > 0 &&
+                  `, ${t("namingFix.failed", { count: result.errors.length })}`}
               </span>
             </div>
           )}
@@ -347,7 +348,7 @@ export function NamingFixDialog({ isOpen, onClose, scopePaths, onComplete }: Nam
               <ul className="space-y-1">
                 {result.errors.map((e, i) => (
                   <li key={i} className="break-all">
-                    {e}
+                    {basename(e.path)}: {e.message}
                   </li>
                 ))}
               </ul>

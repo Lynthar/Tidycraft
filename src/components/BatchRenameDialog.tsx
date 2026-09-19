@@ -4,6 +4,8 @@ import { useTranslation } from "react-i18next";
 import { ModalShell } from "./ModalShell";
 import { X, RefreshCw, Check, AlertCircle, AlertTriangle } from "lucide-react";
 import { useProjectStore } from "../stores/projectStore";
+import { basename } from "../lib/pathUtils";
+import type { FileOpResult } from "../types/asset";
 
 type RenameOperationType =
   | "FindReplace"
@@ -20,12 +22,6 @@ interface RenamePreview {
   original_name: string;
   new_name: string;
   will_change: boolean;
-}
-
-interface BatchRenameResult {
-  success_count: number;
-  error_count: number;
-  errors: string[];
 }
 
 interface BatchRenameDialogProps {
@@ -56,7 +52,7 @@ export function BatchRenameDialog({
   const [prefixSuffix, setPrefixSuffix] = useState("");
   const [previews, setPreviews] = useState<RenamePreview[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [result, setResult] = useState<BatchRenameResult | null>(null);
+  const [result, setResult] = useState<FileOpResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Godot rename guardrail (see RenameDialog). References depend only on the files'
@@ -139,19 +135,19 @@ export function BatchRenameDialog({
 
     try {
       const operation = buildOperation();
-      const result = await call<BatchRenameResult>("execute_batch_rename", {
+      const result = await call<FileOpResult>("execute_batch_rename", {
         projectId: activeProjectId,
         paths: selectedPaths,
         operation,
       });
       setResult(result);
 
-      if (result.success_count > 0) {
-        onComplete(result.error_count === 0);
+      if (result.successes.length > 0) {
+        onComplete(result.errors.length === 0);
       }
       // Full success: nothing to review, so close. Any failure keeps the dialog
       // open so the result banner and error list render.
-      if (result.error_count === 0) {
+      if (result.errors.length === 0) {
         onClose();
       }
     } catch (err) {
@@ -376,15 +372,15 @@ export function BatchRenameDialog({
           {result && (
             <div
               className={`flex items-center gap-2 p-3 rounded text-sm ${
-                result.error_count > 0
+                result.errors.length > 0
                   ? "bg-warn-soft border border-warn text-warn"
                   : "bg-ok-soft border border-ok text-ok"
               }`}
             >
               <Check size={16} />
               <span>
-                {result.success_count} {t("batchRename.renamed", "renamed")}
-                {result.error_count > 0 && `, ${result.error_count} ${t("batchRename.failed", "failed")}`}
+                {result.successes.length} {t("batchRename.renamed", "renamed")}
+                {result.errors.length > 0 && `, ${result.errors.length} ${t("batchRename.failed", "failed")}`}
               </span>
             </div>
           )}
@@ -397,7 +393,7 @@ export function BatchRenameDialog({
               <ul className="space-y-1">
                 {result.errors.map((e, i) => (
                   <li key={i} className="break-all">
-                    {e}
+                    {basename(e.path)}: {e.message}
                   </li>
                 ))}
               </ul>

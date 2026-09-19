@@ -184,15 +184,6 @@ export interface NamingFix {
   new_name: string;
 }
 
-/** Mirrors Rust `BatchRenameResult` — the outcome of `execute_batch_rename`
- *  and `apply_naming_fixes`. `success_count` counts renamed files; `errors`
- *  are per-file failures (the dialog stays open to surface them). */
-export interface BatchRenameResult {
-  success_count: number;
-  error_count: number;
-  errors: string[];
-}
-
 // ============ Unity Types ============
 
 /** Mirrors Rust `unity::UnityReference` (one GUID reference inside a
@@ -357,19 +348,7 @@ export interface Tag {
 
 export type AssetTagsMap = Record<string, Tag[]>;
 
-// ============ Delete Types ============
-
-export interface DeleteError {
-  path: string;
-  message: string;
-}
-
-export interface DeleteResult {
-  success_paths: string[];
-  errors: DeleteError[];
-}
-
-// ============ Move / Copy / Duplicate ============
+// ============ File operation results ============
 
 export interface FileOpError {
   path: string;
@@ -378,9 +357,13 @@ export interface FileOpError {
 
 export interface FileOpSuccess {
   original_path: string;
-  new_path: string;
+  /** Where the file is now; `null` once it is in the trash. */
+  new_path: string | null;
 }
 
+/** Mirrors Rust `FileOpResult` — the one outcome shape of every batch file
+ *  operation: rename, move, copy, duplicate and delete. Per-file failures are
+ *  what the dialogs stay open to surface. */
 export interface FileOpResult {
   successes: FileOpSuccess[];
   errors: FileOpError[];

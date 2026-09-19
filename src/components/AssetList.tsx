@@ -415,9 +415,9 @@ export function AssetList() {
   // sent to trash. The filesystem watcher will remove them from scanResult
   // on its own, so no rescan is needed.
   const handleDeleteDone = useCallback(
-    (result: { success_paths: string[] }) => {
-      if (result.success_paths.length === 0) return;
-      removePaths(result.success_paths);
+    (result: FileOpResult) => {
+      if (result.successes.length === 0) return;
+      removePaths(result.successes.map((s) => s.original_path));
     },
     [removePaths]
   );

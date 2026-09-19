@@ -741,8 +741,8 @@ export function IssueList({ result, stale, isAnalyzing, onAnalyze, onLocate }: I
         paths={confirmDelete?.paths ?? []}
         onClose={() => setConfirmDelete(null)}
         onDone={(deleteResult) => {
-          if (deleteResult.success_paths.length > 0) {
-            removePaths(deleteResult.success_paths);
+          if (deleteResult.successes.length > 0) {
+            removePaths(deleteResult.successes.map((s) => s.original_path));
           }
           if (confirmDelete && deleteResult.errors.length === 0) {
             pruneDuplicateGroup(confirmDelete.projectId, confirmDelete.groupKey);

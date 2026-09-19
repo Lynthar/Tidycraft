@@ -57,8 +57,8 @@ pub enum ProjectWarning {
     /// asked for it — so saying so is the only way this becomes visible.
     ///
     /// `sample` holds asset paths, not sidecar paths: the asset is what the user
-    /// named. Deletion is deliberately not reported through this — see the
-    /// `carry_on_delete` call in `delete_assets`.
+    /// named. Deletion is deliberately not reported through this: a sidecar
+    /// whose asset is gone breaks no reference.
     SidecarNotCarried {
         affected: usize,
         sample: Vec<String>,

@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { call } from "../lib/commands";
 import { cn } from "../lib/utils";
 import { basename } from "../lib/pathUtils";
-import type { DeleteResult } from "../types/asset";
+import type { FileOpResult } from "../types/asset";
 
 interface DeleteConfirmDialogProps {
   isOpen: boolean;
@@ -14,7 +14,7 @@ interface DeleteConfirmDialogProps {
   /** Called after the delete finishes, fully successful or with per-path errors,
    *  so the caller can clear the selection or show a toast. The filesystem watcher
    *  updates the asset list on its own — no rescan needed. */
-  onDone: (result: DeleteResult) => void;
+  onDone: (result: FileOpResult) => void;
 }
 
 const PREVIEW_LIMIT = 5;
@@ -27,7 +27,7 @@ export function DeleteConfirmDialog({
 }: DeleteConfirmDialogProps) {
   const { t } = useTranslation();
   const [isDeleting, setIsDeleting] = useState(false);
-  const [errors, setErrors] = useState<DeleteResult["errors"]>([]);
+  const [errors, setErrors] = useState<FileOpResult["errors"]>([]);
   // Initial focus lands on Cancel (via ModalShell), NOT the destructive confirm
   // button: this dialog can open from a bare Delete keypress, and confirm-focused
   // meant a blind Enter deleted files.
@@ -57,7 +57,7 @@ export function DeleteConfirmDialog({
   const handleConfirm = async () => {
     setIsDeleting(true);
     try {
-      const result = await call<DeleteResult>("delete_assets", { paths });
+      const result = await call<FileOpResult>("delete_assets", { paths });
       if (result.errors.length > 0) {
         // Show errors inline; don't dismiss. User sees what failed and can close.
         setErrors(result.errors);
