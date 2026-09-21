@@ -1,0 +1,34 @@
+# Fixture config for the CLI end-to-end test: every family on, thresholds pulled
+# down to what a handful of tiny hand-built files can trip. Which file trips which
+# rule is derived from docs/analyzer-rules.md, never from running the tool.
+[naming]
+max_length = 24
+forbid_chinese = true
+texture_prefix = "T_"
+
+[texture]
+enabled = true
+require_pot = true
+max_size = 16
+min_size = 4
+warn_non_square = true
+max_file_size = 1000
+
+[model]
+enabled = true
+max_vertices = 10
+max_faces = 12
+max_materials = 1
+
+[audio]
+enabled = true
+max_sfx_duration = 0.5
+max_file_size = 150000
+prefer_mono_for_sfx = true
+
+[pbr_set]
+enabled = true
+
+[dcc_source]
+enabled = true
+mtime_tolerance_secs = 60

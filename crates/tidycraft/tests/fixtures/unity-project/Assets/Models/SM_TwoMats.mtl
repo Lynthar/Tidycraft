@@ -1,0 +1,4 @@
+newmtl MatA
+Kd 0.5 0.5 0.5
+newmtl MatB
+Kd 0.5 0.5 0.5
