@@ -165,7 +165,14 @@ pub fn find_pbr_set_issues(assets: &[AssetInfo], config: &PbrSetConfig) -> Analy
     let trigger = config.trigger.to_lowercase();
 
     for asset in assets {
-        if !matches!(asset.asset_type, AssetType::Texture) {
+        // A DCC authoring source (.spp, .psd) is not a shipped map: it neither
+        // forms nor completes a set, just as the naming prefix rule exempts it.
+        let is_dcc_source = asset
+            .metadata
+            .as_ref()
+            .and_then(|m| m.dcc_source_kind.as_ref())
+            .is_some();
+        if !matches!(asset.asset_type, AssetType::Texture) || is_dcc_source {
             continue;
         }
         let dir = Path::new(&asset.path)
@@ -342,6 +349,19 @@ mod tests {
         let result = find_pbr_set_issues(&assets, &cfg);
         assert_eq!(result.issue_count, 1);
         assert!(result.issues[0].message.to_lowercase().contains("normal"));
+    }
+
+    #[test]
+    fn a_dcc_source_neither_forms_nor_completes_a_set() {
+        // `sources/T_Wood_BaseColor.spp` beside the exported maps is the
+        // Substance layout; the project file must not read as a lone BaseColor.
+        let mut spp = texture("/proj/sources/T_Wood_BaseColor.spp");
+        spp.metadata = Some(AssetMetadata {
+            dcc_source_kind: Some("substance_painter".to_string()),
+            ..Default::default()
+        });
+        let result = find_pbr_set_issues(&[spp], &enabled_cfg());
+        assert_eq!(result.issue_count, 0);
     }
 
     #[test]

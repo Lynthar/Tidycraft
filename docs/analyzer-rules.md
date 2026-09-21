@@ -178,6 +178,8 @@ RMA = ["roughness", "metallic", "ao"]
 
 **Suffix matching is strict** — the suffix is the substring after the **last** `_` in the file stem, and must equal-match (case-insensitive) one of the configured suffixes. `T_brand_new.png` finds suffix `new`, doesn't match anything default, is silently ignored. This avoids treating innocuous names as misnamed maps.
 
+**DCC authoring sources never form or complete a set.** A `.spp` or `.psd` beside the exported maps, or under a `sources/` folder next to them, is the project file rather than a shipped map, so it is skipped here exactly as the naming prefix rule skips it.
+
 **Packed channels** (e.g. `_ORM` carrying AO + Roughness + Metallic in one image) satisfy all the roles listed under `[pbr_set.packed]`. So a set with `_BaseColor` + `_Normal` + `_ORM` is considered complete even when `required` lists `roughness` and `metallic` separately.
 
 **To relax:**
