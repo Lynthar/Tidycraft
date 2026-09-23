@@ -2426,7 +2426,7 @@ pub struct NamingFixPreview {
     pub suggested_name: String,
     /// True when another proposed fix in the same directory targets the same
     /// name — applying both would collide. Advisory for the UI; the fs guard in
-    /// `rename_batch_on_disk` is the real backstop.
+    /// `run_file_ops` is the real backstop.
     pub collides: bool,
 }
 
@@ -3619,7 +3619,7 @@ mod tests {
     }
 
     #[test]
-    fn rename_batch_on_disk_renames_heterogeneous_targets() {
+    fn commit_renames_renames_heterogeneous_targets() {
         // The Fix-it engine's differentiator vs. execute_batch_rename: each
         // file gets its OWN target name in one batch.
         use tempfile::tempdir;
@@ -3650,7 +3650,7 @@ mod tests {
     }
 
     #[test]
-    fn rename_batch_on_disk_skips_noops_and_rejects_bad_names() {
+    fn commit_renames_skips_noops_and_rejects_bad_names() {
         use tempfile::tempdir;
         let dir = tempdir().unwrap();
         let same = dir.path().join("keep.png");
@@ -3675,7 +3675,7 @@ mod tests {
     }
 
     #[test]
-    fn rename_batch_on_disk_reports_intra_batch_collision() {
+    fn commit_renames_reports_intra_batch_collision() {
         // Two proposals resolving to the same name in the same directory:
         // the first lands, the second must fail with "target already exists"
         // (the fs guard is the backstop behind the preview's `collides` flag).
