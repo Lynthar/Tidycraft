@@ -149,7 +149,7 @@ export function AIAnalyzeModal() {
       // Project switched while the request was in flight: re-opening the result
       // panel would float project A's suggestions over project B, and Apply writes
       // to whichever project is active. Discard the response instead.
-      if (useProjectStore.getState().activeProjectId !== activeProjectId) return;
+      if (!useProjectStore.getState().isStillActive(activeProjectId)) return;
       setAiResultOpen(true, response, paths);
       setAiAnalyzeOpen(false);
     } catch (err) {

@@ -181,7 +181,7 @@ export function AITagPanel() {
       // Abort between the two writes if the user switched projects — the
       // tag landed in the original project; the asset bindings must not
       // resolve against the newly active one.
-      if (useProjectStore.getState().activeProjectId !== activeProjectId) {
+      if (!useProjectStore.getState().isStillActive(activeProjectId)) {
         console.warn("[AITagPanel] apply aborted: project switched mid-run");
         return false;
       }
@@ -214,7 +214,7 @@ export function AITagPanel() {
     // Snapshot the list — applyGroup mutates state.groups as it goes.
     const snapshot = [...groups];
     for (const group of snapshot) {
-      if (useProjectStore.getState().activeProjectId !== targetProjectId) break;
+      if (!useProjectStore.getState().isStillActive(targetProjectId)) break;
       // eslint-disable-next-line no-await-in-loop
       await applyGroup(group);
     }

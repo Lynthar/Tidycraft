@@ -150,7 +150,7 @@ export function AIResultPanel() {
       for (const { label, category, source, paths } of tagPlan.values()) {
         // Abort if the user switched projects mid-apply — the remaining
         // writes would land in the newly active project's tag store.
-        if (useProjectStore.getState().activeProjectId !== startProjectId) {
+        if (!useProjectStore.getState().isStillActive(startProjectId)) {
           console.warn("[AIResultPanel] apply aborted: project switched mid-run");
           break;
         }

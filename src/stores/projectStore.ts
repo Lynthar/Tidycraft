@@ -391,6 +391,10 @@ interface ProjectState extends ActiveMirror {
   removeProject: (projectId: string) => void;
   closeProject: (projectId?: string) => void;
   setActiveProject: (projectId: string) => void;
+  /// Whether `projectId` is still the active project. The fence every async
+  /// flow re-checks after an await before it writes: a response or a batch of
+  /// tag writes must not land in whichever project the user switched to.
+  isStillActive: (projectId: string | null) => boolean;
   getProjectList: () => {
     id: string;
     name: string;
@@ -1021,6 +1025,8 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     // (e.g. user did `git checkout` while it was inactive). Re-fetch.
     get().refreshGitInfo(projectId);
   },
+
+  isStillActive: (projectId: string | null) => get().activeProjectId === projectId,
 
   registerProjectStub: async (rawPath: string) => {
     const path = rawPath.replace(/\\/g, "/");

@@ -122,7 +122,7 @@ export function LearnSetupModal() {
       // If the user switched projects while the call was in flight, do NOT re-open
       // the review panel over the new project: its Save resolves the active project
       // at click time. The staged rules sit in the original project's pending set.
-      if (useProjectStore.getState().activeProjectId !== activeProjectId) return;
+      if (!useProjectStore.getState().isStillActive(activeProjectId)) return;
       setLearnReviewOpen(true, result);
       setOpen(false);
     } catch (err) {

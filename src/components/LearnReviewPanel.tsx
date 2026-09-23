@@ -120,7 +120,7 @@ export function LearnReviewPanel() {
       // still active — an in-flight save survives the panel's unmount.
       let createdCount = 0;
       for (const gap of data.tag_gaps) {
-        if (useProjectStore.getState().activeProjectId !== activeProjectId) {
+        if (!useProjectStore.getState().isStillActive(activeProjectId)) {
           console.warn("[LearnReview] save aborted: project switched mid-run");
           return;
         }
@@ -133,7 +133,7 @@ export function LearnReviewPanel() {
           console.warn("[LearnReview] create gap failed:", gap.label, e);
         }
       }
-      if (useProjectStore.getState().activeProjectId !== activeProjectId) {
+      if (!useProjectStore.getState().isStillActive(activeProjectId)) {
         console.warn("[LearnReview] save aborted: project switched mid-run");
         return;
       }
