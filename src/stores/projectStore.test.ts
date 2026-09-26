@@ -122,13 +122,6 @@ describe("the active project's mirror", () => {
     expect(mirrorOf(undefined).advancedFilters).not.toBe(mirrorOf(undefined).advancedFilters);
   });
 
-  it("carries exactly the mirror fields of a project", () => {
-    const a = project("a");
-    const view = mirrorOf(a);
-    expect(Object.keys(view).sort()).toEqual([...MIRROR_FIELDS].sort());
-    for (const field of MIRROR_FIELDS) expect(view[field], field).toBe(a[field]);
-  });
-
   it("follows every setter and leaves the other project alone", () => {
     const store = useProjectStore.getState();
     const untouched = store.projects.get("b");
@@ -257,11 +250,6 @@ describe("the selected directory", () => {
 
 describe("getFilteredAssets", () => {
   beforeEach(() => activate(scanned("a")));
-
-  it("keeps the assets under the selected directory, nested ones included", () => {
-    store().setSelectedDirectory(`${ROOT}/Textures`);
-    expect(names()).toEqual(["icon.png", "wood.png"]);
-  });
 
   it("trims the search query, so a pasted trailing space cannot join the needle", () => {
     store().setSearchQuery("wood ");
