@@ -478,6 +478,110 @@ where
 mod tests {
     use super::*;
 
+    fn one_asset_request(model: &str) -> TagRequest {
+        TagRequest {
+            assets: vec![AssetInput {
+                path: "a/hero.png".into(),
+                filename: "hero.png".into(),
+                thumbnail_base64: Some("x".into()),
+                metadata_hint: None,
+            }],
+            prompt_version: 1,
+            model: model.into(),
+            include_thumbnails: true,
+            project_ctx: None,
+            existing_tags: Vec::new(),
+        }
+    }
+
+    /// The confirm modal's figure comes from the provider; every provider must hand
+    /// back the shared model's estimate, never an empty one.
+    #[test]
+    fn every_provider_estimates_through_the_shared_cost_model() {
+        for (id, model) in [
+            ("claude", "claude-sonnet-4-6"),
+            ("openai", "gpt-5.4-mini"),
+            ("ollama", "qwen2.5vl:7b"),
+        ] {
+            let config = ProviderConfig {
+                api_key: None,
+                endpoint: None,
+                model: model.into(),
+            };
+            let provider = make_provider(id, config).expect(id);
+            let request = one_asset_request(model);
+            let estimate = provider.estimate_cost(&request);
+            let shared = cost::estimate_cost(&request);
+            assert_eq!(
+                (
+                    estimate.input_tokens,
+                    estimate.output_tokens_estimate,
+                    estimate.usd_cents
+                ),
+                (
+                    shared.input_tokens,
+                    shared.output_tokens_estimate,
+                    shared.usd_cents
+                ),
+                "{id}"
+            );
+            assert!(estimate.input_tokens > 0, "{id}");
+        }
+    }
+
+    /// The command boundary hands the frontend the `Display` text, which it
+    /// classifies by substring; a boundary that dropped it would misroute every failure.
+    #[test]
+    fn the_string_boundary_carries_the_error_message() {
+        assert_eq!(
+            String::from(LLMError::Network("timed out".into())),
+            "Network error: timed out"
+        );
+        assert_eq!(
+            String::from(LLMError::NoApiKey("claude".into())),
+            "API key not configured for provider claude"
+        );
+    }
+
+    #[test]
+    fn make_provider_knows_the_three_provider_ids_and_refuses_others() {
+        let config = || ProviderConfig {
+            api_key: None,
+            endpoint: None,
+            model: "m".to_string(),
+        };
+        for id in ["claude", "openai", "ollama"] {
+            let provider = make_provider(id, config()).unwrap_or_else(|e| panic!("{id}: {e}"));
+            assert_eq!(provider.id(), id);
+        }
+        assert!(matches!(
+            make_provider("gemini", config()),
+            Err(LLMError::ProviderDisabled(id)) if id == "gemini"
+        ));
+    }
+
+    /// Only an alphanumeric language tag is stripped from a fence's opening line;
+    /// anything else there is content, and non-JSON content is a parse error.
+    #[test]
+    fn arbitrary_text_on_the_fence_line_is_content_not_a_tag() {
+        let tagged = "```json\n{\"suggestions\": []}\n```";
+        assert!(parse_suggestions(tagged).expect("tag stripped").is_empty());
+        let chatty = "```json here you go\n{\"suggestions\": []}\n```";
+        assert!(matches!(
+            parse_suggestions(chatty),
+            Err(LLMError::ParseError(_))
+        ));
+    }
+
+    /// A request shape from before the field existed means "send thumbnails".
+    #[test]
+    fn include_thumbnails_defaults_to_true() {
+        let request: TagRequest =
+            serde_json::from_str(r#"{"assets": [], "prompt_version": 1, "model": "m"}"#)
+                .expect("request");
+        assert!(request.include_thumbnails);
+    }
+
     /// 529 is Anthropic's documented `overloaded_error` and 503 the generic
     /// equivalent. Both landed in `Network`, which the frontend routes to "check
     /// your connection" — pointing the user at the one thing that is not wrong.

@@ -489,6 +489,14 @@ mod tests {
     }
 
     #[test]
+    fn stem_strips_one_extension_but_not_a_leading_dot() {
+        assert_eq!(stem("hero.png"), "hero");
+        assert_eq!(stem("a.b.png"), "a.b");
+        assert_eq!(stem("noext"), "noext");
+        assert_eq!(stem(".hidden"), ".hidden");
+    }
+
+    #[test]
     fn a_rule_set_that_compiles_reports_nothing() {
         let rules = vec![
             LearnedRule::FilenameRegex {

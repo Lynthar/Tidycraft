@@ -404,6 +404,43 @@ pub(crate) mod tests {
         set_file_mtime(path, when).unwrap();
     }
 
+    /// `enabled = false` is the documented off switch: a stale pair on disk reports nothing.
+    #[test]
+    fn a_disabled_rule_ignores_a_stale_pair_on_disk() {
+        let dir = tempdir().unwrap();
+        let blend = dir.path().join("hero.blend");
+        let fbx = dir.path().join("hero.fbx");
+        write_with_mtime(&fbx, 3600);
+        write_with_mtime(&blend, 0);
+        let assets = vec![
+            make_asset(&blend.to_string_lossy(), AssetType::Model),
+            make_asset(&fbx.to_string_lossy(), AssetType::Model),
+        ];
+        let enabled = DccSourceConfig {
+            enabled: true,
+            ..DccSourceConfig::default()
+        };
+        assert_eq!(
+            find_dcc_source_issues(&assets, &enabled).issue_count,
+            1,
+            "the pair is stale"
+        );
+        assert_eq!(
+            find_dcc_source_issues(&assets, &DccSourceConfig::default()).issue_count,
+            0
+        );
+    }
+
+    #[test]
+    fn humanized_durations_change_unit_at_the_minute_hour_and_day() {
+        assert_eq!(humanize_seconds(59), (59, "s"));
+        assert_eq!(humanize_seconds(60), (1, "m"));
+        assert_eq!(humanize_seconds(3599), (59, "m"));
+        assert_eq!(humanize_seconds(3600), (1, "h"));
+        assert_eq!(humanize_seconds(86399), (23, "h"));
+        assert_eq!(humanize_seconds(86400), (1, "d"));
+    }
+
     #[test]
     fn disabled_yields_no_issues() {
         // Early-out catches before any IO — fixture files unnecessary.

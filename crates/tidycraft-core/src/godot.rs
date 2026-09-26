@@ -673,15 +673,188 @@ config/name="Minimal"
         assert_eq!(version, Some("4.3".to_string()));
     }
 
+    /// Godot 3 writes `config_version=4` and no `config/features`; Godot 4 writes 5.
     #[test]
     fn test_infer_godot_version_from_config() {
-        let mut config = HashMap::new();
-        let mut root = HashMap::new();
-        root.insert("config_version".to_string(), "5".to_string());
-        config.insert(String::new(), root);
+        let with = |config_version: &str| {
+            let mut config = HashMap::new();
+            let mut root = HashMap::new();
+            root.insert("config_version".to_string(), config_version.to_string());
+            config.insert(String::new(), root);
+            config
+        };
+        assert_eq!(
+            infer_godot_version(&with("5"), &[]),
+            Some("4.x".to_string())
+        );
+        assert_eq!(
+            infer_godot_version(&with("4"), &[]),
+            Some("3.x".to_string())
+        );
+        assert_eq!(infer_godot_version(&with("3"), &[]), None);
+    }
 
-        let version = infer_godot_version(&config, &[]);
-        assert_eq!(version, Some("4.x".to_string()));
+    /// The header the Godot editor writes into every project.godot: `;` comment
+    /// lines, one of which contains `=`. Only `config_version` is a root key.
+    #[test]
+    fn godot_header_comments_are_not_keys() {
+        let content = "; Engine configuration file.\n\
+                       ; It's best edited using the editor UI and not directly,\n\
+                       ; since the parameters that go here are not all obvious.\n\
+                       ;\n\
+                       ; Format:\n\
+                       ;   [section] ; section goes between []\n\
+                       ;   param=value ; assign values to parameters\n\
+                       \n\
+                       config_version=5\n\
+                       \n\
+                       [application]\n\
+                       config/name=\"G\"\n\
+                       list=[1, 2]\n";
+        let config = parse_godot_config(content);
+        let root: Vec<&String> = config[""].keys().collect();
+        assert_eq!(root, ["config_version"]);
+        assert_eq!(config["application"]["config/name"], "\"G\"");
+        // A value ending in `]` is still a value, not a section header.
+        assert_eq!(config["application"]["list"], "[1, 2]");
+    }
+
+    /// Half-typed values parse as text and never slice past the end: release
+    /// builds abort on panic, so a truncated project.godot would take the app down.
+    #[test]
+    fn half_typed_arrays_and_quotes_do_not_panic() {
+        assert!(parse_godot_array("PackedStringArray(").is_empty());
+        assert!(parse_godot_array("PackedStringArray(\"4.2\"").is_empty());
+        assert!(parse_godot_array("[").is_empty());
+        assert_eq!(unquote("\"abc"), "\"abc");
+        assert_eq!(unquote("abc'"), "abc'");
+    }
+
+    #[test]
+    fn godot_metadata_extensions_are_recognised_in_any_case() {
+        for ext in ["import", "uid", "godot", "cfg", "IMPORT", "Godot"] {
+            assert!(is_godot_metadata(ext), "{ext}");
+        }
+        for ext in ["png", "tscn", "tres", "gd", "cs"] {
+            assert!(!is_godot_metadata(ext), "{ext}");
+        }
+    }
+
+    fn asset_at(root: &Path, name: &str, asset_type: crate::scanner::AssetType) -> AssetInfo {
+        AssetInfo {
+            path: root.join(name).to_string_lossy().to_string(),
+            name: name.to_string(),
+            extension: name.rsplit('.').next().unwrap_or_default().to_string(),
+            asset_type,
+            size: 1,
+            modified: 0,
+            metadata: None,
+            unity_guid: None,
+        }
+    }
+
+    /// One reference source of each kind the heuristic reads — scene, resource,
+    /// GDScript and C# — each the sole referrer of one texture, plus an orphan.
+    fn one_source_of_each_kind(root: &Path) -> Vec<AssetInfo> {
+        use crate::scanner::AssetType;
+        let sources = [
+            (
+                "scene.tscn",
+                AssetType::Scene,
+                "[ext_resource type=\"Texture2D\" path=\"res://from_scene.png\" id=\"1\"]\n",
+            ),
+            (
+                "mat.tres",
+                AssetType::Other,
+                "[ext_resource type=\"Texture2D\" path=\"res://from_resource.png\" id=\"1\"]\n",
+            ),
+            (
+                "logic.gd",
+                AssetType::Script,
+                "var t = preload(\"res://from_script.png\")\n",
+            ),
+            (
+                "Logic.cs",
+                AssetType::Script,
+                "var t = GD.Load<Texture2D>(\"res://from_csharp.png\");\n",
+            ),
+        ];
+        let mut assets = Vec::new();
+        for (name, asset_type, content) in sources {
+            fs::write(root.join(name), content).unwrap();
+            assets.push(asset_at(root, name, asset_type));
+        }
+        for png in [
+            "from_scene.png",
+            "from_resource.png",
+            "from_script.png",
+            "from_csharp.png",
+            "orphan.png",
+        ] {
+            fs::write(root.join(png), "x").unwrap();
+            assets.push(asset_at(root, png, AssetType::Texture));
+        }
+        assets
+    }
+
+    #[test]
+    fn each_reference_source_kind_keeps_its_texture_from_being_unused() {
+        let dir = tempdir().unwrap();
+        let assets = one_source_of_each_kind(dir.path());
+
+        let unused_textures: Vec<String> =
+            find_unused_godot_assets(&dir.path().to_string_lossy(), &assets)
+                .into_iter()
+                .filter(|p| {
+                    Path::new(p)
+                        .extension()
+                        .is_some_and(|e| e.eq_ignore_ascii_case("png"))
+                })
+                .map(|p| {
+                    Path::new(&p)
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string()
+                })
+                .collect();
+        assert_eq!(unused_textures, ["orphan.png"]);
+    }
+
+    #[test]
+    fn the_rename_guard_reads_every_reference_source_kind() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let assets = one_source_of_each_kind(root);
+        let target = |name: &str| root.join(name).to_string_lossy().to_string();
+        let targets: Vec<String> = [
+            "from_scene.png",
+            "from_resource.png",
+            "from_script.png",
+            "from_csharp.png",
+        ]
+        .iter()
+        .map(|n| target(n))
+        .collect();
+
+        let refs = referencing_files(root, &assets, &targets);
+
+        assert_eq!(
+            refs.get(&target("from_scene.png")),
+            Some(&vec!["scene.tscn".to_string()])
+        );
+        assert_eq!(
+            refs.get(&target("from_resource.png")),
+            Some(&vec!["mat.tres".to_string()])
+        );
+        assert_eq!(
+            refs.get(&target("from_script.png")),
+            Some(&vec!["logic.gd".to_string()])
+        );
+        assert_eq!(
+            refs.get(&target("from_csharp.png")),
+            Some(&vec!["Logic.cs".to_string()])
+        );
     }
 
     #[test]
@@ -860,6 +1033,35 @@ config/name="Minimal"
             refs.get(&target).map(Vec::as_slice),
             Some(["project.godot".to_string()].as_slice()),
             "the rename guard must attribute the autoload reference to project.godot"
+        );
+    }
+
+    #[test]
+    fn dependency_edges_come_from_every_reference_source_kind() {
+        let dir = tempdir().unwrap();
+        let assets = one_source_of_each_kind(dir.path());
+        let mut edges = godot_dependency_edges(dir.path(), &assets);
+        edges.sort();
+        assert_eq!(
+            edges,
+            vec![
+                (
+                    "res://Logic.cs".to_string(),
+                    "res://from_csharp.png".to_string()
+                ),
+                (
+                    "res://logic.gd".to_string(),
+                    "res://from_script.png".to_string()
+                ),
+                (
+                    "res://mat.tres".to_string(),
+                    "res://from_resource.png".to_string()
+                ),
+                (
+                    "res://scene.tscn".to_string(),
+                    "res://from_scene.png".to_string()
+                ),
+            ]
         );
     }
 

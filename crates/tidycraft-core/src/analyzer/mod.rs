@@ -708,6 +708,90 @@ mod tests {
     }
 
     #[test]
+    fn test_analysis_result_add_info() {
+        let mut result = AnalysisResult::new();
+        result.add_issue(Issue {
+            rule_id: "test_rule".to_string(),
+            rule_name: "Test Rule".to_string(),
+            severity: Severity::Info,
+            message: "Test info".to_string(),
+            asset_path: "/test/file.png".to_string(),
+            suggestion: None,
+            auto_fixable: false,
+            related_paths: None,
+            args: HashMap::new(),
+        });
+        assert_eq!(result.info_count, 1);
+        assert_eq!(result.warning_count, 0);
+        assert_eq!(result.error_count, 0);
+        assert_eq!(result.issue_count, 1);
+    }
+
+    /// The out-of-box values docs/analyzer-rules.md promises, on both roads a
+    /// default can take: `Default` and an empty `tidycraft.toml`.
+    #[test]
+    fn defaults_match_the_documented_out_of_box_values() {
+        let parsed = RuleConfig::from_toml("").expect("an empty config parses");
+        // Every section present but empty: this is the road the per-field
+        // `default_*` functions take; a missing section takes `impl Default`.
+        let sections = RuleConfig::from_toml(
+            "[naming]
+[texture]
+[texture.color_space]
+[model]
+[audio]
+[pbr_set]
+[dcc_source]
+[dcc_source.lookup]
+[ignore]
+",
+        )
+        .expect("empty sections parse");
+        for c in [RuleConfig::default(), parsed, sections] {
+            assert!(c.naming.enabled);
+            assert!(!c.naming.forbid_chinese);
+            assert_eq!(c.naming.max_length, 512);
+            assert_eq!(c.naming.case_style, rules::naming::CaseStyle::Any);
+            assert_eq!(c.naming.texture_prefix, None);
+            assert_eq!(c.naming.model_prefix, None);
+            assert_eq!(c.naming.audio_prefix, None);
+
+            assert!(!c.texture.enabled);
+            assert!(c.texture.require_pot);
+            assert_eq!(c.texture.max_size, 4096);
+            assert_eq!(c.texture.min_size, 4);
+            assert!(!c.texture.warn_non_square);
+            assert_eq!(c.texture.max_file_size, 10 * 1024 * 1024);
+            assert!(c.texture.color_space.enabled);
+
+            assert!(!c.model.enabled);
+            assert_eq!(c.model.max_vertices, 100_000);
+            assert_eq!(c.model.max_faces, 100_000);
+            assert_eq!(c.model.max_materials, 10);
+
+            assert!(!c.audio.enabled);
+            assert_eq!(c.audio.allowed_sample_rates, [44100, 48000]);
+            assert!((c.audio.max_sfx_duration - 30.0).abs() < f64::EPSILON);
+            assert_eq!(c.audio.max_file_size, 20 * 1024 * 1024);
+            assert!(!c.audio.prefer_mono_for_sfx);
+
+            assert!(!c.pbr_set.enabled);
+            assert_eq!(c.pbr_set.trigger, "basecolor");
+            assert_eq!(c.pbr_set.required, ["basecolor", "normal"]);
+
+            assert!(!c.dcc_source.enabled);
+            assert_eq!(c.dcc_source.mtime_tolerance_secs, 60);
+            assert!(c.dcc_source.lookup.same_dir);
+            assert_eq!(
+                c.dcc_source.lookup.sibling_dirs,
+                ["sources", "_source", "src"]
+            );
+
+            assert!(c.ignore.patterns.is_empty());
+        }
+    }
+
+    #[test]
     fn test_analysis_result_merge() {
         let mut result1 = AnalysisResult::new();
         let mut result2 = AnalysisResult::new();

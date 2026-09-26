@@ -213,4 +213,114 @@ mod tests {
         assert!(!cache.needs_rescan("/test/new.png", 111, 500, None));
         assert!(cache.needs_rescan("/test/new.png", 111, 500, Some(70)));
     }
+
+    /// A project path no other test uses: the cache file these tests write under
+    /// the real cache directory is then private to the test, and `clear` removes it.
+    fn unique_project() -> (tempfile::TempDir, String) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let project = dir.path().to_string_lossy().into_owned();
+        (dir, project)
+    }
+
+    fn plant_cache_file(project: &str, content: &str) -> PathBuf {
+        let path = ScanCache::cache_path(project).expect("cache dir");
+        fs::create_dir_all(path.parent().expect("parent")).expect("create cache dir");
+        fs::write(&path, content).expect("write cache file");
+        path
+    }
+
+    #[test]
+    fn cache_files_are_per_project_and_stable_across_calls() {
+        let a = ScanCache::cache_path("/projects/a").expect("cache dir");
+        let b = ScanCache::cache_path("/projects/b").expect("cache dir");
+        assert_ne!(a, b, "two projects must never share a cache file");
+        assert_eq!(a, ScanCache::cache_path("/projects/a").expect("cache dir"));
+        assert_eq!(a.extension().and_then(|e| e.to_str()), Some("json"));
+        assert!(a.ancestors().any(|p| p.ends_with("tidycraft")), "{a:?}");
+    }
+
+    #[test]
+    fn save_then_load_round_trips_the_entries() {
+        let (_dir, project) = unique_project();
+        let mut cache = ScanCache::new(&project);
+        cache.update_entry(dummy_asset("/p/file.png", 1000), 12345, Some(50));
+        cache.save().expect("save");
+
+        let loaded = ScanCache::load(&project);
+        ScanCache::clear(&project).expect("clear");
+        let loaded = loaded.expect("a saved cache loads back");
+        assert_eq!(loaded.project_path, project);
+        let entry = &loaded.entries["/p/file.png"];
+        assert_eq!(entry.modified_nanos, 12345);
+        assert_eq!(entry.size, 1000);
+        assert_eq!(entry.meta_modified_nanos, Some(50));
+        assert_eq!(entry.asset.path, "/p/file.png");
+    }
+
+    #[test]
+    fn a_cache_from_an_older_version_is_rejected() {
+        let (_dir, project) = unique_project();
+        let mut cache = ScanCache::new(&project);
+        cache.version -= 1;
+        cache.save().expect("save");
+
+        let loaded = ScanCache::load(&project);
+        ScanCache::clear(&project).expect("clear");
+        assert!(
+            loaded.is_none(),
+            "an older cache must be rejected so the project is re-scanned"
+        );
+    }
+
+    #[test]
+    fn a_cache_saved_for_another_project_is_not_served() {
+        let (_dir, project) = unique_project();
+        let mut other = ScanCache::new("/somewhere/else");
+        other.update_entry(dummy_asset("/somewhere/else/file.png", 1), 1, None);
+        plant_cache_file(&project, &serde_json::to_string(&other).expect("json"));
+
+        let loaded = ScanCache::load(&project);
+        ScanCache::clear(&project).expect("clear");
+        assert!(
+            loaded.is_none(),
+            "another project's entries must not be served"
+        );
+    }
+
+    #[test]
+    fn a_torn_cache_file_loads_as_nothing() {
+        let (_dir, project) = unique_project();
+        plant_cache_file(&project, r#"{"version": 7, "project_path": "#);
+
+        let loaded = ScanCache::load(&project);
+        ScanCache::clear(&project).expect("clear");
+        assert!(
+            loaded.is_none(),
+            "a torn file means a full rescan, not a failure"
+        );
+    }
+
+    #[test]
+    fn clear_removes_the_cache_file() {
+        let (_dir, project) = unique_project();
+        ScanCache::new(&project).save().expect("save");
+        let path = ScanCache::cache_path(&project).expect("cache dir");
+        assert!(path.exists());
+
+        ScanCache::clear(&project).expect("clear");
+        assert!(!path.exists());
+        assert!(ScanCache::load(&project).is_none());
+    }
+
+    #[test]
+    fn prune_keeps_only_the_entries_whose_files_still_exist() {
+        let mut cache = ScanCache::new("/test");
+        cache.update_entry(dummy_asset("/test/kept.png", 1), 1, None);
+        cache.update_entry(dummy_asset("/test/gone.png", 1), 1, None);
+
+        cache.prune(&["/test/kept.png".to_string()]);
+
+        let remaining: Vec<&String> = cache.entries.keys().collect();
+        assert_eq!(remaining, ["/test/kept.png"]);
+    }
 }

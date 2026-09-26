@@ -632,6 +632,68 @@ mod tests {
         );
     }
 
+    /// Unity's reference form `{fileID: n, guid: hex32, type: k}`, negative ids
+    /// included; a guid inside a YAML comment or directive is not a reference.
+    #[test]
+    fn references_carry_file_id_and_type_and_skip_comment_lines() {
+        let content = "%YAML 1.1\n\
+            # guid: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n\
+            m_Script: {fileID: 11500000, guid: 0123456789abcdef0123456789abcdef, type: 3}\n\
+            m_Mesh: {fileID: -8679921383154817045, guid: fedcba9876543210fedcba9876543210, type: 2}\n";
+        let mut refs = extract_references(content);
+        refs.sort_by(|a, b| a.guid.cmp(&b.guid));
+        assert_eq!(refs.len(), 2);
+        assert_eq!(refs[0].guid, "0123456789abcdef0123456789abcdef");
+        assert_eq!(refs[0].file_id, Some(11500000));
+        assert_eq!(refs[0].ref_type, Some(3));
+        assert_eq!(refs[1].file_id, Some(-8679921383154817045));
+        assert_eq!(refs[1].ref_type, Some(2));
+    }
+
+    #[test]
+    fn package_metas_are_indexed_from_meta_files_with_a_valid_guid_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let runtime = dir
+            .path()
+            .join("Library")
+            .join("PackageCache")
+            .join("com.example.pkg@1.0.0")
+            .join("Runtime");
+        fs::create_dir_all(&runtime).unwrap();
+        fs::write(
+            runtime.join("Lit.shader.meta"),
+            "fileFormatVersion: 2\nguid: abcdefabcdefabcdefabcdefabcdef01\n",
+        )
+        .unwrap();
+        // A guid line in a non-meta file, and a meta whose guid is 32 non-hex characters.
+        fs::write(
+            runtime.join("notes.txt"),
+            "guid: abcdefabcdefabcdefabcdefabcdef02\n",
+        )
+        .unwrap();
+        fs::write(
+            runtime.join("Odd.cs.meta"),
+            "fileFormatVersion: 2\nguid: zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\n",
+        )
+        .unwrap();
+        let index = build_package_guid_index(dir.path());
+        assert_eq!(
+            index
+                .get("abcdefabcdefabcdefabcdefabcdef01")
+                .map(|r| r.file_name.as_str()),
+            Some("Lit.shader")
+        );
+        assert!(index.get("abcdefabcdefabcdefabcdefabcdef02").is_none());
+        assert!(index.get("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz").is_none());
+    }
+
+    /// A material reference carries a guid too; only `m_Script:` means a MonoBehaviour.
+    #[test]
+    fn only_script_references_count_as_monobehaviour_components() {
+        let content = "--- !u!23 &2\nMeshRenderer:\n  m_Materials:\n  - {fileID: 2100000, guid: abc123def456789012345678901234ab, type: 2}\n";
+        assert_eq!(extract_components(content), vec!["MeshRenderer"]);
+    }
+
     #[test]
     fn parse_project_version_reads_both_fields() {
         let dir = tempfile::tempdir().unwrap();

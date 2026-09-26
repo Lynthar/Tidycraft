@@ -290,3 +290,435 @@ fn sarif_carries_every_finding() {
     let want: BTreeSet<&str> = EXPECTED.iter().map(|(r, _)| *r).collect();
     assert_eq!(rules, want);
 }
+
+fn tidycraft(args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_tidycraft"))
+        .args(args)
+        .output()
+        .expect("run tidycraft")
+}
+
+fn code(out: &Output) -> i32 {
+    out.status.code().expect("exit code")
+}
+
+fn text(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+/// Exit codes are a contract: 2 for usage or configuration, 3 for the environment.
+#[test]
+fn usage_and_environment_failures_exit_2_and_3() {
+    let p = project();
+    let root = p.root.to_str().expect("utf-8 path");
+    let missing = p.root.join("does-not-exist");
+    let missing = missing.to_str().unwrap();
+
+    let out = tidycraft(&["check", missing]);
+    assert_eq!(code(&out), 2);
+    assert!(
+        text(&out.stderr).contains("project root is not a directory"),
+        "{}",
+        text(&out.stderr)
+    );
+
+    let out = tidycraft(&["check", root, "--config", missing]);
+    assert_eq!(code(&out), 2);
+    assert!(
+        text(&out.stderr).contains("cannot read config"),
+        "{}",
+        text(&out.stderr)
+    );
+
+    let toml = p.root.join("tidycraft.toml");
+    fs::write(&toml, "[texture\n").unwrap();
+    assert_eq!(code(&check(&p.root, &[])), 2);
+
+    // Absent: built-in defaults, and the report carries no config_source.
+    fs::remove_file(&toml).unwrap();
+    let out = check(&p.root, &[]);
+    assert_eq!(code(&out), 0, "{}", text(&out.stderr));
+    assert!(report(&out)["project"].get("config_source").is_none());
+
+    // Present but unreadable: the environment failed, not the user.
+    fs::create_dir(&toml).unwrap();
+    let out = check(&p.root, &[]);
+    assert_eq!(code(&out), 3, "{}", text(&out.stderr));
+}
+
+/// Threshold precedence: `--fail-on` flag, then `[check] fail_on`, then `error`.
+#[test]
+fn fail_on_comes_from_the_flag_then_the_config_then_defaults_to_error() {
+    let p = project();
+    let toml = p.root.join("tidycraft.toml");
+    let base = fs::read_to_string(&toml).unwrap();
+    let configured = |fail_on: &str| {
+        fs::write(&toml, format!("{base}\n[check]\nfail_on = \"{fail_on}\"\n")).unwrap()
+    };
+
+    // The fixture yields warnings and infos, no errors.
+    assert_eq!(code(&check(&p.root, &[])), 0);
+    configured("info");
+    assert_eq!(code(&check(&p.root, &[])), 1);
+    configured("warning");
+    assert_eq!(code(&check(&p.root, &[])), 1);
+    assert_eq!(
+        code(&check(&p.root, &["--fail-on", "error"])),
+        0,
+        "the flag wins"
+    );
+    configured("error");
+    assert_eq!(code(&check(&p.root, &[])), 0);
+    configured("loud");
+    assert_eq!(code(&check(&p.root, &[])), 2);
+}
+
+#[test]
+fn the_listing_is_bounded_while_the_summary_counts_everything() {
+    let p = project();
+    let root = p.root.to_str().expect("utf-8 path");
+    let json = ["check", root, "--format", "json", "--no-progress"];
+
+    let rep = report(&tidycraft(&[&json[..], &["--max-issues", "5"]].concat()));
+    assert_eq!(rep["issues"].as_array().unwrap().len(), 5);
+    assert_eq!(rep["summary"]["truncated"], true);
+    assert_eq!(rep["summary"]["issues_total"], EXPECTED.len());
+
+    let rep = report(&tidycraft(&[&json[..], &["--summary-only"]].concat()));
+    assert_eq!(rep["issues"].as_array().unwrap().len(), 0);
+    assert_eq!(rep["summary"]["issues_total"], EXPECTED.len());
+
+    let out = tidycraft(&["check", root, "--max-issues", "5", "--no-progress"]);
+    let stdout = text(&out.stdout);
+    assert!(
+        stdout.contains(&format!("(showing 5 of {} issues", EXPECTED.len())),
+        "{stdout}"
+    );
+
+    // The human listing: one header per group, severity column padded to one
+    // width, and no completeness block when the scan was complete.
+    let full = text(&tidycraft(&["check", root, "--no-progress"]).stdout);
+    assert_eq!(
+        full.lines().filter(|l| *l == "duplicate").count(),
+        1,
+        "{full}"
+    );
+    assert!(
+        full.contains(
+            "
+  warning  Assets/"
+        ),
+        "{full}"
+    );
+    assert!(
+        full.contains(
+            "
+  info     Assets/"
+        ),
+        "{full}"
+    );
+    assert!(
+        !full.contains("scan warnings") && !full.contains("git-lfs"),
+        "{full}"
+    );
+    let by_dir = text(&tidycraft(&["check", root, "--no-progress", "--group-by", "dir"]).stdout);
+    assert_eq!(
+        by_dir.lines().filter(|l| *l == "Assets/Textures").count(),
+        1,
+        "{by_dir}"
+    );
+    let by_sev =
+        text(&tidycraft(&["check", root, "--no-progress", "--group-by", "severity"]).stdout);
+    assert_eq!(
+        by_sev.lines().filter(|l| *l == "warning").count(),
+        1,
+        "{by_sev}"
+    );
+    assert_eq!(
+        by_sev.lines().filter(|l| *l == "info").count(),
+        1,
+        "{by_sev}"
+    );
+}
+
+/// The summary's counts are the listing's counts, severities are the three
+/// documented names, and paths are project-relative with forward slashes.
+#[test]
+fn summary_counts_match_the_listing_and_paths_are_relative() {
+    let p = project();
+    let rep = report(&check(&p.root, &[]));
+    let issues = rep["issues"].as_array().unwrap();
+    let count = |sev: &str| issues.iter().filter(|i| i["severity"] == sev).count();
+    for i in issues {
+        let sev = i["severity"].as_str().unwrap();
+        assert!(["error", "warning", "info"].contains(&sev), "{sev}");
+        let path = i["path"].as_str().unwrap();
+        assert!(
+            !path.contains('\\') && path.starts_with("Assets/"),
+            "{path}"
+        );
+    }
+    assert_eq!(rep["summary"]["errors"], count("error"));
+    assert_eq!(rep["summary"]["warnings"], count("warning"));
+    assert_eq!(rep["summary"]["infos"], count("info"));
+    assert!(count("info") > 0 && count("warning") > 0);
+    // A rule that interpolates nothing carries no `args` key at all.
+    let chinese = issues
+        .iter()
+        .find(|i| i["rule"] == "naming.chinese")
+        .expect("in the fixture");
+    assert!(chinese.get("args").is_none());
+    let pot = issues
+        .iter()
+        .find(|i| i["rule"] == "texture.pot")
+        .expect("in the fixture");
+    assert_eq!(pot["args"]["width"], "6");
+}
+
+/// An unpulled git-lfs pointer (spec header, at most 512 bytes) is reported in
+/// every format and turns the run red only under `--strict`.
+#[test]
+fn an_unpulled_lfs_pointer_is_reported_and_strict_makes_it_red() {
+    let p = project();
+    let root = p.root.to_str().expect("utf-8 path");
+    let header = "version https://git-lfs.github.com/spec/v1\noid sha256:0000000000000000000000000000000000000000000000000000000000000000\nsize 12345\n";
+    // A complete scan is complete: nothing to admit, --strict passes.
+    assert_eq!(code(&check(&p.root, &["--strict"])), 0);
+    let textures = p.root.join("Assets/Textures");
+    fs::write(textures.join("T_Pointer.png"), header).unwrap();
+    let mut at_limit = header.as_bytes().to_vec();
+    at_limit.resize(512, b'\n');
+    fs::write(textures.join("T_PointerAtLimit.png"), &at_limit).unwrap();
+    let mut over = at_limit.clone();
+    over.push(b'\n');
+    fs::write(textures.join("T_PointerOver.png"), &over).unwrap();
+
+    let out = check(&p.root, &[]);
+    assert_eq!(code(&out), 0, "reported, not red, by default");
+    assert_eq!(report(&out)["summary"]["lfs_pointers"], 2);
+    assert_eq!(code(&check(&p.root, &["--strict"])), 1);
+
+    let human = tidycraft(&["check", root, "--strict", "--no-progress"]);
+    assert_eq!(code(&human), 1);
+    let stdout = text(&human.stdout);
+    assert!(
+        stdout.contains("2 git-lfs pointer file(s) not pulled"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("Assets/Textures/T_Pointer.png, Assets/Textures/T_PointerAtLimit.png"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("T_PointerOver"), "{stdout}");
+    assert!(
+        stdout.contains("FAIL (strict: scan incomplete)"),
+        "{stdout}"
+    );
+}
+
+/// GitHub caps annotations at 10 per type per step: at most 9 findings per
+/// severity are annotated and the rest roll up into one line, none lost.
+#[test]
+fn github_annotations_cap_each_severity_at_nine_and_roll_up_the_rest() {
+    let p = project();
+    let root = p.root.to_str().expect("utf-8 path");
+    let rep = report(&check(&p.root, &[]));
+    let out = tidycraft(&["check", root, "--format", "github", "--no-progress"]);
+    let stdout = text(&out.stdout);
+    for (severity, command, total) in [
+        ("warning", "warning", "warnings"),
+        ("info", "notice", "infos"),
+        ("error", "error", "errors"),
+    ] {
+        let detailed = stdout
+            .lines()
+            .filter(|l| l.starts_with(&format!("::{command} file=")))
+            .count();
+        assert!(detailed <= 9, "{severity}: {detailed}");
+        let rolled: usize = stdout
+            .lines()
+            .find_map(|l| l.strip_prefix(&format!("::{command}::")))
+            .and_then(|rest| rest.split_whitespace().next())
+            .map(|n| n.parse().expect("a count"))
+            .unwrap_or(0);
+        let total = rep["summary"][total].as_u64().expect("count") as usize;
+        assert_eq!(detailed + rolled, total, "{severity}");
+        assert_eq!(detailed, total.min(9), "{severity}");
+        if total <= 9 {
+            assert!(
+                !stdout.contains(&format!("::{command}::")),
+                "{severity}: no rollup under the cap"
+            );
+        }
+    }
+    assert!(
+        rep["summary"]["warnings"].as_u64().unwrap() > 9,
+        "the fixture must overflow the cap"
+    );
+}
+
+/// The baseline accepts today's findings; a grown duplicate group re-fires; a
+/// broken baseline is a usage error rather than a silent reset.
+#[test]
+fn a_baseline_accepts_current_findings_and_a_broken_one_is_a_usage_error() {
+    let p = project();
+    let baseline = p.root.join("tidycraft.baseline.json");
+    let out = check(&p.root, &["--update-baseline"]);
+    assert_eq!(code(&out), 0, "{}", text(&out.stderr));
+    let written = format!("baseline written: {} issue(s)", EXPECTED.len());
+    assert!(
+        text(&out.stdout).starts_with(&written),
+        "{}",
+        text(&out.stdout)
+    );
+    assert!(baseline.exists());
+
+    let out = check(&p.root, &["--fail-on", "info"]);
+    assert_eq!(code(&out), 0);
+    let rep = report(&out);
+    assert_eq!(rep["summary"]["baseline_suppressed"], EXPECTED.len());
+    assert_eq!(rep["summary"]["issues_total"], 0);
+    assert_eq!(code(&check(&p.root, &["--fail-on", "warning"])), 0);
+
+    // A third copy grows the accepted duplicate group, so it fires again.
+    fs::copy(
+        p.root.join("Assets/Textures/T_Dup_A.png"),
+        p.root.join("Assets/Textures/T_Dup_C.png"),
+    )
+    .unwrap();
+    let out = check(&p.root, &["--fail-on", "warning"]);
+    assert_eq!(code(&out), 1);
+    let rep = report(&out);
+    let got = findings(&rep);
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert!(got.iter().all(|(rule, _)| rule == "duplicate"), "{got:?}");
+    assert_eq!(rep["summary"]["baseline_suppressed"], EXPECTED.len() - 1);
+
+    // A baseline path that does not exist is simply no baseline.
+    let nope = p.root.join("nope.json");
+    let out = check(
+        &p.root,
+        &["--baseline", nope.to_str().unwrap(), "--fail-on", "warning"],
+    );
+    assert_eq!(code(&out), 1);
+    assert_eq!(report(&out)["summary"]["baseline_suppressed"], 0);
+
+    fs::write(&baseline, "not json").unwrap();
+    let out = check(&p.root, &[]);
+    assert_eq!(code(&out), 2);
+    assert!(
+        text(&out.stderr).contains("invalid baseline"),
+        "{}",
+        text(&out.stderr)
+    );
+
+    // Present but unreadable is a usage error too, never "no baseline".
+    let unreadable = p.root.join("Assets");
+    let out = check(&p.root, &["--baseline", unreadable.to_str().unwrap()]);
+    assert_eq!(code(&out), 2);
+    assert!(
+        text(&out.stderr).contains("cannot read baseline"),
+        "{}",
+        text(&out.stderr)
+    );
+}
+
+#[test]
+fn rules_lists_every_documented_rule_id_and_the_effective_config() {
+    let p = project();
+    let root = p.root.to_str().expect("utf-8 path");
+    let out = tidycraft(&["rules", root]);
+    assert_eq!(code(&out), 0);
+    let stdout = text(&out.stdout);
+    for id in EXPECTED.iter().map(|(r, _)| *r).chain([STALE_SOURCE.0]) {
+        assert!(
+            stdout.lines().any(|l| l.trim() == id),
+            "{id} missing from:\n{stdout}"
+        );
+    }
+
+    let out = tidycraft(&["rules", root, "--format", "json"]);
+    let rep: Value = serde_json::from_slice(&out.stdout).expect("json");
+    assert_eq!(rep["config_source"], "tidycraft.toml");
+    assert_eq!(rep["config"]["texture"]["enabled"], true);
+    assert_eq!(rep["config"]["texture"]["max_size"], 16);
+    let ids: BTreeSet<&str> = rep["rules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["id"].as_str().unwrap())
+        .collect();
+    assert!(ids.contains("dcc_source.outdated_export") && ids.contains("naming.prefix"));
+}
+
+#[test]
+fn explain_prints_the_rule_doc_or_fails_as_a_usage_error() {
+    let out = tidycraft(&["explain", "naming.prefix"]);
+    assert_eq!(code(&out), 0);
+    let stdout = text(&out.stdout);
+    assert!(stdout.starts_with("naming.prefix — "), "{stdout}");
+    assert!(stdout.contains("docs/analyzer-rules.md"), "{stdout}");
+
+    let out = tidycraft(&["explain", "nonsense"]);
+    assert_eq!(code(&out), 2);
+    assert!(
+        text(&out.stderr).contains("unknown rule `nonsense`"),
+        "{}",
+        text(&out.stderr)
+    );
+}
+
+#[test]
+fn scan_lists_every_asset_and_filters_and_bounds_on_request() {
+    let p = project();
+    let root = p.root.to_str().expect("utf-8 path");
+    let scan = |extra: &[&str]| -> Value {
+        let mut args = vec!["scan", root];
+        args.extend_from_slice(extra);
+        let out = tidycraft(&args);
+        assert_eq!(code(&out), 0, "{}", text(&out.stderr));
+        serde_json::from_slice(&out.stdout).expect("json")
+    };
+    let matched = |rep: &Value| rep["summary"]["matched"].as_u64().expect("matched");
+
+    let all = scan(&[]);
+    assert_eq!(all["summary"]["assets_total"], non_sidecar_files(&p.root));
+    let paths: Vec<&str> = all["assets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["path"].as_str().unwrap())
+        .collect();
+    assert!(
+        paths.windows(2).all(|w| w[0] < w[1]),
+        "sorted by path: {paths:?}"
+    );
+    assert!(
+        paths.iter().all(|p| !p.contains('\\') && !p.contains(':')),
+        "{paths:?}"
+    );
+
+    let textures = scan(&["--types", "texture"]);
+    let returned = textures["assets"].as_array().unwrap();
+    assert!(returned.iter().all(|a| a["type"] == "texture"));
+    assert_eq!(matched(&textures) as usize, returned.len());
+    let audio = scan(&["--types", "audio"]);
+    let both = scan(&["--types", "texture,audio"]);
+    assert_eq!(matched(&both), matched(&textures) + matched(&audio));
+    assert!(matched(&both) < all["summary"]["assets_total"].as_u64().unwrap());
+
+    let bounded = scan(&["--max-assets", "3"]);
+    assert_eq!(bounded["assets"].as_array().unwrap().len(), 3);
+    assert_eq!(bounded["summary"]["truncated"], true);
+    assert_eq!(bounded["summary"]["matched"], non_sidecar_files(&p.root));
+    let exact = scan(&["--max-assets", &all["summary"]["assets_total"].to_string()]);
+    assert_eq!(exact["summary"]["truncated"], false);
+
+    let out = tidycraft(&["scan", root, "--types", "bogus"]);
+    assert_eq!(code(&out), 2);
+    assert!(
+        text(&out.stderr).contains("unknown asset type `bogus`"),
+        "{}",
+        text(&out.stderr)
+    );
+}

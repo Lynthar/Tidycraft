@@ -155,3 +155,56 @@ impl Rule for ModelRule {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scanner::AssetMetadata;
+
+    fn model(vertex_count: u32, face_count: u32, material_count: u32) -> AssetInfo {
+        AssetInfo {
+            path: "/p/SM_Rock.fbx".to_string(),
+            name: "SM_Rock.fbx".to_string(),
+            extension: "fbx".to_string(),
+            asset_type: AssetType::Model,
+            size: 1024,
+            modified: 0,
+            metadata: Some(AssetMetadata {
+                vertex_count: Some(vertex_count),
+                face_count: Some(face_count),
+                material_count: Some(material_count),
+                ..Default::default()
+            }),
+            unity_guid: None,
+        }
+    }
+
+    fn rule_id(asset: &AssetInfo) -> Option<String> {
+        ModelRule::new(ModelConfig::default())
+            .check(asset)
+            .map(|i| i.rule_id)
+    }
+
+    /// "Max vertices 100,000 / faces 100,000 / materials 10" all include the limit.
+    #[test]
+    fn limits_are_inclusive() {
+        assert_eq!(rule_id(&model(100_000, 100_000, 10)), None);
+        assert_eq!(
+            rule_id(&model(100_001, 1, 1)),
+            Some("model.vertices".into())
+        );
+        assert_eq!(rule_id(&model(1, 100_001, 1)), Some("model.faces".into()));
+        assert_eq!(rule_id(&model(1, 1, 11)), Some("model.materials".into()));
+    }
+
+    #[test]
+    fn the_model_rule_only_applies_to_models() {
+        let rule = ModelRule::new(ModelConfig::default());
+        assert!(rule.applies_to(&model(1, 1, 1)));
+        let texture = AssetInfo {
+            asset_type: AssetType::Texture,
+            ..model(1, 1, 1)
+        };
+        assert!(!rule.applies_to(&texture));
+    }
+}

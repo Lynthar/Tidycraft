@@ -2161,6 +2161,214 @@ mod tests {
     }
 
     #[test]
+    fn heavy_parse_threshold_is_32_mib() {
+        assert_eq!(HEAVY_PARSE_THRESHOLD, 32 * 1024 * 1024);
+    }
+
+    /// A bare `Assets/` folder is any folder; Unity needs `ProjectSettings/` above
+    /// it or an `Editor.meta` inside it.
+    #[test]
+    fn an_editor_meta_inside_assets_is_what_makes_a_settings_less_root_unity() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("Assets")).unwrap();
+        assert!(!matches!(
+            detect_project_type(dir.path()),
+            Some(ProjectType::Unity)
+        ));
+        fs::write(
+            dir.path().join("Assets").join("Editor.meta"),
+            "fileFormatVersion: 2\n",
+        )
+        .unwrap();
+        assert!(matches!(
+            detect_project_type(dir.path()),
+            Some(ProjectType::Unity)
+        ));
+    }
+
+    #[test]
+    fn directory_tree_counts_and_sizes_roll_up_from_the_files() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("sub").join("deep")).unwrap();
+        fs::write(dir.path().join("a.png"), b"abc").unwrap();
+        fs::write(dir.path().join("sub").join("b.png"), b"abcde").unwrap();
+        fs::write(
+            dir.path().join("sub").join("deep").join("c.png"),
+            b"abcdefg",
+        )
+        .unwrap();
+        let result = scan_directory_with_state(&path_to_string(dir.path()), None, false).unwrap();
+        let root = &result.directory_tree;
+        assert_eq!((root.file_count, root.total_size), (3, 15));
+        let sub = root.children.iter().find(|c| c.name == "sub").expect("sub");
+        assert_eq!((sub.file_count, sub.total_size), (2, 12));
+        let deep = sub
+            .children
+            .iter()
+            .find(|c| c.name == "deep")
+            .expect("deep");
+        assert_eq!((deep.file_count, deep.total_size), (1, 7));
+        assert_eq!((result.total_count, result.total_size), (3, 15));
+    }
+
+    #[test]
+    fn the_gitignore_matcher_reads_the_project_ignore_file_only_when_asked() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join(".gitignore"), "Library/\n").unwrap();
+        let matcher =
+            build_gitignore_matcher(dir.path(), true).expect("a .gitignore builds a matcher");
+        assert!(matcher.is_ignored(Path::new("Library"), true));
+        assert!(!matcher.is_ignored(Path::new("Assets"), true));
+        assert!(build_gitignore_matcher(dir.path(), false).is_none());
+    }
+
+    #[test]
+    fn parse_asset_file_describes_the_file_on_disk() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("hero.png");
+        fs::write(&path, b"12345").unwrap();
+        let asset = parse_asset_file(&path, &None).expect("a png is an asset");
+        assert_eq!(asset.name, "hero.png");
+        assert_eq!(asset.extension, "png");
+        assert!(matches!(asset.asset_type, AssetType::Texture));
+        assert_eq!(asset.size, 5);
+    }
+
+    #[test]
+    fn an_incremental_scan_counts_types_and_reports_no_warnings_when_clean() {
+        let dir = tempdir().unwrap();
+        let root = path_to_string(dir.path());
+        fs::write(dir.path().join("a.png"), b"x").unwrap();
+        fs::write(dir.path().join("b.png"), b"y").unwrap();
+        fs::write(dir.path().join("hit.wav"), b"z").unwrap();
+        let (result, _) = scan_directory_incremental(&root, None, false).unwrap();
+        let _ = crate::cache::ScanCache::clear(&root);
+        assert_eq!(result.type_counts["texture"], 2);
+        assert_eq!(result.type_counts["audio"], 1);
+        assert!(result.warnings.is_empty(), "{:?}", result.warnings);
+    }
+
+    #[test]
+    fn image_metadata_reports_alpha_and_covers_every_decodable_format() {
+        let dir = tempdir().unwrap();
+        let rgba = dir.path().join("a.png");
+        image::RgbaImage::from_pixel(3, 2, image::Rgba([1, 2, 3, 4]))
+            .save(&rgba)
+            .unwrap();
+        let m = parse_metadata_for(&rgba, "png", &AssetType::Texture).expect("png parses");
+        assert_eq!(
+            (m.width, m.height, m.has_alpha),
+            (Some(3), Some(2), Some(true))
+        );
+        let rgb = dir.path().join("b.png");
+        image::RgbImage::from_pixel(3, 2, image::Rgb([1, 2, 3]))
+            .save(&rgb)
+            .unwrap();
+        assert_eq!(
+            parse_metadata_for(&rgb, "png", &AssetType::Texture)
+                .unwrap()
+                .has_alpha,
+            Some(false)
+        );
+        for ext in ["jpg", "bmp", "gif", "tga", "tiff", "webp"] {
+            let path = dir.path().join(format!("c.{ext}"));
+            image::RgbImage::from_pixel(4, 2, image::Rgb([9, 9, 9]))
+                .save(&path)
+                .unwrap_or_else(|e| panic!("{ext}: {e}"));
+            let m = parse_metadata_for(&path, ext, &AssetType::Texture)
+                .unwrap_or_else(|| panic!("{ext} parses"));
+            assert_eq!((m.width, m.height), (Some(4), Some(2)), "{ext}");
+        }
+    }
+
+    /// Through the dispatcher, so the `.svg` arm is exercised along with the parser.
+    fn svg_dims(body: &str) -> Option<(u32, u32, Option<bool>)> {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("a.svg");
+        fs::write(&path, body).unwrap();
+        parse_metadata_for(&path, "svg", &AssetType::Texture)
+            .map(|m| (m.width.unwrap(), m.height.unwrap(), m.has_alpha))
+    }
+
+    /// `viewwidth=` must not satisfy a lookup for `width`, and the root tag need
+    /// not sit at offset 0.
+    #[test]
+    fn svg_attribute_lookup_matches_whole_names_and_skips_the_prolog() {
+        let body = "<?xml version=\"1.0\"?>\n<!-- c -->\n<svg viewwidth=\"99\" width=\"10\" height=\"20\"></svg>";
+        assert_eq!(svg_dims(body), Some((10, 20, Some(true))));
+    }
+
+    #[test]
+    fn svg_lengths_accept_exponents_and_reject_non_positive_or_relative_values() {
+        assert_eq!(parse_svg_length("1e2"), Some(100));
+        assert_eq!(parse_svg_length("1E2"), Some(100));
+        assert_eq!(parse_svg_length("12.4px"), Some(12));
+        assert_eq!(parse_svg_length("0"), None);
+        assert_eq!(parse_svg_length("-5"), None);
+        assert_eq!(parse_svg_length("50%"), None);
+        assert_eq!(parse_svg_length("2em"), None);
+    }
+
+    #[test]
+    fn svg_viewbox_fallback_needs_four_positive_finite_numbers() {
+        assert_eq!(
+            svg_dims("<svg viewBox=\"0 0 30 20\"></svg>"),
+            Some((30, 20, Some(true)))
+        );
+        assert_eq!(svg_dims("<svg viewBox=\"0 0 0 20\"></svg>"), None);
+        assert_eq!(svg_dims("<svg viewBox=\"0 0 30 0\"></svg>"), None);
+        assert_eq!(svg_dims("<svg viewBox=\"0 0 30 -20\"></svg>"), None);
+        assert_eq!(svg_dims("<svg viewBox=\"0 0 30\"></svg>"), None);
+    }
+
+    #[test]
+    fn dds_mipmap_count_is_read_and_a_missing_count_means_one_level() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("t.dds");
+        let mut bytes = make_dds_bytes(512, 512, false);
+        fs::write(&path, &bytes).unwrap();
+        assert_eq!(parse_dds_metadata(&path).unwrap().mipmap_count, Some(1));
+        bytes[28..32].copy_from_slice(&10u32.to_le_bytes());
+        fs::write(&path, &bytes).unwrap();
+        assert_eq!(parse_dds_metadata(&path).unwrap().mipmap_count, Some(10));
+    }
+
+    /// A canonical 44-byte PCM WAV header followed by silence.
+    fn pcm_wav(sample_rate: u32, channels: u16, bits: u16, frames: u32) -> Vec<u8> {
+        let block_align = channels * bits / 8;
+        let data_len = frames * u32::from(block_align);
+        let mut w = Vec::new();
+        w.extend_from_slice(b"RIFF");
+        w.extend_from_slice(&(36 + data_len).to_le_bytes());
+        w.extend_from_slice(b"WAVE");
+        w.extend_from_slice(b"fmt ");
+        w.extend_from_slice(&16u32.to_le_bytes());
+        w.extend_from_slice(&1u16.to_le_bytes());
+        w.extend_from_slice(&channels.to_le_bytes());
+        w.extend_from_slice(&sample_rate.to_le_bytes());
+        w.extend_from_slice(&(sample_rate * u32::from(block_align)).to_le_bytes());
+        w.extend_from_slice(&block_align.to_le_bytes());
+        w.extend_from_slice(&bits.to_le_bytes());
+        w.extend_from_slice(b"data");
+        w.extend_from_slice(&data_len.to_le_bytes());
+        w.resize(w.len() + data_len as usize, 0);
+        w
+    }
+
+    #[test]
+    fn wav_metadata_carries_rate_channels_bit_depth_and_duration() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("hit.wav");
+        fs::write(&path, pcm_wav(8000, 1, 16, 8000)).unwrap();
+        let m = parse_audio_metadata(&path).expect("a PCM wav parses");
+        assert_eq!(m.sample_rate, Some(8000));
+        assert_eq!(m.channels, Some(1));
+        assert_eq!(m.bit_depth, Some(16));
+        let duration = m.duration_secs.expect("data length gives the duration");
+        assert!((duration - 1.0).abs() < 1e-9, "{duration}");
+    }
+
+    #[test]
     fn test_get_asset_type_textures() {
         assert!(matches!(get_asset_type("png"), AssetType::Texture));
         assert!(matches!(get_asset_type("jpg"), AssetType::Texture));
@@ -2183,6 +2391,17 @@ mod tests {
         assert!(matches!(get_asset_type("blend"), AssetType::Model));
         assert!(matches!(get_asset_type("vox"), AssetType::Model));
         assert!(matches!(get_asset_type("FBX"), AssetType::Model));
+    }
+
+    #[test]
+    fn video_and_godot_extensions_have_their_own_types() {
+        for ext in ["mp4", "mov", "m4v", "webm", "mkv", "avi"] {
+            assert!(matches!(get_asset_type(ext), AssetType::Video), "{ext}");
+        }
+        assert!(matches!(get_asset_type("tscn"), AssetType::Scene));
+        assert!(matches!(get_asset_type("gd"), AssetType::Script));
+        // A serialized resource with no type of its own joins the other serialized formats.
+        assert!(matches!(get_asset_type("tres"), AssetType::Data));
     }
 
     #[test]
@@ -2474,11 +2693,15 @@ mod tests {
                     let _permit = GATE.acquire();
                     let now = live.fetch_add(1, Ordering::SeqCst) + 1;
                     peak.fetch_max(now, Ordering::SeqCst);
-                    // Linger until a peer arrives; without it a gate that
-                    // serialised everything would still pass.
-                    let deadline =
-                        std::time::Instant::now() + std::time::Duration::from_millis(500);
+                    // Linger until a peer arrives, then hold the permit a little
+                    // longer: a gate that serialised everything would otherwise
+                    // pass, and so would one that admits everyone at once.
+                    let entered = std::time::Instant::now();
+                    let deadline = entered + std::time::Duration::from_millis(500);
                     while live.load(Ordering::SeqCst) < 2 && std::time::Instant::now() < deadline {
+                        std::thread::yield_now();
+                    }
+                    while entered.elapsed() < std::time::Duration::from_millis(40) {
                         std::thread::yield_now();
                     }
                     live.fetch_sub(1, Ordering::SeqCst);

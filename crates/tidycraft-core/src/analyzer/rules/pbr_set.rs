@@ -330,6 +330,20 @@ mod tests {
         assert_eq!(issue.asset_path, "/proj/T_Wood_BCA.png");
     }
 
+    /// The issue anchors on the trigger (BaseColor) file whatever order the scan lists the set in.
+    #[test]
+    fn the_issue_anchors_on_the_trigger_texture_whatever_the_scan_order() {
+        let assets = vec![
+            texture("/proj/T_Wood_Normal.png"),
+            texture("/proj/T_Wood_BaseColor.png"),
+        ];
+        let mut cfg = enabled_cfg();
+        cfg.required = vec!["basecolor".into(), "normal".into(), "roughness".into()];
+        let result = find_pbr_set_issues(&assets, &cfg);
+        assert_eq!(result.issue_count, 1);
+        assert_eq!(result.issues[0].asset_path, "/proj/T_Wood_BaseColor.png");
+    }
+
     #[test]
     fn complete_set_produces_no_issue() {
         let assets = vec![

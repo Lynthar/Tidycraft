@@ -198,10 +198,153 @@ impl GitManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use git2::{BranchType, IndexAddOption, ResetType, Signature};
+    use std::fs;
 
     #[test]
     fn test_non_git_directory() {
         let manager = GitManager::open(Path::new("/tmp"));
         assert!(!manager.is_repo());
+    }
+
+    /// Stage everything in the work tree and commit it; returns the new HEAD.
+    fn commit_all(repo: &Repository, message: &str) -> git2::Oid {
+        let mut index = repo.index().expect("index");
+        index
+            .add_all(["*"], IndexAddOption::DEFAULT, None)
+            .expect("stage");
+        index.write().expect("write index");
+        let tree = repo
+            .find_tree(index.write_tree().expect("tree"))
+            .expect("find tree");
+        let sig = Signature::now("tidycraft tests", "tests@tidycraft.invalid").expect("signature");
+        let parent = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
+        let parents: Vec<&git2::Commit> = parent.iter().collect();
+        repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &parents)
+            .expect("commit")
+    }
+
+    /// The status of the entry named `name`, or `None` when git lists nothing for it.
+    fn status_of(manager: &mut GitManager, name: &str) -> Option<GitFileStatus> {
+        manager
+            .get_all_statuses()
+            .iter()
+            .find(|(path, _)| path.file_name().is_some_and(|f| f == name))
+            .map(|(_, status)| status.clone())
+    }
+
+    #[test]
+    fn an_untracked_file_counts_as_a_change_and_reports_as_untracked() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        Repository::init(dir.path()).expect("init");
+        fs::write(dir.path().join("new.png"), b"x").expect("write");
+
+        let mut manager = GitManager::open(dir.path());
+        assert!(manager.is_repo());
+        let info = manager.get_info();
+        assert!(info.is_repo);
+        assert!(
+            info.has_changes,
+            "git status lists an untracked file, so must this"
+        );
+        assert_eq!(
+            status_of(&mut manager, "new.png"),
+            Some(GitFileStatus::Untracked)
+        );
+    }
+
+    #[test]
+    fn staged_modified_and_deleted_files_map_to_their_own_statuses() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(dir.path()).expect("init");
+        for name in ["kept.txt", "edited.txt", "removed.txt"] {
+            fs::write(dir.path().join(name), "a").expect("write");
+        }
+        commit_all(&repo, "base");
+
+        fs::write(dir.path().join("edited.txt"), "b").expect("edit");
+        fs::remove_file(dir.path().join("removed.txt")).expect("remove");
+        fs::write(dir.path().join("staged.txt"), "a").expect("write");
+        let mut index = repo.index().expect("index");
+        index.add_path(Path::new("staged.txt")).expect("stage");
+        index.write().expect("write index");
+
+        let mut manager = GitManager::open(dir.path());
+        assert_eq!(
+            status_of(&mut manager, "staged.txt"),
+            Some(GitFileStatus::New)
+        );
+        assert_eq!(
+            status_of(&mut manager, "edited.txt"),
+            Some(GitFileStatus::Modified)
+        );
+        assert_eq!(
+            status_of(&mut manager, "removed.txt"),
+            Some(GitFileStatus::Deleted)
+        );
+        assert_eq!(
+            status_of(&mut manager, "kept.txt"),
+            None,
+            "an unchanged file has no entry"
+        );
+    }
+
+    #[test]
+    fn ahead_and_behind_follow_the_configured_upstream() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(dir.path()).expect("init");
+        fs::write(dir.path().join("a.txt"), "a").expect("write");
+        let first = commit_all(&repo, "first");
+        fs::write(dir.path().join("b.txt"), "b").expect("write");
+        let second = commit_all(&repo, "second");
+        let head = repo
+            .head()
+            .expect("head")
+            .shorthand()
+            .expect("branch name")
+            .to_string();
+
+        // A local branch as upstream: `branch.<head>.remote` is `.`, not `origin`.
+        repo.branch("base", &repo.find_commit(first).expect("first"), false)
+            .expect("branch");
+        repo.find_branch(&head, BranchType::Local)
+            .expect("head branch")
+            .set_upstream(Some("base"))
+            .expect("set upstream");
+        let info = GitManager::open(dir.path()).get_info();
+        assert_eq!((info.ahead, info.behind), (1, 0));
+
+        repo.branch("tip", &repo.find_commit(second).expect("second"), false)
+            .expect("branch");
+        repo.find_branch(&head, BranchType::Local)
+            .expect("head branch")
+            .set_upstream(Some("tip"))
+            .expect("set upstream");
+        repo.reset(
+            repo.find_commit(first).expect("first").as_object(),
+            ResetType::Hard,
+            None,
+        )
+        .expect("reset");
+        let info = GitManager::open(dir.path()).get_info();
+        assert_eq!((info.ahead, info.behind), (0, 1));
+    }
+
+    #[test]
+    fn get_all_statuses_consumes_the_pass_get_info_ran_then_requeries() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        Repository::init(dir.path()).expect("init");
+        fs::write(dir.path().join("first.txt"), "a").expect("write");
+        let mut manager = GitManager::open(dir.path());
+        assert!(manager.get_info().has_changes);
+
+        // Appeared after get_info's pass: the read that follows reuses that pass.
+        fs::write(dir.path().join("second.txt"), "b").expect("write");
+        assert_eq!(status_of(&mut manager, "second.txt"), None);
+        // Consumed once; a standalone read re-queries and sees it.
+        assert_eq!(
+            status_of(&mut manager, "second.txt"),
+            Some(GitFileStatus::Untracked)
+        );
     }
 }

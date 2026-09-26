@@ -316,6 +316,134 @@ mod tests {
         }
     }
 
+    fn texture(name: &str, width: u32, height: u32, mipmap_count: Option<u32>) -> AssetInfo {
+        AssetInfo {
+            path: format!("/p/{name}"),
+            name: name.to_string(),
+            extension: name.rsplit('.').next().unwrap_or_default().to_string(),
+            asset_type: AssetType::Texture,
+            size: 1024,
+            modified: 0,
+            metadata: Some(AssetMetadata {
+                width: Some(width),
+                height: Some(height),
+                mipmap_count,
+                ..Default::default()
+            }),
+            unity_guid: None,
+        }
+    }
+
+    fn rule_id(rule: &TextureRule, asset: &AssetInfo) -> Option<String> {
+        rule.check(asset).map(|i| i.rule_id)
+    }
+
+    /// "Minimum size 4 px" and "Maximum size 4096 px" both include the limit.
+    #[test]
+    fn size_limits_are_inclusive() {
+        let rule = TextureRule::new(TextureConfig {
+            require_pot: false,
+            ..TextureConfig::default()
+        });
+        assert_eq!(rule_id(&rule, &texture("a.png", 4, 4, None)), None);
+        assert_eq!(
+            rule_id(&rule, &texture("a.png", 3, 4, None)),
+            Some("texture.min_size".into())
+        );
+        assert_eq!(
+            rule_id(&rule, &texture("a.png", 4, 3, None)),
+            Some("texture.min_size".into())
+        );
+        assert_eq!(rule_id(&rule, &texture("a.png", 4096, 4096, None)), None);
+        assert_eq!(
+            rule_id(&rule, &texture("a.png", 4097, 4096, None)),
+            Some("texture.max_size".into())
+        );
+        assert_eq!(
+            rule_id(&rule, &texture("a.png", 4096, 4097, None)),
+            Some("texture.max_size".into())
+        );
+        // "Maximum file size 10 MB" includes 10 MiB exactly.
+        let at_limit = AssetInfo {
+            size: 10 * 1024 * 1024,
+            ..texture("a.png", 4, 4, None)
+        };
+        assert_eq!(rule_id(&rule, &at_limit), None);
+        let over = AssetInfo {
+            size: 10 * 1024 * 1024 + 1,
+            ..texture("a.png", 4, 4, None)
+        };
+        assert_eq!(rule_id(&rule, &over), Some("texture.file_size".into()));
+    }
+
+    #[test]
+    fn the_pot_suggestion_names_the_next_power_of_two_per_side() {
+        let rule = TextureRule::new(TextureConfig::default());
+        let issue = rule
+            .check(&texture("a.png", 6, 10, None))
+            .expect("6x10 is not POT");
+        assert_eq!(issue.rule_id, "texture.pot");
+        assert_eq!(issue.args["pot_width"], "8");
+        assert_eq!(issue.args["pot_height"], "16");
+        assert_eq!(issue.suggestion.as_deref(), Some("Resize to 8x16"));
+        // One non-POT side is enough.
+        assert_eq!(
+            rule_id(&rule, &texture("a.png", 8, 6, None)),
+            Some("texture.pot".into())
+        );
+    }
+
+    #[test]
+    fn next_power_of_two_is_the_smallest_power_not_below_n() {
+        for (n, want) in [
+            (0, 1),
+            (1, 1),
+            (2, 2),
+            (3, 4),
+            (6, 8),
+            (8, 8),
+            (9, 16),
+            (1000, 1024),
+            (1 << 31, 1 << 31),
+            ((1 << 31) + 1, 1 << 31),
+        ] {
+            assert_eq!(next_power_of_two(n), want, "n = {n}");
+        }
+    }
+
+    /// "Missing mipmaps (DDS only, ≥ 512px)": only a mipmap count says it is a DDS,
+    /// and only a side of 512 or more makes the missing chain a finding.
+    #[test]
+    fn the_mipmap_finding_needs_a_dds_of_at_least_512() {
+        let rule = TextureRule::new(TextureConfig::default());
+        assert_eq!(
+            rule_id(&rule, &texture("a.dds", 512, 512, Some(1))),
+            Some("texture.no_mipmaps".into())
+        );
+        assert_eq!(
+            rule_id(&rule, &texture("a.dds", 512, 256, Some(1))),
+            Some("texture.no_mipmaps".into())
+        );
+        assert_eq!(
+            rule_id(&rule, &texture("a.dds", 256, 512, Some(1))),
+            Some("texture.no_mipmaps".into())
+        );
+        assert_eq!(rule_id(&rule, &texture("a.dds", 256, 256, Some(1))), None);
+        assert_eq!(rule_id(&rule, &texture("a.dds", 512, 512, Some(10))), None);
+        assert_eq!(rule_id(&rule, &texture("a.png", 512, 512, None)), None);
+    }
+
+    #[test]
+    fn the_texture_rule_only_applies_to_textures() {
+        let rule = TextureRule::new(TextureConfig::default());
+        assert!(rule.applies_to(&texture("a.png", 4, 4, None)));
+        let model = AssetInfo {
+            asset_type: AssetType::Model,
+            ..texture("a.fbx", 4, 4, None)
+        };
+        assert!(!rule.applies_to(&model));
+    }
+
     #[test]
     fn file_size_check_covers_textures_without_dimensions() {
         let rule = TextureRule::new(TextureConfig::default());

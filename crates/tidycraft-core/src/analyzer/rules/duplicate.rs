@@ -161,6 +161,22 @@ mod tests {
             .collect()
     }
 
+    /// One warning per content group, listing every member; `other_count` is the
+    /// copies beyond the lexicographically first "original".
+    #[test]
+    fn the_group_args_count_the_copies() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = write(dir.path(), "a.png", vec![7u8; 100]);
+        let b = write(dir.path(), "b.png", vec![7u8; 100]);
+        let c = write(dir.path(), "c.png", vec![7u8; 100]);
+        let result = find_duplicates(&assets(&[a, b, c]), dir.path().to_str().unwrap());
+        assert_eq!(result.issue_count, 1);
+        let args = &result.issues[0].args;
+        assert_eq!(args["file_count"], "3");
+        assert_eq!(args["other_count"], "2");
+        assert_eq!(args["original"], "a.png");
+    }
+
     #[test]
     fn prefix_hash_separates_files_that_differ_early() {
         // The whole point of the first pass: same length, different opening

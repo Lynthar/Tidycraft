@@ -261,6 +261,50 @@ mod tests {
         }
     }
 
+    fn sfx(duration_secs: f64, size: u64) -> AssetInfo {
+        AssetInfo {
+            path: "audio/sfx/hit_sfx.wav".to_string(),
+            name: "hit_sfx.wav".to_string(),
+            size,
+            metadata: Some(AssetMetadata {
+                sample_rate: Some(44100),
+                duration_secs: Some(duration_secs),
+                channels: Some(1),
+                ..Default::default()
+            }),
+            ..audio_asset(44100)
+        }
+    }
+
+    /// "SFX duration ≤ 30s" and "Maximum file size 20 MB" both include the limit.
+    #[test]
+    fn duration_and_file_size_limits_are_inclusive() {
+        let rule = AudioRule::new(AudioConfig::default());
+        assert!(rule.check(&sfx(30.0, 1024)).is_none());
+        assert_eq!(
+            rule.check(&sfx(30.01, 1024)).map(|i| i.rule_id),
+            Some("audio.sfx_duration".to_string())
+        );
+        assert!(rule.check(&sfx(1.0, 20 * 1024 * 1024)).is_none());
+        assert_eq!(
+            rule.check(&sfx(1.0, 20 * 1024 * 1024 + 1))
+                .map(|i| i.rule_id),
+            Some("audio.file_size".to_string())
+        );
+    }
+
+    /// The rule applies to audio files only; a huge texture is the texture rule's business.
+    #[test]
+    fn the_audio_rule_only_applies_to_audio_assets() {
+        let rule = AudioRule::new(AudioConfig::default());
+        assert!(rule.applies_to(&audio_asset(44100)));
+        let texture = AssetInfo {
+            asset_type: AssetType::Texture,
+            ..audio_asset(44100)
+        };
+        assert!(!rule.applies_to(&texture));
+    }
+
     #[test]
     fn empty_allowed_sample_rates_disables_check_instead_of_panicking() {
         let rule = AudioRule::new(AudioConfig {

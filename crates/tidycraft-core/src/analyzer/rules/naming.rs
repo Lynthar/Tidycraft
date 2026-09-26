@@ -595,6 +595,98 @@ mod tests {
         })
     }
 
+    fn rule_id(rule: &NamingRule, asset: &AssetInfo) -> Option<String> {
+        rule.check(asset).map(|i| i.rule_id)
+    }
+
+    /// "Max name length 512 chars" includes 512, counted in characters.
+    #[test]
+    fn the_length_limit_is_inclusive() {
+        let rule = NamingRule::new(NamingConfig::default());
+        let at_limit = format!("{}.png", "a".repeat(508));
+        assert_eq!(at_limit.chars().count(), 512);
+        assert_eq!(
+            rule_id(&rule, &asset(&at_limit, "png", AssetType::Texture, None)),
+            None
+        );
+        let over = format!("{}.png", "a".repeat(509));
+        assert_eq!(
+            rule_id(&rule, &asset(&over, "png", AssetType::Texture, None)),
+            Some("naming.length".to_string())
+        );
+    }
+
+    #[test]
+    fn the_audio_prefix_applies_to_audio_files() {
+        let rule = NamingRule::new(NamingConfig {
+            audio_prefix: Some("SFX_".to_string()),
+            ..Default::default()
+        });
+        assert_eq!(
+            rule_id(&rule, &asset("hit.wav", "wav", AssetType::Audio, None)),
+            Some("naming.prefix".to_string())
+        );
+        assert_eq!(
+            rule_id(&rule, &asset("SFX_hit.wav", "wav", AssetType::Audio, None)),
+            None
+        );
+        assert_eq!(
+            rule_id(&rule, &asset("hit.png", "png", AssetType::Texture, None)),
+            None
+        );
+    }
+
+    /// Each block the option treats as Chinese: Unified Ideographs, Extension A, Extension B.
+    #[test]
+    fn forbid_chinese_covers_the_unified_ideographs_and_both_extensions() {
+        let rule = NamingRule::new(NamingConfig {
+            forbid_chinese: true,
+            ..Default::default()
+        });
+        for name in ["中.png", "㐀.png", "𠀀.png"] {
+            assert_eq!(
+                rule_id(&rule, &asset(name, "png", AssetType::Texture, None)),
+                Some("naming.chinese".to_string()),
+                "{name}"
+            );
+        }
+        assert_eq!(
+            rule_id(&rule, &asset("a.png", "png", AssetType::Texture, None)),
+            None
+        );
+    }
+
+    #[test]
+    fn camel_case_starts_lowercase_and_has_no_underscore() {
+        assert!(is_camel_case("playerOne"));
+        assert!(is_camel_case(""));
+        assert!(!is_camel_case("PlayerOne"));
+        assert!(!is_camel_case("player_one"));
+    }
+
+    #[test]
+    fn words_split_on_underscore_hyphen_and_space() {
+        assert_eq!(tokenize_words("a_b-c d"), ["a", "b", "c", "d"]);
+    }
+
+    /// The `style` argument the frontend receives is the `tidycraft.toml` spelling.
+    #[test]
+    fn case_style_names_are_their_toml_spellings() {
+        for style in [
+            CaseStyle::Any,
+            CaseStyle::Pascal,
+            CaseStyle::Snake,
+            CaseStyle::Camel,
+            CaseStyle::Kebab,
+        ] {
+            let toml_value = serde_json::to_value(style).expect("serializes");
+            assert_eq!(toml_value, style.as_str(), "{style:?}");
+            assert_eq!(style.to_string(), style.as_str());
+        }
+        assert_eq!(CaseStyle::Pascal.as_str(), "PascalCase");
+        assert_eq!(CaseStyle::Kebab.as_str(), "kebab-case");
+    }
+
     /// The default list is what makes this rule a portability check rather than a
     /// style preference, and the Windows-illegal set is the unambiguous part: such
     /// a file cannot be checked out on Windows at all.

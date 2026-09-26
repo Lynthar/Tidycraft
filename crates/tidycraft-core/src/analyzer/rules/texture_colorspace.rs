@@ -128,6 +128,18 @@ mod tests {
         }
     }
 
+    /// "Applies to: Image assets" — a `_normal`-named model is not a texture.
+    #[test]
+    fn the_color_space_rule_only_applies_to_textures() {
+        let rule = TextureColorSpaceRule;
+        assert!(rule.applies_to(&texture("rock_n.png", Some("sRGB"))));
+        let model = AssetInfo {
+            asset_type: AssetType::Model,
+            ..texture("rock_n.fbx", Some("sRGB"))
+        };
+        assert!(!rule.applies_to(&model));
+    }
+
     #[test]
     fn fires_on_normal_map_with_srgb() {
         let rule = TextureColorSpaceRule;

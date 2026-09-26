@@ -3525,6 +3525,109 @@ mod tests {
         }
     }
 
+    /// The Stats dashboard's numbers: counts by type and extension, the six size
+    /// buckets on their 1 KB / 10 KB / 100 KB / 1 MB / 10 MB boundaries, bytes per
+    /// directory, and the ten largest files.
+    #[test]
+    fn project_stats_count_bucket_and_rank_the_scanned_assets() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let project_id = "stats-test";
+        let file = |rel: &str, asset_type: scanner::AssetType, size: u64| scanner::AssetInfo {
+            size,
+            ..unity_asset(&dir.path().join(rel), asset_type, None)
+        };
+        // Adjacent buckets get different counts, so a boundary that slides one
+        // bucket over changes a count rather than swapping two equal ones.
+        let assets = vec![
+            file("Textures/a.png", scanner::AssetType::Texture, 1023),
+            file("Textures/b.png", scanner::AssetType::Texture, 1024),
+            file("Textures/c.PNG", scanner::AssetType::Texture, 10 * 1024),
+            file("Textures/l.png", scanner::AssetType::Texture, 5000),
+            file("Models/d.fbx", scanner::AssetType::Model, 100 * 1024),
+            file("Models/e.fbx", scanner::AssetType::Model, 1024 * 1024),
+            file("Models/m.fbx", scanner::AssetType::Model, 50_000),
+            file("Models/n.fbx", scanner::AssetType::Model, 90_000),
+            file("Models/o.fbx", scanner::AssetType::Model, 500_000),
+            file("Models/p.fbx", scanner::AssetType::Model, 5 * 1024 * 1024),
+            file("Models/q.fbx", scanner::AssetType::Model, 2 * 1024 * 1024),
+            file("Audio/f.wav", scanner::AssetType::Audio, 10 * 1024 * 1024),
+            file("Audio/g.wav", scanner::AssetType::Audio, 1),
+            file("Audio/h.wav", scanner::AssetType::Audio, 2),
+            file("Audio/i.wav", scanner::AssetType::Audio, 3),
+            file("Audio/j.wav", scanner::AssetType::Audio, 4),
+            file("Audio/k.wav", scanner::AssetType::Audio, 5),
+        ];
+        let mut scan = scan_of(dir.path(), assets);
+        scan.total_size = scan.assets.iter().map(|a| a.size).sum();
+        let total_size = scan.total_size;
+        project::register(project_id.to_string(), scanner::path_to_string(dir.path()));
+        project::with_mut(project_id, |s| {
+            s.cached_scan = Some(scan);
+            Ok(())
+        })
+        .unwrap();
+        let stats = get_project_stats(project_id.to_string()).unwrap();
+        project::unregister(project_id);
+
+        assert_eq!(stats.total_assets, 17);
+        assert_eq!(stats.total_size, total_size);
+        assert_eq!(
+            total_size,
+            1023 + 1024
+                + 10 * 1024
+                + 5000
+                + 100 * 1024
+                + 1024 * 1024
+                + 50_000
+                + 90_000
+                + 500_000
+                + 5 * 1024 * 1024
+                + 2 * 1024 * 1024
+                + 10 * 1024 * 1024
+                + 15
+        );
+        assert_eq!(stats.type_distribution["texture"], 4);
+        assert_eq!(stats.type_distribution["model"], 7);
+        assert_eq!(stats.type_distribution["audio"], 6);
+        assert_eq!(stats.extension_distribution["png"], 3);
+        assert_eq!(stats.extension_distribution["PNG"], 1);
+        assert_eq!(stats.extension_distribution["fbx"], 7);
+        assert_eq!(stats.extension_distribution["wav"], 6);
+        for (bucket, count) in [
+            ("< 1 KB", 6),
+            ("1-10 KB", 2),
+            ("10-100 KB", 3),
+            ("100 KB - 1 MB", 2),
+            ("1-10 MB", 3),
+            ("> 10 MB", 1),
+        ] {
+            assert_eq!(
+                stats.size_distribution.get(bucket).copied(),
+                Some(count),
+                "{bucket}"
+            );
+        }
+        let largest: Vec<&str> = stats
+            .largest_files
+            .iter()
+            .map(|f| f.name.as_str())
+            .collect();
+        assert_eq!(
+            largest,
+            [
+                "f.wav", "p.fbx", "q.fbx", "e.fbx", "o.fbx", "d.fbx", "n.fbx", "m.fbx", "c.PNG",
+                "l.png"
+            ]
+        );
+        assert_eq!(stats.largest_files[0].asset_type, "audio");
+        let textures_dir = scanner::path_to_string(&dir.path().join("Textures"));
+        assert_eq!(
+            stats.directory_sizes.get(&textures_dir).copied(),
+            Some(1023 + 1024 + 10 * 1024 + 5000)
+        );
+    }
+
     /// A sprite atlas is a pure reference holder, so leaving `.spriteatlas` out of
     /// the reference-source set made every sprite only an atlas points at look
     /// unused. `unreadable_sources` is asserted too: the two gates run in series.

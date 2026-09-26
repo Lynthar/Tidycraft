@@ -273,6 +273,80 @@ mod tests {
         }
     }
 
+    /// Ollama vision families are priced by prefix so pinned quantizations resolve.
+    #[test]
+    fn ollama_families_are_matched_by_prefix() {
+        for model in [
+            "qwen2.5vl:7b-fp16",
+            "llama3.2-vision:11b",
+            "llava:13b",
+            "gemma3:4b",
+            "moondream",
+        ] {
+            let p = pricing(model).unwrap_or_else(|| panic!("{model} is priced"));
+            assert_eq!((p.input_per_m, p.output_per_m), (0, 0), "{model}");
+        }
+    }
+
+    /// `include_thumbnails = false` skips image content even when thumbnails are attached.
+    #[test]
+    fn thumbnails_are_not_billed_when_the_request_excludes_them() {
+        let mut attached_but_excluded = req("gpt-5.4", 3, true);
+        attached_but_excluded.include_thumbnails = false;
+        assert_eq!(
+            estimate_cost(&attached_but_excluded).input_tokens,
+            estimate_cost(&req("gpt-5.4", 3, false)).input_tokens
+        );
+        assert!(
+            estimate_cost(&req("gpt-5.4", 3, true)).input_tokens
+                > estimate_cost(&req("gpt-5.4", 3, false)).input_tokens
+        );
+    }
+
+    /// Project framing is billed at 4 characters per token, once per chunk of 20 assets.
+    #[test]
+    fn project_context_is_billed_by_its_length_once_per_chunk() {
+        let ctx = crate::llm::project_meta::ProjectMeta {
+            theme: Some("t".repeat(300)),
+            goal: Some("g".repeat(100)),
+        };
+        for (assets, chunks) in [(1, 1), (21, 2)] {
+            let mut with = req("gpt-5.4", assets, false);
+            with.project_ctx = Some(ctx.clone());
+            let without = req("gpt-5.4", assets, false);
+            assert_eq!(
+                estimate_cost(&with).input_tokens - estimate_cost(&without).input_tokens,
+                100 * chunks,
+                "{assets} assets"
+            );
+        }
+    }
+
+    /// Existing-tag context (name, description, sample paths) is billed at 4
+    /// characters per token; measured as differences so the per-tag framing
+    /// overhead, which the docs do not pin, stays out of the expectation.
+    #[test]
+    fn existing_tag_text_is_billed_at_four_chars_per_token() {
+        use crate::llm::ExistingTagContext;
+        let with_tag = |description: Option<String>, sample_paths: Vec<String>| {
+            let mut r = req("gpt-5.4", 1, false);
+            r.existing_tags = vec![ExistingTagContext {
+                name: "n".repeat(40),
+                description,
+                sample_paths,
+            }];
+            estimate_cost(&r).input_tokens
+        };
+        let name_only = with_tag(None, Vec::new());
+        assert!(name_only > estimate_cost(&req("gpt-5.4", 1, false)).input_tokens);
+        assert_eq!(with_tag(Some("d".repeat(40)), Vec::new()) - name_only, 10);
+        assert_eq!(with_tag(None, vec!["p".repeat(80)]) - name_only, 20);
+        assert_eq!(
+            with_tag(Some("d".repeat(40)), vec!["p".repeat(80)]) - name_only,
+            30
+        );
+    }
+
     // Cross-checked against the docs' worked examples: 200×200 → 54,
     // 1000×1000 → 1334, 1092×1092 → 1568 (capped), Opus 4.7 1920×1080 → 2765.
 

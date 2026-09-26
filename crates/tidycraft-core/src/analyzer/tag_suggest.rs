@@ -611,6 +611,35 @@ mod tests {
     }
 
     #[test]
+    fn stem_strips_one_extension_but_not_a_leading_dot() {
+        assert_eq!(stem("hero.png"), "hero");
+        assert_eq!(stem("a.b.png"), "a.b");
+        assert_eq!(stem("noext"), "noext");
+        assert_eq!(stem(".hidden"), ".hidden");
+    }
+
+    #[test]
+    fn cjk_covers_ideographs_extension_a_hiragana_and_katakana() {
+        for c in ['中', '㐀', 'あ', 'ア'] {
+            assert!(is_cjk(c), "{c}");
+        }
+        for c in ['a', '9', '_'] {
+            assert!(!is_cjk(c), "{c}");
+        }
+    }
+
+    #[test]
+    fn jaccard_is_intersection_over_union() {
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let close = |a: f32, b: f32| (a - b).abs() < 1e-6;
+        assert!(close(jaccard(&s(&["a", "b"]), &s(&["c"])), 0.0));
+        assert!(close(jaccard(&s(&["a", "b"]), &s(&["a", "b"])), 1.0));
+        assert!(close(jaccard(&s(&["a", "b"]), &s(&["b", "c"])), 1.0 / 3.0));
+        assert!(close(jaccard(&[], &[]), 1.0));
+        assert!(close(jaccard(&[], &s(&["a"])), 0.0));
+    }
+
+    #[test]
     fn near_synonym_groups_merge_but_cooccurring_distinct_ones_dont() {
         // A "Trees/" dir of "tree_*.png" surfaces a path group "Trees" and a
         // token group "Tree" over the SAME files — one pile, two near-synonym
